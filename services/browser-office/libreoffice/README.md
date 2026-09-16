@@ -118,6 +118,11 @@ docker run --rm --user=1000:1000 \
 ```
 
 The build root is deliberately external and keyed by the patch-series hash.
+It must be a persistent disk, not Cloud Build's disposable `/workspace`:
+Cloud Build removes that directory after a failed job, so retries there repeat
+the full native compile. Keep the build root, tarballs and compiler cache on a
+stoppable build VM; copy the cache into a new patch-level root when the source
+series changes, and stop the VM when no build is running.
 Native CppUnit targets and the WASM link each write a completion marker only
 after success, so a failed step resumes from its existing object files instead
 of restarting the preceding hour-long work. A root belonging to another source
