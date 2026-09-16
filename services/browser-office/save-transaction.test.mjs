@@ -4,8 +4,31 @@ import test from "node:test";
 import {
   acknowledgedSaveHasLaterChanges,
   createSaveSnapshot,
+  journalRecoveryDisposition,
   laterHistoryFromSaveSnapshot,
 } from "./save-transaction.mjs";
+
+test("recovery distinguishes unsaved work from a save acknowledged before journal cleanup", () => {
+  const oldHash = "a".repeat(64);
+  const savedHash = "b".repeat(64);
+  const unrelatedHash = "c".repeat(64);
+  const checkpoint = {
+    metadata: { baseSha256: oldHash, candidateSha256: savedHash },
+  };
+  assert.equal(journalRecoveryDisposition(oldHash, checkpoint), "replay");
+  assert.equal(
+    journalRecoveryDisposition(savedHash, checkpoint),
+    "already_saved",
+  );
+  assert.equal(
+    journalRecoveryDisposition(unrelatedHash, checkpoint),
+    "conflict",
+  );
+  assert.throws(() => journalRecoveryDisposition("invalid", checkpoint));
+  assert.throws(() =>
+    journalRecoveryDisposition(oldHash, { metadata: { baseSha256: oldHash } }),
+  );
+});
 
 test("save acknowledgement compares the sent snapshot, not the current buffer reference", () => {
   const bytes = Uint8Array.from([0x50, 0x4b, 1]);

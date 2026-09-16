@@ -638,6 +638,55 @@ try {
     laterReplacement,
   );
 
+  let staleAcknowledgedJournalDiscarded = false;
+  if (patchedBrowserRuntime) {
+    await evaluateRenderer(
+      page,
+      async ({ original, accepted }) => {
+        const { openBrowserDocumentJournal } = await import(
+          "/harness/opfs-journal.mjs"
+        );
+        const journal = await openBrowserDocumentJournal({
+          identity: "document:product-bridge:product-bridge.pptx",
+        });
+        await journal.save({
+          fileName: "product-bridge.pptx",
+          baseBytes: Uint8Array.from(original),
+          candidateBytes: Uint8Array.from(accepted),
+          commands: [{ op: "replace_text" }],
+        });
+      },
+      { original: Array.from(fixture), accepted: Array.from(savedBytes) },
+      "seed acknowledged browser recovery checkpoint",
+    );
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
+    await connectProductHost(page, origin);
+    await openProductFixture(
+      page,
+      savedBytes,
+      "acknowledged-journal-open",
+      "product-bridge.pptx",
+      overlappingRevision,
+    );
+    const acknowledgedOpen = await waitForEvent(page, {
+      type: "open-complete",
+      requestId: "acknowledged-journal-open",
+    });
+    assert.equal(acknowledgedOpen.recovered, false);
+    const acknowledgedState = await nativeTask(
+      page,
+      "acknowledged-journal-observed",
+      { operation: "observe", captureSlideIndexes: [] },
+    );
+    assert.equal(
+      acknowledgedState.slides
+        .flatMap((slide) => slide.elements)
+        .find((element) => element.elementId === target.elementId)?.text,
+      replacement,
+    );
+    staleAcknowledgedJournalDiscarded = true;
+  }
+
   const slideStructure = await verifyProductSlideStructure(browser, origin);
   const readingOrder = patchedBrowserRuntime
     ? await verifyProductReadingOrder(browser, origin)
@@ -657,6 +706,7 @@ try {
     undoRestoredRevision: restored.revision,
     recovered: recoveredOpen.recovered,
     postSaveEditRecovered: postSaveOpen.recovered,
+    staleAcknowledgedJournalDiscarded,
     patchedBrowserRuntime,
     candidateRuntime: candidateRuntime
       ? {

@@ -11,6 +11,7 @@ import {
 import {
   acknowledgedSaveHasLaterChanges,
   createSaveSnapshot,
+  journalRecoveryDisposition,
   laterHistoryFromSaveSnapshot,
 } from "/harness/save-transaction.mjs";
 import "/harness/runtime-admission.js";
@@ -1655,13 +1656,31 @@ async function openProductDocument(message) {
   unreconciledModelRevision = "";
   await requestPersistentBrowserStorage();
   await openJournal(initial, message.fileName, message.documentId);
-  const recovered = await journal.load();
+  let recovered = await journal.load();
   baseBytes = initial.slice();
   let candidate = initial;
   let recoveredSnapshotHistory = null;
   if (recovered) {
-    if ((await sha256(recovered.baseBytes)) !== (await sha256(initial)))
+    const disposition = journalRecoveryDisposition(
+      await sha256(initial),
+      recovered,
+    );
+    if (disposition === "conflict")
       throw new Error("Browser recovery base differs from the host document.");
+    if (disposition === "already_saved") {
+      try {
+        await journal.clear();
+      } catch (error) {
+        observed.events.push({
+          state: "recovery-warning",
+          atMs: Math.round(performance.now()),
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+      recovered = null;
+    }
+  }
+  if (recovered) {
     const containsNativeSnapshot = recovered.metadata.commands.some(
       (command) =>
         command?.op === "native_snapshot" &&

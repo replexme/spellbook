@@ -7,6 +7,23 @@ function sameBytes(left, right) {
   return true;
 }
 
+export function journalRecoveryDisposition(hostSha256, checkpoint) {
+  if (!/^[0-9a-f]{64}$/u.test(hostSha256 ?? ""))
+    throw new TypeError("The host document digest is invalid.");
+  const base = checkpoint?.metadata?.baseSha256;
+  const candidate = checkpoint?.metadata?.candidateSha256;
+  if (
+    !/^[0-9a-f]{64}$/u.test(base ?? "") ||
+    !/^[0-9a-f]{64}$/u.test(candidate ?? "")
+  )
+    throw new TypeError("The browser recovery checkpoint is invalid.");
+  if (base === hostSha256) return "replay";
+  // The server accepted the candidate, then the browser stopped before its
+  // local journal was cleared. There is no unsaved delta to replay.
+  if (candidate === hostSha256) return "already_saved";
+  return "conflict";
+}
+
 export function createSaveSnapshot(
   bytes,
   modelRevision,
