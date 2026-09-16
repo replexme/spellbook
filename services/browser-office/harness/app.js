@@ -9,6 +9,10 @@ import {
   persistedSlideTopologyMatches,
 } from "/harness/product-persistence.mjs";
 import {
+  intendedDocumentMutationDifferences,
+  persistenceStateFromObservation,
+} from "/harness/persistence-evidence.mjs";
+import {
   acknowledgedSaveHasLaterChanges,
   createSaveSnapshot,
   journalRecoveryDisposition,
@@ -127,6 +131,24 @@ const productUndoHistory = [];
 const productRedoHistory = [];
 let reconciledModelRevision = "";
 let unreconciledModelRevision = "";
+let reconciledObservation = null;
+
+function rememberReconciledObservation(observation) {
+  if (
+    !observation ||
+    observation.revision !== reconciledModelRevision ||
+    !Array.isArray(observation.slides) ||
+    !Array.isArray(observation.masters)
+  )
+    throw new Error("browser_reconciled_observation_mismatch");
+  reconciledObservation = {
+    revision: observation.revision,
+    slides: structuredClone(observation.slides),
+    masters: structuredClone(observation.masters),
+    sections: structuredClone(observation.sections),
+    textDetails: structuredClone(observation.textDetails),
+  };
+}
 
 function clearNativeProductHistoryAvailability() {
   for (const entry of [...productUndoHistory, ...productRedoHistory]) {
@@ -415,7 +437,10 @@ function verifyPreparedSlideTopology(command, report) {
     throw new Error("browser_package_topology_not_persisted");
 }
 
-async function serializeNativeDocument() {
+async function serializeNativeDocument({
+  inspect = false,
+  detailSlideIndex,
+} = {}) {
   const outputPath = `/tmp/spellbook/native-${++requestSequence}.pptx`;
   try {
     await request("store", { path: outputPath });
@@ -427,12 +452,36 @@ async function serializeNativeDocument() {
       bytes[1] !== 0x4b
     )
       throw new Error("Browser native serialization produced an invalid PPTX.");
-    return bytes;
+    if (!inspect) return bytes;
+    const saved = await request("inspect-saved", {
+      path: outputPath,
+      detailSlideIndex,
+    });
+    return { bytes, observation: saved.value };
   } finally {
     try {
       FS.unlink(outputPath);
     } catch {}
   }
+}
+
+function assertPersistedNativeIntent(before, expected, reopened) {
+  const state = (observation) => ({
+    ...persistenceStateFromObservation(observation),
+    sections: observation?.sections,
+  });
+  const differences = intendedDocumentMutationDifferences(
+    {
+      before: state(before),
+      expected: state(expected),
+      observed: state(reopened),
+    },
+    { limit: 5 },
+  );
+  if (differences.length)
+    throw new Error(
+      `browser_native_snapshot_not_persisted:${differences[0].path}`,
+    );
 }
 
 async function mutate(command) {
@@ -743,6 +792,7 @@ async function prepareProductPackageMutation(nativeRequest) {
       persistence: "native_snapshot",
       beforeBytes: currentBytes.slice(),
       beforeRevision: reconciledModelRevision,
+      beforeObservation: await observeNativeDocument(),
       beforeSlides: expectedSlides,
       nativeRequest: structuredClone(nativeRequest),
       persistedNativeRequest: {
@@ -804,6 +854,7 @@ async function prepareProductPackageMutation(nativeRequest) {
       persistence: "native_snapshot",
       beforeBytes: currentBytes.slice(),
       beforeRevision: reconciledModelRevision,
+      beforeObservation: await observeNativeDocument(),
       beforeSlides: expectedSlides,
       nativeRequest: {
         operation: nativeRequest.operation,
@@ -1107,9 +1158,18 @@ async function commitProductPackageMutation(prepared, nativeValue) {
     }
     let afterBytes;
     try {
-      afterBytes = await serializeNativeDocument();
+      const serialized = await serializeNativeDocument({
+        inspect: true,
+        detailSlideIndex: nativeValue.textDetails?.slideIndex,
+      });
+      afterBytes = serialized.bytes;
       if ((await sha256(afterBytes)) === (await sha256(prepared.beforeBytes)))
         throw new Error("Browser native edit did not change the PPTX package.");
+      assertPersistedNativeIntent(
+        prepared.beforeObservation,
+        nativeValue,
+        serialized.observation,
+      );
     } catch (error) {
       await request("dispatch", { unoCommand: "Undo" });
       const restored = await observeNativeDocument();
@@ -1503,7 +1563,19 @@ async function checkpointLiveNativeState(live, reason) {
   const beforeCommands = commands.slice();
   const beforeUndoHistory = productUndoHistory.slice();
   const beforeRedoHistory = productRedoHistory.slice();
-  const afterBytes = await serializeNativeDocument();
+  const previousObservation = reconciledObservation;
+  if (reconciledObservation?.revision !== beforeRevision)
+    throw new Error("browser_native_baseline_unavailable");
+  const serialized = await serializeNativeDocument({
+    inspect: true,
+    detailSlideIndex: live.textDetails?.slideIndex,
+  });
+  assertPersistedNativeIntent(
+    reconciledObservation,
+    live,
+    serialized.observation,
+  );
+  const afterBytes = serialized.bytes;
   const previousManualSnapshot =
     commands.at(-1)?.persistence === "native_snapshot" &&
     commands.at(-1)?.sourceOperations?.length === 1 &&
@@ -1534,6 +1606,7 @@ async function checkpointLiveNativeState(live, reason) {
     ? live.slides.length
     : currentSlideCount;
   try {
+    rememberReconciledObservation(live);
     await persistCheckpoint();
   } catch (error) {
     currentBytes = beforeBytes;
@@ -1550,6 +1623,7 @@ async function checkpointLiveNativeState(live, reason) {
     );
     reconciledModelRevision = beforeRevision;
     unreconciledModelRevision = live.revision;
+    reconciledObservation = previousObservation;
     throw error;
   }
   return true;
@@ -1654,6 +1728,7 @@ async function openProductDocument(message) {
   productRedoHistory.length = 0;
   reconciledModelRevision = "";
   unreconciledModelRevision = "";
+  reconciledObservation = null;
   await requestPersistentBrowserStorage();
   await openJournal(initial, message.fileName, message.documentId);
   let recovered = await journal.load();
@@ -1751,6 +1826,7 @@ async function openProductDocument(message) {
   if (recoveredSnapshotHistory)
     productUndoHistory.push(recoveredSnapshotHistory);
   reconciledModelRevision = live.revision;
+  rememberReconciledObservation(live);
   const modified = commands.length > 0;
   lastReportedModified = !modified;
   reportHostModified(modified);
@@ -1830,6 +1906,9 @@ async function handleProductHostMessage(message) {
           Boolean(status.modified) || Boolean(unreconciledModelRevision),
         );
       }
+      const settled = await observeNativeDocument();
+      if (settled.revision === reconciledModelRevision)
+        rememberReconciledObservation(settled);
       postHost({
         type: "command-complete",
         messageId: message.messageId,
@@ -1940,6 +2019,7 @@ async function handleProductHostMessage(message) {
           afterAcknowledgement,
           "manual_after_save_acknowledgement",
         );
+      else rememberReconciledObservation(afterAcknowledgement);
       const modified = acknowledgedSaveHasLaterChanges(
         saved,
         currentBytes,
@@ -1989,6 +2069,8 @@ async function handleProductHostMessage(message) {
           commands.length > 0 ||
           Boolean(unreconciledModelRevision),
       );
+      if (value?.revision === reconciledModelRevision)
+        rememberReconciledObservation(value);
       postHost({ id: message.id, value });
     } catch (error) {
       postHost({
@@ -2560,5 +2642,21 @@ globalThis.spellbookBrowserOffice = {
   probeHistory(direction = null) {
     if (!browserProbeMode) throw new Error("Browser probe mode is not active.");
     return browserProbeHistory(direction);
+  },
+  async verifySerializedState() {
+    if (!productMode || query.get("verifySerialization") !== "1")
+      throw new Error("Browser serialization probe is not active.");
+    const live = await observeNativeDocument();
+    const serialized = await serializeNativeDocument({
+      inspect: true,
+      detailSlideIndex: live.textDetails?.slideIndex,
+    });
+    const retained = await observeNativeDocument();
+    return {
+      liveRevision: live.revision,
+      reopenedRevision: serialized.observation.revision,
+      retainedRevision: retained.revision,
+      slideCount: serialized.observation.slides?.length,
+    };
   },
 };

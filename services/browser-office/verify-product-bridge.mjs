@@ -82,7 +82,7 @@ try {
     }),
   );
   await page.goto(
-    `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}`,
+    `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}&verifySerialization=1`,
     { waitUntil: "domcontentloaded", timeout: 30_000 },
   );
   await connectProductHost(page, origin);
@@ -95,6 +95,18 @@ try {
     operation: "observe",
     captureSlideIndexes: [],
   });
+  const serializationProbe = await evaluateRenderer(
+    page,
+    () => globalThis.spellbookBrowserOffice.verifySerializedState(),
+    undefined,
+    "reopen serialized PPTX without changing the live document",
+  );
+  assert.equal(serializationProbe.retainedRevision, before.revision);
+  assert.equal(serializationProbe.slideCount, before.slides.length);
+  await writeFile(
+    path.join(outputRoot, "serialization-probe.json"),
+    `${JSON.stringify(serializationProbe, null, 2)}\n`,
+  );
   const patchedBrowserRuntime = await evaluateRenderer(page, () => {
     return (
       globalThis.spellbookBrowserRuntimeAdmitted?.(
@@ -435,6 +447,45 @@ try {
         /browser_native_runtime_patch_required/u,
       );
   }
+  let nativeSnapshotPersisted = false;
+  if (patchedBrowserRuntime) {
+    const batchText = `${target.text} · saved batch`;
+    const batch = await nativeTask(page, "native-snapshot-batch", {
+      operation: "edit_batch",
+      expectedRevision: before.revision,
+      expectedSlides: JSON.stringify(before.slides),
+      commands: [
+        { op: "replace_text", elementId: target.elementId, text: batchText },
+        {
+          op: "move",
+          elementId: geometryTarget.elementId,
+          x: geometryTarget.x + 100,
+          y: geometryTarget.y + 100,
+        },
+      ],
+      permission: {
+        mode: "selection",
+        elementIds: [target.elementId, geometryTarget.elementId],
+        slideIndexes: [],
+      },
+      suppressCapture: true,
+    });
+    assert.equal(
+      batch.slides
+        .flatMap((slide) => slide.elements)
+        .find((element) => element.elementId === target.elementId)?.text,
+      batchText,
+    );
+    await sendHostCommand(page, "Send_UNO_Command", {
+      Command: ".uno:Undo",
+    });
+    const afterBatchUndo = await nativeTask(page, "native-snapshot-undone", {
+      operation: "observe",
+      captureSlideIndexes: [],
+    });
+    assert.equal(afterBatchUndo.revision, before.revision);
+    nativeSnapshotPersisted = true;
+  }
   const endurance =
     enduranceCycles > 0
       ? await runProductEndurance({
@@ -707,6 +758,8 @@ try {
     recovered: recoveredOpen.recovered,
     postSaveEditRecovered: postSaveOpen.recovered,
     staleAcknowledgedJournalDiscarded,
+    serializationProbe,
+    nativeSnapshotPersisted,
     patchedBrowserRuntime,
     candidateRuntime: candidateRuntime
       ? {

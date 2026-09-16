@@ -82,6 +82,43 @@ function observeDocument(request = {}) {
   });
 }
 
+function inspectSavedDocument(path, detailSlideIndex) {
+  if (!model) throw new Error("No browser Office document is open.");
+  if (
+    typeof path !== "string" ||
+    !/^\/tmp\/spellbook\/native-[0-9]+\.pptx$/u.test(path)
+  )
+    throw new Error("Invalid saved-document inspection path.");
+  const inspected = desktop.loadComponentFromURL(
+    `file://${path}`,
+    "_blank",
+    0,
+    [
+      property("Hidden", zetajs.type.boolean, true),
+      property("ReadOnly", zetajs.type.boolean, true),
+    ],
+  );
+  if (!inspected)
+    throw new Error("Saved PPTX could not be reopened for inspection.");
+  try {
+    return spellbookDocumentOperation({
+      operation: "observe",
+      captureSlideIndexes: [],
+      ...(Number.isSafeInteger(detailSlideIndex) ? { detailSlideIndex } : {}),
+      mutationContracts: spellbookMutationContracts,
+      nativeAdapter,
+      documentModel: inspected,
+      inspectPersistedSnapshot: true,
+    });
+  } finally {
+    try {
+      inspected.close(true);
+    } catch {
+      inspected.dispose();
+    }
+  }
+}
+
 function mutateAsset(request) {
   const {
     assetBytes,
@@ -444,6 +481,15 @@ function start() {
           break;
         case "store":
           storeDocument(event.data.path, requestId);
+          break;
+        case "inspect-saved":
+          post("inspect-saved-complete", {
+            requestId,
+            value: inspectSavedDocument(
+              event.data.path,
+              event.data.detailSlideIndex,
+            ),
+          });
           break;
         case "mark-saved":
           if (!model) throw new Error("No browser Office document is open.");

@@ -63,8 +63,14 @@ function spellbookDocumentOperation(request) {
   const desktop = uno.idl.com.sun.star.frame.Desktop.create(
     uno.componentContext,
   );
-  const frame = desktop.getCurrentFrame();
-  const controller = frame.getController();
+  // A browser save probe uses a temporary hidden document. Resolve that
+  // read-only inspection against its explicit model, not desktop focus.
+  const controller =
+    request.inspectPersistedSnapshot && request.documentModel
+      ? request.documentModel.getCurrentController()
+      : desktop.getCurrentFrame().getController();
+  if (!controller) throw new Error("native_document_controller_unavailable");
+  const frame = controller.getFrame();
   const model = controller.getModel();
   const pages = model.getDrawPages();
   const documentStyleNames = (serviceName) => {

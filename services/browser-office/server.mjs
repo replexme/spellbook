@@ -66,6 +66,26 @@ export function buildRoutes(
       ),
     ],
     [
+      "/harness/persistence-evidence.mjs",
+      route(
+        path.join(
+          repositoryRoot,
+          "services/office-session-spike/persistence-evidence.mjs",
+        ),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
+      "/harness/document-state-evidence.mjs",
+      route(
+        path.join(
+          repositoryRoot,
+          "services/office-session-spike/document-state-evidence.mjs",
+        ),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
       "/harness/office-thread.js",
       route(
         path.join(root, "harness/office-thread.js"),

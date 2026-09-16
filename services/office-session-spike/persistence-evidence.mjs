@@ -773,6 +773,71 @@ export function documentPersistenceDeltaDifferences(report, observed, options) {
   );
 }
 
+/**
+ * Product save admission has no no-op export of the user's current in-memory
+ * session. Compare only the fields that the edit actually changed, using the
+ * same canonical PPTX semantics as the release conformance runner. Unchanged
+ * fields remain the package-preservation validator's responsibility.
+ */
+export function intendedDocumentMutationDifferences(
+  { before, expected, observed },
+  options,
+) {
+  if (
+    !Array.isArray(before?.slides) ||
+    !Array.isArray(before?.masters) ||
+    !Array.isArray(expected?.slides) ||
+    !Array.isArray(expected?.masters) ||
+    !Array.isArray(observed?.slides) ||
+    !Array.isArray(observed?.masters)
+  )
+    throw new Error(
+      "Persisted mutation evidence requires before, expected and reopened slide/master states.",
+    );
+  const normalizedBefore = normalizeDocumentPersistenceState(before);
+  const normalizedExpected = normalizeDocumentPersistenceState(expected);
+  const normalizedObserved = normalizeDocumentPersistenceState(observed, {
+    authoredBy: expected,
+  });
+  const sectionsChanged =
+    Array.isArray(before.sections) &&
+    Array.isArray(expected.sections) &&
+    Boolean(firstPersistenceDifference(before.sections, expected.sections));
+  if (
+    !firstPersistenceDifference(normalizedBefore, normalizedExpected) &&
+    !sectionsChanged
+  )
+    throw new Error(
+      "Persisted mutation evidence has no observable intended change.",
+    );
+  if (sectionsChanged && !Array.isArray(observed.sections))
+    throw new Error("Reopened PPTX has no section observation.");
+  const differences = persistenceDeltaDifferences(
+    {
+      before: normalizedBefore,
+      expected: normalizedExpected,
+      baseline: normalizedObserved,
+      observed: normalizedObserved,
+    },
+    options,
+  );
+  if (
+    sectionsChanged &&
+    firstPersistenceDifference(expected.sections, observed.sections)
+  ) {
+    collectExactDifferences(
+      expected.sections,
+      observed.sections,
+      "$.sections",
+      "intended-change",
+      differences,
+      options?.limit ?? 200,
+      false,
+    );
+  }
+  return differences;
+}
+
 export function assertDocumentPersistenceDelta(report, observed, message) {
   const before = report?.persistenceBefore;
   const expected = report?.persistenceExpected;

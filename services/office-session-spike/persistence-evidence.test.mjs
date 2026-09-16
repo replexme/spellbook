@@ -8,10 +8,85 @@ import {
   documentPersistenceDeltaDifferences,
   firstPersistenceDeltaDifference,
   firstPersistenceDifference,
+  intendedDocumentMutationDifferences,
   normalizeDocumentPersistenceState,
   persistenceStateFromObservation,
   persistenceDeltaDifferences,
 } from "./persistence-evidence.mjs";
+
+test("product persistence admission checks changed semantics across save/reopen", () => {
+  const before = {
+    slides: [{ elements: [{ objectName: "Title", text: "Before", x: 100 }] }],
+    masters: [],
+  };
+  const expected = structuredClone(before);
+  expected.slides[0].elements[0].text = "After";
+  const observed = structuredClone(expected);
+  observed.slides[0].elements[0].x = 101;
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({ before, expected, observed }),
+    [],
+    "Unedited import geometry belongs to package/visual preservation, not mutation intent",
+  );
+  observed.slides[0].elements[0].text = "Before";
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({ before, expected, observed }).map(
+      ({ path, invariant }) => ({ path, invariant }),
+    ),
+    [
+      {
+        path: "$.slides[0].elements[0].text",
+        invariant: "intended-change",
+      },
+    ],
+  );
+});
+
+test("product persistence admission refuses missing observed state", () => {
+  assert.throws(
+    () =>
+      intendedDocumentMutationDifferences({
+        before: { slides: [], masters: [] },
+        expected: { slides: [], masters: [] },
+        observed: { slides: [] },
+      }),
+    /requires before, expected and reopened slide\/master states/u,
+  );
+});
+
+test("product persistence admission refuses an unobservable snapshot", () => {
+  const state = {
+    slides: [{ name: "Slide 1" }],
+    masters: [],
+    sections: [],
+  };
+  assert.throws(
+    () =>
+      intendedDocumentMutationDifferences({
+        before: state,
+        expected: structuredClone(state),
+        observed: structuredClone(state),
+      }),
+    /no observable intended change/u,
+  );
+});
+
+test("product persistence admission includes authored section changes", () => {
+  const before = { slides: [], masters: [], sections: [] };
+  const expected = {
+    slides: [],
+    masters: [],
+    sections: [{ id: "A", name: "Part A", startSlideIndex: 0 }],
+  };
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({
+      before,
+      expected,
+      observed: before,
+    }).map(({ path, invariant }) => ({ path, invariant })),
+    [{ path: "$.sections.length", invariant: "intended-change" }],
+  );
+});
 
 test("persistence comparison ignores object key insertion order", () => {
   assert.equal(

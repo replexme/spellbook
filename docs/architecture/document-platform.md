@@ -85,19 +85,26 @@ package patch → persisted-semantic check → package-scope/preservation
 validation → rendered review → version promotion. Human and AI edits may use
 different tools, but must satisfy this same outcome contract.
 
-Today localized single edits use a minimal OOXML patch, while compound AI
-edits and direct human edits can create full native snapshots. The server checks
-package categories, target slide scope and preservation of selected unsupported
-features; these checks do not prove that every requested property survived
-serialization. The browser's package-only section edit now checks its saved
-identity and order before journaling, and the native regression tests inspect
-PPTX properties separately from LibreOffice's internal readback. This is a
-partial boundary, not a claim that all edit families have persisted-semantic
-admission. Extend the operation contract with a format-owned persisted probe
-for each editable semantic family, then require that probe for both save paths
-before treating the implementation as complete. The probe should compare
-effective user-visible semantics: for example, DrawingML paragraph margins,
-not only a UNO field that may be remapped into numbering rules on import.
+Localized single edits use a minimal OOXML patch, while compound AI edits and
+direct human edits can create full native snapshots. The browser source now
+reopens native snapshot bytes in a hidden read-only document and compares the
+intended, observable change with the same format-aware normalization used by
+the release conformance runner before writing the OPFS checkpoint. Its manual
+baseline is the preceding observation from the **same live session**, not a
+new import of the old file: even an unedited LibreOffice export can resolve
+inherited values differently. The hidden probe never becomes the visible
+editor. Package-only section and slide-topology edits use their own saved
+identity/order checks. The server separately checks package categories, target
+scope and preservation of selected unsupported features.
+
+This source-level boundary is not yet a verified runtime guarantee for every
+PPTX property. The new browser snapshot path must pass the immutable candidate
+runtime, all operation-family conformance cases, save/reopen, Undo/Redo,
+performance and PowerPoint checks. The observation graph also has to cover
+each claimed editable semantic family; a byte difference or a changed UNO
+revision is never a substitute for persisted intent. For example, paragraph
+margins must be compared as effective DrawingML semantics, not merely as a UNO
+field that may be remapped into numbering rules on import.
 
 ## Current limitation that matters for expansion
 
