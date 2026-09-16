@@ -4,7 +4,10 @@ import {
   openBrowserDocumentJournal,
   requestPersistentBrowserStorage,
 } from "/harness/opfs-journal.mjs";
-import { persistedSectionsMatch } from "/harness/product-persistence.mjs";
+import {
+  persistedSectionsMatch,
+  persistedSlideTopologyMatches,
+} from "/harness/product-persistence.mjs";
 import {
   acknowledgedSaveHasLaterChanges,
   createSaveSnapshot,
@@ -392,6 +395,23 @@ async function withPackageDocumentMetadata(value) {
   if (!currentBytes || !value || typeof value !== "object") return value;
   const metadata = await inspectPackage(currentBytes);
   return { ...value, sections: metadata.report.sections };
+}
+
+function verifyPreparedSlideTopology(command, report) {
+  if (
+    !["add_slide", "duplicate_slide", "delete_slide", "move_slide"].includes(
+      command.op,
+    )
+  )
+    return;
+  if (
+    !persistedSlideTopologyMatches(
+      command,
+      report.slideIdsBefore,
+      report.slideIdsAfter,
+    )
+  )
+    throw new Error("browser_package_topology_not_persisted");
 }
 
 async function serializeNativeDocument() {
@@ -813,6 +833,7 @@ async function prepareProductPackageMutation(nativeRequest) {
   const packageCommand = productPackageCommand(command, expectedElement);
   const beforeBytes = currentBytes.slice();
   const mutation = await applyMutation(beforeBytes, packageCommand);
+  verifyPreparedSlideTopology(packageCommand, mutation.report);
   return {
     beforeBytes,
     beforeRevision: reconciledModelRevision,

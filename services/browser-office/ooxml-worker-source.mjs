@@ -84,6 +84,9 @@ export function applyOoxmlCommand(input, command) {
   const context = openPackage(input, {
     requireSimpleTopology: topologyOperations.has(command.op),
   });
+  const slideIdsBefore = topologyOperations.has(command.op)
+    ? currentSlideIds(context).map((slide) => slide.getAttribute("id"))
+    : null;
   const report =
     command.op === "set_sections"
       ? updateSections(context, command)
@@ -96,13 +99,15 @@ export function applyOoxmlCommand(input, command) {
             : slideMetadataOperations.has(command.op)
               ? updateSlideMetadata(context, command)
               : updateElement(context, command);
-  return {
-    bytes: zipSync(context.entries, {
-      level: 6,
-      mtime: deterministicZipModifiedAt,
-    }),
-    report,
-  };
+  const bytes = zipSync(context.entries, {
+    level: 6,
+    mtime: deterministicZipModifiedAt,
+  });
+  if (slideIdsBefore) {
+    report.slideIdsBefore = slideIdsBefore;
+    report.slideIdsAfter = inspectOoxmlDocument(bytes).slideIds;
+  }
+  return { bytes, report };
 }
 
 export function inspectOoxmlDocument(input) {
@@ -113,6 +118,7 @@ export function inspectOoxmlDocument(input) {
   const context = openPackage(input, { requireSimpleTopology: false });
   return {
     sections: readSections(context),
+    slideIds: currentSlideIds(context).map((slide) => slide.getAttribute("id")),
   };
 }
 

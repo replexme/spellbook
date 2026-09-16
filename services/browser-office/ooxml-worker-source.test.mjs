@@ -23,6 +23,23 @@ test("browser OOXML commands produce deterministic package bytes", async () => {
   assert.deepEqual(first.bytes, second.bytes);
 });
 
+test("browser OOXML inspection exposes ordered slide identities", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const original = inspectOoxmlDocument(source);
+  const moved = applyOoxmlCommand(source, {
+    op: "duplicate_slide",
+    slideIndex: 0,
+    insertIndex: 0,
+  });
+  const observed = inspectOoxmlDocument(moved.bytes);
+  assert.equal(original.slideIds.length, 1);
+  assert.equal(observed.slideIds.length, 2);
+  assert.equal(observed.slideIds[1], original.slideIds[0]);
+  assert.notEqual(observed.slideIds[0], original.slideIds[0]);
+  assert.deepEqual(moved.report.slideIdsBefore, original.slideIds);
+  assert.deepEqual(moved.report.slideIdsAfter, observed.slideIds);
+});
+
 const fixtureUrl = new URL(
   "../../eval/public/fixtures/general-native-surface.pptx",
   import.meta.url,
