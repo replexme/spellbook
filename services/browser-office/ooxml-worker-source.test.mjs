@@ -85,12 +85,15 @@ test("native snapshot reconciliation keeps the author's unrelated OOXML parts", 
   assert.match(strFromU8(merged["ppt/slides/slide1.xml"]), /Preserved edit/u);
 });
 
-test("native snapshot reconciliation refuses a changed part with unmapped relationships", async () => {
+test("native snapshot reconciliation preserves the original implicit slide layout", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const noEdit = unzipSync(source);
   const relationshipPath = "ppt/slides/_rels/slide1.xml.rels";
   noEdit[relationshipPath] = strToU8(
-    `${strFromU8(noEdit[relationshipPath])}<!-- normalized -->`,
+    strFromU8(noEdit[relationshipPath]).replace(
+      "slideLayout7.xml",
+      "slideLayout9.xml",
+    ),
   );
   const edited = unzipSync(
     applyOoxmlCommand(source, {
@@ -99,6 +102,33 @@ test("native snapshot reconciliation refuses a changed part with unmapped relati
       expectedText: "Spellbook 검증 العربية",
       text: "Changed edit",
     }).bytes,
+  );
+  edited[relationshipPath] = noEdit[relationshipPath];
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+  );
+  assert.deepEqual(result.report.changedParts, ["ppt/slides/slide1.xml"]);
+  assert.deepEqual(
+    unzipSync(result.bytes)[relationshipPath],
+    unzipSync(source)[relationshipPath],
+  );
+});
+
+test("native snapshot reconciliation refuses a changed part with remapped references", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const noEdit = unzipSync(source);
+  const relationshipPath = "ppt/_rels/presentation.xml.rels";
+  noEdit[relationshipPath] = strToU8(
+    strFromU8(noEdit[relationshipPath]).replace(
+      'Target="slides/slide1.xml"',
+      'Target="slides/slide2.xml"',
+    ),
+  );
+  const edited = unzipSync(source);
+  edited["ppt/presentation.xml"] = strToU8(
+    `${strFromU8(edited["ppt/presentation.xml"])}<!-- author edit -->`,
   );
   edited[relationshipPath] = noEdit[relationshipPath];
   assert.throws(

@@ -98,6 +98,64 @@ function sameEngineExportPart(part, left, right) {
   return samePartBytes(normalized(left), normalized(right));
 }
 
+function referencedRelationshipsStillMatch(
+  part,
+  editedBytes,
+  originalRels,
+  noEditRels,
+) {
+  if (!editedBytes || !part.endsWith(".xml")) return false;
+  const edited = parseXml({ [part]: editedBytes }, part);
+  const referencedIds = new Set();
+  for (const element of edited.getElementsByTagName("*")) {
+    for (let index = 0; index < element.attributes.length; index += 1) {
+      const attribute = element.attributes.item(index);
+      if (attribute.namespaceURI === relationshipAttributeNamespace)
+        referencedIds.add(attribute.value);
+    }
+  }
+  if (referencedIds.size === 0) return true;
+  if (!originalRels || !noEditRels) return false;
+  const relationshipPath = relationshipsPath(part);
+  const original = parseXml(
+    { [relationshipPath]: originalRels },
+    relationshipPath,
+  );
+  const normalized = parseXml(
+    { [relationshipPath]: noEditRels },
+    relationshipPath,
+  );
+  const relationshipsById = (document) =>
+    new Map(
+      relationshipElements(document).map((relationship) => [
+        relationship.getAttribute("Id"),
+        relationship,
+      ]),
+    );
+  const originals = relationshipsById(original);
+  const normalizedRels = relationshipsById(normalized);
+  for (const id of referencedIds) {
+    const before = originals.get(id);
+    const after = normalizedRels.get(id);
+    if (
+      !before ||
+      !after ||
+      before.getAttribute("Type") !== after.getAttribute("Type") ||
+      before.getAttribute("TargetMode") !== after.getAttribute("TargetMode")
+    )
+      return false;
+    const external = before.getAttribute("TargetMode") === "External";
+    const beforeTarget = before.getAttribute("Target");
+    const afterTarget = after.getAttribute("Target");
+    if (
+      (external ? beforeTarget : resolvePart(part, beforeTarget)) !==
+      (external ? afterTarget : resolvePart(part, afterTarget))
+    )
+      return false;
+  }
+  return true;
+}
+
 // Office can rewrite unrelated package parts even when no edit was made.
 // Compare two exports from that same engine, then apply only their actual
 // difference to the user's original package. Reopening the result and proving
@@ -147,7 +205,13 @@ export function preserveOriginalPptxParts(
       const related = relationshipsPath(part);
       if (
         samePartBytes(noEdit[related], edited[related]) &&
-        !samePartBytes(original[related], noEdit[related])
+        !samePartBytes(original[related], noEdit[related]) &&
+        !referencedRelationshipsStillMatch(
+          part,
+          edited[part],
+          original[related],
+          noEdit[related],
+        )
       )
         throw new Error(
           `Native snapshot needs relationship remapping before preserving ${part}.`,
