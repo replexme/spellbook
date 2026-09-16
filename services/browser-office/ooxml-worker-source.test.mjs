@@ -139,6 +139,22 @@ test("native snapshot comparison ignores generated field GUIDs but not field sem
   assert.deepEqual(changedType.report.changedParts, [part]);
 });
 
+test("native snapshot reconciliation rejects a missing package dependency", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const edited = unzipSync(source);
+  const part = "ppt/slides/_rels/slide1.xml.rels";
+  edited[part] = strToU8(
+    strFromU8(edited[part]).replace(
+      /Target="[^"]+"/u,
+      'Target="../media/missing.png"',
+    ),
+  );
+  assert.throws(
+    () => preserveOriginalPptxParts(source, source, zipSync(edited)),
+    /missing dependency/u,
+  );
+});
+
 test("browser OOXML worker adds one slide without rewriting existing parts", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const before = unzipSync(source);
