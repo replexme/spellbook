@@ -24,6 +24,7 @@ test("browser Office routes preserve isolation, asset identity and encodings", (
   assert.ok(routes.has("/runtime/browser-candidate.js"));
   assert.ok(routes.has("/harness/opfs-journal.mjs"));
   assert.ok(routes.has("/harness/save-transaction.mjs"));
+  assert.ok(routes.has("/harness/product-history.mjs"));
   assert.ok(routes.has("/harness/product-persistence.mjs"));
   assert.ok(routes.has("/harness/persistence-evidence.mjs"));
   assert.ok(routes.has("/harness/document-state-evidence.mjs"));

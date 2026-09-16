@@ -53,6 +53,9 @@ as real PPTX snapshots, recover them from OPFS, and expose the complete
 97-operation source contract to a receipt-bound candidate runtime. The shared
 15-scenario conformance runner covers 24 mutation families and binds 32 native
 regression tests to the same immutable server and browser source candidates.
+The browser source now separates the server-acknowledged PPTX base and its
+unsaved recovery journal from session Undo/Redo history, including Undo after
+Save. That source change still needs the candidate browser product run.
 
 These facts explain what has been built. They do not claim that the final
 runtime, full remaining feature breadth, deployment or public user workflow has

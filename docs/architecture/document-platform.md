@@ -87,15 +87,30 @@ different tools, but must satisfy this same outcome contract.
 
 Localized single edits use a minimal OOXML patch, while compound AI edits and
 direct human edits can create full native snapshots. The browser source now
-reopens native snapshot bytes in a hidden read-only document and compares the
-intended, observable change with the same format-aware normalization used by
-the release conformance runner before writing the OPFS checkpoint. Its manual
-baseline is the preceding observation from the **same live session**, not a
-new import of the old file: even an unedited LibreOffice export can resolve
-inherited values differently. The hidden probe never becomes the visible
+reopens native snapshot bytes in a separate document model without a UI frame
+and compares the intended, observable change with the same format-aware
+normalization used by the release conformance runner before writing the OPFS
+checkpoint. Its manual baseline is the preceding observation from the **same
+live session**, not a new import of the old file: even an unedited LibreOffice export can resolve
+inherited values differently. The model-only probe never becomes the visible
 editor. Package-only section and slide-topology edits use their own saved
 identity/order checks. The server separately checks package categories, target
 scope and preservation of selected unsupported features.
+
+Before publishing a browser checkpoint, the product snapshots its package
+bytes, revision, slide count, command journal and Undo/Redo stacks as one
+state. A failed checkpoint restores that whole state before attempting the
+corresponding engine rollback. This prevents a storage error from silently
+discarding Redo history or leaving metadata from an edit that was not saved.
+The journal is anchored to the last server-acknowledged PPTX; the session
+Undo/Redo stacks are separate and survive Save. An Undo after Save becomes a
+new unsaved snapshot relative to that acknowledged base, and Redo back to the
+saved bytes clears that journal delta without clearing the session history.
+To avoid retaining unlimited full PPTX buffers in the browser, recent session
+history is trimmed at 32 actions or 256 MiB of referenced snapshots. The
+latest Undo action remains available even if it alone exceeds that budget.
+The save/Undo separation is source-level until the candidate browser runtime
+passes the save → Undo → Redo → recovery scenario in the product bridge.
 
 This source-level boundary is not yet a verified runtime guarantee for every
 PPTX property. The new browser snapshot path must pass the immutable candidate

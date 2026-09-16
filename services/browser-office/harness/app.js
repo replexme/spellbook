@@ -9,14 +9,18 @@ import {
   persistedSlideTopologyMatches,
 } from "/harness/product-persistence.mjs";
 import {
+  snapshotProductEditState,
+  trimSessionProductHistory,
+} from "/harness/product-history.mjs";
+import {
   intendedDocumentMutationDifferences,
   persistenceStateFromObservation,
 } from "/harness/persistence-evidence.mjs";
 import {
   acknowledgedSaveHasLaterChanges,
   createSaveSnapshot,
+  journalSnapshotFromSavedBase,
   journalRecoveryDisposition,
-  laterHistoryFromSaveSnapshot,
 } from "/harness/save-transaction.mjs";
 import "/harness/runtime-admission.js";
 
@@ -123,6 +127,7 @@ const paragraphAlignmentByUnoValue = new Map([
 let currentBytes;
 let currentSlideCount = 0;
 let baseBytes;
+let baseModelRevision = "";
 let journal;
 let productExportQueue = Promise.resolve();
 let productMessageQueue = Promise.resolve();
@@ -134,16 +139,16 @@ let unreconciledModelRevision = "";
 let reconciledObservation = null;
 
 function captureProductEditState() {
-  return {
+  return snapshotProductEditState({
     currentBytes,
     currentSlideCount,
-    commands: commands.slice(),
-    undoHistory: productUndoHistory.map((entry) => ({ ...entry })),
-    redoHistory: productRedoHistory.map((entry) => ({ ...entry })),
+    commands,
+    undoHistory: productUndoHistory,
+    redoHistory: productRedoHistory,
     reconciledModelRevision,
     unreconciledModelRevision,
     reconciledObservation,
-  };
+  });
 }
 
 function restoreProductEditState(state) {
@@ -155,6 +160,18 @@ function restoreProductEditState(state) {
   reconciledModelRevision = state.reconciledModelRevision;
   unreconciledModelRevision = state.unreconciledModelRevision;
   reconciledObservation = state.reconciledObservation;
+}
+
+function rebaseCommandsToSavedBase(reason) {
+  const snapshot = journalSnapshotFromSavedBase({
+    baseBytes,
+    currentBytes,
+    baseRevision: baseModelRevision,
+    currentRevision: reconciledModelRevision,
+    reason,
+  });
+  commands.splice(0, commands.length, ...(snapshot ? [snapshot] : []));
+  return Boolean(snapshot);
 }
 
 function rememberReconciledObservation(observation) {
@@ -1362,7 +1379,7 @@ async function replayRecoveredCommands(base, recoveredCommands) {
 
 async function undoProductMutation() {
   const previous = productUndoHistory.at(-1);
-  if (!previous || !commands.length) return false;
+  if (!previous) return false;
   const previousState = captureProductEditState();
   const current = await observeNativeDocument();
   if (current.revision !== reconciledModelRevision) {
@@ -1398,11 +1415,11 @@ async function undoProductMutation() {
     }
   }
   productUndoHistory.pop();
-  commands.pop();
   productRedoHistory.push(previous);
   reconciledModelRevision = previous.beforeRevision;
   unreconciledModelRevision = "";
   try {
+    rebaseCommandsToSavedBase("undo");
     await persistCheckpoint();
   } catch (error) {
     restoreProductEditState(previousState);
@@ -1495,10 +1512,10 @@ async function redoProductMutation() {
   }
   productRedoHistory.pop();
   productUndoHistory.push(next);
-  commands.push(next.command);
   reconciledModelRevision = next.afterRevision;
   unreconciledModelRevision = "";
   try {
+    rebaseCommandsToSavedBase("redo");
     await persistCheckpoint();
   } catch (error) {
     restoreProductEditState(previousState);
@@ -1567,6 +1584,7 @@ async function persistCheckpoint() {
     candidateBytes: currentBytes,
     commands,
   });
+  trimSessionProductHistory(productUndoHistory, productRedoHistory);
 }
 
 async function checkpointLiveNativeState(live, reason) {
@@ -1731,6 +1749,7 @@ async function openProductDocument(message) {
   reconciledModelRevision = "";
   unreconciledModelRevision = "";
   reconciledObservation = null;
+  baseModelRevision = "";
   await requestPersistentBrowserStorage();
   await openJournal(initial, message.fileName, message.documentId);
   let recovered = await journal.load();
@@ -1828,6 +1847,8 @@ async function openProductDocument(message) {
   if (recoveredSnapshotHistory)
     productUndoHistory.push(recoveredSnapshotHistory);
   reconciledModelRevision = live.revision;
+  baseModelRevision =
+    commands[0]?.reconciliation?.beforeRevision ?? live.revision;
   rememberReconciledObservation(live);
   const modified = commands.length > 0;
   lastReportedModified = !modified;
@@ -1849,12 +1870,7 @@ async function saveProductDocument() {
   hostSaveRequestId = requestId;
   try {
     const bytes = await exportProductDocument();
-    hostSaveSnapshot = createSaveSnapshot(
-      bytes,
-      reconciledModelRevision,
-      commands.length,
-      productUndoHistory.length,
-    );
+    hostSaveSnapshot = createSaveSnapshot(bytes, reconciledModelRevision);
     const transferable = bytes.slice();
     postHost(
       {
@@ -1964,56 +1980,15 @@ async function handleProductHostMessage(message) {
         reconciledModelRevision,
       );
       baseBytes = saved.bytes.slice();
+      baseModelRevision = saved.modelRevision;
       if (hasLaterChanges) {
-        const laterHistory = laterHistoryFromSaveSnapshot(
-          saved,
-          currentBytes,
-          reconciledModelRevision,
-          commands,
-          productUndoHistory,
-        );
-        if (laterHistory) {
-          commands.splice(0, commands.length, ...laterHistory.commands);
-          productUndoHistory.splice(
-            0,
-            productUndoHistory.length,
-            ...laterHistory.undoHistory,
-          );
-        } else {
-          const snapshotCommand = {
-            op: "native_snapshot",
-            persistence: "native_snapshot",
-            sourceOperations: ["edit_after_save_request"],
-            reason: "save_acknowledged_with_later_edits",
-            reconciliation: {
-              beforeRevision: saved.modelRevision,
-              afterRevision: reconciledModelRevision,
-              nativeRequest: null,
-            },
-          };
-          commands.splice(0, commands.length, snapshotCommand);
-          productUndoHistory.splice(0, productUndoHistory.length, {
-            beforeBytes: saved.bytes.slice(),
-            afterBytes: currentBytes.slice(),
-            beforeRevision: saved.modelRevision,
-            afterRevision: reconciledModelRevision,
-            beforeSlides: [],
-            nativeRequest: null,
-            command: snapshotCommand,
-            persistence: "native_snapshot",
-            nativeUndoAvailable: false,
-            nativeRedoAvailable: false,
-          });
-        }
-        productRedoHistory.length = 0;
+        rebaseCommandsToSavedBase("save_acknowledged_with_later_edits");
         await persistCheckpoint();
       } else {
         await request("mark-saved");
         await journal.clear();
         history.length = 0;
         commands.length = 0;
-        productUndoHistory.length = 0;
-        productRedoHistory.length = 0;
       }
       const afterAcknowledgement = await observeNativeDocument();
       if (afterAcknowledgement.revision !== reconciledModelRevision)

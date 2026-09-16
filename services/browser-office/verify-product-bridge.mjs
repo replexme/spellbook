@@ -47,6 +47,9 @@ const outputRoot = path.resolve(
 await mkdir(outputRoot, { recursive: true });
 const candidateRuntimePath = optionalFlagValue("--candidate-runtime");
 const enduranceCycles = integerFlagValue("--endurance-cycles", 0);
+const serializationProbes = !process.argv.includes(
+  "--skip-serialization-probes",
+);
 const candidateRuntime = candidateRuntimePath
   ? await admitCandidateRuntime({ runtimeDirectory: candidateRuntimePath })
   : null;
@@ -95,18 +98,21 @@ try {
     operation: "observe",
     captureSlideIndexes: [],
   });
-  const serializationProbe = await evaluateRenderer(
-    page,
-    () => globalThis.spellbookBrowserOffice.verifySerializedState(),
-    undefined,
-    "reopen serialized PPTX without changing the live document",
-  );
-  assert.equal(serializationProbe.retainedRevision, before.revision);
-  assert.equal(serializationProbe.slideCount, before.slides.length);
-  await writeFile(
-    path.join(outputRoot, "serialization-probe.json"),
-    `${JSON.stringify(serializationProbe, null, 2)}\n`,
-  );
+  let serializationProbe = null;
+  if (serializationProbes) {
+    serializationProbe = await evaluateRenderer(
+      page,
+      () => globalThis.spellbookBrowserOffice.verifySerializedState(),
+      undefined,
+      "reopen serialized PPTX without changing the live document",
+    );
+    assert.equal(serializationProbe.retainedRevision, before.revision);
+    assert.equal(serializationProbe.slideCount, before.slides.length);
+    await writeFile(
+      path.join(outputRoot, "serialization-probe.json"),
+      `${JSON.stringify(serializationProbe, null, 2)}\n`,
+    );
+  }
   const patchedBrowserRuntime = await evaluateRenderer(page, () => {
     return (
       globalThis.spellbookBrowserRuntimeAdmitted?.(
@@ -176,6 +182,19 @@ try {
     .find((element) => element.elementId === geometryTarget.elementId);
   assert.equal(movedTarget?.x, geometryTarget.x + 100);
   assert.equal(movedTarget?.y, geometryTarget.y + 100);
+  if (serializationProbes) {
+    const editedSerializationProbe = await evaluateRenderer(
+      page,
+      () => globalThis.spellbookBrowserOffice.verifySerializedState(),
+      undefined,
+      "reopen an edited PPTX as a model-only document",
+    );
+    assert.equal(editedSerializationProbe.retainedRevision, moved.revision);
+    await writeFile(
+      path.join(outputRoot, "edited-serialization-probe.json"),
+      `${JSON.stringify(editedSerializationProbe, null, 2)}\n`,
+    );
+  }
   await sendHostCommand(page, "Send_UNO_Command", {
     Command: ".uno:Undo",
   });
@@ -621,6 +640,40 @@ try {
   const savedRevision =
     '"saved:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"';
   await acknowledgeProductSave(page, save.requestId, savedRevision);
+  const undoAfterSave = await sendHostCommand(page, "Send_UNO_Command", {
+    Command: ".uno:Undo",
+  });
+  assert.equal(undoAfterSave.revision, before.revision);
+  assert.equal(
+    (
+      await evaluateRenderer(page, () =>
+        globalThis.spellbookBrowserOffice.diagnostics(),
+      )
+    ).commandCount,
+    1,
+  );
+  const undoAfterSaveState = await nativeTask(page, "undo-after-save", {
+    operation: "observe",
+    captureSlideIndexes: [],
+  });
+  assert.equal(
+    undoAfterSaveState.slides
+      .flatMap((slide) => slide.elements)
+      .find((element) => element.elementId === target.elementId)?.text,
+    target.text,
+  );
+  const redoAfterSave = await sendHostCommand(page, "Send_UNO_Command", {
+    Command: ".uno:Redo",
+  });
+  assert.equal(redoAfterSave.revision, editedForSave.revision);
+  assert.equal(
+    (
+      await evaluateRenderer(page, () =>
+        globalThis.spellbookBrowserOffice.diagnostics(),
+      )
+    ).commandCount,
+    0,
+  );
 
   // A validated save may be acknowledged after the user has already edited
   // again. The later edit must remain dirty and recover from the saved file.

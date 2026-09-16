@@ -75,6 +75,15 @@ checks independent of the pinned headless build's unrelated `ViewTabBar`
 lifecycle; the real canvas and controller remain covered by the subsequent
 browser product-bridge endurance run.
 
+The browser's native-snapshot admission uses the same model-only principle:
+load the serialized PPTX through `XLoadable` in a separate UNO document model,
+observe its saved semantics, then dispose it without replacing the visible
+editor frame. A stock-WASM probe reopened both an untouched and an edited
+one-slide file in about 0.7 seconds while retaining the live revision. That
+probe does **not** establish safe Undo afterward: the older stock runtime
+still aborted during repeated product Undo. The pinned candidate's product
+bridge and endurance run must prove the combined reopen-and-Undo sequence.
+
 Verify every source edit before starting the expensive build:
 
 ```sh

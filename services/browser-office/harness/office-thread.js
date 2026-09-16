@@ -89,33 +89,30 @@ function inspectSavedDocument(path, detailSlideIndex) {
     !/^\/tmp\/spellbook\/native-[0-9]+\.pptx$/u.test(path)
   )
     throw new Error("Invalid saved-document inspection path.");
-  const inspected = desktop.loadComponentFromURL(
-    `file://${path}`,
-    "_blank",
-    0,
-    [
-      property("Hidden", zetajs.type.boolean, true),
-      property("ReadOnly", zetajs.type.boolean, true),
-    ],
+  const factory = context.getServiceManager();
+  const created = factory.createInstanceWithContext(
+    "com.sun.star.comp.Draw.PresentationDocument",
+    context,
   );
-  if (!inspected)
-    throw new Error("Saved PPTX could not be reopened for inspection.");
+  if (!created) throw new Error("Saved PPTX model could not be created.");
   try {
+    if (typeof created.load !== "function")
+      throw new Error("Saved PPTX model is not loadable.");
+    created.load([
+      property("URL", zetajs.type.string, `file://${path}`),
+      property("FilterName", zetajs.type.string, "Impress Office Open XML"),
+    ]);
     return spellbookDocumentOperation({
       operation: "observe",
       captureSlideIndexes: [],
       ...(Number.isSafeInteger(detailSlideIndex) ? { detailSlideIndex } : {}),
       mutationContracts: spellbookMutationContracts,
       nativeAdapter,
-      documentModel: inspected,
+      documentModel: created,
       inspectPersistedSnapshot: true,
     });
   } finally {
-    try {
-      inspected.close(true);
-    } catch {
-      inspected.dispose();
-    }
+    created.dispose();
   }
 }
 
@@ -494,7 +491,6 @@ function start() {
         case "mark-saved":
           if (!model) throw new Error("No browser Office document is open.");
           model.setModified(false);
-          model.getUndoManager().clear();
           post("mark-saved-complete", { requestId });
           break;
         case "close":

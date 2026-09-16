@@ -59,6 +59,13 @@ export function buildRoutes(
       ),
     ],
     [
+      "/harness/product-history.mjs",
+      route(
+        path.join(root, "product-history.mjs"),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
       "/harness/product-persistence.mjs",
       route(
         path.join(root, "harness/product-persistence.mjs"),

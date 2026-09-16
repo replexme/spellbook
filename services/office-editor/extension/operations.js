@@ -60,18 +60,23 @@ function spellbookDocumentOperation(request) {
     return contract;
   };
 
-  const desktop = uno.idl.com.sun.star.frame.Desktop.create(
-    uno.componentContext,
-  );
-  // A browser save probe uses a temporary hidden document. Resolve that
-  // read-only inspection against its explicit model, not desktop focus.
-  const controller =
+  // A browser save probe loads a separate model without a UI frame. Resolve
+  // read-only inspection against that model, not desktop focus.
+  const inspectionModel =
     request.inspectPersistedSnapshot && request.documentModel
-      ? request.documentModel.getCurrentController()
-      : desktop.getCurrentFrame().getController();
-  if (!controller) throw new Error("native_document_controller_unavailable");
-  const frame = controller.getFrame();
-  const model = controller.getModel();
+      ? request.documentModel
+      : null;
+  if (inspectionModel && request.operation !== "observe")
+    throw new Error("persisted_snapshot_inspection_is_read_only");
+  const controller = inspectionModel
+    ? inspectionModel.getCurrentController()
+    : uno.idl.com.sun.star.frame.Desktop.create(uno.componentContext)
+        .getCurrentFrame()
+        .getController();
+  if (!controller && !inspectionModel)
+    throw new Error("native_document_controller_unavailable");
+  const frame = controller?.getFrame() ?? null;
+  const model = inspectionModel ?? controller.getModel();
   const pages = model.getDrawPages();
   const documentStyleNames = (serviceName) => {
     try {
@@ -1446,10 +1451,10 @@ function spellbookDocumentOperation(request) {
     const slides = [];
     const masters = masterDetails();
     const selectedElementIds = [];
-    const currentPage = controller.getCurrentPage();
+    const currentPage = controller?.getCurrentPage() ?? pages.getByIndex(0);
     let selection;
     try {
-      selection = controller.getSelection();
+      selection = controller?.getSelection();
     } catch (_) {}
     const selected = (shape) => {
       if (!selection) return false;
