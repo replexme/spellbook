@@ -320,7 +320,9 @@ describe("shared open document agent", () => {
         expect(result.success).toBe(false);
         expect(result.contentItems[0]).toMatchObject({
           type: "inputText",
-          text: expect.stringContaining("undo-v19"),
+          text: expect.stringContaining(
+            `undo-v${nativeEditContract.mutationModel.operations.set_slide_metadata.minEnginePatch}`,
+          ),
         });
       },
       permission,
