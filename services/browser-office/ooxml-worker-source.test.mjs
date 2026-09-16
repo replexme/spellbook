@@ -10,6 +10,7 @@ import {
   applyOoxmlCommand,
   inspectOoxmlDocument,
 } from "./ooxml-worker-source.mjs";
+import { persistedSlideTopologyMatches } from "./harness/product-persistence.mjs";
 
 test("browser OOXML commands produce deterministic package bytes", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
@@ -90,6 +91,14 @@ test("browser OOXML worker duplicates, moves, and deletes through one package to
   });
   const duplicateEntries = unzipSync(duplicated.bytes);
   assert.equal(duplicated.report.slideCount, 2);
+  assert.equal(
+    persistedSlideTopologyMatches(
+      { op: "duplicate_slide", slideIndex: 0, insertIndex: 0 },
+      duplicated.report.slideIdsBefore,
+      duplicated.report.slideIdsAfter,
+    ),
+    true,
+  );
   assert.deepEqual(slidePaths(duplicateEntries), [
     "ppt/slides/slide2.xml",
     "ppt/slides/slide1.xml",
@@ -113,6 +122,14 @@ test("browser OOXML worker duplicates, moves, and deletes through one package to
     insertIndex: 1,
   });
   const movedEntries = unzipSync(moved.bytes);
+  assert.equal(
+    persistedSlideTopologyMatches(
+      { op: "move_slide", slideIndex: 0, insertIndex: 1 },
+      moved.report.slideIdsBefore,
+      moved.report.slideIdsAfter,
+    ),
+    true,
+  );
   assert.deepEqual(slidePaths(movedEntries), [
     "ppt/slides/slide1.xml",
     "ppt/slides/slide2.xml",
@@ -127,6 +144,14 @@ test("browser OOXML worker duplicates, moves, and deletes through one package to
     slideIndex: 1,
   });
   const deletedEntries = unzipSync(deleted.bytes);
+  assert.equal(
+    persistedSlideTopologyMatches(
+      { op: "delete_slide", slideIndex: 1 },
+      deleted.report.slideIdsBefore,
+      deleted.report.slideIdsAfter,
+    ),
+    true,
+  );
   assert.equal(deleted.report.slideCount, 1);
   assert.deepEqual(slidePaths(deletedEntries), ["ppt/slides/slide1.xml"]);
   assert.deepEqual(deleted.report.removedParts, ["ppt/slides/slide2.xml"]);
