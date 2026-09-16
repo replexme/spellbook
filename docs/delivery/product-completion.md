@@ -83,7 +83,10 @@ server engine. It compiled but then failed on an invalid PPTX round-trip test
 expectation: fixed dates are literal text and do not serialize an inactive
 live-date format choice. The `browser-undo-v28` source series keeps the native
 Undo check for that choice while checking only portable fixed-date properties
-after reload. It has not passed native tests.
+after reload. Its Cloud Build failed one native test because the DrawingML
+exporter skipped paragraph properties when margins were the only formatting
+that required them. `browser-undo-v29` corrects that shared emission condition
+and adds a right-margin-only regression, but has not passed native tests.
 The current local browser editor passed real open/edit/save/download and
 compact-screen canvas/access tests, but the older standalone conformance
 runtime aborts during its third document reopen. Neither current source

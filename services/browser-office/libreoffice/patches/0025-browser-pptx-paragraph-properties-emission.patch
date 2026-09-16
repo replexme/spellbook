@@ -1,0 +1,72 @@
+diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
+index 964fea7..c01c6f1 100644
+--- a/oox/source/export/drawingml.cxx
++++ b/oox/source/export/drawingml.cxx
+@@ -3540,19 +3540,22 @@ bool DrawingML::WriteParagraphProperties(const Reference<XTextContent>& rParagra
+     sal_Int32 nLeftMargin =  getBulletMarginIndentation ( rXPropSet, nLevel,u"LeftMargin");
+     sal_Int32 nLineIndentation = getBulletMarginIndentation ( rXPropSet, nLevel,u"FirstLineOffset");
+ 
+-    if (bWriteNumbering && !bForceZeroIndent)
+-    {
+-        if (!(nLevel != -1
+-            || nAlignment != style::ParagraphAdjust_LEFT
+-            || bHasLinespacing))
+-            return false;
+-    }
+-
+     sal_Int32 nParaDefaultTabSize = 0;
+     if (GetProperty(rXPropSet, "ParaTabStopDefaultDistance"))
+         mAny >>= nParaDefaultTabSize;
+     const bool bWriteRightMargin = nParaRightMargin >= 0 && nParaRightMargin <= 142240
+         && (nParaRightMargin > 0 || bDirectRightMargin);
++    css::uno::Sequence<css::style::TabStop> aTabStops;
++    const bool bHasTabStops = GetProperty(rXPropSet, "ParaTabStops")
++                              && (mAny >>= aTabStops) && aTabStops.getLength() > 0;
++    const bool bHasParagraphFormatting
++        = nParaLeftMargin > 0 || bWriteRightMargin || nParaFirstLineIndent != 0
++          || nParaTopMargin != 0 || nParaBottomMargin != 0 || nLeftMargin > 0
++          || nLineIndentation != 0 || nParaDefaultTabSize > 0 || bRtl || bHasTabStops;
++    if (bWriteNumbering && !bForceZeroIndent
++        && nLevel == -1 && nAlignment == style::ParagraphAdjust_LEFT
++        && !bHasLinespacing && !bHasParagraphFormatting)
++        return false;
+ 
+     if (nParaLeftMargin) // For Paragraph
+         mpFS->startElementNS( XML_a, nElement,
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+index 895bbf0..5cd6769 100644
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2281,6 +2281,24 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookMetadataLineAndParagraphPrope
+     pUndoManager->Redo();
+     assertChanged("after redo");
+ 
++    // A separate paragraph with only a direct right margin must still
++    // produce a paragraph-properties element in the saved PPTX.
++    uno::Reference<drawing::XShape> xRightOnlyShape(
++        xFactory->createInstance("com.sun.star.drawing.TextShape"), uno::UNO_QUERY_THROW);
++    xRightOnlyShape->setPosition(awt::Point(1000, 5000));
++    xRightOnlyShape->setSize(awt::Size(8000, 1000));
++    xShapes->add(xRightOnlyShape);
++    uno::Reference<text::XText> xRightOnlyText(xRightOnlyShape, uno::UNO_QUERY_THROW);
++    xRightOnlyText->setString("Right margin only");
++    uno::Reference<container::XEnumerationAccess> xRightOnlyParagraphs(
++        xRightOnlyText, uno::UNO_QUERY_THROW);
++    uno::Reference<container::XEnumeration> xParagraphs
++        = xRightOnlyParagraphs->createEnumeration();
++    CPPUNIT_ASSERT(xParagraphs->hasMoreElements());
++    uno::Reference<beans::XPropertySet> xRightOnlyParagraph(
++        xParagraphs->nextElement(), uno::UNO_QUERY_THROW);
++    xRightOnlyParagraph->setPropertyValue("ParaRightMargin", uno::Any(sal_Int32(200)));
++
+     saveAndReloadSdImpressDocModelOnly("Impress Office Open XML");
+     xPagesSupplier.set(mxComponent, uno::UNO_QUERY_THROW);
+     xPage.set(xPagesSupplier->getDrawPages()->getByIndex(0), uno::UNO_QUERY_THROW);
+@@ -2292,6 +2310,7 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookMetadataLineAndParagraphPrope
+     // Verify the saved OOXML as well as the UNO readback after reopening.
+     xmlDocUniquePtr pSlideXml = parseExport("ppt/slides/slide1.xml");
+     assertXPath(pSlideXml, "//a:pPr[@marL='432000' and @marR='108000']", 1);
++    assertXPath(pSlideXml, "//a:pPr[@marR='72000' and not(@marL)]", 1);
+     assertChanged("after PPTX reload", true);
+ }
+ 

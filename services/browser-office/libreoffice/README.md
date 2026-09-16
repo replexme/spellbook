@@ -12,7 +12,7 @@ been built or promoted; `buildReady` remains false until the complete command,
 Undo, save/reopen, visual and PowerPoint evidence is attached to one immutable
 browser build.
 
-The cumulative `browser-undo-v28` source series ports generic document behavior:
+The cumulative `browser-undo-v29` source series ports generic document behavior:
 table structure, formatting and Undo; page and object identity; master-safe
 layout support; sparse-master insertion; object-creation Undo; text-layout
 invalidation; slide names and text shadows; object locks; object interactions;
@@ -53,6 +53,13 @@ without a live-date format field. `browser-undo-v28` keeps the edit and Undo
 assertion for that property, but treats only the fixed text and visibility as
 portable after reload. The revised source series still requires a native test
 pass; it is not promoted.
+The `browser-undo-v28` Cloud Build reached all focused native tests and failed
+one saved-OOXML assertion: a paragraph with nondefault margins still skipped
+the entire DrawingML paragraph-properties element before the right-margin
+writer ran. Patch `0025` extends that generic emission condition to paragraph
+spacing, indents, direction and direct tab stops, and tests a paragraph with
+only a right margin. `browser-undo-v29` remains source-only until its own
+native and browser product runs pass.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves
