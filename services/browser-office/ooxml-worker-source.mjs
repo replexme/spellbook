@@ -82,6 +82,22 @@ function samePartBytes(left, right) {
   return true;
 }
 
+function sameEngineExportPart(part, left, right) {
+  if (samePartBytes(left, right)) return true;
+  if (!left || !right || !part.endsWith(".xml")) return false;
+  const normalized = (bytes) => {
+    const document = parseXml({ [part]: bytes }, part);
+    let fieldIndex = 0;
+    for (const field of document.getElementsByTagNameNS(
+      drawingNamespace,
+      "fld",
+    ))
+      field.setAttribute("id", `__office_field_${++fieldIndex}__`);
+    return serializeXml(document);
+  };
+  return samePartBytes(normalized(left), normalized(right));
+}
+
 // Office can rewrite unrelated package parts even when no edit was made.
 // Compare two exports from that same engine, then apply only their actual
 // difference to the user's original package. Reopening the result and proving
@@ -122,7 +138,11 @@ export function preserveOriginalPptxParts(
     ...Object.keys(edited),
   ]);
   for (const part of [...paths].sort()) {
-    const authoredChange = !samePartBytes(noEdit[part], edited[part]);
+    const authoredChange = !sameEngineExportPart(
+      part,
+      noEdit[part],
+      edited[part],
+    );
     if (authoredChange && !part.endsWith(".rels")) {
       const related = relationshipsPath(part);
       if (
@@ -2092,13 +2112,24 @@ function relativePart(source, target) {
 
 if (typeof self !== "undefined")
   self.onmessage = (event) => {
-    const { requestId, bytes, command, operation } = event.data;
+    const { requestId, bytes, command, operation, noEditBytes, editedBytes } =
+      event.data;
     try {
       if (operation === "inspect") {
         self.postMessage({
           requestId,
           report: inspectOoxmlDocument(new Uint8Array(bytes)),
         });
+      } else if (operation === "preserve-native") {
+        const result = preserveOriginalPptxParts(
+          new Uint8Array(bytes),
+          new Uint8Array(noEditBytes),
+          new Uint8Array(editedBytes),
+        );
+        self.postMessage(
+          { requestId, bytes: result.bytes.buffer, report: result.report },
+          [result.bytes.buffer],
+        );
       } else {
         const result = applyOoxmlCommand(new Uint8Array(bytes), command);
         self.postMessage(

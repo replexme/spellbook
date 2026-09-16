@@ -82,7 +82,7 @@ function observeDocument(request = {}) {
   });
 }
 
-function inspectSavedDocument(path, detailSlideIndex) {
+function withSavedDocumentModel(path, operation) {
   if (!model) throw new Error("No browser Office document is open.");
   if (
     typeof path !== "string" ||
@@ -102,7 +102,15 @@ function inspectSavedDocument(path, detailSlideIndex) {
       property("URL", zetajs.type.string, `file://${path}`),
       property("FilterName", zetajs.type.string, "Impress Office Open XML"),
     ]);
-    return spellbookDocumentOperation({
+    return operation(created);
+  } finally {
+    created.dispose();
+  }
+}
+
+function inspectSavedDocument(path, detailSlideIndex) {
+  return withSavedDocumentModel(path, (created) =>
+    spellbookDocumentOperation({
       operation: "observe",
       captureSlideIndexes: [],
       ...(Number.isSafeInteger(detailSlideIndex) ? { detailSlideIndex } : {}),
@@ -110,10 +118,24 @@ function inspectSavedDocument(path, detailSlideIndex) {
       nativeAdapter,
       documentModel: created,
       inspectPersistedSnapshot: true,
-    });
-  } finally {
-    created.dispose();
-  }
+    }),
+  );
+}
+
+function normalizeSavedDocument(path, outputPath) {
+  if (
+    typeof outputPath !== "string" ||
+    !/^\/tmp\/spellbook\/normalized-[0-9]+\.pptx$/u.test(outputPath)
+  )
+    throw new Error("Invalid normalized-document output path.");
+  withSavedDocumentModel(path, (created) => {
+    if (typeof created.storeToURL !== "function")
+      throw new Error("Saved PPTX model cannot be normalized.");
+    created.storeToURL(`file://${outputPath}`, [
+      property("FilterName", zetajs.type.string, "Impress Office Open XML"),
+      property("Overwrite", zetajs.type.boolean, true),
+    ]);
+  });
 }
 
 function mutateAsset(request) {
@@ -487,6 +509,10 @@ function start() {
               event.data.detailSlideIndex,
             ),
           });
+          break;
+        case "normalize-saved":
+          normalizeSavedDocument(event.data.path, event.data.outputPath);
+          post("normalize-saved-complete", { requestId });
           break;
         case "mark-saved":
           if (!model) throw new Error("No browser Office document is open.");

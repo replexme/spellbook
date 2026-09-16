@@ -106,6 +106,15 @@ browser LibreOffice build, public-corpus render comparison and a PowerPoint
 platform matrix. Until those checks pass, `status` stays
 `viability_probe_only` and the server editor remains the runtime fallback.
 
+For direct human edits and native AI transactions, the browser now keeps the
+uploaded package as the file authority. It serializes the edited model, also
+exports a model-only no-edit baseline, and applies only their package-part
+differences to the uploaded bytes. Regenerated DrawingML field GUIDs do not
+count as authored changes. The merged package must reopen to the intended
+model state; unresolved relationship remapping fails closed. This path is
+source-implemented, not runtime-verified until the candidate product bridge
+and original-part preservation check pass.
+
 The Spellbook-owned conformance shell is available at
 `http://127.0.0.1:4173/?autorun=1`. It loads the tracked public PPTX fixture,
 adds, duplicates, moves, deletes, renames, and hides slides through the OOXML

@@ -100,13 +100,17 @@ try {
   });
   let serializationProbe = null;
   if (serializationProbes) {
-    serializationProbe = await evaluateRenderer(
-      page,
-      () => globalThis.spellbookBrowserOffice.verifySerializedState(),
-      undefined,
-      "reopen serialized PPTX without changing the live document",
+    serializationProbe = await saveSerializationProbe(
+      "serialization",
+      await evaluateRenderer(
+        page,
+        () => globalThis.spellbookBrowserOffice.verifySerializedState(),
+        undefined,
+        "reopen serialized PPTX without changing the live document",
+      ),
     );
     assert.equal(serializationProbe.retainedRevision, before.revision);
+    assert.match(serializationProbe.normalizedRevision, /^v2-/u);
     assert.equal(serializationProbe.slideCount, before.slides.length);
     await writeFile(
       path.join(outputRoot, "serialization-probe.json"),
@@ -183,13 +187,17 @@ try {
   assert.equal(movedTarget?.x, geometryTarget.x + 100);
   assert.equal(movedTarget?.y, geometryTarget.y + 100);
   if (serializationProbes) {
-    const editedSerializationProbe = await evaluateRenderer(
-      page,
-      () => globalThis.spellbookBrowserOffice.verifySerializedState(),
-      undefined,
-      "reopen an edited PPTX as a model-only document",
+    const editedSerializationProbe = await saveSerializationProbe(
+      "edited-serialization",
+      await evaluateRenderer(
+        page,
+        () => globalThis.spellbookBrowserOffice.verifySerializedState(),
+        undefined,
+        "reopen an edited PPTX as a model-only document",
+      ),
     );
     assert.equal(editedSerializationProbe.retainedRevision, moved.revision);
+    assert.match(editedSerializationProbe.normalizedRevision, /^v2-/u);
     await writeFile(
       path.join(outputRoot, "edited-serialization-probe.json"),
       `${JSON.stringify(editedSerializationProbe, null, 2)}\n`,
@@ -1943,6 +1951,23 @@ function changedLogicalParts(before, after) {
   return [...names]
     .filter((name) => !equalBytes(before[name], after[name]))
     .sort();
+}
+
+async function saveSerializationProbe(label, probe) {
+  const { serializedBytes, normalizedBytes, ...summary } = probe;
+  const serialized = Uint8Array.from(serializedBytes);
+  const normalized = Uint8Array.from(normalizedBytes);
+  await Promise.all([
+    writeFile(path.join(outputRoot, `${label}-live.pptx`), serialized),
+    writeFile(path.join(outputRoot, `${label}-model-only.pptx`), normalized),
+  ]);
+  return {
+    ...summary,
+    noEditChangedParts: changedLogicalParts(
+      unzipSync(normalized),
+      unzipSync(serialized),
+    ),
+  };
 }
 
 function equalBytes(left, right) {

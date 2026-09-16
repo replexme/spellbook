@@ -107,6 +107,38 @@ test("native snapshot reconciliation refuses a changed part with unmapped relati
   );
 });
 
+test("native snapshot comparison ignores generated field GUIDs but not field semantics", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const part = "ppt/slideMasters/slideMaster1.xml";
+  const noEdit = unzipSync(source);
+  const originalXml = strFromU8(noEdit[part]);
+  assert.match(originalXml, /<a:fld id="\{[^}]+\}"/u);
+  noEdit[part] = strToU8(
+    originalXml.replace(/(<a:fld id=")[^"]+(")/u, "$1{AAAAAAAA}$2"),
+  );
+  const edited = unzipSync(zipSync(noEdit));
+  edited[part] = strToU8(
+    strFromU8(edited[part]).replace(/(<a:fld id=")[^"]+(")/u, "$1{BBBBBBBB}$2"),
+  );
+  const guidOnly = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+  );
+  assert.deepEqual(guidOnly.report.changedParts, []);
+  assert.deepEqual(unzipSync(guidOnly.bytes)[part], unzipSync(source)[part]);
+
+  edited[part] = strToU8(
+    strFromU8(edited[part]).replace('type="slidenum"', 'type="datetime"'),
+  );
+  const changedType = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+  );
+  assert.deepEqual(changedType.report.changedParts, [part]);
+});
+
 test("browser OOXML worker adds one slide without rewriting existing parts", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const before = unzipSync(source);

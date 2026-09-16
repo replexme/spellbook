@@ -456,6 +456,26 @@ function inspectPackage(bytes) {
   });
 }
 
+function preserveNativeSnapshot(original, noEdit, edited) {
+  const requestId = `ooxml-preserve-${++requestSequence}`;
+  const source = original.slice();
+  const baseline = noEdit.slice();
+  const candidate = edited.slice();
+  return new Promise((resolve, reject) => {
+    mutationPending.set(requestId, { resolve, reject });
+    ooxmlWorker.postMessage(
+      {
+        requestId,
+        operation: "preserve-native",
+        bytes: source.buffer,
+        noEditBytes: baseline.buffer,
+        editedBytes: candidate.buffer,
+      },
+      [source.buffer, baseline.buffer, candidate.buffer],
+    );
+  });
+}
+
 async function withPackageDocumentMetadata(value) {
   if (!currentBytes || !value || typeof value !== "object") return value;
   const metadata = await inspectPackage(currentBytes);
@@ -505,6 +525,64 @@ async function serializeNativeDocument({
       FS.unlink(outputPath);
     } catch {}
   }
+}
+
+async function normalizeNativeDocumentBytes(bytes) {
+  const inputPath = `/tmp/spellbook/native-${++requestSequence}.pptx`;
+  const outputPath = `/tmp/spellbook/normalized-${++requestSequence}.pptx`;
+  try {
+    FS.writeFile(inputPath, bytes);
+    await request("normalize-saved", { path: inputPath, outputPath });
+    const normalized = FS.readFile(outputPath).slice();
+    if (
+      normalized.byteLength < 4 ||
+      normalized.byteLength > hostMaximumBytes ||
+      normalized[0] !== 0x50 ||
+      normalized[1] !== 0x4b
+    )
+      throw new Error(
+        "Browser no-edit normalization produced an invalid PPTX.",
+      );
+    return normalized;
+  } finally {
+    for (const path of [inputPath, outputPath]) {
+      try {
+        FS.unlink(path);
+      } catch {}
+    }
+  }
+}
+
+async function inspectNativeDocumentBytes(bytes, detailSlideIndex) {
+  const path = `/tmp/spellbook/native-${++requestSequence}.pptx`;
+  try {
+    FS.writeFile(path, bytes);
+    const observed = await request("inspect-saved", {
+      path,
+      detailSlideIndex,
+    });
+    return observed.value;
+  } finally {
+    try {
+      FS.unlink(path);
+    } catch {}
+  }
+}
+
+async function preserveAndInspectNativeDocument(
+  originalBytes,
+  detailSlideIndex,
+) {
+  const serialized = await serializeNativeDocument();
+  const noEdit = await normalizeNativeDocumentBytes(originalBytes);
+  const preserved = await preserveNativeSnapshot(
+    originalBytes,
+    noEdit,
+    serialized,
+  );
+  const bytes = new Uint8Array(preserved.bytes);
+  const observation = await inspectNativeDocumentBytes(bytes, detailSlideIndex);
+  return { bytes, observation, report: preserved.report };
 }
 
 function assertPersistedNativeIntent(before, expected, reopened) {
@@ -1198,18 +1276,20 @@ async function commitProductPackageMutation(prepared, nativeValue) {
       return;
     }
     let afterBytes;
+    let preservationReport;
     try {
-      const serialized = await serializeNativeDocument({
-        inspect: true,
-        detailSlideIndex: nativeValue.textDetails?.slideIndex,
-      });
-      afterBytes = serialized.bytes;
+      const preserved = await preserveAndInspectNativeDocument(
+        prepared.beforeBytes,
+        nativeValue.textDetails?.slideIndex,
+      );
+      afterBytes = preserved.bytes;
+      preservationReport = preserved.report;
       if ((await sha256(afterBytes)) === (await sha256(prepared.beforeBytes)))
         throw new Error("Browser native edit did not change the PPTX package.");
       assertPersistedNativeIntent(
         prepared.beforeObservation,
         nativeValue,
-        serialized.observation,
+        preserved.observation,
       );
     } catch (error) {
       await request("dispatch", { unoCommand: "Undo" });
@@ -1273,6 +1353,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
     observed.lastMutation = {
       persistence: "native_snapshot",
       sourceOperations: prepared.sourceOperations,
+      preservation: preservationReport,
     };
     evidence.value = JSON.stringify(observed);
     return;
@@ -1600,16 +1681,16 @@ async function checkpointLiveNativeState(live, reason) {
   const beforeRevision = previousState.reconciledModelRevision;
   if (reconciledObservation?.revision !== beforeRevision)
     throw new Error("browser_native_baseline_unavailable");
-  const serialized = await serializeNativeDocument({
-    inspect: true,
-    detailSlideIndex: live.textDetails?.slideIndex,
-  });
+  const preserved = await preserveAndInspectNativeDocument(
+    previousState.currentBytes,
+    live.textDetails?.slideIndex,
+  );
+  const afterBytes = preserved.bytes;
   assertPersistedNativeIntent(
     reconciledObservation,
     live,
-    serialized.observation,
+    preserved.observation,
   );
-  const afterBytes = serialized.bytes;
   recordManualProductCheckpoint({
     commands,
     undoHistory: productUndoHistory,
@@ -2619,11 +2700,19 @@ globalThis.spellbookBrowserOffice = {
       detailSlideIndex: live.textDetails?.slideIndex,
     });
     const durationMs = Math.round(performance.now() - startedAt);
+    const normalized = await normalizeNativeDocumentBytes(currentBytes);
+    const normalizedObservation = await inspectNativeDocumentBytes(
+      normalized,
+      live.textDetails?.slideIndex,
+    );
     const retained = await observeNativeDocument();
     return {
       durationMs,
       liveRevision: live.revision,
       reopenedRevision: serialized.observation.revision,
+      normalizedRevision: normalizedObservation.revision,
+      serializedBytes: Array.from(serialized.bytes),
+      normalizedBytes: Array.from(normalized),
       retainedRevision: retained.revision,
       slideCount: serialized.observation.slides?.length,
     };
