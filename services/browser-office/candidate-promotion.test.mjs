@@ -4,6 +4,7 @@ import test from "node:test";
 
 import { createCandidatePromotion } from "./candidate-promotion.mjs";
 import { upstreamManifest } from "./libreoffice/upstream.mjs";
+import { browserRuntimeBuildInputPaths } from "./repository-identity.mjs";
 
 const operations = [
   "replace_text",
@@ -57,14 +58,12 @@ const admittedRuntime = {
 const runtimeBuildInputEquivalence = {
   buildSourceRevision: "c".repeat(40),
   integrationSourceRevision: "e".repeat(40),
-  inputs: [
-    {
-      path: "services/browser-office/libreoffice",
-      buildObject: "1".repeat(40),
-      integrationObject: "1".repeat(40),
-      exact: true,
-    },
-  ],
+  inputs: browserRuntimeBuildInputPaths.map((path) => ({
+    path,
+    buildObject: "1".repeat(40),
+    integrationObject: "1".repeat(40),
+    exact: true,
+  })),
   exact: true,
 };
 const browserReport = {

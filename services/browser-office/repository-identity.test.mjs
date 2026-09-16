@@ -5,7 +5,33 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { readRepositoryPathEquivalence } from "./repository-identity.mjs";
+import {
+  browserRuntimeBuildInputPaths,
+  readRepositoryPathEquivalence,
+} from "./repository-identity.mjs";
+
+test("browser build identity covers the manifest but not non-build documentation", () => {
+  assert.ok(
+    browserRuntimeBuildInputPaths.includes(
+      "services/browser-office/upstream.json",
+    ),
+  );
+  assert.ok(
+    browserRuntimeBuildInputPaths.includes(
+      "services/browser-office/libreoffice/patches",
+    ),
+  );
+  assert.equal(
+    browserRuntimeBuildInputPaths.some((path) => path.endsWith("README.md")),
+    false,
+  );
+  assert.equal(
+    browserRuntimeBuildInputPaths.includes(
+      "services/browser-office/libreoffice",
+    ),
+    false,
+  );
+});
 
 test("runtime input equivalence permits unrelated commits and rejects input drift", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "spellbook-source-proof-"));

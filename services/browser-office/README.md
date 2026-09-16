@@ -129,12 +129,13 @@ move, delete-round-trip, and Undo mappings across the generated files. Run it
 only on a macOS host with PowerPoint and no unrelated presentation open.
 
 Candidate promotion may run from a later integration commit than the expensive
-WASM build when intervening commits affect only another engine or product
-layer. That exception is evidence-bound rather than assumed: promotion compares
-the immutable Git tree for `services/browser-office/libreoffice` at the build
-and integration revisions and fails if any runtime build input differs. The
-promotion receipt records both revisions, both tree objects and the exact
-equivalence result.
+WASM build when intervening commits affect only another engine, product layer
+or documentation. That exception is evidence-bound rather than assumed:
+promotion compares immutable Git objects for the manifest, toolchain recipe,
+build scripts and complete patch directory at the build and integration
+revisions. A changed build input fails; a README-only edit does not demand a
+new LibreOffice compile. The promotion receipt records both revisions, every
+input object and the exact equivalence result.
 
 Upstream references:
 

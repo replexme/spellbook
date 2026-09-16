@@ -1,7 +1,13 @@
 import { execFileSync } from "node:child_process";
 
 export const browserRuntimeBuildInputPaths = Object.freeze([
-  "services/browser-office/libreoffice",
+  "services/browser-office/upstream.json",
+  "services/browser-office/libreoffice/Dockerfile.toolchain",
+  "services/browser-office/libreoffice/build-candidate-runtime.sh",
+  "services/browser-office/libreoffice/patches",
+  "services/browser-office/libreoffice/upstream.mjs",
+  "services/browser-office/libreoffice/verify-source.mjs",
+  "services/browser-office/libreoffice/write-build-receipt.mjs",
 ]);
 
 export function readRepositoryIdentity(repositoryRoot) {
