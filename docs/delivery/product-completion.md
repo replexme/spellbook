@@ -59,6 +59,15 @@ Save. Direct human edits now enter that same session history as coalesced,
 reversible checkpoints instead of discarding prior AI Undo entries. These
 source changes still need the candidate browser product run.
 
+The advanced browser edit path still adopts LibreOffice's whole-PPTX export as
+a native snapshot. The stock runtime has rewritten unrelated original OOXML
+parts on a no-op save, so a same-engine baseline comparison alone cannot prove
+the original file was preserved. The product bridge now compares the native
+snapshot directly with the uploaded PPTX and release admission rejects
+collateral part changes. A passing result, or a scoped preservation mechanism
+that passes this check, is still required before the original-file promise is
+verified for advanced edits.
+
 These facts explain what has been built. They do not claim that the final
 runtime, full remaining feature breadth, deployment or public user workflow has
 passed.
