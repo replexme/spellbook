@@ -9,6 +9,7 @@ import { DOMParser } from "@xmldom/xmldom";
 import {
   applyOoxmlCommand,
   inspectOoxmlDocument,
+  verifyPersistedElementMutation,
 } from "./ooxml-worker-source.mjs";
 import { persistedSlideTopologyMatches } from "./harness/product-persistence.mjs";
 
@@ -279,6 +280,7 @@ test("browser OOXML worker replaces text without rewriting unrelated package par
   });
   const entries = unzipSync(edited.bytes);
   assert.deepEqual(edited.report.changedParts, ["ppt/slides/slide1.xml"]);
+  assert.equal(edited.report.persistedSemanticVerified, true);
   assert.deepEqual(changedLogicalParts(original, entries), [
     "ppt/slides/slide1.xml",
   ]);
@@ -295,6 +297,69 @@ test("browser OOXML worker replaces text without rewriting unrelated package par
         text: replacement,
       }),
     /changed after observation/iu,
+  );
+});
+
+test("saved element readback rejects a lost text, geometry or style edit", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const commands = [
+    {
+      op: "replace_text",
+      elementId: "0/0",
+      expectedText: "Spellbook 검증 العربية",
+      text: "Persisted title",
+    },
+    {
+      op: "move",
+      elementId: "0/0",
+      expectedX: 5321,
+      expectedY: 2540,
+      x: 5421,
+      y: 2640,
+    },
+    {
+      op: "fill_color",
+      elementId: "0/1",
+      expectedColor: 0x2563eb,
+      color: 0x112233,
+    },
+  ];
+  for (const command of commands) {
+    const edited = applyOoxmlCommand(source, command);
+    assert.doesNotThrow(() =>
+      verifyPersistedElementMutation(source, edited.bytes, command),
+    );
+    assert.throws(
+      () => verifyPersistedElementMutation(source, source, command),
+      /browser_package_semantics_not_persisted/u,
+      command.op,
+    );
+  }
+});
+
+test("saved opacity readback preserves a themed color", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const entries = unzipSync(source);
+  const slide = strFromU8(entries["ppt/slides/slide1.xml"]);
+  assert.match(slide, /<a:srgbClr val="2563EB"\/>/u);
+  entries["ppt/slides/slide1.xml"] = strToU8(
+    slide.replace('<a:srgbClr val="2563EB"/>', '<a:schemeClr val="accent1"/>'),
+  );
+  const themed = zipSync(entries);
+  const command = {
+    op: "fill_opacity",
+    elementId: "0/1",
+    expectedOpacity: 100,
+    opacity: 75,
+    expectedColor: 0x2563eb,
+  };
+  const edited = applyOoxmlCommand(themed, command);
+  assert.doesNotThrow(() =>
+    verifyPersistedElementMutation(themed, edited.bytes, command),
+  );
+  assert.match(
+    strFromU8(unzipSync(edited.bytes)["ppt/slides/slide1.xml"]),
+    /<a:schemeClr val="accent1"><a:alpha val="75000"\/><\/a:schemeClr>/u,
   );
 });
 

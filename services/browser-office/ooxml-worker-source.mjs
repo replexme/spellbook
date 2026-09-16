@@ -107,7 +107,172 @@ export function applyOoxmlCommand(input, command) {
     report.slideIdsBefore = slideIdsBefore;
     report.slideIdsAfter = inspectOoxmlDocument(bytes).slideIds;
   }
+  if (report.changedParts.length && elementOperations.has(command.op)) {
+    verifyPersistedElementMutation(input, bytes, command);
+    report.persistedSemanticVerified = true;
+  }
   return { bytes, report };
+}
+
+export function verifyPersistedElementMutation(
+  beforeBytes,
+  afterBytes,
+  command,
+) {
+  if (!elementOperations.has(command?.op))
+    throw new Error(
+      "The persisted element verifier received an invalid operation.",
+    );
+  const before = openPackage(beforeBytes, { requireSimpleTopology: false });
+  const after = openPackage(afterBytes, { requireSimpleTopology: false });
+  const beforeShape = resolveElementShape(before, command.elementId).shape;
+  const afterShape = resolveElementShape(after, command.elementId).shape;
+  const unchanged = (expected, actual) => {
+    if (expected !== actual)
+      throw new Error(`browser_package_semantics_not_persisted:${command.op}`);
+  };
+  if (command.op === "replace_text") {
+    unchanged(command.text.replace(/\r\n/gu, "\n"), readShapeText(afterShape));
+    return;
+  }
+  if (geometryOperations.has(command.op)) {
+    const beforeTransform = requiredShapeTransform(beforeShape);
+    const afterTransform = requiredShapeTransform(afterShape);
+    if (command.op === "move") {
+      for (const [attribute, requested, previous] of [
+        ["x", command.x, command.expectedX],
+        ["y", command.y, command.expectedY],
+      ])
+        unchanged(
+          coordinateAttribute(
+            requiredDirectElement(beforeTransform, drawingNamespace, "off"),
+            attribute,
+          ) +
+            (requested - previous) * emuPerHundredthMillimeter,
+          coordinateAttribute(
+            requiredDirectElement(afterTransform, drawingNamespace, "off"),
+            attribute,
+          ),
+        );
+    } else if (command.op === "resize") {
+      for (const [attribute, requested, previous] of [
+        ["cx", command.width, command.expectedWidth],
+        ["cy", command.height, command.expectedHeight],
+      ])
+        unchanged(
+          coordinateAttribute(
+            requiredDirectElement(beforeTransform, drawingNamespace, "ext"),
+            attribute,
+          ) +
+            (requested - previous) * emuPerHundredthMillimeter,
+          coordinateAttribute(
+            requiredDirectElement(afterTransform, drawingNamespace, "ext"),
+            attribute,
+          ),
+        );
+    } else {
+      const previous = beforeTransform.hasAttribute("rot")
+        ? coordinateAttribute(beforeTransform, "rot")
+        : 0;
+      const saved = afterTransform.hasAttribute("rot")
+        ? coordinateAttribute(afterTransform, "rot")
+        : 0;
+      unchanged(
+        previous + (command.rotation - command.expectedRotation) * 600,
+        saved,
+      );
+    }
+    return;
+  }
+  const properties = requiredShapeProperties(afterShape);
+  const line = () => requiredDirectElement(properties, drawingNamespace, "ln");
+  const solidColor = (container) =>
+    requiredDirectElement(
+      requiredDirectElement(container, drawingNamespace, "solidFill"),
+      drawingNamespace,
+      "srgbClr",
+    );
+  const hexColor = (value) => value.toString(16).padStart(6, "0").toUpperCase();
+  switch (command.op) {
+    case "fill_color":
+    case "line_color":
+      unchanged(
+        hexColor(command.color),
+        solidColor(
+          command.op === "fill_color" ? properties : line(),
+        ).getAttribute("val"),
+      );
+      return;
+    case "line_width":
+      unchanged(
+        String(command.width * emuPerHundredthMillimeter),
+        line().getAttribute("w"),
+      );
+      return;
+    case "fill_opacity":
+    case "line_opacity": {
+      const container = command.op === "fill_opacity" ? properties : line();
+      const fill = requiredDirectElement(
+        container,
+        drawingNamespace,
+        "solidFill",
+      );
+      unchanged(
+        String(command.opacity * 1000),
+        directColorTransform(fill, "alpha")?.getAttribute("val"),
+      );
+      return;
+    }
+    case "paragraph_alignment": {
+      const value = { left: "l", center: "ctr", right: "r", justify: "just" }[
+        command.alignment
+      ];
+      for (const paragraph of editableParagraphs(afterShape))
+        unchanged(
+          value,
+          requiredDirectElement(
+            paragraph,
+            drawingNamespace,
+            "pPr",
+          ).getAttribute("algn"),
+        );
+      return;
+    }
+    default:
+      break;
+  }
+  for (const property of existingRunProperties(afterShape)) {
+    if (command.op === "font_size")
+      unchanged(String(command.size), property.getAttribute("sz"));
+    else if (command.op === "bold" || command.op === "italic")
+      unchanged(
+        command[command.op] ? "1" : "0",
+        property.getAttribute(command.op === "bold" ? "b" : "i"),
+      );
+    else if (command.op === "underline")
+      unchanged(command.underline ? "sng" : "none", property.getAttribute("u"));
+    else if (command.op === "strikethrough")
+      unchanged(
+        command.strikethrough ? "sngStrike" : "noStrike",
+        property.getAttribute("strike"),
+      );
+    else if (command.op === "font_family")
+      for (const script of ["latin", "ea", "cs"])
+        unchanged(
+          fontFamily(command.family, "family"),
+          requiredDirectElement(
+            property,
+            drawingNamespace,
+            script,
+          ).getAttribute("typeface"),
+        );
+    else if (command.op === "font_color")
+      unchanged(
+        hexColor(command.color),
+        solidColor(property).getAttribute("val"),
+      );
+    else throw new Error(`No persisted verifier for ${command.op}.`);
+  }
 }
 
 export function inspectOoxmlDocument(input) {
@@ -472,34 +637,21 @@ function updateSlideMetadata(context, command) {
 
 function updateElement(context, command) {
   if (
-    typeof command.elementId !== "string" ||
-    !/^\d+(?:\/\d+)+$/u.test(command.elementId)
+    geometryOperations.has(command.op) &&
+    /^\d+(?:\/\d+)+$/u.test(command.elementId) &&
+    command.elementId.split("/").length !== 2
   )
-    throw new Error("elementId must be a browser Office object path.");
-  const path = command.elementId.split("/").map(Number);
-  const slideIndex = integerInRange(
-    path.shift(),
-    0,
-    context.slideIds.length - 1,
-    "element slide index",
+    throw new Error(
+      "Browser package geometry currently requires a top-level shape.",
+    );
+  const { slideIndex, target, slide, shape, path } = resolveElementShape(
+    context,
+    command.elementId,
   );
   if (geometryOperations.has(command.op) && path.length !== 1)
     throw new Error(
       "Browser package geometry currently requires a top-level shape.",
     );
-  const target = slideInfo(context, slideIndex);
-  const slide = parseXml(context.entries, target.path);
-  const shapeTree = requiredElement(slide, presentationNamespace, "spTree");
-  let container = shapeTree;
-  let shape;
-  for (const [depth, index] of path.entries()) {
-    const shapes = directShapes(container);
-    shape =
-      shapes[
-        integerInRange(index, 0, shapes.length - 1, `element path ${depth}`)
-      ];
-    container = shape;
-  }
   const mutation =
     command.op === "replace_text"
       ? replaceElementText(shape, command)
@@ -518,6 +670,32 @@ function updateElement(context, command) {
     value: mutation.value,
     changedParts: mutation.changed ? [target.path] : [],
   };
+}
+
+function resolveElementShape(context, elementId) {
+  if (typeof elementId !== "string" || !/^\d+(?:\/\d+)+$/u.test(elementId))
+    throw new Error("elementId must be a browser Office object path.");
+  const path = elementId.split("/").map(Number);
+  const slideIndex = integerInRange(
+    path.shift(),
+    0,
+    context.slideIds.length - 1,
+    "element slide index",
+  );
+  const target = slideInfo(context, slideIndex);
+  const slide = parseXml(context.entries, target.path);
+  const shapeTree = requiredElement(slide, presentationNamespace, "spTree");
+  let container = shapeTree;
+  let shape;
+  for (const [depth, index] of path.entries()) {
+    const shapes = directShapes(container);
+    shape =
+      shapes[
+        integerInRange(index, 0, shapes.length - 1, `element path ${depth}`)
+      ];
+    container = shape;
+  }
+  return { slideIndex, target, slide, shape, path };
 }
 
 function replaceElementText(shape, command) {
@@ -864,6 +1042,19 @@ function editableRunProperties(shape) {
       }
   if (!properties.length)
     throw new Error("The browser package target has no editable text runs.");
+  return properties;
+}
+
+function existingRunProperties(shape) {
+  const properties = [];
+  for (const paragraph of editableParagraphs(shape))
+    for (const name of ["r", "fld"])
+      for (const run of [
+        ...paragraph.getElementsByTagNameNS(drawingNamespace, name),
+      ])
+        properties.push(requiredDirectElement(run, drawingNamespace, "rPr"));
+  if (!properties.length)
+    throw new Error("The saved browser package has no editable text runs.");
   return properties;
 }
 

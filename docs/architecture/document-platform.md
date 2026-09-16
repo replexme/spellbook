@@ -106,6 +106,17 @@ revision is never a substitute for persisted intent. For example, paragraph
 margins must be compared as effective DrawingML semantics, not merely as a UNO
 field that may be remapped into numbering rules on import.
 
+The localized OOXML patch path uses a different persisted proof: the package
+worker reopens the ZIP it just wrote and checks the authored target property
+against the requested text, geometry, color, opacity, line or paragraph/run
+format. This is fast and independent of the live editor. A focused probe showed
+that loading a second hidden LibreOffice document immediately after a native
+edit could block the older stock browser runtime, even after flushing it to
+PPTX; that blocking probe is not on the localized interactive path. Raw OOXML
+readback proves the file contains the authored value, while the release
+conformance runner must still prove that PowerPoint/LibreOffice reimport and
+render that value as intended.
+
 ## Current limitation that matters for expansion
 
 The worker boundary and upload registry are format-aware, but the current element graph, edit-command schema, conversation scope and UI still contain slide-specific fields. They are valid PPTX adapter contracts, not the future universal interchange model. Before enabling DOCX, introduce a small format-neutral observation envelope whose payload is validated by an adapter-owned schema. Do not stretch `slides[]` into `pages[]` or `paragraphs[]`.

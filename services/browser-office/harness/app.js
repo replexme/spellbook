@@ -2647,12 +2647,15 @@ globalThis.spellbookBrowserOffice = {
     if (!productMode || query.get("verifySerialization") !== "1")
       throw new Error("Browser serialization probe is not active.");
     const live = await observeNativeDocument();
+    const startedAt = performance.now();
     const serialized = await serializeNativeDocument({
       inspect: true,
       detailSlideIndex: live.textDetails?.slideIndex,
     });
+    const durationMs = Math.round(performance.now() - startedAt);
     const retained = await observeNativeDocument();
     return {
+      durationMs,
       liveRevision: live.revision,
       reopenedRevision: serialized.observation.revision,
       retainedRevision: retained.revision,
