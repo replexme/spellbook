@@ -467,6 +467,7 @@ try {
       );
   }
   let nativeSnapshotPersisted = false;
+  let nativeSnapshotChangedParts = null;
   if (patchedBrowserRuntime) {
     const batchText = `${target.text} · saved batch`;
     const batch = await nativeTask(page, "native-snapshot-batch", {
@@ -494,6 +495,22 @@ try {
         .flatMap((slide) => slide.elements)
         .find((element) => element.elementId === target.elementId)?.text,
       batchText,
+    );
+    const snapshotBytes = Uint8Array.from(
+      await evaluateRenderer(
+        page,
+        () => globalThis.spellbookBrowserOffice.verifyProductBytes(),
+        undefined,
+        "read the native batch's persisted PPTX",
+      ),
+    );
+    nativeSnapshotChangedParts = changedLogicalParts(
+      unzipSync(fixture),
+      unzipSync(snapshotBytes),
+    );
+    await writeFile(
+      path.join(outputRoot, "native-snapshot-batch.pptx"),
+      snapshotBytes,
     );
     await sendHostCommand(page, "Send_UNO_Command", {
       Command: ".uno:Undo",
@@ -796,8 +813,14 @@ try {
     ? await verifyProductReadingOrder(browser, origin)
     : { status: "candidate-runtime-required" };
 
+  const nativeSnapshotPreserved =
+    !patchedBrowserRuntime ||
+    (nativeSnapshotChangedParts?.length === 1 &&
+      nativeSnapshotChangedParts[0] === "ppt/slides/slide1.xml");
   const result = {
-    status: "browser-product-bridge-verified",
+    status: nativeSnapshotPreserved
+      ? "browser-product-bridge-verified"
+      : "browser-product-bridge-failed",
     crossOriginIsolated: await evaluateRenderer(
       page,
       () => crossOriginIsolated,
@@ -813,6 +836,8 @@ try {
     staleAcknowledgedJournalDiscarded,
     serializationProbe,
     nativeSnapshotPersisted,
+    nativeSnapshotChangedParts,
+    nativeSnapshotPreserved,
     patchedBrowserRuntime,
     candidateRuntime: candidateRuntime
       ? {
@@ -864,6 +889,11 @@ try {
   await writeFile(
     path.join(outputRoot, "result.json"),
     `${JSON.stringify(result, null, 2)}\n`,
+  );
+  assert.equal(
+    nativeSnapshotPreserved,
+    true,
+    `A native batch changed unrelated original PPTX parts: ${nativeSnapshotChangedParts?.join(", ") ?? "not measured"}.`,
   );
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 } finally {

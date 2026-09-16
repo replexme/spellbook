@@ -2628,4 +2628,9 @@ globalThis.spellbookBrowserOffice = {
       slideCount: serialized.observation.slides?.length,
     };
   },
+  async verifyProductBytes() {
+    if (!productMode || query.get("verifySerialization") !== "1")
+      throw new Error("Browser product export probe is not active.");
+    return Array.from(await exportProductDocument({ checkpoint: false }));
+  },
 };
