@@ -16,6 +16,20 @@ const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
 const repositoryIdentity = readRepositoryIdentity(repositoryRoot);
 const rendererCallTimeoutMs = 10_000;
+const unsupportedOperationProbe = "execute_arbitrary_command";
+const mutationContract = JSON.parse(
+  await readFile(
+    path.join(repositoryRoot, "contracts/native-edit-capabilities.json"),
+  ),
+);
+assert.equal(
+  Object.hasOwn(
+    mutationContract.mutationModel.operations,
+    unsupportedOperationProbe,
+  ),
+  false,
+  "The fail-closed probe must not reject a supported PPTX operation.",
+);
 const fixture = new Uint8Array(
   await readFile(
     path.join(
@@ -114,9 +128,8 @@ try {
       expectedRevision: before.revision,
       expectedSlides: JSON.stringify(before.slides),
       command: {
-        op: "flip",
+        op: unsupportedOperationProbe,
         elementId: target.elementId,
-        axis: "horizontal",
       },
       permission: {
         mode: "selection",
@@ -126,7 +139,7 @@ try {
       suppressCapture: true,
     }),
     patchedBrowserRuntime
-      ? /browser_ooxml_reconciliation_required:flip/u
+      ? /unsupported_native_operation/u
       : /browser_native_runtime_patch_required/u,
   );
   const moved = await nativeTask(page, "move-1", {

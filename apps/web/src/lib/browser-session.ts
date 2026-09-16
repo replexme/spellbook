@@ -4,16 +4,9 @@ import { currentPresentationFormat } from "./document-formats";
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./http";
 import type { Session } from "./models";
-import { internalAppBaseUrl, publicAppBaseUrl } from "./runtime-urls";
-import {
-  accountPrefix,
-  deleteObject,
-  getObject,
-  putObject,
-  storageNamespace,
-} from "./storage";
-import { enqueueWorkerJob } from "./workers";
-import { loadNativeSaveChangePolicy } from "./native-change-budget";
+import { publicAppBaseUrl } from "./runtime-urls";
+import { accountPrefix, deleteObject, getObject, putObject } from "./storage";
+import { dispatchNativeSave, stageNativeSave } from "./native-save-stage";
 import {
   aiConnectorConfig,
   type AiConnectorConfig,
@@ -253,57 +246,24 @@ export async function saveBrowserDocument(
         expectedRevision
       )
         throw new HttpError(412, "browser_revision_changed");
-      const policy = await loadNativeSaveChangePolicy(
-        sql,
-        current.id,
-        locked.save_revision,
-      );
-      payload = {
+      payload = await stageNativeSave(sql, {
+        sessionId: current.id,
+        documentId,
+        parentVersionId: locked.working_version_id,
+        versionId,
         jobId,
-        callbackUrl: `${internalAppBaseUrl()}/api/internal/jobs/callback`,
-        storageNamespace: storageNamespace(),
-        formatId: currentPresentationFormat.id,
-        inputObject: object,
-        baselineInputObject: current.preservation_object,
+        object,
         outputPrefix,
-        nativeSessionId: current.id,
-        changeOrigin: policy.origin,
-        changeTaskIds: policy.taskIds,
-        changeBudget: policy.budget,
-      };
-      await sql`
-        insert into spellbook_versions
-          (id,document_id,parent_version_id,kind,status,document_object,document_sha256)
-        values (${versionId},${documentId},${locked.working_version_id},'approved','processing',${object},${digest})
-      `;
-      await sql`
-        insert into spellbook_jobs
-          (id,job_type,document_id,version_id,status,payload)
-        values (${jobId},'scan_render',${documentId},${versionId},'queued',${sql.json(payload as any)})
-      `;
-      await sql`
-        update spellbook_native_sessions set
-          working_version_id=${versionId},working_sha256=${digest},
-          status='validating',save_revision=save_revision+1,last_error=null,
-          last_seen_at=now(),updated_at=now()
-        where id=${current.id}
-      `;
+        digest,
+        preservationObject: current.preservation_object,
+        saveRevision: locked.save_revision,
+      });
     });
   } catch (error) {
     await deleteObject(object).catch(() => undefined);
     throw error;
   }
-  try {
-    await enqueueWorkerJob(
-      jobId,
-      "document",
-      "/internal/jobs/scan-render",
-      payload!,
-    );
-    await db()`update spellbook_jobs set dispatched_at=now() where id=${jobId}`;
-  } catch (error) {
-    await db()`update spellbook_jobs set error=${error instanceof Error ? error.message : "dispatch_failed"} where id=${jobId}`;
-  }
+  await dispatchNativeSave(jobId, payload!);
   return {
     revision: browserRevision(versionId, digest),
     unchanged: false,
