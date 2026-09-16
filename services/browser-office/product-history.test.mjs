@@ -2,9 +2,138 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  recordManualProductCheckpoint,
   snapshotProductEditState,
   trimSessionProductHistory,
 } from "./product-history.mjs";
+
+test("manual checkpoints preserve earlier AI Undo and coalesce continuous typing", () => {
+  const aiBytes = Uint8Array.of(2);
+  const firstManual = Uint8Array.of(3);
+  const secondManual = Uint8Array.of(4);
+  const aiCommand = { op: "replace_text" };
+  const commands = [aiCommand];
+  const aiEntry = { command: aiCommand, nativeUndoAvailable: true };
+  const undoHistory = [aiEntry];
+  const redoHistory = [{ command: { op: "old_redo" } }];
+  recordManualProductCheckpoint({
+    commands,
+    undoHistory,
+    redoHistory,
+    beforeBytes: aiBytes,
+    afterBytes: firstManual,
+    beforeRevision: "ai",
+    afterRevision: "manual-1",
+    beforeSlides: [],
+    reason: "manual_autosave",
+  });
+  assert.equal(undoHistory.length, 2);
+  assert.equal(undoHistory[0], aiEntry);
+  assert.equal(redoHistory.length, 0);
+  recordManualProductCheckpoint({
+    commands,
+    undoHistory,
+    redoHistory,
+    beforeBytes: firstManual,
+    afterBytes: secondManual,
+    beforeRevision: "manual-1",
+    afterRevision: "manual-2",
+    beforeSlides: [],
+    reason: "manual_save",
+  });
+  assert.equal(commands.length, 2);
+  assert.equal(undoHistory.length, 2);
+  assert.deepEqual(undoHistory[1].beforeBytes, aiBytes);
+  assert.deepEqual(undoHistory[1].afterBytes, secondManual);
+  assert.equal(undoHistory[1].beforeRevision, "ai");
+  assert.equal(undoHistory[1].afterRevision, "manual-2");
+  assert.equal(undoHistory[1].nativeUndoAvailable, false);
+  assert.equal(undoHistory[1].nativeRequest, null);
+});
+
+test("a manual Undo returning to the checkpoint base removes only its aggregate", () => {
+  const base = Uint8Array.of(1);
+  const edited = Uint8Array.of(2);
+  const commands = [];
+  const undoHistory = [];
+  const redoHistory = [];
+  recordManualProductCheckpoint({
+    commands,
+    undoHistory,
+    redoHistory,
+    beforeBytes: base,
+    afterBytes: edited,
+    beforeRevision: "base",
+    afterRevision: "edited",
+    beforeSlides: [],
+    reason: "manual_autosave",
+  });
+  const removed = recordManualProductCheckpoint({
+    commands,
+    undoHistory,
+    redoHistory,
+    beforeBytes: edited,
+    afterBytes: base,
+    beforeRevision: "edited",
+    afterRevision: "base",
+    beforeSlides: [],
+    reason: "manual_undo",
+  });
+  assert.equal(removed, null);
+  assert.deepEqual(commands, []);
+  assert.deepEqual(undoHistory, []);
+});
+
+test("manual checkpoints reject noncontiguous or unpersisted revisions", () => {
+  const base = Uint8Array.of(1);
+  const edited = Uint8Array.of(2);
+  const commands = [];
+  const undoHistory = [];
+  const redoHistory = [];
+  recordManualProductCheckpoint({
+    commands,
+    undoHistory,
+    redoHistory,
+    beforeBytes: base,
+    afterBytes: edited,
+    beforeRevision: "base",
+    afterRevision: "edited",
+    beforeSlides: [],
+    reason: "manual_autosave",
+  });
+  assert.throws(
+    () =>
+      recordManualProductCheckpoint({
+        commands,
+        undoHistory,
+        redoHistory,
+        beforeBytes: Uint8Array.of(9),
+        afterBytes: Uint8Array.of(3),
+        beforeRevision: "edited",
+        afterRevision: "later",
+        beforeSlides: [],
+        reason: "manual_save",
+      }),
+    /not contiguous/u,
+  );
+  assert.equal(commands.length, 1);
+  assert.equal(undoHistory.length, 1);
+  assert.throws(
+    () =>
+      recordManualProductCheckpoint({
+        commands: [],
+        undoHistory: [],
+        redoHistory: [],
+        beforeBytes: base,
+        afterBytes: base,
+        beforeRevision: "base",
+        afterRevision: "changed",
+        beforeSlides: [],
+        reason: "manual_save",
+      }),
+    /matching persisted revision/u,
+  );
+});
 
 test("checkpoint rollback snapshot preserves redo and native availability flags", () => {
   const command = { op: "edit" };

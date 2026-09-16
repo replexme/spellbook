@@ -12,6 +12,107 @@ export function snapshotProductEditState(state) {
   };
 }
 
+function sameBytes(left, right) {
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index += 1)
+    if (left[index] !== right[index]) return false;
+  return true;
+}
+
+export function recordManualProductCheckpoint({
+  commands,
+  undoHistory,
+  redoHistory,
+  beforeBytes,
+  afterBytes,
+  beforeRevision,
+  afterRevision,
+  beforeSlides,
+  reason,
+}) {
+  if (
+    !Array.isArray(commands) ||
+    !Array.isArray(undoHistory) ||
+    !Array.isArray(redoHistory) ||
+    !(beforeBytes instanceof Uint8Array) ||
+    !(afterBytes instanceof Uint8Array) ||
+    !beforeBytes.byteLength ||
+    !afterBytes.byteLength ||
+    typeof beforeRevision !== "string" ||
+    !beforeRevision ||
+    typeof afterRevision !== "string" ||
+    !afterRevision ||
+    !Array.isArray(beforeSlides) ||
+    typeof reason !== "string" ||
+    !reason
+  )
+    throw new TypeError("A manual checkpoint needs complete edit identity.");
+
+  const previousCommand = commands.at(-1);
+  const coalesce =
+    previousCommand?.persistence === "native_snapshot" &&
+    previousCommand.sourceOperations?.length === 1 &&
+    previousCommand.sourceOperations[0] === "manual_edit";
+  const previousEntry = undoHistory.at(-1);
+  if (
+    coalesce &&
+    (previousEntry?.command !== previousCommand ||
+      !(previousEntry.beforeBytes instanceof Uint8Array) ||
+      !(previousEntry.afterBytes instanceof Uint8Array) ||
+      previousEntry.afterRevision !== beforeRevision ||
+      !sameBytes(previousEntry.afterBytes, beforeBytes))
+  )
+    throw new Error("The manual checkpoint history is not contiguous.");
+
+  const firstBytes = coalesce ? previousEntry.beforeBytes : beforeBytes;
+  const firstRevision = coalesce
+    ? previousEntry.beforeRevision
+    : beforeRevision;
+  if (sameBytes(firstBytes, afterBytes)) {
+    if (firstRevision !== afterRevision)
+      throw new Error("The manual edit has no matching persisted revision.");
+    if (coalesce) {
+      commands.pop();
+      undoHistory.pop();
+    }
+    redoHistory.length = 0;
+    return null;
+  }
+
+  const command = {
+    op: "native_snapshot",
+    persistence: "native_snapshot",
+    sourceOperations: ["manual_edit"],
+    reason,
+    reconciliation: {
+      beforeRevision: firstRevision,
+      afterRevision,
+      nativeRequest: { operation: "manual_edit" },
+    },
+  };
+  const entry = {
+    beforeBytes: firstBytes,
+    afterBytes,
+    beforeRevision: firstRevision,
+    afterRevision,
+    beforeSlides: coalesce ? previousEntry.beforeSlides : beforeSlides,
+    nativeRequest: null,
+    command,
+    persistence: "native_snapshot",
+    nativeUndoAvailable: false,
+    nativeRedoAvailable: false,
+  };
+  if (coalesce) {
+    commands[commands.length - 1] = command;
+    undoHistory[undoHistory.length - 1] = entry;
+  } else {
+    commands.push(command);
+    undoHistory.push(entry);
+  }
+  redoHistory.length = 0;
+  return command;
+}
+
 function retainedByteLength(undoHistory, redoHistory) {
   const buffers = new Set();
   let total = 0;

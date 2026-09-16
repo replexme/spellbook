@@ -9,6 +9,7 @@ import {
   persistedSlideTopologyMatches,
 } from "/harness/product-persistence.mjs";
 import {
+  recordManualProductCheckpoint,
   snapshotProductEditState,
   trimSessionProductHistory,
 } from "/harness/product-history.mjs";
@@ -1609,30 +1610,18 @@ async function checkpointLiveNativeState(live, reason) {
     serialized.observation,
   );
   const afterBytes = serialized.bytes;
-  const previousManualSnapshot =
-    commands.at(-1)?.persistence === "native_snapshot" &&
-    commands.at(-1)?.sourceOperations?.length === 1 &&
-    commands.at(-1)?.sourceOperations?.[0] === "manual_edit"
-      ? commands.at(-1)
-      : null;
-  const snapshotCommand = {
-    op: "native_snapshot",
-    persistence: "native_snapshot",
-    sourceOperations: ["manual_edit"],
+  recordManualProductCheckpoint({
+    commands,
+    undoHistory: productUndoHistory,
+    redoHistory: productRedoHistory,
+    beforeBytes: previousState.currentBytes,
+    afterBytes,
+    beforeRevision,
+    afterRevision: live.revision,
+    beforeSlides: previousState.reconciledObservation.slides,
     reason,
-    reconciliation: {
-      beforeRevision:
-        previousManualSnapshot?.reconciliation?.beforeRevision ??
-        beforeRevision,
-      afterRevision: live.revision,
-      nativeRequest: { operation: "manual_edit" },
-    },
-  };
+  });
   currentBytes = afterBytes;
-  if (previousManualSnapshot) commands[commands.length - 1] = snapshotCommand;
-  else commands.push(snapshotCommand);
-  productUndoHistory.length = 0;
-  productRedoHistory.length = 0;
   reconciledModelRevision = live.revision;
   unreconciledModelRevision = "";
   currentSlideCount = Array.isArray(live.slides)

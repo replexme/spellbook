@@ -55,7 +55,9 @@ as real PPTX snapshots, recover them from OPFS, and expose the complete
 regression tests to the same immutable server and browser source candidates.
 The browser source now separates the server-acknowledged PPTX base and its
 unsaved recovery journal from session Undo/Redo history, including Undo after
-Save. That source change still needs the candidate browser product run.
+Save. Direct human edits now enter that same session history as coalesced,
+reversible checkpoints instead of discarding prior AI Undo entries. These
+source changes still need the candidate browser product run.
 
 These facts explain what has been built. They do not claim that the final
 runtime, full remaining feature breadth, deployment or public user workflow has
