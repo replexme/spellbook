@@ -59,6 +59,9 @@ test("PowerPoint admission requires the complete receipt-bound endurance report"
       operations,
     },
     changedParts: ["ppt/slides/slide1.xml"],
+    nativeSnapshotPersisted: true,
+    nativeSnapshotPreserved: true,
+    nativeSnapshotChangedParts: ["ppt/slides/slide1.xml"],
     replacement: "Spellbook · product bridge",
     savedSha256: "b".repeat(64),
     postSaveEditRecovered: true,
@@ -86,6 +89,16 @@ test("PowerPoint admission requires the complete receipt-bound endurance report"
       verifiedElementOperations: operations.slice(1),
     }).join("; "),
     /17-operation bridge/u,
+  );
+  assert.match(
+    candidateBrowserReportErrors({
+      ...report,
+      nativeSnapshotChangedParts: [
+        "ppt/slides/slide1.xml",
+        "ppt/slideMasters/slideMaster1.xml",
+      ],
+    }).join("; "),
+    /unrelated original PPTX parts/u,
   );
 });
 

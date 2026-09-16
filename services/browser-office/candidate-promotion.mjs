@@ -125,6 +125,7 @@ export function createCandidatePromotion({
       verifiedNativeOperations: nativeConformanceReport.executedOperations,
       enduranceCycles: browserReport.endurance.cycles,
       changedParts: browserReport.changedParts,
+      nativeSnapshotChangedParts: browserReport.nativeSnapshotChangedParts,
       savedSha256: browserReport.savedSha256,
       powerpointRenderer: powerpointReport.renderer,
       powerpointSlideCounts: powerpointReport.slideCounts,

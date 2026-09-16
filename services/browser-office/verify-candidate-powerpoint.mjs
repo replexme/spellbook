@@ -86,6 +86,13 @@ export function candidateBrowserReportErrors(report) {
     errors.push("endurance did not rotate through all 17 element operations");
   if (JSON.stringify(report?.changedParts) !== '["ppt/slides/slide1.xml"]')
     errors.push("the final edit changed collateral OOXML parts");
+  if (
+    report?.nativeSnapshotPersisted !== true ||
+    report?.nativeSnapshotPreserved !== true ||
+    JSON.stringify(report?.nativeSnapshotChangedParts) !==
+      '["ppt/slides/slide1.xml"]'
+  )
+    errors.push("the native edit rewrote unrelated original PPTX parts");
   if (report?.replacement?.includes("product bridge") !== true)
     errors.push("the saved text replacement is missing from the report");
   if (!/^[0-9a-f]{64}$/u.test(report?.savedSha256 ?? ""))
