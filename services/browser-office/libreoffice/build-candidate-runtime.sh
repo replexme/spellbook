@@ -19,6 +19,8 @@ upstream_reader="$spellbook_repo_root/services/browser-office/libreoffice/upstre
 source_repository="$(node "$upstream_reader" get source.repository)"
 source_commit="$(node "$upstream_reader" get source.candidateCommit)"
 patch_level="$(node "$upstream_reader" get sourceCandidate.patchLevel)"
+mapfile -t wasm_modules < <(node "$upstream_reader" get sourceCandidate.wasmModules)
+wasm_modules_arg="${wasm_modules[*]}"
 expected_patch_sha="$(node "$upstream_reader" get sourceCandidate.patchSeriesSha256)"
 actual_patch_sha="$(node "$upstream_reader" patch-series-sha256)"
 patch_series_ready="$(node "$upstream_reader" get sourceCandidate.patchSeriesReady)"
@@ -29,6 +31,10 @@ qtbase_commit="$(node "$upstream_reader" get toolchain.qt.qtbaseCommit)"
 
 if [[ "$patch_series_ready" != "true" || "$actual_patch_sha" != "$expected_patch_sha" ]]; then
   echo "The exact browser patch series must pass source admission before building." >&2
+  exit 1
+fi
+if [[ "$wasm_modules_arg" != "calc writer impress" ]]; then
+  echo "The browser candidate must include Calc, Writer and Impress." >&2
   exit 1
 fi
 if [[ ! "${SPELLBOOK_SOURCE_REVISION:-}" =~ ^[0-9a-f]{40}$ ]]; then
@@ -164,9 +170,14 @@ if [[ ! -f "$native_marker" ]]; then
 fi
 
 wasm_build="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm"
-wasm_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm.$expected_patch_sha"
+wasm_configuration="LibreOfficeWASM32:$wasm_modules_arg:en-US ko:colibre:release"
+wasm_configuration_sha="$(printf '%s' "$wasm_configuration" | sha256sum | cut -d' ' -f1)"
+wasm_configuration_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm.configuration"
+wasm_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm.$expected_patch_sha.$wasm_configuration_sha"
 mkdir -p "$wasm_build"
-if [[ ! -f "$wasm_build/Makefile" ]]; then
+if [[ ! -f "$wasm_build/Makefile" ]] || \
+   ! -f "$wasm_configuration_marker" ]] || \
+   [[ "$(<"$wasm_configuration_marker")" != "$wasm_configuration" ]]; then
   # The Korean browser package needs the translations submodule, but a normal
   # `git submodule update` downloads the complete multi-gigabyte history. Fetch
   # only the exact gitlink commit before configure. LibreOffice's `./g clone`
@@ -191,12 +202,18 @@ if [[ ! -f "$wasm_build/Makefile" ]]; then
       --with-parallelism="$parallelism" \
       --with-external-tar="$tarballs" \
       --with-distro=LibreOfficeWASM32 \
+      --with-wasm-module="$wasm_modules_arg" \
       --with-build-platform-configure-options=--enable-ccache \
       --enable-ccache \
       --enable-release-build \
       --with-lang="en-US ko" \
       --with-theme=colibre
   )
+  printf '%s\n' "$wasm_configuration" > "$wasm_configuration_marker"
+fi
+if ! grep -qx 'export ENABLE_WASM_STRIP_BASIC_DRAW_MATH_IMPRESS=' "$wasm_build/config_host.mk"; then
+  echo "The configured WASM runtime still strips Impress." >&2
+  exit 1
 fi
 if [[ ! -f "$wasm_marker" ]]; then
   make -C "$wasm_build" build

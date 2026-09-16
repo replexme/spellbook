@@ -8,6 +8,7 @@ export const browserRuntimeBuildInputPaths = Object.freeze([
   "services/browser-office/libreoffice/upstream.mjs",
   "services/browser-office/libreoffice/verify-source.mjs",
   "services/browser-office/libreoffice/write-build-receipt.mjs",
+  "services/browser-office/libreoffice/runtime-package.mjs",
 ]);
 
 export function readRepositoryIdentity(repositoryRoot) {

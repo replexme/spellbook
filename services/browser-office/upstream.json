@@ -10,6 +10,7 @@
   },
   "sourceCandidate": {
     "patchLevel": "browser-undo-v29",
+    "wasmModules": ["calc", "writer", "impress"],
     "patchSeriesReady": true,
     "buildReady": false,
     "nativeSlideStructureReady": false,

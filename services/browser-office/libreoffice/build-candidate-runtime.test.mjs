@@ -27,6 +27,15 @@ test("fetches only the exact shallow translations gitlink for the Korean WASM bu
   );
 });
 
+test("configures Impress and invalidates a stripped WASM build marker", () => {
+  assert.match(script, /get sourceCandidate\.wasmModules/u);
+  assert.match(script, /--with-wasm-module="\$wasm_modules_arg"/u);
+  assert.match(script, /ENABLE_WASM_STRIP_BASIC_DRAW_MATH_IMPRESS=/u);
+  assert.match(script, /wasm_configuration_marker/u);
+  assert.match(script, /wasm_configuration_sha/u);
+  assert.match(script, /wasm\.\$expected_patch_sha\.\$wasm_configuration_sha/u);
+});
+
 test("runs the declared focused native regressions instead of the unrelated UI suite", () => {
   const dependencyIndex = script.indexOf(
     'make -C "$native_build" ExternalPackage_liblangtag_data',

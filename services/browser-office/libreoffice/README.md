@@ -58,8 +58,12 @@ one saved-OOXML assertion: a paragraph with nondefault margins still skipped
 the entire DrawingML paragraph-properties element before the right-margin
 writer ran. Patch `0025` extends that generic emission condition to paragraph
 spacing, indents, direction and direct tab stops, and tests a paragraph with
-only a right margin. `browser-undo-v29` remains source-only until its own
-native and browser product runs pass.
+only a right margin. `browser-undo-v29` passed all 18 focused native tests.
+Its first WASM build could not open a PPTX: the upstream WASM default enables
+Calc and Writer but strips Impress/Draw, so its package omitted the Impress UI
+assets. The build now explicitly requests `calc writer impress`, checks the
+configured module state, and refuses a receipt or admission when the produced
+package lacks those assets. A corrected browser product run is still required.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves
@@ -126,10 +130,14 @@ series changes, and stop the VM when no build is running.
 Native CppUnit targets and the WASM link each write a completion marker only
 after success, so a failed step resumes from its existing object files instead
 of restarting the preceding hour-long work. A root belonging to another source
-or patch identity is rejected rather than cleaned implicitly. The output holds
+or patch identity is rejected rather than cleaned implicitly. The WASM module
+configuration has its own marker; changing it reconfigures the preserved build
+tree and reuses its compiled objects rather than treating the prior stripped
+runtime as complete. The output holds
 the four raw runtime assets, Brotli serving variants and a receipt binding their
 hashes to the exact public source, LibreOffice, patch-series, Emscripten and Qt
-identities. Native tests use the source language only; the Korean translations
+identities and the required `calc writer impress` module set. Native tests use
+the source language only; the Korean translations
 needed by the browser build are fetched at the exact superproject gitlink with
 depth one, avoiding a full translation-repository history on every clean build.
 Building does not set `buildReady`; promotion still requires the integrated

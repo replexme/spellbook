@@ -76,8 +76,12 @@ try {
     viewport: { width: 1440, height: 960 },
   });
   const pageErrors = [];
+  const consoleMessages = [];
   const requestFailures = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) =>
+    consoleMessages.push({ type: message.type(), text: message.text() }),
+  );
   page.on("requestfailed", (request) =>
     requestFailures.push({
       url: request.url(),
@@ -90,7 +94,14 @@ try {
   );
   await connectProductHost(page, origin);
   await openProductFixture(page, fixture, "open-1");
-  const opened = await waitForEvent(page, { type: "open-complete" });
+  let opened;
+  try {
+    opened = await waitForEvent(page, { type: "open-complete" });
+  } catch (error) {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}; pageErrors=${JSON.stringify(pageErrors)}; requestFailures=${JSON.stringify(requestFailures)}; consoleMessages=${JSON.stringify(consoleMessages.slice(-80))}`,
+    );
+  }
   assert.equal(opened.slideCount > 0, true);
   assert.equal(opened.recovered, false);
 
@@ -1797,8 +1808,12 @@ async function waitForEvent(page, expected) {
     await withWallClockTimeout(
       page.waitForFunction(
         (match) =>
-          globalThis.__spellbookProductHost?.events.some((event) =>
-            Object.entries(match).every(([key, value]) => event[key] === value),
+          globalThis.__spellbookProductHost?.events.some(
+            (event) =>
+              event.type === "error" ||
+              Object.entries(match).every(
+                ([key, value]) => event[key] === value,
+              ),
           ),
         expected,
         { timeout: 30_000 },
@@ -1841,7 +1856,7 @@ async function waitForEvent(page, expected) {
       `${error instanceof Error ? error.message : String(error)}; expected=${JSON.stringify(expected)}; events=${JSON.stringify(events)}; diagnostics=${JSON.stringify(diagnostics)}`,
     );
   }
-  return evaluateRenderer(
+  const event = await evaluateRenderer(
     page,
     (match) =>
       globalThis.__spellbookProductHost.events.find((event) =>
@@ -1849,6 +1864,17 @@ async function waitForEvent(page, expected) {
       ),
     expected,
   );
+  if (!event) {
+    const failure = await evaluateRenderer(page, () =>
+      globalThis.__spellbookProductHost.events.find(
+        (candidate) => candidate.type === "error",
+      ),
+    );
+    throw new Error(
+      failure?.error ?? "Browser product host reported an error.",
+    );
+  }
+  return event;
 }
 
 async function nativeTask(page, id, request) {

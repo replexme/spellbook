@@ -103,7 +103,12 @@ Undo check for that choice while checking only portable fixed-date properties
 after reload. Its Cloud Build failed one native test because the DrawingML
 exporter skipped paragraph properties when margins were the only formatting
 that required them. `browser-undo-v29` corrects that shared emission condition
-and adds a right-margin-only regression, but has not passed native tests.
+and adds a right-margin-only regression; all 18 focused native tests passed.
+Its first WASM package then failed at the first PPTX open because the browser
+build did not request the Impress module. The candidate receipt and admission
+now require the actual Impress/Draw package assets, and the preserved WASM
+build tree will be reconfigured for `calc writer impress`. That corrected
+runtime has not passed the browser product run.
 The current local browser editor passed real open/edit/save/download and
 compact-screen canvas/access tests, but the older standalone conformance
 runtime aborts during its third document reopen. Neither current source

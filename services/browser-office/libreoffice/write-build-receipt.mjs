@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { computePatchSeriesSha256, upstreamManifest } from "./upstream.mjs";
+import { assertBrowserOfficePackageMetadata } from "./runtime-package.mjs";
 
 const requiredArtifacts = Object.freeze([
   "soffice.js",
@@ -28,6 +29,8 @@ export async function createBrowserRuntimeReceipt({
     throw new Error("Browser patch series changed during the build.");
 
   const artifacts = [];
+  let packageMetadata;
+  let packageBytes;
   for (const name of requiredArtifacts) {
     const artifactPath = path.join(runtimeDirectory, name);
     const [bytes, details] = await Promise.all([
@@ -41,13 +44,16 @@ export async function createBrowserRuntimeReceipt({
       !bytes.subarray(0, 4).equals(Buffer.from([0x00, 0x61, 0x73, 0x6d]))
     )
       throw new Error("Browser runtime artifact is not WebAssembly.");
-    if (name.endsWith(".metadata")) JSON.parse(bytes.toString("utf8"));
+    if (name.endsWith(".metadata"))
+      packageMetadata = JSON.parse(bytes.toString("utf8"));
+    if (name === "soffice.data") packageBytes = bytes.byteLength;
     artifacts.push({
       name,
       bytes: bytes.byteLength,
       sha256: createHash("sha256").update(bytes).digest("hex"),
     });
   }
+  assertBrowserOfficePackageMetadata(packageMetadata, packageBytes);
 
   const resolvedSourceRevision =
     sourceRevision ??
@@ -59,7 +65,7 @@ export async function createBrowserRuntimeReceipt({
     throw new Error("Spellbook source revision is not immutable.");
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: "built_unverified",
     builtAt,
     platform,
@@ -70,6 +76,7 @@ export async function createBrowserRuntimeReceipt({
       patchLevel: upstreamManifest.sourceCandidate.patchLevel,
       patchSeriesSha256,
     },
+    wasmModules: upstreamManifest.sourceCandidate.wasmModules,
     toolchain: upstreamManifest.toolchain,
     artifacts,
   };

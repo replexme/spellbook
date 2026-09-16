@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { upstreamManifest } from "./libreoffice/upstream.mjs";
+import { assertBrowserOfficePackageMetadata } from "./libreoffice/runtime-package.mjs";
 
 const requiredArtifactNames = Object.freeze([
   "soffice.js",
@@ -57,6 +58,8 @@ export async function admitCandidateRuntime({
     );
 
   const verifiedArtifacts = new Map();
+  let packageMetadata;
+  let packageBytes;
   for (const name of requiredArtifactNames) {
     const expected = receiptArtifacts.get(name);
     if (!expected) throw new Error(`Candidate runtime receipt omits ${name}.`);
@@ -72,12 +75,15 @@ export async function admitCandidateRuntime({
       !bytes.subarray(0, 4).equals(Buffer.from([0x00, 0x61, 0x73, 0x6d]))
     )
       throw new Error("Candidate runtime artifact is not WebAssembly.");
-    if (name.endsWith(".metadata")) JSON.parse(bytes.toString("utf8"));
+    if (name.endsWith(".metadata"))
+      packageMetadata = JSON.parse(bytes.toString("utf8"));
+    if (name === "soffice.data") packageBytes = bytes.byteLength;
     verifiedArtifacts.set(name, {
       bytes: details.size,
       sha256,
     });
   }
+  assertBrowserOfficePackageMetadata(packageMetadata, packageBytes);
   const runtimeAssets = servedRuntimeArtifacts.map((asset) => ({
     ...asset,
     ...verifiedArtifacts.get(asset.storedPath),
@@ -118,7 +124,7 @@ export async function admitCandidateRuntime({
 
 function assertReceiptIdentity(receipt, manifest) {
   if (
-    receipt?.schemaVersion !== 1 ||
+    receipt?.schemaVersion !== 2 ||
     receipt.status !== "built_unverified" ||
     !/^[0-9a-f]{40}$/u.test(receipt.spellbookSourceRevision ?? "")
   )
@@ -135,6 +141,11 @@ function assertReceiptIdentity(receipt, manifest) {
     throw new Error("Candidate runtime LibreOffice identity differs.");
   if (JSON.stringify(receipt.toolchain) !== JSON.stringify(manifest.toolchain))
     throw new Error("Candidate runtime toolchain identity differs.");
+  if (
+    JSON.stringify(receipt.wasmModules) !==
+    JSON.stringify(manifest.sourceCandidate.wasmModules)
+  )
+    throw new Error("Candidate runtime module set differs.");
   if (!Array.isArray(receipt.artifacts))
     throw new Error("Candidate runtime receipt has no artifacts.");
   for (const artifact of receipt.artifacts) {

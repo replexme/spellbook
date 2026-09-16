@@ -7,6 +7,15 @@ import test from "node:test";
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
 import { createBrowserRuntimeReceipt } from "./libreoffice/write-build-receipt.mjs";
 
+const packageMetadata = JSON.stringify({
+  remote_package_size: 1,
+  files: ["scalc", "swriter", "simpress", "sdraw"].map((module) => ({
+    filename: `/instdir/share/config/soffice.cfg/modules/${module}/menubar/menubar.xml`,
+    start: 0,
+    end: 1,
+  })),
+});
+
 test("candidate runtime serves only receipt-bound production assets", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "spellbook-candidate-"));
   try {
@@ -65,7 +74,7 @@ test("candidate runtime serves only receipt-bound production assets", async () =
 async function writeArtifacts(root) {
   await Promise.all([
     writeFile(path.join(root, "soffice.js"), "Module = {};\n"),
-    writeFile(path.join(root, "soffice.data.js.metadata"), "{}\n"),
+    writeFile(path.join(root, "soffice.data.js.metadata"), packageMetadata),
     writeFile(
       path.join(root, "soffice.wasm"),
       Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01]),
