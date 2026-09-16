@@ -62,8 +62,13 @@ source changes still need the candidate browser product run.
 The stock runtime rewrites unrelated original OOXML parts on a no-op save.
 The browser source now compares no-edit and edited exports from the same
 engine, applies only the resulting part differences to the user's original
-PPTX, and reopens that preserved candidate before committing it. It refuses
-unmapped relationships rather than silently accepting a corrupt package.
+PPTX, and reopens that preserved candidate before committing it. If the engine
+rewrites an implicit slide-layout relationship without an authored change, the
+original relationship is retained; an edited part that explicitly references
+a remapped relationship is refused rather than silently corrupting the file.
+The local package test using an actual no-edit LibreOffice export changed only
+the intended slide XML after a simulated text edit, while restoring the
+unrelated master, layout and theme parts from the original.
 The product bridge compares the result directly with the uploaded PPTX, and
 release admission rejects collateral part changes. This source-only repair
 has not passed the candidate browser product run, so the original-file promise
