@@ -133,6 +133,30 @@ let reconciledModelRevision = "";
 let unreconciledModelRevision = "";
 let reconciledObservation = null;
 
+function captureProductEditState() {
+  return {
+    currentBytes,
+    currentSlideCount,
+    commands: commands.slice(),
+    undoHistory: productUndoHistory.map((entry) => ({ ...entry })),
+    redoHistory: productRedoHistory.map((entry) => ({ ...entry })),
+    reconciledModelRevision,
+    unreconciledModelRevision,
+    reconciledObservation,
+  };
+}
+
+function restoreProductEditState(state) {
+  currentBytes = state.currentBytes;
+  currentSlideCount = state.currentSlideCount;
+  commands.splice(0, commands.length, ...state.commands);
+  productUndoHistory.splice(0, productUndoHistory.length, ...state.undoHistory);
+  productRedoHistory.splice(0, productRedoHistory.length, ...state.redoHistory);
+  reconciledModelRevision = state.reconciledModelRevision;
+  unreconciledModelRevision = state.unreconciledModelRevision;
+  reconciledObservation = state.reconciledObservation;
+}
+
 function rememberReconciledObservation(observation) {
   if (
     !observation ||
@@ -1089,8 +1113,7 @@ async function commitProductPackageReload(prepared) {
     return unchanged;
   }
   const afterBytes = new Uint8Array(prepared.mutation.bytes);
-  const undoHistoryLength = productUndoHistory.length;
-  const commandLength = commands.length;
+  const previousState = captureProductEditState();
   try {
     await writeAndOpen(afterBytes, filename);
     const after = await withPackageDocumentMetadata(
@@ -1132,8 +1155,7 @@ async function commitProductPackageReload(prepared) {
     evidence.value = JSON.stringify(observed);
     return after;
   } catch (error) {
-    productUndoHistory.length = undoHistoryLength;
-    commands.length = commandLength;
+    restoreProductEditState(previousState);
     await writeAndOpen(prepared.beforeBytes, filename);
     const restored = await observeNativeDocument();
     reconciledModelRevision = restored.revision;
@@ -1150,6 +1172,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
     !nativeValue.revision
   )
     throw new Error("Browser native edit has no resulting revision.");
+  const previousState = captureProductEditState();
   if (prepared.persistence === "native_snapshot") {
     if (nativeValue.revision === prepared.beforeRevision) {
       reconciledModelRevision = nativeValue.revision;
@@ -1215,9 +1238,8 @@ async function commitProductPackageMutation(prepared, nativeValue) {
     try {
       await persistCheckpoint();
     } catch (error) {
-      currentBytes = prepared.beforeBytes;
-      productUndoHistory.pop();
-      commands.pop();
+      restoreProductEditState(previousState);
+      unreconciledModelRevision = nativeValue.revision;
       await request("dispatch", { unoCommand: "Undo" });
       const restored = await observeNativeDocument();
       if (restored.revision !== prepared.beforeRevision)
@@ -1227,6 +1249,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
           }`,
         );
       reconciledModelRevision = restored.revision;
+      unreconciledModelRevision = "";
       throw error;
     }
     observed.lastMutation = {
@@ -1285,9 +1308,8 @@ async function commitProductPackageMutation(prepared, nativeValue) {
   try {
     await persistCheckpoint();
   } catch (error) {
-    currentBytes = prepared.beforeBytes;
-    productUndoHistory.pop();
-    commands.pop();
+    restoreProductEditState(previousState);
+    unreconciledModelRevision = nativeValue.revision;
     await request("dispatch", { unoCommand: "Undo" });
     const restored = await observeNativeDocument();
     if (restored.revision !== prepared.beforeRevision)
@@ -1297,6 +1319,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
         }`,
       );
     reconciledModelRevision = restored.revision;
+    unreconciledModelRevision = "";
     throw error;
   }
   observed.lastMutation = prepared.mutation.report;
@@ -1340,6 +1363,7 @@ async function replayRecoveredCommands(base, recoveredCommands) {
 async function undoProductMutation() {
   const previous = productUndoHistory.at(-1);
   if (!previous || !commands.length) return false;
+  const previousState = captureProductEditState();
   const current = await observeNativeDocument();
   if (current.revision !== reconciledModelRevision) {
     unreconciledModelRevision = current.revision;
@@ -1381,17 +1405,13 @@ async function undoProductMutation() {
   try {
     await persistCheckpoint();
   } catch (error) {
-    productRedoHistory.pop();
-    productUndoHistory.push(previous);
-    commands.push(previous.command);
+    restoreProductEditState(previousState);
+    unreconciledModelRevision = previous.beforeRevision;
     if (useNativeUndo) {
       await request("dispatch", { unoCommand: "Redo" });
       const recovered = await observeNativeDocument();
       if (recovered.revision !== previous.afterRevision)
         throw new Error("browser_undo_checkpoint_rollback_failed");
-      previous.nativeUndoAvailable = true;
-      previous.nativeRedoAvailable = false;
-      currentBytes = previous.afterBytes.slice();
     } else {
       await writeAndOpen(previous.afterBytes, filename);
       const recovered = await observeNativeDocument();
@@ -1399,6 +1419,7 @@ async function undoProductMutation() {
         throw new Error("browser_undo_checkpoint_reopen_failed");
     }
     reconciledModelRevision = previous.afterRevision;
+    unreconciledModelRevision = "";
     throw error;
   }
   reportHostModified(commands.length > 0);
@@ -1408,6 +1429,7 @@ async function undoProductMutation() {
 async function redoProductMutation() {
   const next = productRedoHistory.at(-1);
   if (!next) return false;
+  const previousState = captureProductEditState();
   if ((await sha256(currentBytes)) !== (await sha256(next.beforeBytes)))
     throw new Error("Browser redo base no longer matches the package history.");
   const current = await observeNativeDocument();
@@ -1479,17 +1501,13 @@ async function redoProductMutation() {
   try {
     await persistCheckpoint();
   } catch (error) {
-    commands.pop();
-    productUndoHistory.pop();
-    productRedoHistory.push(next);
+    restoreProductEditState(previousState);
+    unreconciledModelRevision = next.afterRevision;
     if (useNativeRedo || canReplayNative) {
       await request("dispatch", { unoCommand: "Undo" });
       const recovered = await observeNativeDocument();
       if (recovered.revision !== next.beforeRevision)
         throw new Error("browser_redo_checkpoint_rollback_failed");
-      next.nativeUndoAvailable = false;
-      next.nativeRedoAvailable = true;
-      currentBytes = next.beforeBytes.slice();
     } else {
       await writeAndOpen(next.beforeBytes, filename);
       const recovered = await observeNativeDocument();
@@ -1497,6 +1515,7 @@ async function redoProductMutation() {
         throw new Error("browser_redo_checkpoint_reopen_failed");
     }
     reconciledModelRevision = next.beforeRevision;
+    unreconciledModelRevision = "";
     throw error;
   }
   reportHostModified(true);
@@ -1558,12 +1577,8 @@ async function checkpointLiveNativeState(live, reason) {
     live.revision === reconciledModelRevision
   )
     return false;
-  const beforeBytes = currentBytes;
-  const beforeRevision = reconciledModelRevision;
-  const beforeCommands = commands.slice();
-  const beforeUndoHistory = productUndoHistory.slice();
-  const beforeRedoHistory = productRedoHistory.slice();
-  const previousObservation = reconciledObservation;
+  const previousState = captureProductEditState();
+  const beforeRevision = previousState.reconciledModelRevision;
   if (reconciledObservation?.revision !== beforeRevision)
     throw new Error("browser_native_baseline_unavailable");
   const serialized = await serializeNativeDocument({
@@ -1609,21 +1624,8 @@ async function checkpointLiveNativeState(live, reason) {
     rememberReconciledObservation(live);
     await persistCheckpoint();
   } catch (error) {
-    currentBytes = beforeBytes;
-    commands.splice(0, commands.length, ...beforeCommands);
-    productUndoHistory.splice(
-      0,
-      productUndoHistory.length,
-      ...beforeUndoHistory,
-    );
-    productRedoHistory.splice(
-      0,
-      productRedoHistory.length,
-      ...beforeRedoHistory,
-    );
-    reconciledModelRevision = beforeRevision;
+    restoreProductEditState(previousState);
     unreconciledModelRevision = live.revision;
-    reconciledObservation = previousObservation;
     throw error;
   }
   return true;
