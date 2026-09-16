@@ -74,6 +74,88 @@ const sharedDependencyKinds = new Set([
   "slide",
 ]);
 
+function samePartBytes(left, right) {
+  if (!left || !right) return left === right;
+  if (left.byteLength !== right.byteLength) return false;
+  for (let index = 0; index < left.byteLength; index += 1)
+    if (left[index] !== right[index]) return false;
+  return true;
+}
+
+// Office can rewrite unrelated package parts even when no edit was made.
+// Compare two exports from that same engine, then apply only their actual
+// difference to the user's original package. Reopening the result and proving
+// its intended model state is still required before it can be committed.
+export function preserveOriginalPptxParts(
+  originalBytes,
+  noEditBytes,
+  editedBytes,
+) {
+  for (const bytes of [originalBytes, noEditBytes, editedBytes]) {
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > maximumInputBytes)
+      throw new TypeError("Native snapshot inputs must be bounded PPTX bytes.");
+    inspectZipPackage(bytes);
+  }
+  const original = unzipSync(originalBytes);
+  const noEdit = unzipSync(noEditBytes);
+  const edited = unzipSync(editedBytes);
+  const expandedBytes = [original, noEdit, edited].reduce(
+    (total, entries) =>
+      total +
+      Object.values(entries).reduce(
+        (size, bytes) => size + bytes.byteLength,
+        0,
+      ),
+    0,
+  );
+  if (expandedBytes > maximumExpandedBytes)
+    throw new Error(
+      "Native snapshot comparison exceeds the browser memory limit.",
+    );
+
+  const merged = {};
+  const changedParts = [];
+  const suppressedNoopParts = [];
+  const paths = new Set([
+    ...Object.keys(original),
+    ...Object.keys(noEdit),
+    ...Object.keys(edited),
+  ]);
+  for (const part of [...paths].sort()) {
+    const authoredChange = !samePartBytes(noEdit[part], edited[part]);
+    if (authoredChange && !part.endsWith(".rels")) {
+      const related = relationshipsPath(part);
+      if (
+        samePartBytes(noEdit[related], edited[related]) &&
+        !samePartBytes(original[related], noEdit[related])
+      )
+        throw new Error(
+          `Native snapshot needs relationship remapping before preserving ${part}.`,
+        );
+    }
+    const selected = authoredChange ? edited[part] : original[part];
+    if (selected) merged[part] = selected;
+    if (!samePartBytes(original[part], selected)) changedParts.push(part);
+    if (!authoredChange && !samePartBytes(original[part], noEdit[part]))
+      suppressedNoopParts.push(part);
+  }
+  const bytes = zipSync(merged, {
+    level: 6,
+    mtime: deterministicZipModifiedAt,
+  });
+  if (bytes.byteLength > maximumInputBytes)
+    throw new Error(
+      "Preserved native snapshot exceeds the browser PPTX limit.",
+    );
+  for (const part of reachableParts(merged))
+    if (!merged[part])
+      throw new Error(
+        `Preserved native snapshot has a missing dependency: ${part}.`,
+      );
+  inspectOoxmlDocument(bytes);
+  return { bytes, report: { changedParts, suppressedNoopParts } };
+}
+
 export function applyOoxmlCommand(input, command) {
   if (!(input instanceof Uint8Array))
     throw new TypeError("PPTX input must be a Uint8Array.");

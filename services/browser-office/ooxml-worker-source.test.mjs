@@ -9,6 +9,7 @@ import { DOMParser } from "@xmldom/xmldom";
 import {
   applyOoxmlCommand,
   inspectOoxmlDocument,
+  preserveOriginalPptxParts,
   verifyPersistedElementMutation,
 } from "./ooxml-worker-source.mjs";
 import { persistedSlideTopologyMatches } from "./harness/product-persistence.mjs";
@@ -46,6 +47,65 @@ const fixtureUrl = new URL(
   "../../eval/public/fixtures/general-native-surface.pptx",
   import.meta.url,
 );
+
+test("native snapshot reconciliation keeps the author's unrelated OOXML parts", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const noEdit = unzipSync(source);
+  noEdit["ppt/theme/theme1.xml"] = strToU8(
+    `${strFromU8(noEdit["ppt/theme/theme1.xml"])}<!-- normalized -->`,
+  );
+  noEdit["customXml/LONoise.xml"] = strToU8("<noise/>");
+  const edited = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "replace_text",
+      elementId: "0/0",
+      expectedText: "Spellbook 검증 العربية",
+      text: "Preserved edit",
+    }).bytes,
+  );
+  edited["ppt/theme/theme1.xml"] = noEdit["ppt/theme/theme1.xml"];
+  edited["customXml/LONoise.xml"] = noEdit["customXml/LONoise.xml"];
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+  );
+  const merged = unzipSync(result.bytes);
+  const original = unzipSync(source);
+  assert.deepEqual(result.report.changedParts, ["ppt/slides/slide1.xml"]);
+  assert.deepEqual(result.report.suppressedNoopParts, [
+    "customXml/LONoise.xml",
+    "ppt/theme/theme1.xml",
+  ]);
+  assert.deepEqual(
+    merged["ppt/theme/theme1.xml"],
+    original["ppt/theme/theme1.xml"],
+  );
+  assert.equal(merged["customXml/LONoise.xml"], undefined);
+  assert.match(strFromU8(merged["ppt/slides/slide1.xml"]), /Preserved edit/u);
+});
+
+test("native snapshot reconciliation refuses a changed part with unmapped relationships", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const noEdit = unzipSync(source);
+  const relationshipPath = "ppt/slides/_rels/slide1.xml.rels";
+  noEdit[relationshipPath] = strToU8(
+    `${strFromU8(noEdit[relationshipPath])}<!-- normalized -->`,
+  );
+  const edited = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "replace_text",
+      elementId: "0/0",
+      expectedText: "Spellbook 검증 العربية",
+      text: "Changed edit",
+    }).bytes,
+  );
+  edited[relationshipPath] = noEdit[relationshipPath];
+  assert.throws(
+    () => preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited)),
+    /relationship remapping/u,
+  );
+});
 
 test("browser OOXML worker adds one slide without rewriting existing parts", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
