@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { verifySlideshowPlayback } from "./slideshow-playback.mjs";
@@ -294,10 +295,7 @@ try {
     durationSeconds: playbackTarget.duration,
   });
 
-  await page.getByRole("button", { name: "저장", exact: true }).click();
-  await page.getByRole("status").filter({ hasText: "저장 확인 중…" }).waitFor({
-    timeout: 20_000,
-  });
+  await requestNativeProbeSave(page);
   const report = {
     enginePatchLevel: redone.engine.patchLevel,
     commands: [

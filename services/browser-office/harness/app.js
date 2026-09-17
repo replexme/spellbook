@@ -2490,27 +2490,31 @@ undoButton.addEventListener("click", async () => {
   await undoMutation();
 });
 
-saveButton.addEventListener("click", async () => {
+async function saveBrowserProbeDocument() {
+  if (!browserProbeMode || body.dataset.browserProbe !== "ready")
+    throw new Error("Browser probe is not ready.");
   if (!currentBytes) throw new Error("Open a PPTX before saving.");
-  if (browserProbeMode) {
-    const bytes = await exportProductDocument();
-    const response = await networkFetch("/browser-probe/save", {
-      method: "POST",
-      headers: {
-        "content-type":
-          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-      },
-      body: bytes,
-    });
-    if (!response.ok) {
-      const value = await response.json().catch(() => ({}));
-      throw new Error(
-        value.error ?? `Browser probe save failed: ${response.status}`,
-      );
-    }
-    status.textContent = "저장 확인 중…";
-    return;
+  const bytes = await exportProductDocument();
+  const response = await networkFetch("/browser-probe/save", {
+    method: "POST",
+    headers: {
+      "content-type":
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    },
+    body: bytes,
+  });
+  if (!response.ok) {
+    const value = await response.json().catch(() => ({}));
+    throw new Error(
+      value.error ?? `Browser probe save failed: ${response.status}`,
+    );
   }
+  status.textContent = "저장 확인 중…";
+}
+
+saveButton.addEventListener("click", async () => {
+  if (browserProbeMode) return saveBrowserProbeDocument();
+  if (!currentBytes) throw new Error("Open a PPTX before saving.");
   await recordBytes("manual-save", currentBytes, currentSlideCount, {
     operation: "export_current_candidate",
   });
@@ -2744,6 +2748,7 @@ script.onerror = () =>
 document.body.append(script);
 
 globalThis.spellbookBrowserOffice = {
+  saveProbe: saveBrowserProbeDocument,
   artifactLabels() {
     return [...savedArtifacts.keys()];
   },
