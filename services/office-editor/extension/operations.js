@@ -853,6 +853,31 @@ function spellbookDocumentOperation(request) {
   };
   const enumName = (value) => {
     if (value === null || value === undefined) return null;
+    if (typeof value === "object") {
+      // ZetaJS enumerators stringify as "[object Object]". Their symbol tag
+      // retains the UNO enum type and their non-enumerable `value` is its
+      // ordinal; resolve the public name once for every enum-valued field.
+      const tagged = Object.getOwnPropertySymbols(value)
+        .map((symbol) => value[symbol])
+        .find(
+          (tag) =>
+            tag?.kind === "enumerator" &&
+            typeof tag.type === "string" &&
+            tag.type.startsWith("com.sun.star."),
+        );
+      if (tagged) {
+        try {
+          const enumType = tagged.type
+            .split(".")
+            .reduce((member, part) => member?.[part], uno.idl);
+          const ordinal = Number(value.value);
+          for (const [name, member] of Object.entries(enumType ?? {}))
+            if (member === value || Number(member?.value) === ordinal)
+              return name;
+        } catch (_) {}
+      }
+      if (Number.isInteger(Number(value.value))) return String(value.value);
+    }
     try {
       return String(value);
     } catch (_) {
@@ -1572,6 +1597,8 @@ function spellbookDocumentOperation(request) {
           const elementId = `${prefix}/${index}`;
           const children = childCount(shape);
           const shapeKind = safeCall(shape, "getShapeType", "unknown");
+          const textlessPicture =
+            String(shapeKind).endsWith("GraphicObjectShape");
           const objectName = safeCall(shape, "getName", "");
           const shapeName = objectName || `unnamed-${shapeKind}`;
           const occurrence = nameOccurrences[shapeName] ?? 0;
@@ -1629,10 +1656,14 @@ function spellbookDocumentOperation(request) {
             strikethrough: safeTextProperty(shape, "CharStrikeout"),
             textShadow: safeTextProperty(shape, "CharShadowed"),
             color: safeProperty(shape, "CharColor"),
-            paragraphAlignment: safeProperty(shape, "ParaAdjust"),
-            textVerticalAlignment: enumName(
-              safeProperty(shape, "TextVerticalAdjust"),
-            ),
+            // UNO exposes transient text defaults on pictures, but a PPTX
+            // picture has no text body in which to persist those defaults.
+            paragraphAlignment: textlessPicture
+              ? null
+              : safeProperty(shape, "ParaAdjust"),
+            textVerticalAlignment: textlessPicture
+              ? null
+              : enumName(safeProperty(shape, "TextVerticalAdjust")),
             textAutoGrowHeight: safeProperty(shape, "TextAutoGrowHeight"),
             textAutoGrowWidth: safeProperty(shape, "TextAutoGrowWidth"),
             textFitToSize: enumName(safeProperty(shape, "TextFitToSize")),
@@ -5745,7 +5776,13 @@ function spellbookDocumentOperation(request) {
         properties[propertyName] = converted;
         expected[expectedName] = converted;
       };
-      setOptional("fillColor", "FillColor", "fillColor", Math.round);
+      if (format.fillColor !== null && format.fillColor !== undefined) {
+        // FillColor changes the live RGB but retains an imported theme color.
+        // The PPTX exporter then serializes the stale scheme reference. Clear
+        // that reference before applying the explicit RGB, as text colors do.
+        properties.FillColorTheme = -1;
+        setOptional("fillColor", "FillColor", "fillColor", Math.round);
+      }
       if (format.fillOpacity !== null && format.fillOpacity !== undefined) {
         properties.FillTransparence = 100 - Math.round(format.fillOpacity);
         expected.fillOpacity = Math.round(format.fillOpacity);
@@ -6234,8 +6271,23 @@ function spellbookDocumentOperation(request) {
           ? chartModel
           : null;
       };
-      const createChartService = (chartModel, serviceName) =>
-        chartModel.createInstance(`com.sun.star.chart2.${serviceName}`);
+      const createChartService = (chartModel, serviceName) => {
+        const qualifiedName = `com.sun.star.chart2.${serviceName}`;
+        // The chart document factory does not expose FormattedString in the
+        // browser runtime. Its published UNO service has a direct constructor.
+        const directFactory = uno.idl.com.sun.star.chart2[serviceName];
+        const created =
+          (serviceName === "FormattedString" && directFactory?.create
+            ? directFactory.create(uno.componentContext)
+            : null) ??
+          chartModel.createInstance(qualifiedName) ??
+          uno.componentContext
+            .getServiceManager()
+            .createInstanceWithContext(qualifiedName, uno.componentContext);
+        if (!created)
+          throw new Error(`chart_service_unavailable:${serviceName}`);
+        return created;
+      };
       const setTitle = (chartModel, titled, text) => {
         if (text === "") {
           titled.setTitleObject(null);
@@ -6410,9 +6462,24 @@ function spellbookDocumentOperation(request) {
         const target = after.slides[slideIndex].elements.find(
           (candidate) => candidate.elementId === command.elementId,
         );
+        let expectedSeriesIndex = 0;
         const expectedTarget = {
           ...element,
-          chart: { ...element.chart, format: requestedFormat },
+          chart: {
+            ...element.chart,
+            format: requestedFormat,
+            chartTypes: element.chart.chartTypes.map((chartType) => ({
+              ...chartType,
+              series: chartType.series.map((series) => {
+                const requested = requestedFormat.series[expectedSeriesIndex++];
+                return {
+                  ...series,
+                  color: requested.color,
+                  label: requested.label,
+                };
+              }),
+            })),
+          },
         };
         const expectedSlides = before.slides.map((slide, index) => ({
           ...slide,
@@ -6427,6 +6494,12 @@ function spellbookDocumentOperation(request) {
           documentStateJson(after.masters) !==
             documentStateJson(before.masters) ||
           documentStateJson(after.slides) !== documentStateJson(expectedSlides);
+        const scopeDifference = unrelatedChanged
+          ? firstDifferencePath(
+              { masters: before.masters, slides: expectedSlides },
+              { masters: after.masters, slides: after.slides },
+            )
+          : null;
         if (
           !applied ||
           unrelatedChanged ||
@@ -6435,7 +6508,7 @@ function spellbookDocumentOperation(request) {
         )
           throw new Error(
             unrelatedChanged
-              ? "unexpected_edit_scope"
+              ? `unexpected_edit_scope:${scopeDifference ?? "unknown"}`
               : !applied
                 ? "native_command_not_applied"
                 : "native_undo_not_recorded",

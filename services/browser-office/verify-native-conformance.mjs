@@ -59,9 +59,12 @@ if (!plan.summary.complete)
     `Native conformance definition has ${plan.summary.missingGates} uncovered gates.`,
   );
 const onlyScenario = optionalFlagValue("--only-scenario");
+const onlyScenarios = optionalFlagValue("--only-scenarios")?.split(",") ?? null;
 const diagnosticAll = process.argv.includes("--diagnostic-all");
 if (onlyScenario && diagnosticAll)
   throw new Error("--only-scenario and --diagnostic-all cannot be combined.");
+if (onlyScenario && onlyScenarios)
+  throw new Error("Select either --only-scenario or --only-scenarios.");
 const allScenarios = buildScenarioExecutionPlan(
   capabilities,
   conformance,
@@ -69,8 +72,17 @@ const allScenarios = buildScenarioExecutionPlan(
 );
 if (onlyScenario && !allScenarios.some(({ name }) => name === onlyScenario))
   throw new Error(`Unknown native conformance scenario: ${onlyScenario}.`);
-const scenarios = onlyScenario
-  ? allScenarios.filter(({ name }) => name === onlyScenario)
+const selectedNames = onlyScenarios ?? (onlyScenario ? [onlyScenario] : null);
+if (
+  selectedNames &&
+  (selectedNames.some(
+    (name) => !allScenarios.some((scenario) => scenario.name === name),
+  ) ||
+    new Set(selectedNames).size !== selectedNames.length)
+)
+  throw new Error("--only-scenarios needs distinct known scenario names.");
+const scenarios = selectedNames
+  ? allScenarios.filter(({ name }) => selectedNames.includes(name))
   : allScenarios;
 
 await runProcess(
@@ -94,6 +106,7 @@ const report = {
   contractVersion: conformance.version,
   mutationContractVersion: capabilities.mutationModel.version,
   ...(onlyScenario ? { diagnosticScenario: onlyScenario } : {}),
+  ...(onlyScenarios ? { diagnosticScenarios: selectedNames } : {}),
   ...(diagnosticAll ? { diagnosticAll: true } : {}),
   expectedOperations: Object.keys(capabilities.mutationModel.operations)
     .filter(
@@ -139,11 +152,11 @@ try {
     throw new Error(
       `Browser candidate failed ${report.scenarioFailures.length} of ${scenarios.length} native scenarios: ${report.scenarioFailures.map(({ scenario }) => scenario).join(", ")}.`,
     );
-  if (!onlyScenario && report.missingOperations.length)
+  if (!selectedNames && report.missingOperations.length)
     throw new Error(
       `Browser candidate did not execute: ${report.missingOperations.join(", ")}.`,
     );
-  report.status = onlyScenario
+  report.status = selectedNames
     ? "diagnostic-scenario-verified"
     : "browser-native-conformance-verified";
   report.completedAt = new Date().toISOString();

@@ -10,6 +10,7 @@ import {
 } from "./document-state-evidence.mjs";
 import { persistenceStateFromObservation } from "./persistence-evidence.mjs";
 import { activeTextFontEvidence } from "./text-format-evidence.mjs";
+import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
   new URL("../../apps/web/package.json", import.meta.url),
@@ -46,6 +47,7 @@ const visualEvidenceOperations = new Set(
     .map(([operation]) => operation),
 );
 const browser = await chromium.launch({ headless: true });
+let page;
 
 const reorderObjectKeys = (value) => {
   if (Array.isArray(value)) return value.map(reorderObjectKeys);
@@ -60,7 +62,7 @@ const reorderObjectKeys = (value) => {
 };
 
 try {
-  const page = await browser.newPage({
+  page = await browser.newPage({
     viewport: { width: 1440, height: 1000 },
   });
   await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -1606,5 +1608,6 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
+  await captureNativeSnapshots(page, "general-native-surface");
   await browser.close();
 }

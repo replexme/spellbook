@@ -14,6 +14,7 @@ import {
   PROBE_REPLACEMENT_IMAGE_ASSET_ID as REPLACEMENT_IMAGE_ASSET_ID,
   PROBE_REPLACEMENT_MEDIA_ASSET_ID as REPLACEMENT_MEDIA_ASSET_ID,
 } from "./probe-assets.mjs";
+import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
   new URL("../../apps/web/package.json", import.meta.url),
@@ -47,9 +48,10 @@ if (
 
 const stable = (value) => JSON.stringify(value);
 const browser = await chromium.launch({ headless: true });
+let page;
 
 try {
-  const page = await browser.newPage({
+  page = await browser.newPage({
     viewport: { width: 1440, height: 1000 },
   });
   await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -123,7 +125,9 @@ try {
       { slides: expected.slides, masters: expected.masters },
       { slides: actual?.slides, masters: actual?.masters },
     );
-    throw new Error(`${label} did not restore the exact observed document: ${JSON.stringify(difference)}`);
+    throw new Error(
+      `${label} did not restore the exact observed document: ${JSON.stringify(difference)}`,
+    );
   };
 
   let observed = await call({ operation: "observe" });
@@ -372,5 +376,6 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
+  await captureNativeSnapshots(page, scenario);
   await browser.close();
 }

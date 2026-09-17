@@ -86,6 +86,59 @@ test("native snapshot reconciliation keeps the author's unrelated OOXML parts", 
   assert.match(strFromU8(merged["ppt/slides/slide1.xml"]), /Preserved edit/u);
 });
 
+test("native snapshot preserves untouched author shapes when Office inserts a shape", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(source);
+  const slidePath = "ppt/slides/slide1.xml";
+  const normalized = new DOMParser().parseFromString(
+    strFromU8(original[slidePath]),
+    "application/xml",
+  );
+  const drawingNamespace =
+    "http://schemas.openxmlformats.org/drawingml/2006/main";
+  normalized.getElementsByTagNameNS(drawingNamespace, "t")[0].textContent =
+    "Office normalized this unrelated text";
+  const normalizedXml = new XMLSerializer().serializeToString(normalized);
+  const noEdit = { ...original, [slidePath]: strToU8(normalizedXml) };
+  const changed = new DOMParser().parseFromString(
+    normalizedXml,
+    "application/xml",
+  );
+  const presentationNamespace =
+    "http://schemas.openxmlformats.org/presentationml/2006/main";
+  const tree = changed.getElementsByTagNameNS(
+    presentationNamespace,
+    "spTree",
+  )[0];
+  const added = tree
+    .getElementsByTagNameNS(presentationNamespace, "sp")[0]
+    .cloneNode(true);
+  const properties = added.getElementsByTagNameNS(
+    presentationNamespace,
+    "cNvPr",
+  )[0];
+  properties.setAttribute("id", "999");
+  properties.setAttribute("name", "Added Shape");
+  added.getElementsByTagNameNS(drawingNamespace, "t")[0].textContent =
+    "New shape";
+  tree.appendChild(added);
+  const edited = {
+    ...noEdit,
+    [slidePath]: strToU8(new XMLSerializer().serializeToString(changed)),
+  };
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    ["add_shape"],
+  );
+  const merged = strFromU8(unzipSync(result.bytes)[slidePath]);
+  assert.match(merged, /Spellbook 검증 العربية/u);
+  assert.doesNotMatch(merged, /Office normalized this unrelated text/u);
+  assert.match(merged, /New shape/u);
+  assert.deepEqual(result.report.semanticPatchedParts, [slidePath]);
+});
+
 test("native snapshot reconciliation preserves the original implicit slide layout", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const noEdit = unzipSync(source);
@@ -121,7 +174,10 @@ test("native snapshot reconciliation preserves the original implicit slide layou
 test("native snapshot remaps an edited slide layout by identity after Office renumbers layouts", async () => {
   const source = new Uint8Array(
     await readFile(
-      new URL("../../eval/public/downloads/lo-master-layouts.pptx", import.meta.url),
+      new URL(
+        "../../eval/public/downloads/lo-master-layouts.pptx",
+        import.meta.url,
+      ),
     ),
   );
   const original = unzipSync(source);
@@ -156,7 +212,10 @@ test("native snapshot remaps an edited slide layout by identity after Office ren
 test("native snapshot refuses an ambiguous slide layout identity", async () => {
   const source = new Uint8Array(
     await readFile(
-      new URL("../../eval/public/downloads/lo-master-layouts.pptx", import.meta.url),
+      new URL(
+        "../../eval/public/downloads/lo-master-layouts.pptx",
+        import.meta.url,
+      ),
     ),
   );
   const original = unzipSync(source);
@@ -186,10 +245,66 @@ test("native snapshot refuses an ambiguous slide layout identity", async () => {
   assert.ok(original[target]);
 });
 
+test("native relationship edits retain an unchanged original layout even when Office layout names collide", async () => {
+  const source = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/downloads/lo-transition-media.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
+  const original = unzipSync(source);
+  const noEdit = unzipSync(source);
+  for (const part of [
+    "ppt/slideLayouts/slideLayout2.xml",
+    "ppt/slideLayouts/slideLayout3.xml",
+  ])
+    noEdit[part] = strToU8(
+      strFromU8(noEdit[part]).replace(
+        /(<p:cSld\b[^>]*\bname=")[^"]+"/u,
+        '$1Default"',
+      ),
+    );
+  const edited = unzipSync(zipSync(noEdit));
+  const relsPath = "ppt/slides/_rels/slide1.xml.rels";
+  edited[relsPath] = strToU8(
+    strFromU8(edited[relsPath])
+      .replace(
+        "</Relationships>",
+        '<Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/" TargetMode="External"/></Relationships>',
+      )
+      .replace(
+        "../slideLayouts/slideLayout3.xml",
+        "../slideLayouts/slideLayout2.xml",
+      ),
+  );
+  const merged = unzipSync(
+    preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), [
+      "set_object_interaction",
+    ]).bytes,
+  );
+  assert.match(
+    strFromU8(merged[relsPath]),
+    /Target="\.\.\/slideLayouts\/slideLayout3\.xml"/u,
+  );
+  assert.match(
+    strFromU8(merged[relsPath]),
+    /Target="https:\/\/example\.com\/"/u,
+  );
+  assert.deepEqual(
+    merged["ppt/slideLayouts/slideLayout3.xml"],
+    original["ppt/slideLayouts/slideLayout3.xml"],
+  );
+});
+
 test("native slide size patch preserves original presentation relationships and unrelated XML", async () => {
   const source = new Uint8Array(
     await readFile(
-      new URL("../../eval/public/downloads/lo-master-layouts.pptx", import.meta.url),
+      new URL(
+        "../../eval/public/downloads/lo-master-layouts.pptx",
+        import.meta.url,
+      ),
     ),
   );
   const original = unzipSync(source);
@@ -317,7 +432,10 @@ test("native snapshot comparison ignores generated field GUIDs but not field sem
     strFromU8(edited[part]).replace('type="slidenum"', 'type="datetime"'),
   );
   assert.throws(
-    () => preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), ["set_master_theme"]),
+    () =>
+      preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), [
+        "set_master_theme",
+      ]),
     /exactly one edited master theme/u,
   );
 
@@ -338,9 +456,14 @@ test("native snapshot comparison ignores generated field GUIDs but not field sem
 });
 
 test("master theme edit splits only the selected original layout and retains unrelated theme bytes", async () => {
-  const source = new Uint8Array(await readFile(new URL(
-    "../../eval/public/downloads/lo-master-layouts.pptx", import.meta.url,
-  )));
+  const source = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/downloads/lo-master-layouts.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
   const original = unzipSync(source);
   const noEdit = unzipSync(source);
   const master = "ppt/slideMasters/slideMaster1.xml";
@@ -349,40 +472,71 @@ test("master theme edit splits only the selected original layout and retains unr
   const normalizedRels = "ppt/slideMasters/_rels/slideMaster2.xml.rels";
   const theme = "ppt/theme/theme2.xml";
   noEdit[normalizedMaster] = original[master].slice();
-  const rels = new DOMParser().parseFromString(strFromU8(original[masterRels]), "application/xml");
+  const rels = new DOMParser().parseFromString(
+    strFromU8(original[masterRels]),
+    "application/xml",
+  );
   for (const relationship of [...rels.getElementsByTagName("Relationship")]) {
     const target = relationship.getAttribute("Target");
     if (target?.endsWith("theme1.xml"))
       relationship.setAttribute("Target", "../theme/theme2.xml");
-    else if (target?.includes("slideLayout") && !target.endsWith("slideLayout10.xml"))
+    else if (
+      target?.includes("slideLayout") &&
+      !target.endsWith("slideLayout10.xml")
+    )
       relationship.parentNode.removeChild(relationship);
   }
   noEdit[normalizedRels] = strToU8(new XMLSerializer().serializeToString(rels));
   const edited = unzipSync(zipSync(noEdit));
-  edited[theme] = strToU8(strFromU8(edited[theme])
-    .replace('name="Office Theme"', 'name="Spellbook verified theme"')
-    .replace(/(<a:accent1>\s*<a:srgbClr val=")[^"]+/u, "$14f46e5"));
-  const result = preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), ["set_master_theme"]);
-  const merged = unzipSync(result.bytes);
-  const clonedMaster = result.report.changedParts.find((part) =>
-    part.startsWith("ppt/slideMasters/slideMaster1-spellbook-") && part.endsWith(".xml"),
+  edited[theme] = strToU8(
+    strFromU8(edited[theme])
+      .replace('name="Office Theme"', 'name="Spellbook verified theme"')
+      .replace(/(<a:accent1>\s*<a:srgbClr val=")[^"]+/u, "$14f46e5"),
   );
-  const clonedTheme = result.report.changedParts.find((part) =>
-    part.startsWith("ppt/theme/theme1-spellbook-") && part.endsWith(".xml"),
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    ["set_master_theme"],
+  );
+  const merged = unzipSync(result.bytes);
+  const clonedMaster = result.report.changedParts.find(
+    (part) =>
+      part.startsWith("ppt/slideMasters/slideMaster1-spellbook-") &&
+      part.endsWith(".xml"),
+  );
+  const clonedTheme = result.report.changedParts.find(
+    (part) =>
+      part.startsWith("ppt/theme/theme1-spellbook-") && part.endsWith(".xml"),
   );
   assert.ok(clonedMaster);
   assert.ok(clonedTheme);
-  assert.deepEqual(merged["ppt/theme/theme1.xml"], original["ppt/theme/theme1.xml"]);
+  assert.deepEqual(
+    merged["ppt/theme/theme1.xml"],
+    original["ppt/theme/theme1.xml"],
+  );
   assert.match(strFromU8(merged[clonedTheme]), /Spellbook verified theme/u);
   assert.match(strFromU8(merged[clonedTheme]), /4f46e5/u);
-  assert.match(strFromU8(merged["ppt/slideLayouts/_rels/slideLayout10.xml.rels"]), /slideMaster1-spellbook-/u);
-  assert.deepEqual(merged["ppt/slideLayouts/_rels/slideLayout2.xml.rels"], original["ppt/slideLayouts/_rels/slideLayout2.xml.rels"]);
+  assert.match(
+    strFromU8(merged["ppt/slideLayouts/_rels/slideLayout10.xml.rels"]),
+    /slideMaster1-spellbook-/u,
+  );
+  assert.deepEqual(
+    merged["ppt/slideLayouts/_rels/slideLayout2.xml.rels"],
+    original["ppt/slideLayouts/_rels/slideLayout2.xml.rels"],
+  );
   assert.ok(result.report.semanticPatchedParts.includes(clonedMaster));
-  edited[theme] = strToU8(strFromU8(edited[theme]).replace(
-    'fmtScheme name="Office"', 'fmtScheme name="Unrequested"',
-  ));
+  edited[theme] = strToU8(
+    strFromU8(edited[theme]).replace(
+      'fmtScheme name="Office"',
+      'fmtScheme name="Unrequested"',
+    ),
+  );
   assert.throws(
-    () => preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), ["set_master_theme"]),
+    () =>
+      preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), [
+        "set_master_theme",
+      ]),
     /non-theme mutation/u,
   );
 });

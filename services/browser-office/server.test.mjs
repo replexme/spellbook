@@ -46,7 +46,7 @@ test("browser Office routes preserve isolation, asset identity and encodings", (
   );
   assert.equal(
     routes.get("/runtime/zeta.js").headers["Cache-Control"],
-    "public, max-age=31536000, immutable",
+    "no-store",
   );
 });
 
@@ -111,6 +111,7 @@ test("candidate verification routes raw artifacts and an in-memory identity", ()
     routes.get("/runtime/zeta.js").file,
     path.join(import.meta.dirname, "runtime/zeta.js"),
   );
+  assert.equal(typeof routes.get("/runtime/zeta.js").transform, "function");
 });
 
 test("browser probe serves the same bounded asset fixture as the native probe", () => {

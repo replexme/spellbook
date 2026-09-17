@@ -5,6 +5,7 @@ import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { verifySlideshowPlayback } from "./slideshow-playback.mjs";
 import { undoDocumentStateEquivalent } from "./document-state-evidence.mjs";
+import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
   new URL("../../apps/web/package.json", import.meta.url),
@@ -13,6 +14,7 @@ const { chromium } = require("@playwright/test");
 const url = process.argv[2] ?? "http://localhost:3190";
 const reportPath = process.argv[3] ? path.resolve(process.argv[3]) : null;
 const browser = await chromium.launch({ headless: true });
+let page;
 const stable = (value) => JSON.stringify(value);
 const persistedTransition = (transition) => ({
   type: transition?.type,
@@ -23,7 +25,7 @@ const persistedTransition = (transition) => ({
 });
 
 try {
-  const page = await browser.newPage({
+  page = await browser.newPage({
     viewport: { width: 1440, height: 1000 },
   });
   await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -89,8 +91,7 @@ try {
     let observed;
     do {
       observed = await call({ operation: "observe" });
-      if (undoDocumentStateEquivalent(expected, observed))
-        return observed;
+      if (undoDocumentStateEquivalent(expected, observed)) return observed;
       await page.waitForTimeout(100);
     } while (Date.now() < stop);
     throw new Error(`${label} did not restore the exact document.`);
@@ -219,5 +220,6 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
+  await captureNativeSnapshots(page, "slide-transition");
   await browser.close();
 }

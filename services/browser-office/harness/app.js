@@ -598,6 +598,8 @@ async function preserveAndInspectNativeDocument(
     sourceOperations,
   );
   const bytes = new Uint8Array(preserved.bytes);
+  if (browserProbeMode && query.get("nativeRaw") === "1")
+    savedArtifacts.set("native-snapshot-preserved", bytes.slice());
   markBrowserProbePhase("snapshot:inspect");
   const observation = await inspectNativeDocumentBytes(bytes, detailSlideIndex);
   return { bytes, observation, report: preserved.report };

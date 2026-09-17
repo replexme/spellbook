@@ -4,10 +4,12 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { probeAssets } from "../office-session-spike/probe-assets.mjs";
+import { applyZetaJsOverlay } from "./zetajs-overlay.mjs";
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
@@ -217,6 +219,13 @@ export function buildRoutes(
           ? { "Content-Encoding": bridgeAsset.contentEncoding }
           : {}),
         ...upstream.requiredAssetHeaders,
+        "Cache-Control": "no-store",
+      },
+      (source) => {
+        const digest = createHash("sha256").update(source).digest("hex");
+        if (digest !== bridgeAsset.sha256)
+          throw new Error("Pinned ZetaJS asset failed source admission.");
+        return applyZetaJsOverlay(source);
       },
     ),
   );
@@ -324,6 +333,18 @@ export function createHarnessServer(options = {}) {
       response.end("Not found");
       return;
     }
+    if (target.transform && target.body === undefined) {
+      try {
+        target.body = target.transform(readFileSync(target.file, "utf8"));
+      } catch (_) {
+        response.writeHead(500, {
+          "Content-Type": "text/plain; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        response.end("Browser UNO bridge unavailable");
+        return;
+      }
+    }
     response.writeHead(200, target.headers);
     if (request.method === "HEAD") response.end();
     else if (target.body !== undefined) response.end(target.body);
@@ -352,9 +373,10 @@ export function configuredServerPort(
   return port;
 }
 
-function route(file, contentType, headers = {}) {
+function route(file, contentType, headers = {}, transform = null) {
   return {
     file,
+    ...(transform ? { transform } : {}),
     headers: {
       "Content-Type": contentType,
       "Cache-Control": "no-store",

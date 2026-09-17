@@ -4,6 +4,7 @@ import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { undoDocumentStateEquivalent } from "./document-state-evidence.mjs";
+import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
   new URL("../../apps/web/package.json", import.meta.url),
@@ -81,8 +82,7 @@ try {
     let observed;
     do {
       observed = await call({ operation: "observe" });
-      if (undoDocumentStateEquivalent(expected, observed))
-        return observed;
+      if (undoDocumentStateEquivalent(expected, observed)) return observed;
       await page.waitForTimeout(100);
     } while (Date.now() < stop);
     throw new Error(`${label} did not restore every slide and master exactly.`);
@@ -148,12 +148,16 @@ try {
       next.transaction?.undoActionsAdded !== 1 ||
       nextHistory.undo.length !== priorHistory.undo.length + 1
     )
-      throw new Error(`${command.op} did not apply as one native Undo action: ${JSON.stringify({
-        revisionChanged: next.revision !== prior.revision,
-        transaction: next.transaction ?? null,
-        undoBefore: priorHistory.undo.length,
-        undoAfter: nextHistory.undo.length,
-      })}`);
+      throw new Error(
+        `${command.op} did not apply as one native Undo action: ${JSON.stringify(
+          {
+            revisionChanged: next.revision !== prior.revision,
+            transaction: next.transaction ?? null,
+            undoBefore: priorHistory.undo.length,
+            undoAfter: nextHistory.undo.length,
+          },
+        )}`,
+      );
     await history("undo");
     await waitForState(prior, `${command.op} Undo`);
     await history("redo");
@@ -241,25 +245,6 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
-  try {
-    if (page && process.env.SPELLBOOK_DIAGNOSTIC_RAW_DIR) {
-      const rawDir = path.resolve(process.env.SPELLBOOK_DIAGNOSTIC_RAW_DIR);
-      const labels = [
-        "native-snapshot-original",
-        "native-snapshot-no-edit",
-        "native-snapshot-edited",
-      ];
-      for (const label of labels) {
-        const bytes = await page.evaluate(
-          (requestedLabel) =>
-            globalThis.spellbookBrowserOffice?.artifact(requestedLabel),
-          label,
-        );
-        if (bytes?.length)
-          await writeFile(path.join(rawDir, `${label}.pptx`), Buffer.from(bytes));
-      }
-    }
-  } finally {
-    await browser.close();
-  }
+  await captureNativeSnapshots(page, "layout-master");
+  await browser.close();
 }
