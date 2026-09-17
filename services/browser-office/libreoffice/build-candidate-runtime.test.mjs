@@ -56,7 +56,10 @@ test("configures Impress and invalidates a stripped WASM build marker", () => {
     script,
     /compression_cache="\$SPELLBOOK_BROWSER_BUILD_ROOT\/compression-cache"/u,
   );
-  assert.match(script, /brotli -d -c "\$cached_path" \| cmp -s - "\$raw_path"/u);
+  assert.match(
+    script,
+    /brotli -d -c "\$cached_path" \| cmp -s - "\$raw_path"/u,
+  );
   assert.match(script, /brotli --force --quality=11 "\$raw_path"/u);
   assert.match(script, /\[\[ ! -f "\$wasm_configuration_marker" \]\]/u);
   assert.doesNotMatch(script, /\|\|\s*! -f "\$wasm_configuration_marker"/u);
