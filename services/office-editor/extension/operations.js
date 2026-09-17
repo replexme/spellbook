@@ -177,7 +177,33 @@ function spellbookDocumentOperation(request) {
   };
   const activateSlide = (slideIndex) =>
     transformSlides([{ JumpToSlide: slideIndex }]);
+  // UNO objects expose different property sets. Ask the object's declared
+  // capability before reading so optional properties do not repeatedly enter
+  // the exception path during whole-document observations.
+  const propertyCapabilityCache = new WeakMap();
+  const propertyIsSupported = (value, name) => {
+    if (!value || typeof value !== "object") return true;
+    let entry = propertyCapabilityCache.get(value);
+    if (!entry) {
+      let info = null;
+      try {
+        info = value.getPropertySetInfo();
+      } catch (_) {}
+      entry = { info, names: new Map() };
+      propertyCapabilityCache.set(value, entry);
+    }
+    if (!entry.info) return true;
+    if (!entry.names.has(name)) {
+      try {
+        entry.names.set(name, entry.info.hasPropertyByName(name));
+      } catch (_) {
+        return true;
+      }
+    }
+    return entry.names.get(name);
+  };
   const safeProperty = (shape, name) => {
+    if (!propertyIsSupported(shape, name)) return null;
     try {
       return shape.getPropertyValue(name);
     } catch (_) {
@@ -185,6 +211,7 @@ function spellbookDocumentOperation(request) {
     }
   };
   const safePropertyState = (value, name) => {
+    if (!propertyIsSupported(value, name)) return null;
     try {
       return enumName(value.getPropertyState(name));
     } catch (_) {
@@ -236,15 +263,21 @@ function spellbookDocumentOperation(request) {
   };
   const safeTextProperty = (shape, name) => {
     try {
-      return shape.createTextCursor().getPropertyValue(name);
+      const cursor = shape.createTextCursor();
+      if (!propertyIsSupported(cursor, name)) return safeProperty(shape, name);
+      return safeProperty(cursor, name);
     } catch (_) {
       return safeProperty(shape, name);
     }
   };
   const collectPropertyStates = (value, mappings) => {
+    const supported = mappings.filter(([, property]) =>
+      propertyIsSupported(value, property),
+    );
     const propertyNames = [
-      ...new Set(mappings.map(([, property]) => property)),
+      ...new Set(supported.map(([, property]) => property)),
     ];
+    if (!propertyNames.length) return {};
     try {
       const states = Array.from(value.getPropertyStates(propertyNames));
       if (states.length === propertyNames.length) {
@@ -255,7 +288,7 @@ function spellbookDocumentOperation(request) {
           ]),
         );
         return Object.fromEntries(
-          mappings.map(([field, property]) => [
+          supported.map(([field, property]) => [
             field,
             byProperty.get(property),
           ]),
@@ -263,7 +296,7 @@ function spellbookDocumentOperation(request) {
       }
     } catch (_) {}
     return Object.fromEntries(
-      mappings
+      supported
         .map(([field, property]) => [field, safePropertyState(value, property)])
         .filter(([, state]) => state !== null),
     );
@@ -316,8 +349,8 @@ function spellbookDocumentOperation(request) {
     ]);
     if (text === null) return states;
     try {
-      const cursor = shape.createTextCursor();
-      cursor.gotoEnd(true);
+      const cursor = text === "" ? shape : shape.createTextCursor();
+      if (cursor !== shape) cursor.gotoEnd(true);
       Object.assign(
         states,
         collectPropertyStates(cursor, [
@@ -353,8 +386,12 @@ function spellbookDocumentOperation(request) {
   const wholeTextFormatting = (shape, text) => {
     if (text === null) return null;
     try {
-      const cursor = shape.createTextCursor();
-      cursor.gotoEnd(true);
+      // An empty text body has no range whose character properties can be
+      // authoritative. Its UNO cursor may report a physical fallback font
+      // after Undo even while the shape default and saved PPTX retain the
+      // declared family. Read the shape defaults until text exists.
+      const cursor = text === "" ? shape : shape.createTextCursor();
+      if (cursor !== shape) cursor.gotoEnd(true);
       return {
         fontFamily: cursor.getPropertyValue("CharFontName"),
         fontFamilyAsian: cursor.getPropertyValue("CharFontNameAsian"),
@@ -1477,7 +1514,8 @@ function spellbookDocumentOperation(request) {
       const shapeReferences = [];
       const visit = (container, prefix, parentElementId, stablePrefix) => {
         const nameOccurrences = {};
-        for (let index = 0; index < container.getCount(); index++) {
+        const shapeCount = container.getCount();
+        for (let index = 0; index < shapeCount; index++) {
           const shape = container.getByIndex(index);
           const elementId = `${prefix}/${index}`;
           const children = childCount(shape);
