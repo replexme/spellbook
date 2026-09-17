@@ -15,6 +15,12 @@ const packageMetadata = JSON.stringify({
     end: 1,
   })),
 });
+const packageJavascript = ["scalc", "swriter", "simpress", "sdraw"]
+  .map(
+    (module) =>
+      `Module["FS_createPath"]("/instdir/share/config/soffice.cfg/modules/${module}","menubar",true,true);`,
+  )
+  .join("\n");
 
 test("browser runtime receipt binds every artifact to source and toolchain identity", async () => {
   const root = await mkdtemp(
@@ -22,7 +28,7 @@ test("browser runtime receipt binds every artifact to source and toolchain ident
   );
   try {
     await Promise.all([
-      writeFile(path.join(root, "soffice.js"), "Module = {};\n"),
+      writeFile(path.join(root, "soffice.js"), packageJavascript),
       writeFile(path.join(root, "soffice.data.js.metadata"), packageMetadata),
       writeFile(
         path.join(root, "soffice.wasm"),
@@ -69,6 +75,20 @@ test("browser runtime receipt binds every artifact to source and toolchain ident
       assert.ok(artifact.bytes > 0);
       assert.match(artifact.sha256, /^[0-9a-f]{64}$/u);
     }
+
+    await writeFile(
+      path.join(root, "soffice.js"),
+      packageJavascript.replace(/^.*modules\/sdraw.*(?:\n|$)/mu, ""),
+    );
+    await assert.rejects(
+      createBrowserRuntimeReceipt({
+        runtimeDirectory: root,
+        repositoryRoot: path.resolve(import.meta.dirname, "../../.."),
+        sourceRevision: "a".repeat(40),
+      }),
+      /JavaScript filesystem disagree.*sdraw/u,
+    );
+    await writeFile(path.join(root, "soffice.js"), packageJavascript);
 
     await writeFile(
       path.join(root, "soffice.data.js.metadata"),

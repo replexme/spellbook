@@ -3,7 +3,10 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { upstreamManifest } from "./libreoffice/upstream.mjs";
-import { assertBrowserOfficePackageMetadata } from "./libreoffice/runtime-package.mjs";
+import {
+  assertBrowserOfficeFilesystemLayout,
+  assertBrowserOfficePackageMetadata,
+} from "./libreoffice/runtime-package.mjs";
 
 const requiredArtifactNames = Object.freeze([
   "soffice.js",
@@ -60,6 +63,7 @@ export async function admitCandidateRuntime({
   const verifiedArtifacts = new Map();
   let packageMetadata;
   let packageBytes;
+  let runtimeJavascript;
   for (const name of requiredArtifactNames) {
     const expected = receiptArtifacts.get(name);
     if (!expected) throw new Error(`Candidate runtime receipt omits ${name}.`);
@@ -78,12 +82,14 @@ export async function admitCandidateRuntime({
     if (name.endsWith(".metadata"))
       packageMetadata = JSON.parse(bytes.toString("utf8"));
     if (name === "soffice.data") packageBytes = bytes.byteLength;
+    if (name === "soffice.js") runtimeJavascript = bytes.toString("utf8");
     verifiedArtifacts.set(name, {
       bytes: details.size,
       sha256,
     });
   }
   assertBrowserOfficePackageMetadata(packageMetadata, packageBytes);
+  assertBrowserOfficeFilesystemLayout(packageMetadata, runtimeJavascript);
   const runtimeAssets = servedRuntimeArtifacts.map((asset) => ({
     ...asset,
     ...verifiedArtifacts.get(asset.storedPath),

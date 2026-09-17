@@ -34,6 +34,11 @@ test("configures Impress and invalidates a stripped WASM build marker", () => {
   assert.match(script, /wasm_configuration_marker/u);
   assert.match(script, /wasm_configuration_sha/u);
   assert.match(script, /wasm\.\$expected_patch_sha\.\$wasm_configuration_sha/u);
+  assert.match(
+    script,
+    /make -C "\$wasm_build" static[\s\S]*make -C "\$wasm_build" desktop/u,
+  );
+  assert.match(script, /wasm_filesystem_marker/u);
 });
 
 test("runs the declared focused native regressions instead of the unrelated UI suite", () => {

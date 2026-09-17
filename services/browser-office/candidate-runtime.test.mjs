@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +16,12 @@ const packageMetadata = JSON.stringify({
     end: 1,
   })),
 });
+const packageJavascript = ["scalc", "swriter", "simpress", "sdraw"]
+  .map(
+    (module) =>
+      `Module["FS_createPath"]("/instdir/share/config/soffice.cfg/modules/${module}","menubar",true,true);`,
+  )
+  .join("\n");
 
 test("candidate runtime serves only receipt-bound production assets", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "spellbook-candidate-"));
@@ -55,6 +62,33 @@ test("candidate runtime serves only receipt-bound production assets", async () =
       ["identity", "identity", "br", "br"],
     );
 
+    const staleJavascript = packageJavascript.replace(
+      /^.*modules\/sdraw.*(?:\n|$)/mu,
+      "",
+    );
+    await writeFile(path.join(root, "soffice.js"), staleJavascript);
+    const staleReceipt = structuredClone(receipt);
+    const scriptArtifact = staleReceipt.artifacts.find(
+      ({ name }) => name === "soffice.js",
+    );
+    scriptArtifact.bytes = Buffer.byteLength(staleJavascript);
+    scriptArtifact.sha256 = createHash("sha256")
+      .update(staleJavascript)
+      .digest("hex");
+    await writeFile(
+      path.join(root, "build-receipt.json"),
+      `${JSON.stringify(staleReceipt)}\n`,
+    );
+    await assert.rejects(
+      admitCandidateRuntime({ runtimeDirectory: root }),
+      /JavaScript filesystem disagree.*sdraw/u,
+    );
+    await writeFile(path.join(root, "soffice.js"), packageJavascript);
+    await writeFile(
+      path.join(root, "build-receipt.json"),
+      `${JSON.stringify(receipt)}\n`,
+    );
+
     await writeFile(path.join(root, "soffice.data"), Buffer.from([0x02]));
     await assert.rejects(
       admitCandidateRuntime({ runtimeDirectory: root }),
@@ -73,7 +107,7 @@ test("candidate runtime serves only receipt-bound production assets", async () =
 
 async function writeArtifacts(root) {
   await Promise.all([
-    writeFile(path.join(root, "soffice.js"), "Module = {};\n"),
+    writeFile(path.join(root, "soffice.js"), packageJavascript),
     writeFile(path.join(root, "soffice.data.js.metadata"), packageMetadata),
     writeFile(
       path.join(root, "soffice.wasm"),

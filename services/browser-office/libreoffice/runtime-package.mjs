@@ -38,3 +38,27 @@ export function assertBrowserOfficePackageMetadata(metadata, dataBytes) {
       throw new Error(`Browser Office package is missing ${module} assets.`);
   }
 }
+
+export function assertBrowserOfficeFilesystemLayout(metadata, javascript) {
+  if (!Array.isArray(metadata?.files) || typeof javascript !== "string")
+    throw new Error("Browser Office filesystem layout is unavailable.");
+
+  const createdDirectories = new Set(
+    [
+      ...javascript.matchAll(
+        /Module\["FS_createPath"\]\("([^"]+)","([^"]+)",true,true\);/gu,
+      ),
+    ].map(([, parent, name]) => `${parent.replace(/\/$/u, "")}/${name}`),
+  );
+  const missing = [
+    ...new Set(
+      metadata.files.map((file) =>
+        file.filename.slice(0, file.filename.lastIndexOf("/")),
+      ),
+    ),
+  ].filter((directory) => !createdDirectories.has(directory));
+  if (missing.length)
+    throw new Error(
+      `Browser Office package and JavaScript filesystem disagree: ${missing.length} directories are missing, beginning with ${missing[0]}.`,
+    );
+}

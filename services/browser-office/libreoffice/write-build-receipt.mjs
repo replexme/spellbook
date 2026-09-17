@@ -6,7 +6,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { computePatchSeriesSha256, upstreamManifest } from "./upstream.mjs";
-import { assertBrowserOfficePackageMetadata } from "./runtime-package.mjs";
+import {
+  assertBrowserOfficeFilesystemLayout,
+  assertBrowserOfficePackageMetadata,
+} from "./runtime-package.mjs";
 
 const requiredArtifacts = Object.freeze([
   "soffice.js",
@@ -31,6 +34,7 @@ export async function createBrowserRuntimeReceipt({
   const artifacts = [];
   let packageMetadata;
   let packageBytes;
+  let runtimeJavascript;
   for (const name of requiredArtifacts) {
     const artifactPath = path.join(runtimeDirectory, name);
     const [bytes, details] = await Promise.all([
@@ -47,6 +51,7 @@ export async function createBrowserRuntimeReceipt({
     if (name.endsWith(".metadata"))
       packageMetadata = JSON.parse(bytes.toString("utf8"));
     if (name === "soffice.data") packageBytes = bytes.byteLength;
+    if (name === "soffice.js") runtimeJavascript = bytes.toString("utf8");
     artifacts.push({
       name,
       bytes: bytes.byteLength,
@@ -54,6 +59,7 @@ export async function createBrowserRuntimeReceipt({
     });
   }
   assertBrowserOfficePackageMetadata(packageMetadata, packageBytes);
+  assertBrowserOfficeFilesystemLayout(packageMetadata, runtimeJavascript);
 
   const resolvedSourceRevision =
     sourceRevision ??

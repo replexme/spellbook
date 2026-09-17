@@ -174,6 +174,7 @@ wasm_configuration="LibreOfficeWASM32:$wasm_modules_arg:en-US ko:colibre:release
 wasm_configuration_sha="$(printf '%s' "$wasm_configuration" | sha256sum | cut -d' ' -f1)"
 wasm_configuration_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm.configuration"
 wasm_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm.$expected_patch_sha.$wasm_configuration_sha"
+wasm_filesystem_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm-filesystem.$expected_patch_sha.$wasm_configuration_sha"
 mkdir -p "$wasm_build"
 if [[ ! -f "$wasm_build/Makefile" ]] || \
    ! -f "$wasm_configuration_marker" ]] || \
@@ -218,6 +219,14 @@ fi
 if [[ ! -f "$wasm_marker" ]]; then
   make -C "$wasm_build" build
   printf 'built\n' > "$wasm_marker"
+fi
+if [[ ! -f "$wasm_filesystem_marker" ]]; then
+  # LibreOffice's recursive top-level build may refresh the packaged data
+  # after soffice.js was linked. Complete these dependent stages in order;
+  # unchanged objects and package pre-JS are reused by gbuild.
+  make -C "$wasm_build" static
+  make -C "$wasm_build" desktop
+  printf 'linked\n' > "$wasm_filesystem_marker"
 fi
 
 installation_root="$wasm_build/workdir/installation/LibreOffice/emscripten"

@@ -75,10 +75,24 @@ try {
   const page = await browser.newPage({
     viewport: { width: 1440, height: 960 },
   });
+  await page.addInitScript(() => {
+    globalThis.__spellbookStartupErrors = [];
+    window.addEventListener("error", (event) => {
+      globalThis.__spellbookStartupErrors.push({
+        message: event.message,
+        name: event.error?.name,
+        errno: event.error?.errno,
+        code: event.error?.code,
+        stack: event.error?.stack,
+      });
+    });
+  });
   const pageErrors = [];
   const consoleMessages = [];
   const requestFailures = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("pageerror", (error) =>
+    pageErrors.push({ message: error.message, stack: error.stack }),
+  );
   page.on("console", (message) =>
     consoleMessages.push({ type: message.type(), text: message.text() }),
   );
@@ -92,7 +106,21 @@ try {
     `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}&verifySerialization=1`,
     { waitUntil: "domcontentloaded", timeout: 30_000 },
   );
-  await connectProductHost(page, origin);
+  try {
+    await connectProductHost(page, origin);
+  } catch (error) {
+    const state = await page
+      .evaluate(() => ({
+        state: document.body.dataset.state,
+        error: document.body.dataset.error,
+        status: document.querySelector("#status")?.textContent,
+        startupErrors: globalThis.__spellbookStartupErrors,
+      }))
+      .catch(() => null);
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}; state=${JSON.stringify(state)}; pageErrors=${JSON.stringify(pageErrors)}; requestFailures=${JSON.stringify(requestFailures)}; consoleStart=${JSON.stringify(consoleMessages.slice(0, 40))}; consoleEnd=${JSON.stringify(consoleMessages.slice(-20))}`,
+    );
+  }
   await openProductFixture(page, fixture, "open-1");
   let opened;
   try {
@@ -1741,10 +1769,18 @@ async function waitForNewHostEvent(page, type, previousCount) {
 
 async function connectProductHost(page, origin) {
   await page.waitForFunction(
-    () => document.body.dataset.state === "runtime-ready",
+    () => ["runtime-ready", "error"].includes(document.body.dataset.state),
     null,
     { timeout: 60_000 },
   );
+  const runtimeError = await page.evaluate(() =>
+    document.body.dataset.state === "error"
+      ? (document.body.dataset.error ??
+        document.querySelector("#status")?.textContent)
+      : null,
+  );
+  if (runtimeError)
+    throw new Error(`Browser Office runtime failed: ${runtimeError}`);
   await evaluateRenderer(
     page,
     (hostOrigin) => {
