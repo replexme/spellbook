@@ -38,6 +38,13 @@ export function buildRoutes(
       ),
     ],
     [
+      "/harness/browser-visual-evidence.mjs",
+      route(
+        path.join(root, "browser-visual-evidence.mjs"),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
       "/harness/runtime-admission.js",
       route(
         path.join(root, "harness/runtime-admission.js"),

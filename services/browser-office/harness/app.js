@@ -5,6 +5,10 @@ import {
   requestPersistentBrowserStorage,
 } from "/harness/opfs-journal.mjs";
 import {
+  browserCaptureTargets,
+  withBrowserVisualEvidence,
+} from "/harness/browser-visual-evidence.mjs";
+import {
   persistedSectionsMatch,
   persistedSlideTopologyMatches,
 } from "/harness/product-persistence.mjs";
@@ -647,6 +651,84 @@ async function observeNativeDocument() {
   )
     throw new Error("Browser Office observation has no document revision.");
   return result.value;
+}
+
+async function captureVisibleBrowserCanvas() {
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("browser_canvas_render_timeout")),
+      2_000,
+    );
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        clearTimeout(timer);
+        resolve();
+      }),
+    );
+  });
+  const blob = await new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error("browser_canvas_capture_timeout")),
+      5_000,
+    );
+    canvas.toBlob((value) => {
+      clearTimeout(timer);
+      if (value) resolve(value);
+      else reject(new Error("browser_canvas_capture_failed"));
+    }, "image/png");
+  });
+  if (blob.size < 1_000 || blob.size > 12_000_000)
+    throw new Error("browser_canvas_capture_size_invalid");
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  if (
+    ![137, 80, 78, 71, 13, 10, 26, 10].every(
+      (byte, index) => bytes[index] === byte,
+    )
+  )
+    throw new Error("browser_canvas_capture_png_invalid");
+  return Array.from(bytes);
+}
+
+async function attachBrowserVisualEvidence(nativeRequest, value) {
+  let targets = [];
+  const activeSlide = value?.activeSlide;
+  let showingSlide = activeSlide;
+  const images = [];
+  let captureError = null;
+  try {
+    targets = browserCaptureTargets(nativeRequest, value);
+    for (const slideIndex of targets) {
+      if (showingSlide !== slideIndex) {
+        await request("show-slide", { slideIndex });
+        showingSlide = slideIndex;
+      }
+      images.push({
+        slideIndex,
+        pngBytes: await captureVisibleBrowserCanvas(),
+        source: "browser_canvas",
+      });
+    }
+  } catch (error) {
+    captureError = error instanceof Error ? error.message : String(error);
+  }
+  if (Number.isSafeInteger(activeSlide) && showingSlide !== activeSlide)
+    try {
+      await request("show-slide", { slideIndex: activeSlide });
+    } catch (error) {
+      captureError = [
+        captureError,
+        `browser_canvas_restore_failed:${error instanceof Error ? error.message : String(error)}`,
+      ]
+        .filter(Boolean)
+        .join("; ");
+    }
+  if (captureError)
+    return {
+      ...withBrowserVisualEvidence(value, images, targets),
+      visualEvidenceComplete: false,
+      visualEvidenceError: captureError,
+    };
+  return withBrowserVisualEvidence(value, images, targets);
 }
 
 function parseExpectedSlides(value) {
@@ -2194,6 +2276,7 @@ async function handleProductHostMessage(message) {
         );
         value = await withPackageDocumentMetadata(committed ?? result.value);
       }
+      value = await attachBrowserVisualEvidence(message.request, value);
       const status = await request("status");
       reportHostModified(
         Boolean(status.modified) ||

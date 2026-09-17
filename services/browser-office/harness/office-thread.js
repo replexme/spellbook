@@ -77,6 +77,7 @@ function observeDocument(request = {}) {
   return spellbookDocumentOperation({
     operation: "observe",
     ...request,
+    captureSlideIndexes: [],
     mutationContracts: spellbookMutationContracts,
     nativeAdapter,
   });
@@ -485,6 +486,13 @@ function start() {
             throw new Error(
               "Spellbook native operation program is unavailable.",
             );
+          // Browser visuals come from the actual canvas on the main thread.
+          // The WASM package has no GraphicExportFilter service, so UNO
+          // mutation and observation must not attempt server-side capture.
+          const nativeRequest =
+            event.data.nativeRequest?.operation === "observe"
+              ? { ...event.data.nativeRequest, captureSlideIndexes: [] }
+              : { ...event.data.nativeRequest, suppressCapture: true };
           post("native-complete", {
             requestId,
             value: [
@@ -492,15 +500,30 @@ function start() {
               "replace_image",
               "insert_media",
               "replace_media",
-            ].includes(event.data.nativeRequest?.operation)
-              ? mutateAsset(event.data.nativeRequest)
+            ].includes(nativeRequest.operation)
+              ? mutateAsset(nativeRequest)
               : spellbookDocumentOperation({
-                  ...event.data.nativeRequest,
+                  ...nativeRequest,
                   mutationContracts: spellbookMutationContracts,
                   nativeAdapter,
                 }),
           });
           break;
+        case "show-slide": {
+          if (!model) throw new Error("No browser Office document is open.");
+          const index = event.data.slideIndex;
+          if (
+            !Number.isSafeInteger(index) ||
+            index < 0 ||
+            index >= slideCount()
+          )
+            throw new Error("invalid_capture_slide_index");
+          model
+            .getCurrentController()
+            .setCurrentPage(model.getDrawPages().getByIndex(index));
+          post("slide-shown", { requestId, slideIndex: index });
+          break;
+        }
         case "status":
           post("status-complete", {
             requestId,
