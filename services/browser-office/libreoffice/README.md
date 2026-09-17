@@ -149,6 +149,9 @@ identities and the required `calc writer impress` module set. Native tests use
 the source language only; the Korean translations
 needed by the browser build are fetched at the exact superproject gitlink with
 depth one, avoiding a full translation-repository history on every clean build.
+The preserved build root caches Brotli output by raw SHA-256. Before reuse,
+the cached stream is decompressed and compared byte-for-byte with the current
+raw artifact; changed bytes fall back to compression.
 Building does not set `buildReady`; promotion still requires the integrated
 product, endurance, fidelity and PowerPoint gates.
 

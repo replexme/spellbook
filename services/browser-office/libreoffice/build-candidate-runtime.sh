@@ -250,8 +250,22 @@ for artifact in soffice.data.js.metadata soffice.data; do
   install -m 0644 "$package_root/$artifact" "$SPELLBOOK_BROWSER_OUTPUT_DIR/$artifact"
 done
 
-brotli --force --quality=11 "$SPELLBOOK_BROWSER_OUTPUT_DIR/soffice.wasm"
-brotli --force --quality=11 "$SPELLBOOK_BROWSER_OUTPUT_DIR/soffice.data"
+compression_cache="$SPELLBOOK_BROWSER_BUILD_ROOT/compression-cache"
+mkdir -p "$compression_cache"
+for artifact in soffice.wasm soffice.data; do
+  raw_path="$SPELLBOOK_BROWSER_OUTPUT_DIR/$artifact"
+  compressed_path="$raw_path.br"
+  raw_sha256="$(sha256sum "$raw_path" | cut -d' ' -f1)"
+  cached_path="$compression_cache/$raw_sha256.br"
+  if [[ -s "$cached_path" ]] && \
+     brotli -d -c "$cached_path" | cmp -s - "$raw_path"; then
+    install -m 0644 "$cached_path" "$compressed_path"
+    echo "Reused verified Brotli data for $artifact."
+  else
+    brotli --force --quality=11 "$raw_path"
+    install -m 0644 "$compressed_path" "$cached_path"
+  fi
+done
 node "$spellbook_repo_root/services/browser-office/libreoffice/write-build-receipt.mjs" \
   --runtime-dir "$SPELLBOOK_BROWSER_OUTPUT_DIR" \
   --output "$SPELLBOOK_BROWSER_OUTPUT_DIR/build-receipt.json"
