@@ -118,6 +118,74 @@ test("native snapshot reconciliation preserves the original implicit slide layou
   );
 });
 
+test("native snapshot remaps an edited slide layout by identity after Office renumbers layouts", async () => {
+  const source = new Uint8Array(
+    await readFile(
+      new URL("../../eval/public/downloads/lo-master-layouts.pptx", import.meta.url),
+    ),
+  );
+  const original = unzipSync(source);
+  const noEdit = unzipSync(source);
+  const second = "ppt/slideLayouts/slideLayout2.xml";
+  const tenth = "ppt/slideLayouts/slideLayout10.xml";
+  [noEdit[second], noEdit[tenth]] = [original[tenth], original[second]];
+  const edited = unzipSync(zipSync(noEdit));
+  const relsPath = "ppt/slides/_rels/slide1.xml.rels";
+  edited[relsPath] = strToU8(
+    strFromU8(edited[relsPath]).replace(
+      "../slideLayouts/slideLayout1.xml",
+      "../slideLayouts/slideLayout2.xml",
+    ),
+  );
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    ["set_slide_layout"],
+  );
+  const merged = unzipSync(result.bytes);
+  assert.match(
+    strFromU8(merged[relsPath]),
+    /Target="\.\.\/slideLayouts\/slideLayout10\.xml"/u,
+  );
+  assert.deepEqual(merged[tenth], original[tenth]);
+  assert.deepEqual(merged[second], original[second]);
+  assert.deepEqual(result.report.changedParts, [relsPath]);
+});
+
+test("native snapshot refuses an ambiguous slide layout identity", async () => {
+  const source = new Uint8Array(
+    await readFile(
+      new URL("../../eval/public/downloads/lo-master-layouts.pptx", import.meta.url),
+    ),
+  );
+  const original = unzipSync(source);
+  const noEdit = unzipSync(source);
+  const target = "ppt/slideLayouts/slideLayout2.xml";
+  noEdit[target] = strToU8(
+    strFromU8(noEdit[target]).replace(
+      'name="Title and Content"',
+      'name="No original layout has this name"',
+    ),
+  );
+  const edited = unzipSync(zipSync(noEdit));
+  const relsPath = "ppt/slides/_rels/slide1.xml.rels";
+  edited[relsPath] = strToU8(
+    strFromU8(edited[relsPath]).replace(
+      "../slideLayouts/slideLayout1.xml",
+      "../slideLayouts/slideLayout2.xml",
+    ),
+  );
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), [
+        "set_slide_layout",
+      ]),
+    /cannot uniquely remap slide layout/u,
+  );
+  assert.ok(original[target]);
+});
+
 test("native snapshot keeps unrequested core metadata while committing slide edits", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const noEdit = unzipSync(source);

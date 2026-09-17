@@ -13,8 +13,9 @@ const reportPath = process.argv[3] ? path.resolve(process.argv[3]) : null;
 const browser = await chromium.launch({ headless: true });
 const stable = (value) => JSON.stringify(value);
 
+let page;
 try {
-  const page = await browser.newPage({
+  page = await browser.newPage({
     viewport: { width: 1440, height: 1000 },
   });
   await page.goto(url, { waitUntil: "domcontentloaded" });
@@ -238,5 +239,25 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
-  await browser.close();
+  try {
+    if (page && process.env.SPELLBOOK_DIAGNOSTIC_RAW_DIR) {
+      const rawDir = path.resolve(process.env.SPELLBOOK_DIAGNOSTIC_RAW_DIR);
+      const labels = [
+        "native-snapshot-original",
+        "native-snapshot-no-edit",
+        "native-snapshot-edited",
+      ];
+      for (const label of labels) {
+        const bytes = await page.evaluate(
+          (requestedLabel) =>
+            globalThis.spellbookBrowserOffice?.artifact(requestedLabel),
+          label,
+        );
+        if (bytes?.length)
+          await writeFile(path.join(rawDir, `${label}.pptx`), Buffer.from(bytes));
+      }
+    }
+  } finally {
+    await browser.close();
+  }
 }

@@ -585,6 +585,11 @@ async function preserveAndInspectNativeDocument(
   const serialized = await serializeNativeDocument();
   markBrowserProbePhase("snapshot:normalize");
   const noEdit = await normalizeNativeDocumentBytes(originalBytes);
+  if (browserProbeMode && query.get("nativeRaw") === "1") {
+    savedArtifacts.set("native-snapshot-original", originalBytes.slice());
+    savedArtifacts.set("native-snapshot-no-edit", noEdit.slice());
+    savedArtifacts.set("native-snapshot-edited", serialized.slice());
+  }
   markBrowserProbePhase("snapshot:preserve");
   const preserved = await preserveNativeSnapshot(
     originalBytes,

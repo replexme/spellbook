@@ -217,7 +217,10 @@ async function runScenario({ scenario, capabilities, candidateRuntime }) {
   const missingSelectedOperations = scenario.selectedOperations.filter(
     (operation) => !operations.includes(operation),
   );
-  if (disallowed.length || missingSelectedOperations.length)
+  // A fixture may route an entire family to several complementary scenarios
+  // (for example chart data and chart type). Only the complete matrix, not
+  // each individual scenario, must execute every selected operation.
+  if (disallowed.length)
     throw new Error(
       `${scenario.name} operation mismatch: disallowed=${disallowed.join(",") || "none"}; missing=${missingSelectedOperations.join(",") || "none"}.`,
     );
@@ -295,7 +298,10 @@ async function runBrowserProbe({
   });
   const address = server.address();
   const origin = `http://127.0.0.1:${address.port}`;
-  const url = `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}&browserProbe=1`;
+  const diagnosticRaw = process.env.SPELLBOOK_DIAGNOSTIC_RAW_DIR
+    ? "&nativeRaw=1"
+    : "";
+  const url = `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}&browserProbe=1${diagnosticRaw}`;
   try {
     const result = await runProcess(
       process.execPath,

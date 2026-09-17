@@ -160,6 +160,76 @@ function referencedRelationshipsStillMatch(
   return true;
 }
 
+function slideLayoutIdentity(entries, part) {
+  if (
+    !entries[part] ||
+    !/^ppt\/slideLayouts\/slideLayout[^/]+\.xml$/u.test(part)
+  )
+    throw new Error(`Native snapshot has no comparable slide layout: ${part}.`);
+  const layout = parseXml(entries, part).documentElement;
+  if (
+    layout.namespaceURI !== presentationNamespace ||
+    layout.localName !== "sldLayout"
+  )
+    throw new Error(`Native snapshot has an invalid slide layout: ${part}.`);
+  const commonSlide = [...layout.childNodes].find(
+    (child) =>
+      child.nodeType === 1 &&
+      child.namespaceURI === presentationNamespace &&
+      child.localName === "cSld",
+  );
+  const name = commonSlide?.getAttribute("name")?.trim();
+  if (!name)
+    throw new Error(`Native snapshot cannot identify slide layout: ${part}.`);
+  return { name, type: layout.getAttribute("type") || null };
+}
+
+function remapSlideLayoutTarget(sourcePart, target, original, noEdit) {
+  const sourcePath = resolvePart(sourcePart, target);
+  const identity = slideLayoutIdentity(noEdit, sourcePath);
+  const candidates = Object.keys(original)
+    .filter((part) => /^ppt\/slideLayouts\/slideLayout[^/]+\.xml$/u.test(part))
+    .map((part) => ({ part, identity: slideLayoutIdentity(original, part) }))
+    .filter(({ identity: candidate }) => candidate.name === identity.name);
+  const exactType = candidates.filter(
+    ({ identity: candidate }) => candidate.type === identity.type,
+  );
+  const matching = exactType.length === 1 ? exactType : candidates;
+  if (matching.length !== 1)
+    throw new Error(
+      `Native snapshot cannot uniquely remap slide layout ${sourcePath}: ${identity.name}.`,
+    );
+  return relativePart(sourcePart, matching[0].part);
+}
+
+function remapAuthoredRelationships(part, bytes, original, noEdit) {
+  const sourcePart = part.replace(/\/_rels\/([^/]+)\.rels$/u, "/$1");
+  const document = parseXml({ [part]: bytes }, part);
+  let changed = false;
+  for (const relationship of relationshipElements(document)) {
+    if (relationship.getAttribute("TargetMode") === "External") continue;
+    if (!relationship.getAttribute("Type")?.endsWith("/slideLayout")) continue;
+    const target = relationship.getAttribute("Target");
+    if (
+      !/^ppt\/slideLayouts\/slideLayout[^/]+\.xml$/u.test(
+        resolvePart(sourcePart, target),
+      )
+    )
+      continue;
+    const remapped = remapSlideLayoutTarget(
+      sourcePart,
+      target,
+      original,
+      noEdit,
+    );
+    if (remapped !== target) {
+      relationship.setAttribute("Target", remapped);
+      changed = true;
+    }
+  }
+  return changed ? serializeXml(document) : bytes;
+}
+
 // Office can rewrite unrelated package parts even when no edit was made.
 // Compare two exports from that same engine, then apply only their actual
 // difference to the user's original package. Reopening the result and proving
@@ -233,7 +303,11 @@ export function preserveOriginalPptxParts(
           `Native snapshot needs relationship remapping before preserving ${part}.`,
         );
     }
-    const selected = authoredChange ? edited[part] : original[part];
+    const selected = authoredChange
+      ? part.endsWith(".rels")
+        ? remapAuthoredRelationships(part, edited[part], original, noEdit)
+        : edited[part]
+      : original[part];
     if (selected) merged[part] = selected;
     if (!samePartBytes(original[part], selected)) changedParts.push(part);
     if (!authoredChange && !samePartBytes(original[part], noEdit[part]))
