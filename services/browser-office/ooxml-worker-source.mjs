@@ -235,6 +235,75 @@ function preserveUnaffectedSlideShapes(
   return serializeXml(documents[2]);
 }
 
+function repairChangedTableCellInsets(
+  part,
+  originalBytes,
+  noEditBytes,
+  editedBytes,
+  sourceOperations,
+) {
+  if (
+    !/^ppt\/slides\/slide[^/]+\.xml$/u.test(part) ||
+    !sourceOperations.includes("set_table_cell_format") ||
+    !originalBytes ||
+    !noEditBytes ||
+    !editedBytes
+  )
+    return null;
+  const original = parseXml({ [part]: originalBytes }, part);
+  const baseline = parseXml({ [part]: noEditBytes }, part);
+  const edited = parseXml({ [part]: editedBytes }, part);
+  const cells = (document) => [
+    ...document.getElementsByTagNameNS(drawingNamespace, "tc"),
+  ];
+  const authored = cells(original);
+  const before = cells(baseline);
+  const after = cells(edited);
+  if (
+    !before.length ||
+    authored.length !== before.length ||
+    before.length !== after.length
+  )
+    return null;
+  const child = (parent, localName) =>
+    parent &&
+    [...parent.childNodes].find(
+      (node) =>
+        node.nodeType === 1 &&
+        node.namespaceURI === drawingNamespace &&
+        node.localName === localName,
+    );
+  let changed = false;
+  for (let index = 0; index < before.length; index += 1) {
+    const beforeBody = child(child(before[index], "txBody"), "bodyPr");
+    const afterBody = child(child(after[index], "txBody"), "bodyPr");
+    const authoredProperties = child(authored[index], "tcPr");
+    const cellProperties = child(after[index], "tcPr");
+    if (!beforeBody || !afterBody || !cellProperties) continue;
+    for (const [textAttribute, cellAttribute] of [
+      ["tIns", "marT"],
+      ["bIns", "marB"],
+    ]) {
+      const previous = beforeBody.getAttribute(textAttribute);
+      const requested = afterBody.getAttribute(textAttribute);
+      const authored = authoredProperties?.getAttribute(cellAttribute);
+      const value = previous === requested ? authored : requested;
+      if (
+        value === null ||
+        !/^\d+$/u.test(value) ||
+        cellProperties.getAttribute(cellAttribute) === value
+      )
+        continue;
+      // Impress writes edited insets to a:bodyPr, but imports them from
+      // a:tcPr. Carry an edited value across, or retain the author's prior
+      // explicit value when a later edit touches another cell property.
+      cellProperties.setAttribute(cellAttribute, value);
+      changed = true;
+    }
+  }
+  return changed ? serializeXml(edited) : null;
+}
+
 function referencedRelationshipsStillMatch(
   part,
   editedBytes,
@@ -852,12 +921,21 @@ export function preserveOriginalPptxParts(
       part === presentationPath &&
       sourceOperations.length === 1 &&
       sourceOperations[0] === "set_slide_size";
+    const semanticTableInsetPatch = authoredChange
+      ? repairChangedTableCellInsets(
+          part,
+          original[part],
+          noEdit[part],
+          edited[part],
+          sourceOperations,
+        )
+      : null;
     const semanticShapePatch = authoredChange
       ? preserveUnaffectedSlideShapes(
           part,
           original[part],
           noEdit[part],
-          edited[part],
+          semanticTableInsetPatch ?? edited[part],
           sourceOperations,
         )
       : null;
@@ -891,10 +969,11 @@ export function preserveOriginalPptxParts(
                   noEdit,
                   sourceOperations,
                 )
-              : (semanticShapePatch ?? edited[part])
+              : (semanticShapePatch ?? semanticTableInsetPatch ?? edited[part])
           : original[part];
     if (semanticSlideSizePatch) semanticPatchedParts.push(part);
-    if (semanticShapePatch) semanticPatchedParts.push(part);
+    if (semanticShapePatch || semanticTableInsetPatch)
+      semanticPatchedParts.push(part);
     if (
       semanticMasterThemePatch &&
       Object.hasOwn(semanticMasterThemePatch, part)

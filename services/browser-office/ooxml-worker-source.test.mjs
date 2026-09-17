@@ -139,6 +139,87 @@ test("native snapshot preserves untouched author shapes when Office inserts a sh
   assert.deepEqual(result.report.semanticPatchedParts, [slidePath]);
 });
 
+test("native snapshot writes changed table insets where PPTX import reads them", async () => {
+  const source = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/downloads/ox-table-large.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
+  const slidePath = "ppt/slides/slide1.xml";
+  const edited = unzipSync(source);
+  const drawingNamespace =
+    "http://schemas.openxmlformats.org/drawingml/2006/main";
+  const document = new DOMParser().parseFromString(
+    strFromU8(edited[slidePath]),
+    "application/xml",
+  );
+  const cell = document.getElementsByTagNameNS(drawingNamespace, "tc")[1];
+  const body = cell.getElementsByTagNameNS(drawingNamespace, "bodyPr")[0];
+  body.setAttribute("tIns", "50400");
+  body.setAttribute("bIns", "50760");
+  edited[slidePath] = strToU8(new XMLSerializer().serializeToString(document));
+  const result = preserveOriginalPptxParts(source, source, zipSync(edited), [
+    "set_table_cell_format",
+  ]);
+  const saved = new DOMParser().parseFromString(
+    strFromU8(unzipSync(result.bytes)[slidePath]),
+    "application/xml",
+  );
+  const properties = saved
+    .getElementsByTagNameNS(drawingNamespace, "tc")[1]
+    .getElementsByTagNameNS(drawingNamespace, "tcPr")[0];
+  assert.equal(properties.getAttribute("marT"), "50400");
+  assert.equal(properties.getAttribute("marB"), "50760");
+  assert.deepEqual(result.report.semanticPatchedParts, [slidePath]);
+
+  // A later edit to the same cell must not lose those margins when Impress
+  // omits both attributes again from its no-edit and edited exports.
+  const secondOriginal = unzipSync(result.bytes);
+  const secondNoEdit = new DOMParser().parseFromString(
+    strFromU8(secondOriginal[slidePath]),
+    "application/xml",
+  );
+  const secondProperties = secondNoEdit
+    .getElementsByTagNameNS(drawingNamespace, "tc")[1]
+    .getElementsByTagNameNS(drawingNamespace, "tcPr")[0];
+  secondProperties.removeAttribute("marT");
+  secondProperties.removeAttribute("marB");
+  const noEditEntries = {
+    ...secondOriginal,
+    [slidePath]: strToU8(new XMLSerializer().serializeToString(secondNoEdit)),
+  };
+  const secondEdited = unzipSync(zipSync(noEditEntries));
+  const secondDocument = new DOMParser().parseFromString(
+    strFromU8(secondEdited[slidePath]),
+    "application/xml",
+  );
+  secondDocument
+    .getElementsByTagNameNS(drawingNamespace, "tc")[1]
+    .getElementsByTagNameNS(drawingNamespace, "tcPr")[0]
+    .setAttribute("marL", "95400");
+  secondEdited[slidePath] = strToU8(
+    new XMLSerializer().serializeToString(secondDocument),
+  );
+  const second = preserveOriginalPptxParts(
+    result.bytes,
+    zipSync(noEditEntries),
+    zipSync(secondEdited),
+    ["set_table_cell_format"],
+  );
+  const carriedProperties = new DOMParser()
+    .parseFromString(
+      strFromU8(unzipSync(second.bytes)[slidePath]),
+      "application/xml",
+    )
+    .getElementsByTagNameNS(drawingNamespace, "tc")[1]
+    .getElementsByTagNameNS(drawingNamespace, "tcPr")[0];
+  assert.equal(carriedProperties.getAttribute("marT"), "50400");
+  assert.equal(carriedProperties.getAttribute("marB"), "50760");
+});
+
 test("native snapshot reconciliation preserves the original implicit slide layout", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const noEdit = unzipSync(source);
