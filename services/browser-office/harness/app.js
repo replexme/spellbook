@@ -1459,6 +1459,40 @@ async function replayRecoveredCommands(base, recoveredCommands) {
   return candidate;
 }
 
+// Native Undo/Redo is a fast path, not the source of truth. Impress can
+// quantize shape geometry while restoring an otherwise identical edit, which
+// changes its live revision. The journal retains the exact PPTX for each side
+// of the edit, so reopen that package when the native result is not exact.
+async function restoreProductHistoryPackage({
+  targetBytes,
+  targetRevision,
+  rollbackBytes,
+  rollbackRevision,
+  errorCode,
+}) {
+  try {
+    await writeAndOpen(targetBytes, filename);
+    const restored = await observeNativeDocument();
+    if (restored.revision !== targetRevision) throw new Error(errorCode);
+    return restored;
+  } catch (error) {
+    try {
+      await writeAndOpen(rollbackBytes, filename);
+      const recovered = await observeNativeDocument();
+      if (recovered.revision !== rollbackRevision)
+        throw new Error("browser_history_package_rollback_revision_mismatch");
+      unreconciledModelRevision = "";
+    } catch (rollbackError) {
+      unreconciledModelRevision = "browser_history_package_rollback_failed";
+      throw new Error(
+        `${errorCode}_and_rollback_failed:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+}
+
 async function undoProductMutation() {
   const previous = productUndoHistory.at(-1);
   if (!previous) return false;
@@ -1473,28 +1507,30 @@ async function undoProductMutation() {
     await request("dispatch", { unoCommand: "Undo" });
     const restored = await observeNativeDocument();
     if (restored.revision !== previous.beforeRevision) {
-      const difference = firstModelDifference(
-        previous.beforeSlides,
-        restored.slides,
-      );
-      await request("dispatch", { unoCommand: "Redo" });
-      const recovered = await observeNativeDocument();
-      unreconciledModelRevision =
-        recovered.revision === previous.afterRevision ? "" : recovered.revision;
-      throw new Error(
-        `browser_native_undo_revision_mismatch:${difference ?? "unknown"}`,
-      );
+      await restoreProductHistoryPackage({
+        targetBytes: previous.beforeBytes,
+        targetRevision: previous.beforeRevision,
+        rollbackBytes: previous.afterBytes,
+        rollbackRevision: previous.afterRevision,
+        errorCode: "browser_package_undo_revision_mismatch",
+      });
+      // Reopening the package clears Impress's native history. Redo must use
+      // the exact journaled package too, rather than replaying the command.
+      previous.nativeRequest = null;
+      previous.nativeRedoAvailable = false;
+    } else {
+      previous.nativeRedoAvailable = true;
     }
     currentBytes = previous.beforeBytes.slice();
     previous.nativeUndoAvailable = false;
-    previous.nativeRedoAvailable = true;
   } else {
-    await writeAndOpen(previous.beforeBytes, filename);
-    const restored = await observeNativeDocument();
-    if (restored.revision !== previous.beforeRevision) {
-      unreconciledModelRevision = restored.revision;
-      throw new Error("browser_package_undo_revision_mismatch");
-    }
+    await restoreProductHistoryPackage({
+      targetBytes: previous.beforeBytes,
+      targetRevision: previous.beforeRevision,
+      rollbackBytes: previous.afterBytes,
+      rollbackRevision: previous.afterRevision,
+      errorCode: "browser_package_undo_revision_mismatch",
+    });
   }
   productUndoHistory.pop();
   productRedoHistory.push(previous);
@@ -1585,12 +1621,13 @@ async function redoProductMutation() {
       nativeUndoAvailableFor(next.nativeCommand?.op);
     next.nativeRedoAvailable = false;
   } else {
-    await writeAndOpen(next.afterBytes, filename);
-    const restored = await observeNativeDocument();
-    if (restored.revision !== next.afterRevision) {
-      unreconciledModelRevision = restored.revision;
-      throw new Error("browser_package_redo_revision_mismatch");
-    }
+    await restoreProductHistoryPackage({
+      targetBytes: next.afterBytes,
+      targetRevision: next.afterRevision,
+      rollbackBytes: next.beforeBytes,
+      rollbackRevision: next.beforeRevision,
+      errorCode: "browser_package_redo_revision_mismatch",
+    });
   }
   productRedoHistory.pop();
   productUndoHistory.push(next);

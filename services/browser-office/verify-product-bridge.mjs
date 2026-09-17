@@ -137,6 +137,18 @@ try {
     operation: "observe",
     captureSlideIndexes: [],
   });
+  if (candidateRuntime)
+    for (let index = 0; index < 16; index++) {
+      const repeated = await nativeTask(page, `observe-repeat-${index + 1}`, {
+        operation: "observe",
+        captureSlideIndexes: [],
+      });
+      assert.equal(
+        repeated.revision,
+        before.revision,
+        `Repeated native observation ${index + 1} changed an unedited document.`,
+      );
+    }
   let serializationProbe = null;
   if (serializationProbes) {
     serializationProbe = await saveSerializationProbe(
