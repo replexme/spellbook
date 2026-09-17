@@ -21,6 +21,11 @@ test("browser build identity covers the manifest but not non-build documentation
       "services/browser-office/libreoffice/patches",
     ),
   );
+  assert.ok(
+    browserRuntimeBuildInputPaths.includes(
+      "services/browser-office/libreoffice/verify-linked-filesystem.mjs",
+    ),
+  );
   assert.equal(
     browserRuntimeBuildInputPaths.some((path) => path.endsWith("README.md")),
     false,

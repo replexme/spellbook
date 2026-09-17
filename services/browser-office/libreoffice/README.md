@@ -136,7 +136,9 @@ tree and reuses its compiled objects rather than treating the prior stripped
 runtime as complete. An unchanged configuration does not rerun configure.
 LibreOffice's recursive build can refresh the packaged filesystem after the
 browser executable is linked. The finalization pass completes `scp2`,
-`static` and `desktop` in that order. The receipt then checks that every
+`static` and `desktop` in that order only when the linked executable and
+package disagree; an already consistent pair is reused without relinking.
+The receipt then checks that every
 packaged file's parent directory is created by the executable JavaScript;
 only a passing receipt marks finalization complete. Output assembly reads the
 linked executable from `instdir/program` and the data from the static package
