@@ -100,6 +100,7 @@ export async function admitCandidateRuntime({
     candidateCommit: manifest.source.candidateCommit,
     patchLevel: manifest.sourceCandidate.patchLevel,
     patchSeriesSha256: manifest.sourceCandidate.patchSeriesSha256,
+    publicCommit: receipt.spellbookSourceRevision,
     buildReady: true,
     // Candidate verification must exercise the patched slide lifecycle. The
     // tracked upstream manifest remains false until that verification and the

@@ -372,6 +372,11 @@ test("browser adapter advertises the complete bounded PPTX operation surface", (
     adapter.supportedOperations.length,
     nativeCapabilities.aiExposure.operationCount,
   );
+  assert.equal(
+    adapter.engineIdentity.patchLevel,
+    upstreamManifest.sourceCandidate.patchLevel,
+  );
+  assert.equal(adapter.engineIdentity.engineImage, "browser-wasm");
 });
 
 test("browser runtime decodes image and media assets without exposing model URLs", () => {
@@ -401,6 +406,7 @@ test("browser adapter exposes only stock slide lifecycle on an unbuilt runtime",
     },
   });
   assert.deepEqual(Array.from(adapter.supportedOperations), []);
+  assert.equal(adapter.engineIdentity, null);
   assert.equal(adapter.supportsTransform([{ JumpToSlide: 0 }]), true);
   assert.equal(adapter.supportsTransform([{ DuplicateSlide: 0 }]), true);
   assert.equal(adapter.supportsTransform([{ DeleteSlide: 0 }]), false);

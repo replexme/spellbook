@@ -1631,6 +1631,16 @@
       supportedOperations,
       supportsTransform,
       transformSlides,
+      engineIdentity: admitted
+        ? Object.freeze({
+            patchLevel: runtimeIdentity.patchLevel,
+            publicCommit: runtimeIdentity.publicCommit ?? null,
+            engineImage: "browser-wasm",
+            patchSeriesSha256: runtimeIdentity.patchSeriesSha256,
+            collaboraSourceCommit: null,
+            browserSourceCommit: runtimeIdentity.buildCommit,
+          })
+        : null,
     });
   }
 
