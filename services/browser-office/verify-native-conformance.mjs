@@ -58,7 +58,20 @@ if (!plan.summary.complete)
   throw new Error(
     `Native conformance definition has ${plan.summary.missingGates} uncovered gates.`,
   );
-const scenarios = buildScenarioExecutionPlan(capabilities, conformance, plan);
+const onlyScenario = optionalFlagValue("--only-scenario");
+const diagnosticAll = process.argv.includes("--diagnostic-all");
+if (onlyScenario && diagnosticAll)
+  throw new Error("--only-scenario and --diagnostic-all cannot be combined.");
+const allScenarios = buildScenarioExecutionPlan(
+  capabilities,
+  conformance,
+  plan,
+);
+if (onlyScenario && !allScenarios.some(({ name }) => name === onlyScenario))
+  throw new Error(`Unknown native conformance scenario: ${onlyScenario}.`);
+const scenarios = onlyScenario
+  ? allScenarios.filter(({ name }) => name === onlyScenario)
+  : allScenarios;
 
 await runProcess(
   dotnetHostCommand(),
@@ -80,6 +93,8 @@ const report = {
   },
   contractVersion: conformance.version,
   mutationContractVersion: capabilities.mutationModel.version,
+  ...(onlyScenario ? { diagnosticScenario: onlyScenario } : {}),
+  ...(diagnosticAll ? { diagnosticAll: true } : {}),
   expectedOperations: Object.keys(capabilities.mutationModel.operations)
     .filter(
       (operation) =>
@@ -88,18 +103,30 @@ const report = {
     )
     .sort(),
   scenarios: [],
+  scenarioFailures: [],
 };
 const reportPath = path.join(outputRoot, "conformance-report.json");
 await writeReport(reportPath, report);
 
 try {
   for (const scenario of scenarios) {
-    const result = await runScenario({
-      scenario,
-      capabilities,
-      candidateRuntime,
-    });
-    report.scenarios.push(result);
+    const startedAt = Date.now();
+    try {
+      const result = await runScenario({
+        scenario,
+        capabilities,
+        candidateRuntime,
+      });
+      report.scenarios.push(result);
+    } catch (error) {
+      if (!diagnosticAll) throw error;
+      report.scenarioFailures.push({
+        scenario: scenario.name,
+        selectedOperations: scenario.selectedOperations,
+        durationMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     await writeReport(reportPath, report);
   }
   report.executedOperations = [
@@ -108,11 +135,17 @@ try {
   report.missingOperations = report.expectedOperations.filter(
     (operation) => !report.executedOperations.includes(operation),
   );
-  if (report.missingOperations.length)
+  if (report.scenarioFailures.length)
+    throw new Error(
+      `Browser candidate failed ${report.scenarioFailures.length} of ${scenarios.length} native scenarios: ${report.scenarioFailures.map(({ scenario }) => scenario).join(", ")}.`,
+    );
+  if (!onlyScenario && report.missingOperations.length)
     throw new Error(
       `Browser candidate did not execute: ${report.missingOperations.join(", ")}.`,
     );
-  report.status = "browser-native-conformance-verified";
+  report.status = onlyScenario
+    ? "diagnostic-scenario-verified"
+    : "browser-native-conformance-verified";
   report.completedAt = new Date().toISOString();
   await writeReport(reportPath, report);
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);

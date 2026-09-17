@@ -552,6 +552,14 @@ function spellbookDocumentOperation(request) {
       const cellDetails = Array.from({ length: rows }, (_, row) =>
         Array.from({ length: columns }, (_, column) => {
           const cell = table.getCellByPosition(column, row);
+          let textCursor = null;
+          try {
+            textCursor = cell.createTextCursor();
+          } catch (_) {}
+          const textProperty = (name) =>
+            textCursor && propertyIsSupported(textCursor, name)
+              ? safeProperty(textCursor, name)
+              : safeProperty(cell, name);
           const fillTransparency = safeProperty(cell, "FillTransparence");
           let text = null;
           try {
@@ -571,18 +579,16 @@ function spellbookDocumentOperation(request) {
             fillColor: safeProperty(cell, "FillColor"),
             fillOpacity:
               fillTransparency === null ? null : 100 - Number(fillTransparency),
-            fontFamily: safeTextProperty(cell, "CharFontName"),
-            fontSize: safeTextProperty(cell, "CharHeight"),
-            fontWeight: safeTextProperty(cell, "CharWeight"),
-            fontStyle: fontSlantName(safeTextProperty(cell, "CharPosture")),
-            underline: safeTextProperty(cell, "CharUnderline"),
-            strikethrough: safeTextProperty(cell, "CharStrikeout"),
-            textShadow: safeTextProperty(cell, "CharShadowed"),
-            color: safeTextProperty(cell, "CharColor"),
-            characterSpacing: kerningTwipsToPoints(
-              safeTextProperty(cell, "CharKerning"),
-            ),
-            paragraphAlignment: safeTextProperty(cell, "ParaAdjust"),
+            fontFamily: textProperty("CharFontName"),
+            fontSize: textProperty("CharHeight"),
+            fontWeight: textProperty("CharWeight"),
+            fontStyle: fontSlantName(textProperty("CharPosture")),
+            underline: textProperty("CharUnderline"),
+            strikethrough: textProperty("CharStrikeout"),
+            textShadow: textProperty("CharShadowed"),
+            color: textProperty("CharColor"),
+            characterSpacing: kerningTwipsToPoints(textProperty("CharKerning")),
+            paragraphAlignment: textProperty("ParaAdjust"),
             textMargins: {
               left: safeProperty(cell, "TextLeftDistance"),
               right: safeProperty(cell, "TextRightDistance"),
@@ -2432,6 +2438,7 @@ function spellbookDocumentOperation(request) {
   };
 
   const executeSingle = (request) => {
+    const diagnosticStartedAt = request.diagnosticTimings ? Date.now() : 0;
     // Batch dry-runs all share the same immutable observation, and each
     // committed command already returns the next observation. Reusing it here
     // avoids rescanning the whole deck two or three times per command while
@@ -2443,6 +2450,7 @@ function spellbookDocumentOperation(request) {
           ? request.detailSlideIndex
           : detailSlideForCommand(request.command),
       );
+    const diagnosticObservedAt = request.diagnosticTimings ? Date.now() : 0;
     const result = (state, slideIndex) => ({
       ...state,
       layoutAudit: withAuditDelta(before, state),
@@ -7214,6 +7222,9 @@ function spellbookDocumentOperation(request) {
       const undoCount = undo.getAllUndoActionTitles().length;
       activateSlide(slideIndex);
       try {
+        const diagnosticMutationStartedAt = request.diagnosticTimings
+          ? Date.now()
+          : 0;
         if (command.op === "insert_table_rows")
           table.getRows().insertByIndex(command.index, command.count);
         else if (command.op === "delete_table_rows")
@@ -7256,7 +7267,13 @@ function spellbookDocumentOperation(request) {
             .getByIndex(command.index)
             .setPropertyValue("Width", command.width);
 
+        const diagnosticMutationEndedAt = request.diagnosticTimings
+          ? Date.now()
+          : 0;
         const after = read();
+        const diagnosticReadbackEndedAt = request.diagnosticTimings
+          ? Date.now()
+          : 0;
         const target = after.slides[slideIndex].elements.find(
           (candidate) => candidate.elementId === command.elementId,
         );
@@ -7301,7 +7318,16 @@ function spellbookDocumentOperation(request) {
               ? "native_command_not_applied"
               : "native_undo_not_recorded",
           );
-        return result(after, slideIndex);
+        const response = result(after, slideIndex);
+        if (request.diagnosticTimings)
+          response.nativeTimings = {
+            beforeReadMs: diagnosticObservedAt - diagnosticStartedAt,
+            validationMs: diagnosticMutationStartedAt - diagnosticObservedAt,
+            mutationMs: diagnosticMutationEndedAt - diagnosticMutationStartedAt,
+            afterReadMs: diagnosticReadbackEndedAt - diagnosticMutationEndedAt,
+            responseMs: Date.now() - diagnosticReadbackEndedAt,
+          };
+        return response;
       } catch (error) {
         if (!request.transactionActive) {
           while (undo.getAllUndoActionTitles().length > undoCount) undo.undo();

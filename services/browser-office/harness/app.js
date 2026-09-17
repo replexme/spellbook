@@ -136,6 +136,8 @@ let baseModelRevision = "";
 let journal;
 let productExportQueue = Promise.resolve();
 let productMessageQueue = Promise.resolve();
+let browserProbeActivity = null;
+let browserProbePhaseTrace = [];
 const commands = [];
 const productUndoHistory = [];
 const productRedoHistory = [];
@@ -579,8 +581,11 @@ async function preserveAndInspectNativeDocument(
   detailSlideIndex,
   sourceOperations,
 ) {
+  markBrowserProbePhase("snapshot:serialize");
   const serialized = await serializeNativeDocument();
+  markBrowserProbePhase("snapshot:normalize");
   const noEdit = await normalizeNativeDocumentBytes(originalBytes);
+  markBrowserProbePhase("snapshot:preserve");
   const preserved = await preserveNativeSnapshot(
     originalBytes,
     noEdit,
@@ -588,11 +593,17 @@ async function preserveAndInspectNativeDocument(
     sourceOperations,
   );
   const bytes = new Uint8Array(preserved.bytes);
+  markBrowserProbePhase("snapshot:inspect");
   const observation = await inspectNativeDocumentBytes(bytes, detailSlideIndex);
   return { bytes, observation, report: preserved.report };
 }
 
-function assertPersistedNativeIntent(before, expected, reopened) {
+function assertPersistedNativeIntent(
+  before,
+  expected,
+  reopened,
+  preservationReport,
+) {
   const state = (observation) => ({
     ...persistenceStateFromObservation(observation),
     sections: observation?.sections,
@@ -607,7 +618,11 @@ function assertPersistedNativeIntent(before, expected, reopened) {
   );
   if (differences.length)
     throw new Error(
-      `browser_native_snapshot_not_persisted:${differences[0].path}`,
+      `browser_native_snapshot_not_persisted:${differences[0].path}${
+        browserProbeMode
+          ? `:${JSON.stringify({ difference: differences[0], preservation: preservationReport })}`
+          : ""
+      }`,
     );
 }
 
@@ -1390,6 +1405,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
         prepared.beforeObservation,
         nativeValue,
         preserved.observation,
+        preservationReport,
       );
     } catch (error) {
       const restored = await restoreProductPackageSnapshot(
@@ -2266,21 +2282,27 @@ async function handleProductHostMessage(message) {
   }
   if (typeof message.id === "string" && message.request) {
     try {
+      markBrowserProbePhase("prepare");
       const prepared = await prepareProductPackageMutation(message.request);
       let value;
       if (prepared?.persistence === "package_reload") {
+        markBrowserProbePhase("package-reload");
         value = await commitProductPackageReload(prepared);
       } else {
+        markBrowserProbePhase("native-execute");
         const result = await request("native", {
           nativeRequest: message.request,
         });
+        markBrowserProbePhase("package-commit");
         const committed = await commitProductPackageMutation(
           prepared,
           result.value,
         );
         value = await withPackageDocumentMetadata(committed ?? result.value);
       }
+      markBrowserProbePhase("visual-capture");
       value = await attachBrowserVisualEvidence(message.request, value);
+      markBrowserProbePhase("status");
       const status = await request("status");
       reportHostModified(
         Boolean(status.modified) ||
@@ -2289,8 +2311,10 @@ async function handleProductHostMessage(message) {
       );
       if (value?.revision === reconciledModelRevision)
         rememberReconciledObservation(value);
+      markBrowserProbePhase("complete");
       postHost({ id: message.id, value });
     } catch (error) {
+      markBrowserProbePhase("error");
       postHost({
         id: message.id,
         error: error instanceof Error ? error.message : String(error),
@@ -2314,6 +2338,18 @@ function connectProductHost(event) {
     return;
   hostPort = event.ports[0];
   hostPort.onmessage = (hostEvent) => {
+    if (browserProbeMode && typeof hostEvent.data?.id === "string")
+      browserProbeActivity = {
+        id: hostEvent.data.id,
+        operation:
+          hostEvent.data.request?.command?.op ??
+          hostEvent.data.request?.operation ??
+          "unknown",
+        phase: "queued",
+        at: Date.now(),
+      };
+    if (browserProbeMode && typeof hostEvent.data?.id === "string")
+      browserProbePhaseTrace = [{ phase: "queued", at: Date.now() }];
     void enqueueProductOperation(() =>
       handleProductHostMessage(hostEvent.data),
     );
@@ -2616,6 +2652,13 @@ if (productMode) {
 let browserProbePort;
 const browserProbeEvents = [];
 
+function markBrowserProbePhase(phase) {
+  if (browserProbeMode && browserProbeActivity) {
+    browserProbeActivity = { ...browserProbeActivity, phase, at: Date.now() };
+    browserProbePhaseTrace.push({ phase, at: Date.now() });
+  }
+}
+
 function waitForBrowserProbeEvent(match, timeoutMs = 30_000) {
   const existing = browserProbeEvents.find((event) =>
     Object.entries(match).every(([key, value]) => event[key] === value),
@@ -2630,7 +2673,15 @@ function waitForBrowserProbeEvent(match, timeoutMs = 30_000) {
       if (event) resolve(event);
       else if (Date.now() >= deadline)
         reject(
-          new Error(`Browser probe event timed out: ${JSON.stringify(match)}`),
+          new Error(
+            `Browser probe event timed out: ${JSON.stringify({
+              match,
+              activity: browserProbeActivity,
+              phaseTrace: browserProbePhaseTrace,
+              pendingOfficeRequests: [...pending.keys()].slice(-5),
+              pendingPackageRequests: [...mutationPending.keys()].slice(-5),
+            })}`,
+          ),
         );
       else setTimeout(poll, 25);
     };
@@ -2641,7 +2692,7 @@ function waitForBrowserProbeEvent(match, timeoutMs = 30_000) {
 async function browserProbeNativeCall(nativeRequest) {
   const id = `browser-probe-native-${++requestSequence}`;
   browserProbePort.postMessage({ id, request: nativeRequest });
-  const event = await waitForBrowserProbeEvent({ id });
+  const event = await waitForBrowserProbeEvent({ id }, 120_000);
   if (event.error) throw new Error(event.error);
   return event.value;
 }
@@ -2860,6 +2911,7 @@ globalThis.spellbookBrowserOffice = {
       unreconciledModelRevision,
       hostSaveRequestId,
       checkpointInFlight,
+      ...(browserProbeMode ? { browserProbePhaseTrace } : {}),
     };
   },
   probeHistory(direction = null) {
