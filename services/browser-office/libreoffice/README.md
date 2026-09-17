@@ -133,7 +133,12 @@ of restarting the preceding hour-long work. A root belonging to another source
 or patch identity is rejected rather than cleaned implicitly. The WASM module
 configuration has its own marker; changing it reconfigures the preserved build
 tree and reuses its compiled objects rather than treating the prior stripped
-runtime as complete. The output holds
+runtime as complete. An unchanged configuration does not rerun configure.
+LibreOffice's recursive build can refresh the packaged filesystem after the
+browser executable is linked. The finalization pass completes `scp2`,
+`static` and `desktop` in that order. The receipt then checks that every
+packaged file's parent directory is created by the executable JavaScript;
+only a passing receipt marks finalization complete. The output holds
 the four raw runtime assets, Brotli serving variants and a receipt binding their
 hashes to the exact public source, LibreOffice, patch-series, Emscripten and Qt
 identities and the required `calc writer impress` module set. Native tests use
