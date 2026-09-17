@@ -228,7 +228,6 @@ if [[ ! -f "$wasm_filesystem_marker" ]]; then
   make -C "$wasm_build" scp2
   make -C "$wasm_build" static
   make -C "$wasm_build" desktop
-  printf 'linked\n' > "$wasm_filesystem_marker"
 fi
 
 installation_root="$wasm_build/workdir/installation/LibreOffice/emscripten"
@@ -245,5 +244,6 @@ brotli --force --quality=11 "$SPELLBOOK_BROWSER_OUTPUT_DIR/soffice.data"
 node "$spellbook_repo_root/services/browser-office/libreoffice/write-build-receipt.mjs" \
   --runtime-dir "$SPELLBOOK_BROWSER_OUTPUT_DIR" \
   --output "$SPELLBOOK_BROWSER_OUTPUT_DIR/build-receipt.json"
+printf 'linked\n' > "$wasm_filesystem_marker"
 
 echo "Built $patch_level once; native tests, raw artifacts, compressed assets and receipt are in $SPELLBOOK_BROWSER_OUTPUT_DIR."

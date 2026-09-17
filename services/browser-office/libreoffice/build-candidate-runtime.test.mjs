@@ -39,6 +39,10 @@ test("configures Impress and invalidates a stripped WASM build marker", () => {
     /make -C "\$wasm_build" scp2[\s\S]*make -C "\$wasm_build" static[\s\S]*make -C "\$wasm_build" desktop/u,
   );
   assert.match(script, /wasm_filesystem_marker/u);
+  assert.ok(
+    script.lastIndexOf("printf 'linked\\n' > \"$wasm_filesystem_marker\"") >
+      script.indexOf("write-build-receipt.mjs"),
+  );
   assert.match(script, /\[\[ ! -f "\$wasm_configuration_marker" \]\]/u);
   assert.doesNotMatch(script, /\|\|\s*! -f "\$wasm_configuration_marker"/u);
 });
