@@ -222,8 +222,10 @@ if [[ ! -f "$wasm_marker" ]]; then
 fi
 if [[ ! -f "$wasm_filesystem_marker" ]]; then
   # LibreOffice's recursive top-level build may refresh the packaged data
-  # after soffice.js was linked. Complete these dependent stages in order;
+  # after soffice.js was linked. scp2 owns AutoInstall template variables
+  # required by static, so complete these dependent stages in order;
   # unchanged objects and package pre-JS are reused by gbuild.
+  make -C "$wasm_build" scp2
   make -C "$wasm_build" static
   make -C "$wasm_build" desktop
   printf 'linked\n' > "$wasm_filesystem_marker"
