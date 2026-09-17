@@ -138,7 +138,9 @@ LibreOffice's recursive build can refresh the packaged filesystem after the
 browser executable is linked. The finalization pass completes `scp2`,
 `static` and `desktop` in that order. The receipt then checks that every
 packaged file's parent directory is created by the executable JavaScript;
-only a passing receipt marks finalization complete. The output holds
+only a passing receipt marks finalization complete. Output assembly reads the
+linked executable from `instdir/program` and the data from the static package
+target, not from an earlier installation staging copy. The output holds
 the four raw runtime assets, Brotli serving variants and a receipt binding their
 hashes to the exact public source, LibreOffice, patch-series, Emscripten and Qt
 identities and the required `calc writer impress` module set. Native tests use

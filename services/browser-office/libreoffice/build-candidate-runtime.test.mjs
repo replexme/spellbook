@@ -43,6 +43,15 @@ test("configures Impress and invalidates a stripped WASM build marker", () => {
     script.lastIndexOf("printf 'linked\\n' > \"$wasm_filesystem_marker\"") >
       script.indexOf("write-build-receipt.mjs"),
   );
+  assert.match(script, /program_root="\$wasm_build\/instdir\/program"/u);
+  assert.match(
+    script,
+    /package_root="\$wasm_build\/workdir\/CustomTarget\/static\/emscripten_fs_image"/u,
+  );
+  assert.doesNotMatch(
+    script,
+    /workdir\/installation\/LibreOffice\/emscripten/u,
+  );
   assert.match(script, /\[\[ ! -f "\$wasm_configuration_marker" \]\]/u);
   assert.doesNotMatch(script, /\|\|\s*! -f "\$wasm_configuration_marker"/u);
 });

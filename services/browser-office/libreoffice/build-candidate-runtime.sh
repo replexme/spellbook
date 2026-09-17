@@ -230,13 +230,21 @@ if [[ ! -f "$wasm_filesystem_marker" ]]; then
   make -C "$wasm_build" desktop
 fi
 
-installation_root="$wasm_build/workdir/installation/LibreOffice/emscripten"
-for artifact in soffice.js soffice.data.js.metadata soffice.wasm soffice.data; do
-  if [[ ! -s "$installation_root/$artifact" ]]; then
-    echo "The WASM build did not produce $artifact." >&2
+program_root="$wasm_build/instdir/program"
+package_root="$wasm_build/workdir/CustomTarget/static/emscripten_fs_image"
+for artifact in soffice.js soffice.wasm; do
+  if [[ ! -s "$program_root/$artifact" ]]; then
+    echo "The WASM executable did not produce $artifact." >&2
     exit 1
   fi
-  install -m 0644 "$installation_root/$artifact" "$SPELLBOOK_BROWSER_OUTPUT_DIR/$artifact"
+  install -m 0644 "$program_root/$artifact" "$SPELLBOOK_BROWSER_OUTPUT_DIR/$artifact"
+done
+for artifact in soffice.data.js.metadata soffice.data; do
+  if [[ ! -s "$package_root/$artifact" ]]; then
+    echo "The WASM package did not produce $artifact." >&2
+    exit 1
+  fi
+  install -m 0644 "$package_root/$artifact" "$SPELLBOOK_BROWSER_OUTPUT_DIR/$artifact"
 done
 
 brotli --force --quality=11 "$SPELLBOOK_BROWSER_OUTPUT_DIR/soffice.wasm"
