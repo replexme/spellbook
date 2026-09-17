@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -90,10 +91,8 @@ try {
   };
 
   const before = await call({ operation: "observe" });
-  const patchLevelMatch = /^undo-v([1-9][0-9]*)$/.exec(
-    before.engine?.patchLevel ?? "",
-  );
-  if (!patchLevelMatch || Number(patchLevelMatch[1]) < 12)
+  const patchVersion = probeEnginePatchVersion(before.engine?.patchLevel);
+  if (patchVersion < 12)
     throw new Error("The slide-layout master repair is unavailable.");
   const slideIndex = before.activeSlide;
   const targetMaster = before.masters.find(
@@ -158,7 +157,7 @@ try {
     redone = await waitForState(next, `${command.op} Redo`);
     operations.push(command.op);
   };
-  if (Number(patchLevelMatch[1]) >= 22) {
+  if (patchVersion >= 22) {
     const currentWidth = redone.slides[0].width;
     const nextWidth =
       currentWidth < 99900 ? currentWidth + 100 : currentWidth - 100;

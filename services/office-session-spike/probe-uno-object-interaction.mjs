@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -100,10 +101,7 @@ try {
     });
 
   const before = await call({ operation: "observe" });
-  const patchLevelMatch = /^undo-v([1-9][0-9]*)$/.exec(
-    before.engine?.patchLevel ?? "",
-  );
-  if (!patchLevelMatch || Number(patchLevelMatch[1]) < 18)
+  if (probeEnginePatchVersion(before.engine?.patchLevel) < 18)
     throw new Error("The object-interaction engine candidate is unavailable.");
   if (before.slides.length < 2)
     throw new Error(

@@ -1,4 +1,5 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import {
@@ -65,10 +66,7 @@ try {
     if (!response.ok) throw new Error(value.error ?? `HTTP ${response.status}`);
     return value;
   }, detailSlideIndex);
-  const patchLevelMatch = /^undo-v([1-9][0-9]*)$/.exec(
-    observed.engine?.patchLevel ?? "",
-  );
-  if (!patchLevelMatch || Number(patchLevelMatch[1]) < 5)
+  if (probeEnginePatchVersion(observed.engine?.patchLevel) < 5)
     throw new Error(
       `Expected undo-v5 or newer, got ${observed.engine?.patchLevel}.`,
     );

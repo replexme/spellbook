@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { assertDocumentPersistenceDelta } from "./persistence-evidence.mjs";
@@ -49,10 +50,7 @@ try {
     if (!response.ok) throw new Error(value.error ?? `HTTP ${response.status}`);
     return value;
   });
-  const patchLevelMatch = /^undo-v([1-9][0-9]*)$/.exec(
-    observed.engine?.patchLevel ?? "",
-  );
-  if (!patchLevelMatch || Number(patchLevelMatch[1]) < 18)
+  if (probeEnginePatchVersion(observed.engine?.patchLevel) < 18)
     throw new Error(
       `Expected undo-v18 or newer, got ${observed.engine?.patchLevel}.`,
     );

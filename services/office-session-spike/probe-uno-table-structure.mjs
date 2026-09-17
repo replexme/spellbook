@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -175,10 +176,7 @@ try {
     slides: structuredClone(observed.slides),
     masters: structuredClone(observed.masters),
   };
-  const patchLevelMatch = /^undo-v([1-9][0-9]*)$/.exec(
-    observed.engine?.patchLevel ?? "",
-  );
-  if (!patchLevelMatch || Number(patchLevelMatch[1]) < 5)
+  if (probeEnginePatchVersion(observed.engine?.patchLevel) < 5)
     throw new Error("The table-structure engine candidate is unavailable.");
   const initialTable = observed.slides
     .flatMap((slide) => slide.elements)

@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -118,10 +119,7 @@ try {
   };
 
   let observed = await call({ operation: "observe" });
-  const patchLevelMatch = /^undo-v([1-9][0-9]*)$/.exec(
-    observed.engine?.patchLevel ?? "",
-  );
-  if (!patchLevelMatch || Number(patchLevelMatch[1]) < 24)
+  if (probeEnginePatchVersion(observed.engine?.patchLevel) < 24)
     throw new Error("The semantic feature engine candidate is unavailable.");
   const persistenceBefore = persistenceStateFromObservation(observed);
   const operations = [];

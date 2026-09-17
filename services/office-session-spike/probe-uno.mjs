@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -94,10 +95,9 @@ try {
 
   let observed = await call({ operation: "observe" });
   const persistenceBefore = persistenceStateFromObservation(observed);
-  const patchLevelMatch = /^undo-v([1-9][0-9]*)$/.exec(
-    observed.engine?.patchLevel ?? "",
+  const enginePatchVersion = probeEnginePatchVersion(
+    observed.engine?.patchLevel,
   );
-  const enginePatchVersion = patchLevelMatch ? Number(patchLevelMatch[1]) : 0;
   const engineOperationAvailable = (operation) => {
     const contract = nativeEditContract.mutationModel.operations[operation];
     return (
