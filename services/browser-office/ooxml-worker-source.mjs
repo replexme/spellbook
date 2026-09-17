@@ -2,6 +2,10 @@
 
 import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
+import {
+  classifyNativePackagePart,
+  nativePreservationBudget,
+} from "./native-preservation-policy.mjs";
 
 const presentationNamespace =
   "http://schemas.openxmlformats.org/presentationml/2006/main";
@@ -164,7 +168,9 @@ export function preserveOriginalPptxParts(
   originalBytes,
   noEditBytes,
   editedBytes,
+  sourceOperations,
 ) {
+  const budget = nativePreservationBudget(sourceOperations);
   for (const bytes of [originalBytes, noEditBytes, editedBytes]) {
     if (!(bytes instanceof Uint8Array) || bytes.byteLength > maximumInputBytes)
       throw new TypeError("Native snapshot inputs must be bounded PPTX bytes.");
@@ -190,6 +196,7 @@ export function preserveOriginalPptxParts(
   const merged = {};
   const changedParts = [];
   const suppressedNoopParts = [];
+  const suppressedOutOfBudgetParts = [];
   const paths = new Set([
     ...Object.keys(original),
     ...Object.keys(noEdit),
@@ -199,9 +206,17 @@ export function preserveOriginalPptxParts(
     // No current native command edits package core properties. Impress
     // updates modified time, lastModifiedBy and revision as a save side
     // effect, not as part of the requested slide/content mutation.
+    const engineChanged = !sameEngineExportPart(
+      part,
+      noEdit[part],
+      edited[part],
+    );
+    const withinBudget =
+      budget.allowedCategories.has(classifyNativePackagePart(part)) &&
+      (budget.allowPartCreationOrDeletion ||
+        Boolean(original[part]) === Boolean(edited[part]));
     const authoredChange =
-      part !== "docProps/core.xml" &&
-      !sameEngineExportPart(part, noEdit[part], edited[part]);
+      part !== "docProps/core.xml" && engineChanged && withinBudget;
     if (authoredChange && !part.endsWith(".rels")) {
       const related = relationshipsPath(part);
       if (
@@ -223,6 +238,7 @@ export function preserveOriginalPptxParts(
     if (!samePartBytes(original[part], selected)) changedParts.push(part);
     if (!authoredChange && !samePartBytes(original[part], noEdit[part]))
       suppressedNoopParts.push(part);
+    if (engineChanged && !withinBudget) suppressedOutOfBudgetParts.push(part);
   }
   const bytes = zipSync(merged, {
     level: 6,
@@ -238,7 +254,10 @@ export function preserveOriginalPptxParts(
         `Preserved native snapshot has a missing dependency: ${part}.`,
       );
   inspectOoxmlDocument(bytes);
-  return { bytes, report: { changedParts, suppressedNoopParts } };
+  return {
+    bytes,
+    report: { changedParts, suppressedNoopParts, suppressedOutOfBudgetParts },
+  };
 }
 
 export function applyOoxmlCommand(input, command) {
@@ -2177,8 +2196,15 @@ function relativePart(source, target) {
 
 if (typeof self !== "undefined")
   self.onmessage = (event) => {
-    const { requestId, bytes, command, operation, noEditBytes, editedBytes } =
-      event.data;
+    const {
+      requestId,
+      bytes,
+      command,
+      operation,
+      noEditBytes,
+      editedBytes,
+      sourceOperations,
+    } = event.data;
     try {
       if (operation === "inspect") {
         self.postMessage({
@@ -2190,6 +2216,7 @@ if (typeof self !== "undefined")
           new Uint8Array(bytes),
           new Uint8Array(noEditBytes),
           new Uint8Array(editedBytes),
+          sourceOperations,
         );
         self.postMessage(
           { requestId, bytes: result.bytes.buffer, report: result.report },

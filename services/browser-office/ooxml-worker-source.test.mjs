@@ -69,6 +69,7 @@ test("native snapshot reconciliation keeps the author's unrelated OOXML parts", 
     source,
     zipSync(noEdit),
     zipSync(edited),
+    ["replace_text"],
   );
   const merged = unzipSync(result.bytes);
   const original = unzipSync(source);
@@ -108,6 +109,7 @@ test("native snapshot reconciliation preserves the original implicit slide layou
     source,
     zipSync(noEdit),
     zipSync(edited),
+    ["replace_text"],
   );
   assert.deepEqual(result.report.changedParts, ["ppt/slides/slide1.xml"]);
   assert.deepEqual(
@@ -137,6 +139,7 @@ test("native snapshot keeps unrequested core metadata while committing slide edi
     source,
     zipSync(noEdit),
     zipSync(edited),
+    ["replace_text"],
   );
   const original = unzipSync(source);
   const preserved = unzipSync(result.bytes);
@@ -163,7 +166,10 @@ test("native snapshot reconciliation refuses a changed part with remapped refere
   );
   edited[relationshipPath] = noEdit[relationshipPath];
   assert.throws(
-    () => preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited)),
+    () =>
+      preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), [
+        "set_sections",
+      ]),
     /relationship remapping/u,
   );
 });
@@ -185,6 +191,7 @@ test("native snapshot comparison ignores generated field GUIDs but not field sem
     source,
     zipSync(noEdit),
     zipSync(edited),
+    ["replace_text"],
   );
   assert.deepEqual(guidOnly.report.changedParts, []);
   assert.deepEqual(unzipSync(guidOnly.bytes)[part], unzipSync(source)[part]);
@@ -196,8 +203,49 @@ test("native snapshot comparison ignores generated field GUIDs but not field sem
     source,
     zipSync(noEdit),
     zipSync(edited),
+    ["set_master_theme"],
   );
   assert.deepEqual(changedType.report.changedParts, [part]);
+
+  const unrelatedMasterChange = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    ["insert_table_rows"],
+  );
+  assert.deepEqual(unrelatedMasterChange.report.changedParts, []);
+  assert.deepEqual(unrelatedMasterChange.report.suppressedOutOfBudgetParts, [
+    part,
+  ]);
+  assert.deepEqual(
+    unzipSync(unrelatedMasterChange.bytes)[part],
+    unzipSync(source)[part],
+  );
+});
+
+test("native snapshot requires a known command and does not preserve unapproved parts", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const edited = unzipSync(source);
+  edited["customXml/unrequested.xml"] = strToU8("<unrequested/>");
+  assert.throws(
+    () => preserveOriginalPptxParts(source, source, zipSync(edited), []),
+    /bounded operation list/u,
+  );
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(source, source, zipSync(edited), [
+        "invented_edit",
+      ]),
+    /unknown operation/u,
+  );
+  const result = preserveOriginalPptxParts(source, source, zipSync(edited), [
+    "insert_table_rows",
+  ]);
+  assert.deepEqual(result.report.changedParts, []);
+  assert.deepEqual(result.report.suppressedOutOfBudgetParts, [
+    "customXml/unrequested.xml",
+  ]);
+  assert.equal(unzipSync(result.bytes)["customXml/unrequested.xml"], undefined);
 });
 
 test("native snapshot reconciliation rejects a missing package dependency", async () => {
@@ -211,7 +259,10 @@ test("native snapshot reconciliation rejects a missing package dependency", asyn
     ),
   );
   assert.throws(
-    () => preserveOriginalPptxParts(source, source, zipSync(edited)),
+    () =>
+      preserveOriginalPptxParts(source, source, zipSync(edited), [
+        "insert_image",
+      ]),
     /missing dependency/u,
   );
 });

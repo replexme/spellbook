@@ -5,6 +5,7 @@ import {
   documentStatesEquivalent,
   firstDocumentStateDifference,
   quantizedGeometryEquivalent,
+  undoDocumentStateEquivalent,
 } from "./document-state-evidence.mjs";
 
 test("document state treats two edge-quantization units as the same element outline", () => {
@@ -59,4 +60,26 @@ test("document state keeps meaningful geometry and non-geometry values exact", (
       [{ elements: [{ text: "after" }] }],
     ),
   );
+});
+
+test("Undo state ignores diagnostic master shape counts but keeps authored revision and slides", () => {
+  const expected = {
+    revision: "semantic-v1",
+    masters: [{ name: "Master", shapeCount: 4 }],
+    slides: [{ elements: [{ text: "Original" }] }],
+  };
+  const diagnosticDrift = structuredClone(expected);
+  diagnosticDrift.masters[0].shapeCount = 5;
+  assert.equal(undoDocumentStateEquivalent(expected, diagnosticDrift), true);
+
+  const authoredMasterChange = structuredClone(diagnosticDrift);
+  authoredMasterChange.revision = "semantic-v2";
+  assert.equal(
+    undoDocumentStateEquivalent(expected, authoredMasterChange),
+    false,
+  );
+
+  const slideChange = structuredClone(diagnosticDrift);
+  slideChange.slides[0].elements[0].text = "Changed";
+  assert.equal(undoDocumentStateEquivalent(expected, slideChange), false);
 });

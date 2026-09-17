@@ -460,7 +460,7 @@ function inspectPackage(bytes) {
   });
 }
 
-function preserveNativeSnapshot(original, noEdit, edited) {
+function preserveNativeSnapshot(original, noEdit, edited, sourceOperations) {
   const requestId = `ooxml-preserve-${++requestSequence}`;
   const source = original.slice();
   const baseline = noEdit.slice();
@@ -474,6 +474,7 @@ function preserveNativeSnapshot(original, noEdit, edited) {
         bytes: source.buffer,
         noEditBytes: baseline.buffer,
         editedBytes: candidate.buffer,
+        sourceOperations,
       },
       [source.buffer, baseline.buffer, candidate.buffer],
     );
@@ -576,6 +577,7 @@ async function inspectNativeDocumentBytes(bytes, detailSlideIndex) {
 async function preserveAndInspectNativeDocument(
   originalBytes,
   detailSlideIndex,
+  sourceOperations,
 ) {
   const serialized = await serializeNativeDocument();
   const noEdit = await normalizeNativeDocumentBytes(originalBytes);
@@ -583,6 +585,7 @@ async function preserveAndInspectNativeDocument(
     originalBytes,
     noEdit,
     serialized,
+    sourceOperations,
   );
   const bytes = new Uint8Array(preserved.bytes);
   const observation = await inspectNativeDocumentBytes(bytes, detailSlideIndex);
@@ -1377,6 +1380,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
       const preserved = await preserveAndInspectNativeDocument(
         prepared.beforeBytes,
         nativeValue.textDetails?.slideIndex,
+        prepared.sourceOperations,
       );
       afterBytes = preserved.bytes;
       preservationReport = preserved.report;

@@ -3,7 +3,10 @@ import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { documentStatesEquivalent } from "./document-state-evidence.mjs";
+import {
+  documentStatesEquivalent,
+  undoDocumentStateEquivalent,
+} from "./document-state-evidence.mjs";
 import {
   installNativeBridgeTrace,
   nativeBridgeDiagnostics,
@@ -124,19 +127,22 @@ try {
     let candidate;
     do {
       candidate = await call({ operation: "observe" });
-      if (
-        candidate.revision === expected.revision &&
-        documentStatesEquivalent(expected.slides, candidate.slides) &&
-        documentStatesEquivalent(expected.masters, candidate.masters)
-      )
-        return candidate;
+      if (undoDocumentStateEquivalent(expected, candidate)) return candidate;
       await page.waitForTimeout(100);
     } while (Date.now() < deadline);
     throw new Error(
       `${label} did not restore the exact document: ${JSON.stringify(
         firstDifference(
-          { slides: expected.slides, masters: expected.masters },
-          { slides: candidate?.slides, masters: candidate?.masters },
+          {
+            revision: expected.revision,
+            slides: expected.slides,
+            masters: expected.masters,
+          },
+          {
+            revision: candidate?.revision,
+            slides: candidate?.slides,
+            masters: candidate?.masters,
+          },
         ),
       )}`,
     );

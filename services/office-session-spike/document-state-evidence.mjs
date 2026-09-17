@@ -66,3 +66,14 @@ export function firstDocumentStateDifference(
 export function documentStatesEquivalent(expected, actual) {
   return firstDocumentStateDifference(expected, actual) === null;
 }
+
+// The native revision includes authored masters and sections but intentionally
+// excludes the diagnostic master shapeCount and transient UNO object handles.
+// Keep slide state exact for Undo/Redo while using that revision for the rest.
+export function undoDocumentStateEquivalent(expected, actual) {
+  return (
+    typeof expected?.revision === "string" &&
+    expected.revision === actual?.revision &&
+    documentStatesEquivalent(expected.slides, actual.slides)
+  );
+}
