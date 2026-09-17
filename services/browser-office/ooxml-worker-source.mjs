@@ -196,11 +196,12 @@ export function preserveOriginalPptxParts(
     ...Object.keys(edited),
   ]);
   for (const part of [...paths].sort()) {
-    const authoredChange = !sameEngineExportPart(
-      part,
-      noEdit[part],
-      edited[part],
-    );
+    // No current native command edits package core properties. Impress
+    // updates modified time, lastModifiedBy and revision as a save side
+    // effect, not as part of the requested slide/content mutation.
+    const authoredChange =
+      part !== "docProps/core.xml" &&
+      !sameEngineExportPart(part, noEdit[part], edited[part]);
     if (authoredChange && !part.endsWith(".rels")) {
       const related = relationshipsPath(part);
       if (

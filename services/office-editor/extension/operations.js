@@ -371,10 +371,14 @@ function spellbookDocumentOperation(request) {
           ["wholeTextFormatting.fontStyleAsian", "CharPostureAsian"],
           ["wholeTextFormatting.fontStyleComplex", "CharPostureComplex"],
           ["underline", "CharUnderline"],
+          ["wholeTextFormatting.underline", "CharUnderline"],
           ["strikethrough", "CharStrikeout"],
+          ["wholeTextFormatting.strikethrough", "CharStrikeout"],
           ["textShadow", "CharShadowed"],
           ["color", "CharColor"],
+          ["wholeTextFormatting.color", "CharColor"],
           ["paragraphAlignment", "ParaAdjust"],
+          ["wholeTextFormatting.paragraphAlignment", "ParaAdjust"],
           ["characterSpacing", "CharKerning"],
           ["scriptPosition.escapement", "CharEscapement"],
           ["scriptPosition.relativeHeight", "CharEscapementHeight"],
@@ -402,11 +406,17 @@ function spellbookDocumentOperation(request) {
         fontWeight: cursor.getPropertyValue("CharWeight"),
         fontWeightAsian: cursor.getPropertyValue("CharWeightAsian"),
         fontWeightComplex: cursor.getPropertyValue("CharWeightComplex"),
-        fontStyle: enumName(cursor.getPropertyValue("CharPosture")),
-        fontStyleAsian: enumName(cursor.getPropertyValue("CharPostureAsian")),
-        fontStyleComplex: enumName(
+        fontStyle: fontSlantName(cursor.getPropertyValue("CharPosture")),
+        fontStyleAsian: fontSlantName(
+          cursor.getPropertyValue("CharPostureAsian"),
+        ),
+        fontStyleComplex: fontSlantName(
           cursor.getPropertyValue("CharPostureComplex"),
         ),
+        underline: cursor.getPropertyValue("CharUnderline"),
+        strikethrough: cursor.getPropertyValue("CharStrikeout"),
+        color: cursor.getPropertyValue("CharColor"),
+        paragraphAlignment: cursor.getPropertyValue("ParaAdjust"),
         caseMap: cursor.getPropertyValue("CharCaseMap"),
         locale: localeDetails(cursor.getPropertyValue("CharLocale")),
         localeAsian: localeDetails(cursor.getPropertyValue("CharLocaleAsian")),
@@ -558,7 +568,7 @@ function spellbookDocumentOperation(request) {
             fontFamily: safeTextProperty(cell, "CharFontName"),
             fontSize: safeTextProperty(cell, "CharHeight"),
             fontWeight: safeTextProperty(cell, "CharWeight"),
-            fontStyle: enumName(safeTextProperty(cell, "CharPosture")),
+            fontStyle: fontSlantName(safeTextProperty(cell, "CharPosture")),
             underline: safeTextProperty(cell, "CharUnderline"),
             strikethrough: safeTextProperty(cell, "CharStrikeout"),
             textShadow: safeTextProperty(cell, "CharShadowed"),
@@ -702,11 +712,11 @@ function spellbookDocumentOperation(request) {
               fontWeight: safeProperty(portion, "CharWeight"),
               fontWeightAsian: safeProperty(portion, "CharWeightAsian"),
               fontWeightComplex: safeProperty(portion, "CharWeightComplex"),
-              fontStyle: enumName(safeProperty(portion, "CharPosture")),
-              fontStyleAsian: enumName(
+              fontStyle: fontSlantName(safeProperty(portion, "CharPosture")),
+              fontStyleAsian: fontSlantName(
                 safeProperty(portion, "CharPostureAsian"),
               ),
-              fontStyleComplex: enumName(
+              fontStyleComplex: fontSlantName(
                 safeProperty(portion, "CharPostureComplex"),
               ),
               underline: safeProperty(portion, "CharUnderline"),
@@ -835,6 +845,29 @@ function spellbookDocumentOperation(request) {
       .split(/[.:]/u)
       .at(-1)
       .toUpperCase();
+  // ZetaJS may expose the UNO FontSlant enum as its ordinal instead of its
+  // symbolic name. Normalize at the observation boundary so both the Office
+  // transaction and browser product compare the same typed meaning.
+  const fontSlantName = (value) => {
+    const names = [
+      "NONE",
+      "OBLIQUE",
+      "ITALIC",
+      "DONTKNOW",
+      "REVERSE_OBLIQUE",
+      "REVERSE_ITALIC",
+    ];
+    // ZetaJS represents UNO enumerators as opaque objects with a numeric
+    // (non-enumerable) value property; String(value) is [object Object].
+    if (value && typeof value === "object") {
+      const ordinal = Number(value.value);
+      if (Number.isInteger(ordinal) && ordinal >= 0 && ordinal < names.length)
+        return names[ordinal];
+    }
+    const token = enumToken(value);
+    if (/^[0-5]$/u.test(token)) return names[Number(token)];
+    return names.includes(token) ? token : null;
+  };
   const writingModeName = (value) => {
     const numeric = Number(value);
     if (Number.isInteger(numeric))
@@ -1572,7 +1605,7 @@ function spellbookDocumentOperation(request) {
             fontFamily: safeProperty(shape, "CharFontName"),
             fontSize: safeProperty(shape, "CharHeight"),
             fontWeight: safeProperty(shape, "CharWeight"),
-            fontStyle: enumName(safeProperty(shape, "CharPosture")),
+            fontStyle: fontSlantName(safeProperty(shape, "CharPosture")),
             underline: safeProperty(shape, "CharUnderline"),
             strikethrough: safeTextProperty(shape, "CharStrikeout"),
             textShadow: safeTextProperty(shape, "CharShadowed"),
@@ -1969,6 +2002,14 @@ function spellbookDocumentOperation(request) {
     const revisionMasters = masters.map(
       ({ shapeCount: _shapeCount, ...master }) => master,
     );
+    // A duplicated slide can receive a different UNO object handle after
+    // reopening the exact same PPTX. stableId is useful while the model is
+    // live, but it is not authored document identity and must not invalidate
+    // recovery or optimistic concurrency after a package round trip.
+    const revisionSlides = slides.map(({ elements, ...slide }) => ({
+      ...slide,
+      elements: elements.map(({ stableId: _stableId, ...element }) => element),
+    }));
     return {
       unit: "1/100mm",
       engine: {
@@ -1976,7 +2017,11 @@ function spellbookDocumentOperation(request) {
         supportedOperations: [...runtimeOperations],
       },
       styleCatalog,
-      revision: revisionOf({ slides, masters: revisionMasters, sections }),
+      revision: revisionOf({
+        slides: revisionSlides,
+        masters: revisionMasters,
+        sections,
+      }),
       masters,
       sections,
       slides,
@@ -7381,8 +7426,11 @@ function spellbookDocumentOperation(request) {
     if (!supported.includes(command.op)) throw new Error("unsupported_command");
     if (request.dryRun) return result(before, before.activeSlide);
 
-    const italic = (value) =>
-      value !== null && !String(value).toUpperCase().includes("NONE");
+    const italic = (value) => {
+      const slant = fontSlantName(value);
+      if (!slant || slant === "DONTKNOW") return null;
+      return slant !== "NONE";
+    };
     const underlined = (value) => Number(value ?? 0) !== 0;
     const struck = (value) => Number(value ?? 0) !== 0;
     const autofit = (value) =>
@@ -7471,15 +7519,18 @@ function spellbookDocumentOperation(request) {
                 : command.op === "italic"
                   ? typedTextFormattingMatches(before)
                   : command.op === "underline"
-                    ? underlined(element.underline) === command.underline
+                    ? underlined(wholeTextFormat(before)?.underline) ===
+                      command.underline
                     : command.op === "strikethrough"
-                      ? struck(element.strikethrough) === command.strikethrough
+                      ? struck(wholeTextFormat(before)?.strikethrough) ===
+                        command.strikethrough
                       : command.op === "text_shadow"
                         ? element.textShadow === command.shadow
                         : command.op === "font_family"
                           ? typedTextFormattingMatches(before)
                           : command.op === "font_color"
-                            ? element.color === Math.round(command.color)
+                            ? wholeTextFormat(before)?.color ===
+                              Math.round(command.color)
                             : command.op === "fill_color"
                               ? element.fill === Math.round(command.color)
                               : command.op === "line_color"
@@ -7722,15 +7773,18 @@ function spellbookDocumentOperation(request) {
                 : command.op === "italic"
                   ? typedTextFormattingMatches(after)
                   : command.op === "underline"
-                    ? underlined(target?.underline) === command.underline
+                    ? underlined(wholeTextFormat(after)?.underline) ===
+                      command.underline
                     : command.op === "strikethrough"
-                      ? struck(target?.strikethrough) === command.strikethrough
+                      ? struck(wholeTextFormat(after)?.strikethrough) ===
+                        command.strikethrough
                       : command.op === "text_shadow"
                         ? target?.textShadow === command.shadow
                         : command.op === "font_family"
                           ? typedTextFormattingMatches(after)
                           : command.op === "font_color"
-                            ? target?.color === Math.round(command.color)
+                            ? wholeTextFormat(after)?.color ===
+                              Math.round(command.color)
                             : command.op === "fill_color"
                               ? target?.fill === Math.round(command.color)
                               : command.op === "line_color"
@@ -8256,6 +8310,7 @@ function spellbookDocumentOperation(request) {
         after,
         affectedSlideIndexes,
         Math.min(after.activeSlide, after.slides.length - 1),
+        request.suppressCapture,
       );
       return {
         ...after,
@@ -8334,6 +8389,7 @@ function spellbookDocumentOperation(request) {
       after,
       affectedSlideIndexes,
       after.activeSlide,
+      request.suppressCapture,
     );
     return {
       ...after,

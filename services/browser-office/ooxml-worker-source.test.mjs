@@ -116,6 +116,37 @@ test("native snapshot reconciliation preserves the original implicit slide layou
   );
 });
 
+test("native snapshot keeps unrequested core metadata while committing slide edits", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const noEdit = unzipSync(source);
+  const edited = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "replace_text",
+      elementId: "0/0",
+      expectedText: "Spellbook 검증 العربية",
+      text: "Changed edit",
+    }).bytes,
+  );
+  edited["docProps/core.xml"] = strToU8(
+    strFromU8(edited["docProps/core.xml"]).replace(
+      "2026-01-01T00:00:00Z",
+      "2026-09-17T00:00:00Z",
+    ),
+  );
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+  );
+  const original = unzipSync(source);
+  const preserved = unzipSync(result.bytes);
+  assert.deepEqual(result.report.changedParts, ["ppt/slides/slide1.xml"]);
+  assert.deepEqual(
+    preserved["docProps/core.xml"],
+    original["docProps/core.xml"],
+  );
+});
+
 test("native snapshot reconciliation refuses a changed part with remapped references", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const noEdit = unzipSync(source);

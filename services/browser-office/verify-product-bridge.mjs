@@ -391,17 +391,19 @@ try {
       },
       {
         op: "underline",
-        command: { underline: Number(target.underline ?? 0) === 0 },
+        command: { underline: Number(formatting.underline ?? 0) === 0 },
         matches: (element) =>
-          (Number(element.underline ?? 0) !== 0) ===
-          (Number(target.underline ?? 0) === 0),
+          (Number(element.wholeTextFormatting?.underline ?? 0) !== 0) ===
+          (Number(formatting.underline ?? 0) === 0),
       },
       {
         op: "strikethrough",
-        command: { strikethrough: Number(target.strikethrough ?? 0) === 0 },
+        command: {
+          strikethrough: Number(formatting.strikethrough ?? 0) === 0,
+        },
         matches: (element) =>
-          (Number(element.strikethrough ?? 0) !== 0) ===
-          (Number(target.strikethrough ?? 0) === 0),
+          (Number(element.wholeTextFormatting?.strikethrough ?? 0) !== 0) ===
+          (Number(formatting.strikethrough ?? 0) === 0),
       },
       {
         op: "font_family",
@@ -411,19 +413,22 @@ try {
       },
       {
         op: "font_color",
-        command: { color: target.color === 0x0f766e ? 0xd97706 : 0x0f766e },
+        command: {
+          color: formatting.color === 0x0f766e ? 0xd97706 : 0x0f766e,
+        },
         matches: (element) =>
-          element.color === (target.color === 0x0f766e ? 0xd97706 : 0x0f766e),
+          element.wholeTextFormatting?.color ===
+          (formatting.color === 0x0f766e ? 0xd97706 : 0x0f766e),
       },
       {
         op: "paragraph_alignment",
         command: {
           alignment:
-            Number(target.paragraphAlignment) === 3 ? "left" : "center",
+            Number(formatting.paragraphAlignment) === 3 ? "left" : "center",
         },
         matches: (element) =>
-          Number(element.paragraphAlignment) ===
-          (Number(target.paragraphAlignment) === 3 ? 0 : 3),
+          Number(element.wholeTextFormatting?.paragraphAlignment) ===
+          (Number(formatting.paragraphAlignment) === 3 ? 0 : 3),
       },
     ];
     for (const edit of textFormattingEdits) {
@@ -1595,24 +1600,24 @@ function enduranceOperations(textTarget, geometryTarget) {
       command: {
         op: "underline",
         elementId: textTarget.elementId,
-        underline: Number(textTarget.underline ?? 0) === 0,
+        underline: Number(formatting.underline ?? 0) === 0,
       },
       target: "text",
       matches: (element) =>
-        (Number(element.underline ?? 0) !== 0) ===
-        (Number(textTarget.underline ?? 0) === 0),
+        (Number(element.wholeTextFormatting?.underline ?? 0) !== 0) ===
+        (Number(formatting.underline ?? 0) === 0),
     },
     {
       op: "strikethrough",
       command: {
         op: "strikethrough",
         elementId: textTarget.elementId,
-        strikethrough: Number(textTarget.strikethrough ?? 0) === 0,
+        strikethrough: Number(formatting.strikethrough ?? 0) === 0,
       },
       target: "text",
       matches: (element) =>
-        (Number(element.strikethrough ?? 0) !== 0) ===
-        (Number(textTarget.strikethrough ?? 0) === 0),
+        (Number(element.wholeTextFormatting?.strikethrough ?? 0) !== 0) ===
+        (Number(formatting.strikethrough ?? 0) === 0),
     },
     {
       op: "font_family",
@@ -1631,10 +1636,11 @@ function enduranceOperations(textTarget, geometryTarget) {
       command: {
         op: "font_color",
         elementId: textTarget.elementId,
-        color: alternateColor(textTarget.color),
+        color: alternateColor(formatting.color),
       },
       target: "text",
-      matches: (element) => element.color === alternateColor(textTarget.color),
+      matches: (element) =>
+        element.wholeTextFormatting?.color === alternateColor(formatting.color),
     },
     {
       op: "paragraph_alignment",
@@ -1642,12 +1648,12 @@ function enduranceOperations(textTarget, geometryTarget) {
         op: "paragraph_alignment",
         elementId: textTarget.elementId,
         alignment:
-          Number(textTarget.paragraphAlignment) === 3 ? "left" : "center",
+          Number(formatting.paragraphAlignment) === 3 ? "left" : "center",
       },
       target: "text",
       matches: (element) =>
-        Number(element.paragraphAlignment) ===
-        (Number(textTarget.paragraphAlignment) === 3 ? 0 : 3),
+        Number(element.wholeTextFormatting?.paragraphAlignment) ===
+        (Number(formatting.paragraphAlignment) === 3 ? 0 : 3),
     },
   ];
 }

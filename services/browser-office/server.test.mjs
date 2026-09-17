@@ -48,6 +48,16 @@ test("browser Office routes preserve isolation, asset identity and encodings", (
 
 test("every static harness import in the workspace entrypoint is served", () => {
   const routes = buildRoutes();
+  const document = readFileSync(
+    new URL("./harness/index.html", import.meta.url),
+    "utf8",
+  );
+  assert.match(document, /src="\/runtime\/browser-candidate\.js"/u);
+  assert.ok(
+    document.indexOf('src="/runtime/browser-candidate.js"') <
+      document.indexOf('src="/harness/app.js"'),
+    "Product capability checks must receive the same candidate identity as the Office worker.",
+  );
   const entrypoint = readFileSync(
     new URL("./harness/app.js", import.meta.url),
     "utf8",

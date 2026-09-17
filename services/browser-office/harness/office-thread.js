@@ -409,9 +409,19 @@ function openDocument(path, requestId) {
 }
 
 function reportError(error, requestId) {
+  let message = error instanceof Error ? error.message : String(error);
+  if (error instanceof WebAssembly.Exception) {
+    try {
+      const native = zetajs.catchUnoException(error);
+      const type = String(zetajs.getAnyType(native));
+      message = `${type}:${String(native?.Message ?? native?.message ?? message)}`;
+    } catch {
+      // A WASM trap need not be a UNO exception. Retain the original error.
+    }
+  }
   post("error", {
     requestId,
-    message: error instanceof Error ? error.message : String(error),
+    message,
   });
 }
 
