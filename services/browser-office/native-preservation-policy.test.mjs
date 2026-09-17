@@ -47,7 +47,14 @@ test("browser preservation budget comes from operation families", () => {
 
   const design = nativePreservationBudget(["set_master_theme"]);
   assert.ok(design.allowedCategories.has("slide_master_parts"));
+  assert.ok(design.allowedCategories.has("slide_layout_relationships"));
+  assert.ok(design.allowedCategories.has("presentation_relationships"));
+  assert.equal(design.allowPartCreationOrDeletion, true);
   assert.equal(design.allowedCategories.has("unknown"), false);
+
+  const size = nativePreservationBudget(["set_slide_size"]);
+  assert.deepEqual([...size.allowedCategories], ["presentation", "slide_parts"]);
+  assert.equal(size.allowedCategories.has("slide_master_parts"), false);
 
   const image = nativePreservationBudget(["insert_image"]);
   assert.ok(image.allowedCategories.has("media_parts"));

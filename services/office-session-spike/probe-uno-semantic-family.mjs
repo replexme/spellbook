@@ -3,7 +3,17 @@ import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { persistenceStateFromObservation } from "./persistence-evidence.mjs";
+import {
+  firstPersistenceDifference,
+  persistenceStateFromObservation,
+} from "./persistence-evidence.mjs";
+import { undoDocumentStateEquivalent } from "./document-state-evidence.mjs";
+import {
+  PROBE_IMAGE_ASSET_ID as IMAGE_ASSET_ID,
+  PROBE_MEDIA_ASSET_ID as MEDIA_ASSET_ID,
+  PROBE_REPLACEMENT_IMAGE_ASSET_ID as REPLACEMENT_IMAGE_ASSET_ID,
+  PROBE_REPLACEMENT_MEDIA_ASSET_ID as REPLACEMENT_MEDIA_ASSET_ID,
+} from "./probe-assets.mjs";
 
 const require = createRequire(
   new URL("../../apps/web/package.json", import.meta.url),
@@ -35,10 +45,6 @@ if (
     "SPELLBOOK_PROBE_EXPECTED_OPERATIONS must be a JSON string array.",
   );
 
-const IMAGE_ASSET_ID = "00000000-0000-4000-8000-000000000001";
-const MEDIA_ASSET_ID = "00000000-0000-4000-8000-000000000002";
-const REPLACEMENT_IMAGE_ASSET_ID = "00000000-0000-4000-8000-000000000003";
-const REPLACEMENT_MEDIA_ASSET_ID = "00000000-0000-4000-8000-000000000004";
 const stable = (value) => JSON.stringify(value);
 const browser = await chromium.launch({ headless: true });
 
@@ -104,9 +110,7 @@ try {
       direction,
     );
   };
-  const sameDocument = (left, right) =>
-    stable(left.slides) === stable(right.slides) &&
-    stable(left.masters) === stable(right.masters);
+  const sameDocument = undoDocumentStateEquivalent;
   const waitForState = async (expected, label) => {
     const stop = Date.now() + 10_000;
     let actual;
@@ -115,7 +119,11 @@ try {
       if (sameDocument(actual, expected)) return actual;
       await page.waitForTimeout(100);
     } while (Date.now() < stop);
-    throw new Error(`${label} did not restore the exact observed document.`);
+    const difference = firstPersistenceDifference(
+      { slides: expected.slides, masters: expected.masters },
+      { slides: actual?.slides, masters: actual?.masters },
+    );
+    throw new Error(`${label} did not restore the exact observed document: ${JSON.stringify(difference)}`);
   };
 
   let observed = await call({ operation: "observe" });

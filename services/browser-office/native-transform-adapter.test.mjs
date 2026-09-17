@@ -389,6 +389,8 @@ test("browser runtime decodes image and media assets without exposing model URLs
     assert.match(officeThreadSource, new RegExp(`"${operation}"`, "u"));
   assert.match(officeThreadSource, /assetSignatureIsValid/u);
   assert.match(officeThreadSource, /GraphicProvider\.create/u);
+  assert.match(officeThreadSource, /SequenceInputStream\.createStreamFromSequence/u);
+  assert.match(officeThreadSource, /property\(\s*"InputStream"/u);
   assert.match(officeThreadSource, /dispatch\("InsertAVMedia"/u);
   assert.match(officeThreadSource, /"SpellbookReplaceObject"/u);
   assert.match(officeThreadSource, /FS\.unlink\(path\)/u);

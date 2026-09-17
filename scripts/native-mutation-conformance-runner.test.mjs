@@ -152,6 +152,13 @@ test("change budgets are derived from executed operation families and identity e
       "slide_relationships",
     ),
   );
+  const size = buildChangeBudget(capabilities, ["set_slide_size"], null);
+  assert.deepEqual(size.allowedCategories, ["presentation", "slide_parts"]);
+  assert.equal(size.allowPartCreationOrDeletion, false);
+  const theme = buildChangeBudget(capabilities, ["set_master_theme"], null);
+  assert.equal(theme.allowPartCreationOrDeletion, true);
+  assert.ok(theme.allowedCategories.includes("slide_layout_relationships"));
+  assert.ok(theme.allowedCategories.includes("slide_master_relationships"));
 });
 
 test("a notes-only mutation may create the package infrastructure required by OOXML", () => {

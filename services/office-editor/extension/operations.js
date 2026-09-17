@@ -507,6 +507,13 @@ function spellbookDocumentOperation(request) {
     return null;
   };
   const documentStateJson = stableJson;
+  const transactionState = (state) => ({
+    slides: state.slides,
+    masters: state.masters,
+  });
+  const transactionChanged = (before, after) =>
+    documentStateJson(transactionState(before)) !==
+    documentStateJson(transactionState(after));
   const revisionOf = (value) => {
     const text = documentStateJson(value);
     let first = 2166136261;
@@ -3051,8 +3058,7 @@ function spellbookDocumentOperation(request) {
                             )
                           : after.slides[pageIndexAfter()]?.backgroundColor ===
                             command.color;
-      const changed =
-        documentStateJson(before.slides) !== documentStateJson(after.slides);
+      const changed = transactionChanged(before, after);
       if (
         !applied ||
         (changed &&
@@ -8278,8 +8284,7 @@ function spellbookDocumentOperation(request) {
         ({ reference, visible }) =>
           safeProperty(reference, "Visible") === visible,
       );
-      const changed =
-        documentStateJson(before.slides) !== documentStateJson(after.slides);
+      const changed = transactionChanged(before, after);
       const undoActionsAdded = undo.getAllUndoActionTitles().length - undoCount;
       if (
         !orderApplied ||
@@ -8358,12 +8363,9 @@ function spellbookDocumentOperation(request) {
     } catch (error) {
       while (undo.getAllUndoActionTitles().length > undoCount) undo.undo();
       const rolledBack = read();
-      if (
-        documentStateJson(rolledBack.slides) !==
-        documentStateJson(before.slides)
-      )
+      if (transactionChanged(before, rolledBack))
         throw new Error(
-          `transaction_rollback_failed:${error.message}:${firstDifferencePath(before.slides, rolledBack.slides) ?? "unknown"}:expected_${before.revision}:actual_${rolledBack.revision}`,
+          `transaction_rollback_failed:${error.message}:${firstDifferencePath(transactionState(before), transactionState(rolledBack)) ?? "unknown"}:expected_${before.revision}:actual_${rolledBack.revision}`,
         );
       throw error;
     }
@@ -8402,8 +8404,7 @@ function spellbookDocumentOperation(request) {
     undo.leaveUndoContext();
     contextOpen = false;
     const after = read();
-    const changed =
-      documentStateJson(before.slides) !== documentStateJson(after.slides);
+    const changed = transactionChanged(before, after);
     if (changed && undo.getAllUndoActionTitles().length <= undoCount)
       throw new Error("transaction_undo_not_recorded");
     const affectedSlideIndexes = request.commands.flatMap((command) => {
@@ -8442,11 +8443,9 @@ function spellbookDocumentOperation(request) {
     }
     while (undo.getAllUndoActionTitles().length > undoCount) undo.undo();
     const rolledBack = read();
-    if (
-      documentStateJson(rolledBack.slides) !== documentStateJson(before.slides)
-    )
+    if (transactionChanged(before, rolledBack))
       throw new Error(
-        `transaction_rollback_failed:${error.message}:${firstDifferencePath(before.slides, rolledBack.slides) ?? "unknown"}:expected_${before.revision}:actual_${rolledBack.revision}`,
+        `transaction_rollback_failed:${error.message}:${firstDifferencePath(transactionState(before), transactionState(rolledBack)) ?? "unknown"}:expected_${before.revision}:actual_${rolledBack.revision}`,
       );
     throw error;
   }

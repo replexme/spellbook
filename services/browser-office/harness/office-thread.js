@@ -212,17 +212,32 @@ function mutateAsset(request) {
   const undo = model.getUndoManager();
   const undoCount = undo.getAllUndoActionTitles().length;
   let contextOpen = false;
+  let phase = "prepare_asset";
   try {
-    FS.writeFile(path, new Uint8Array(assetBytes));
+    if (!isImage) {
+      FS.mkdirTree("/tmp/spellbook");
+      phase = "write_asset";
+      FS.writeFile(path, new Uint8Array(assetBytes));
+    }
+    phase = "create_shape";
     const page = model.getDrawPages().getByIndex(slideIndex);
     const pageWidth = Number(page.getPropertyValue("Width")) || 28_000;
     const pageHeight = Number(page.getPropertyValue("Height")) || 15_750;
     undo.enterUndoContext(isImage ? "AI image edit" : "AI media edit");
     contextOpen = true;
+    const inputStream = () =>
+      css.io.SequenceInputStream.createStreamFromSequence(
+        context,
+        [...new Int8Array(assetBytes)],
+      );
     if (isImage) {
       const provider = css.graphic.GraphicProvider.create(context);
       const graphic = provider.queryGraphic([
-        property("URL", zetajs.type.string, `file://${path}`),
+        property(
+          "InputStream",
+          zetajs.type.interface(css.io.XInputStream),
+          inputStream(),
+        ),
       ]);
       if (!graphic) throw new Error("asset_decode_failed");
       const shape = model.createInstance(
@@ -258,6 +273,7 @@ function mutateAsset(request) {
       ]);
     }
     const insertedState = observeDocument();
+    phase = "verify_insert";
     const beforeStableIds = new Set(
       before.slides[slideIndex].elements.map((element) => element.stableId),
     );
@@ -279,7 +295,15 @@ function mutateAsset(request) {
       !otherSlidesUnchanged ||
       !String(inserted[0].kind).endsWith(expectedKind)
     )
-      throw new Error("asset_insert_readback_failed");
+      throw new Error(`asset_insert_readback_failed:${JSON.stringify({
+        operation,
+        expectedKind,
+        insertedKinds: inserted.map((element) => element.kind),
+        beforeCount: before.slides[slideIndex].elements.length,
+        afterCount: insertedState.slides[slideIndex].elements.length,
+        nativeCountAfterObserve: page.getCount(),
+        otherSlidesUnchanged,
+      })}`);
     const replacementTarget = operation.startsWith("replace_")
       ? before.slides[slideIndex].elements.find(
           (element) => element.elementId === elementId,
@@ -305,6 +329,7 @@ function mutateAsset(request) {
     }
     undo.leaveUndoContext();
     contextOpen = false;
+    phase = "verify_final";
     const after = observeDocument({
       detailSlideIndex: slideIndex,
       captureSlideIndexes: [slideIndex],
@@ -370,11 +395,16 @@ function mutateAsset(request) {
       throw new Error(
         `asset_rollback_failed:${error instanceof Error ? error.message : String(error)}`,
       );
-    throw error;
+    throw new Error(
+      `asset_${phase}:${error instanceof Error ? error.message || error.name : String(error)}`,
+      { cause: error },
+    );
   } finally {
-    try {
-      FS.unlink(path);
-    } catch {}
+    if (!isImage) {
+      try {
+        FS.unlink(path);
+      } catch {}
+    }
   }
 }
 
@@ -420,6 +450,11 @@ function reportError(error, requestId) {
       // A WASM trap need not be a UNO exception. Retain the original error.
     }
   }
+  if (!message)
+    message =
+      error instanceof Error
+        ? `${error.name || "Error"}:${error.stack || "no_stack"}`
+        : `Unknown native error: ${Object.prototype.toString.call(error)}`;
   post("error", {
     requestId,
     message,

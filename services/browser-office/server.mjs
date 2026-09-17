@@ -7,6 +7,7 @@ import {
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { probeAssets } from "../office-session-spike/probe-assets.mjs";
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
@@ -183,6 +184,11 @@ export function buildRoutes(
         "text/html; charset=utf-8",
       ),
     );
+    for (const [assetId, asset] of probeAssets)
+      routes.set(
+        `/fixtures/probe-assets/${assetId}`,
+        inlineRoute(asset.bytes, asset.mediaType),
+      );
   }
 
   for (const asset of upstream.runtimeAssets) {

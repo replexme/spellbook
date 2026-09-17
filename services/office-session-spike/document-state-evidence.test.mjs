@@ -33,6 +33,20 @@ test("document state treats two edge-quantization units as the same element outl
   assert.equal(quantizedGeometryEquivalent(1_000, 999), true);
   assert.equal(quantizedGeometryEquivalent(1_000, 998), true);
   assert.equal(quantizedGeometryEquivalent(1_000, 997), false);
+  assert.equal(
+    firstDocumentStateDifference(
+      [{ width: 33_967, height: 19_050 }],
+      [{ width: 33_968, height: 19_050 }],
+    ),
+    null,
+  );
+  assert.deepEqual(
+    firstDocumentStateDifference(
+      [{ width: 33_967 }],
+      [{ width: 33_970 }],
+    ),
+    { path: "slides[0].width", expected: 33_967, actual: 33_970 },
+  );
 });
 
 test("document state keeps meaningful geometry and non-geometry values exact", () => {

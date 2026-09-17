@@ -17,6 +17,7 @@ export function quantizedGeometryEquivalent(expected, actual) {
 
 function isQuantizedGeometryPath(path) {
   return (
+    /(?:^|\.)(?:slides|masters)\[\d+\]\.(?:width|height)$/.test(path) ||
     /\.elements\[\d+\]\.(?:x|y|width|height)$/.test(path) ||
     /\.table\.(?:rowHeights|columnWidths)\[\d+\]$/.test(path)
   );
@@ -24,7 +25,7 @@ function isQuantizedGeometryPath(path) {
 
 /**
  * Finds the first user-visible document-state difference. LibreOffice stores
- * shape and table geometry in hundredths of a millimetre, and some native
+ * slide, master, shape and table geometry in hundredths of a millimetre, and some native
  * model round trips quantize the two edges of a calculated extent by at most
  * two units. That 0.02 mm is below a verification pixel and is treated as the
  * same outline; every structural,

@@ -53,7 +53,7 @@ export function nativePreservationBudget(operations) {
     operations.length > 50
   )
     throw new Error("Native snapshot needs a bounded operation list.");
-  const families = new Set();
+  const allowedCategories = new Set();
   let allowPartCreationOrDeletion = false;
   for (const operation of operations) {
     const contract = capabilities.mutationModel.operations[operation];
@@ -61,17 +61,17 @@ export function nativePreservationBudget(operations) {
       throw new Error(
         `Native snapshot has an unknown operation: ${operation}.`,
       );
-    families.add(contract.family);
+    const family = capabilities.mutationModel.families[contract.family];
+    const categories = contract.changeBudget ?? family?.changeBudget;
+    if (!Array.isArray(categories))
+      throw new Error(`Native snapshot has no change budget: ${operation}.`);
+    for (const category of categories) allowedCategories.add(category);
     if (["create", "delete"].includes(contract.identityEffect))
       allowPartCreationOrDeletion = true;
-  }
-  const allowedCategories = new Set();
-  for (const familyName of families) {
-    const family = capabilities.mutationModel.families[familyName];
-    if (!family || !Array.isArray(family.changeBudget))
-      throw new Error(`Native snapshot has no change budget: ${familyName}.`);
-    for (const category of family.changeBudget) allowedCategories.add(category);
-    if (family.allowPartCreationOrDeletion === true)
+    if (
+      contract.allowPartCreationOrDeletion === true ||
+      family?.allowPartCreationOrDeletion === true
+    )
       allowPartCreationOrDeletion = true;
   }
   return { allowedCategories, allowPartCreationOrDeletion };

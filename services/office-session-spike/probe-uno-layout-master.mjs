@@ -3,6 +3,7 @@ import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
+import { undoDocumentStateEquivalent } from "./document-state-evidence.mjs";
 
 const require = createRequire(
   new URL("../../apps/web/package.json", import.meta.url),
@@ -80,11 +81,7 @@ try {
     let observed;
     do {
       observed = await call({ operation: "observe" });
-      if (
-        observed.revision === expected.revision &&
-        stable(observed.slides) === stable(expected.slides) &&
-        stable(observed.masters) === stable(expected.masters)
-      )
+      if (undoDocumentStateEquivalent(expected, observed))
         return observed;
       await page.waitForTimeout(100);
     } while (Date.now() < stop);
@@ -151,7 +148,12 @@ try {
       next.transaction?.undoActionsAdded !== 1 ||
       nextHistory.undo.length !== priorHistory.undo.length + 1
     )
-      throw new Error(`${command.op} did not apply as one native Undo action.`);
+      throw new Error(`${command.op} did not apply as one native Undo action: ${JSON.stringify({
+        revisionChanged: next.revision !== prior.revision,
+        transaction: next.transaction ?? null,
+        undoBefore: priorHistory.undo.length,
+        undoAfter: nextHistory.undo.length,
+      })}`);
     await history("undo");
     await waitForState(prior, `${command.op} Undo`);
     await history("redo");

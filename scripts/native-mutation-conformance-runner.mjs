@@ -172,27 +172,25 @@ export function buildChangeBudget(
     throw new Error(
       `Mutation report contains unknown operations: ${unknown.join(", ")}`,
     );
-  const families = sortedUnique(
-    operations.map(
-      (operation) => capabilities.mutationModel.operations[operation].family,
-    ),
-  );
   const allowedCategories = sortedUnique(
-    families.flatMap(
-      (family) => capabilities.mutationModel.families[family].changeBudget,
-    ),
+    operations.flatMap((operation) => {
+      const definition = capabilities.mutationModel.operations[operation];
+      return (
+        definition.changeBudget ??
+        capabilities.mutationModel.families[definition.family].changeBudget
+      );
+    }),
   );
   const allowPartCreationOrDeletion =
-    families.some(
-      (family) =>
-        capabilities.mutationModel.families[family]
-          .allowPartCreationOrDeletion === true,
-    ) ||
-    operations.some((operation) =>
-      ["create", "delete"].includes(
-        capabilities.mutationModel.operations[operation].identityEffect,
-      ),
-    );
+    operations.some((operation) => {
+      const definition = capabilities.mutationModel.operations[operation];
+      return (
+        definition.allowPartCreationOrDeletion === true ||
+        capabilities.mutationModel.families[definition.family]
+          .allowPartCreationOrDeletion === true ||
+        ["create", "delete"].includes(definition.identityEffect)
+      );
+    });
   return {
     contractVersion: "1.0",
     allowedCategories,

@@ -220,6 +220,14 @@ test("delta comparison accepts only two-edge quantization on persisted geometry"
     null,
   );
   assert.equal(compareAt("$.slides[0].elements[0].height", 1002), null);
+  assert.equal(compareAt("$.masters[0].width", 1001), null);
+  assert.equal(compareAt("$.slides[0].height", 1002), null);
+  assert.deepEqual(compareAt("$.masters[0].width", 1003), {
+    path: "$.masters[0].width",
+    expected: 1000,
+    observed: 1003,
+    invariant: "intended-change",
+  });
   assert.deepEqual(compareAt("$.slides[0].elements[0].height", 1003), {
     path: "$.slides[0].elements[0].height",
     expected: 1000,

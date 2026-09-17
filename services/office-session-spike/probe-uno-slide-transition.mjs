@@ -4,6 +4,7 @@ import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { verifySlideshowPlayback } from "./slideshow-playback.mjs";
+import { undoDocumentStateEquivalent } from "./document-state-evidence.mjs";
 
 const require = createRequire(
   new URL("../../apps/web/package.json", import.meta.url),
@@ -88,10 +89,7 @@ try {
     let observed;
     do {
       observed = await call({ operation: "observe" });
-      if (
-        stable(observed.slides) === stable(expected.slides) &&
-        stable(observed.masters) === stable(expected.masters)
-      )
+      if (undoDocumentStateEquivalent(expected, observed))
         return observed;
       await page.waitForTimeout(100);
     } while (Date.now() < stop);

@@ -363,7 +363,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 22
+        "minEnginePatch": 22,
+        "changeBudget": ["presentation", "slide_parts"]
       },
       "set_master_theme": {
         "family": "document_design",
@@ -371,7 +372,17 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 22
+        "minEnginePatch": 22,
+        "allowPartCreationOrDeletion": true,
+        "changeBudget": [
+          "package_manifest",
+          "presentation",
+          "presentation_relationships",
+          "slide_master_parts",
+          "slide_master_relationships",
+          "slide_layout_relationships",
+          "theme_parts"
+        ]
       },
       "set_speaker_notes": {
         "family": "speaker_notes",

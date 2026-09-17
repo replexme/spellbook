@@ -10,6 +10,10 @@ import {
   configuredServerPort,
   createHarnessServer,
 } from "./server.mjs";
+import {
+  PROBE_IMAGE_ASSET_ID,
+  probeAssetForId,
+} from "../office-session-spike/probe-assets.mjs";
 
 const upstream = JSON.parse(
   readFileSync(new URL("./upstream.json", import.meta.url), "utf8"),
@@ -106,6 +110,20 @@ test("candidate verification routes raw artifacts and an in-memory identity", ()
   assert.equal(
     routes.get("/runtime/zeta.js").file,
     path.join(import.meta.dirname, "runtime/zeta.js"),
+  );
+});
+
+test("browser probe serves the same bounded asset fixture as the native probe", () => {
+  const routes = buildRoutes(import.meta.dirname, upstream, {
+    browserProbeSource: "source.pptx",
+  });
+  const target = routes.get(`/fixtures/probe-assets/${PROBE_IMAGE_ASSET_ID}`);
+  assert.ok(target);
+  assert.equal(target.headers["Content-Type"], "image/png");
+  assert.deepEqual(target.body, probeAssetForId(PROBE_IMAGE_ASSET_ID).bytes);
+  assert.equal(
+    buildRoutes().has(`/fixtures/probe-assets/${PROBE_IMAGE_ASSET_ID}`),
+    false,
   );
 });
 

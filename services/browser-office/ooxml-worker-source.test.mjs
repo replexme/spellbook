@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import { DOMParser } from "@xmldom/xmldom";
+import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 
 import {
   applyOoxmlCommand,
@@ -186,6 +186,55 @@ test("native snapshot refuses an ambiguous slide layout identity", async () => {
   assert.ok(original[target]);
 });
 
+test("native slide size patch preserves original presentation relationships and unrelated XML", async () => {
+  const source = new Uint8Array(
+    await readFile(
+      new URL("../../eval/public/downloads/lo-master-layouts.pptx", import.meta.url),
+    ),
+  );
+  const original = unzipSync(source);
+  const noEdit = unzipSync(source);
+  const presentation = "ppt/presentation.xml";
+  const relationships = "ppt/_rels/presentation.xml.rels";
+  noEdit[presentation] = strToU8(
+    strFromU8(noEdit[presentation]).replace('r:id="rId2"', 'r:id="rId13"'),
+  );
+  noEdit[relationships] = strToU8(
+    strFromU8(noEdit[relationships]).replace('Id="rId2"', 'Id="rId13"'),
+  );
+  const edited = unzipSync(zipSync(noEdit));
+  const originalXml = strFromU8(original[presentation]);
+  assert.match(originalXml, /<p:sldSz cx="12192000" cy="6858000"\/>/u);
+  edited[presentation] = strToU8(
+    strFromU8(edited[presentation]).replace('cx="12192000"', 'cx="12228513"'),
+  );
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    ["set_slide_size"],
+  );
+  const merged = unzipSync(result.bytes);
+  assert.equal(
+    strFromU8(merged[presentation]),
+    originalXml.replace('cx="12192000"', 'cx="12228513"'),
+  );
+  assert.deepEqual(merged[relationships], original[relationships]);
+  assert.deepEqual(result.report.changedParts, [presentation]);
+  assert.deepEqual(result.report.semanticPatchedParts, [presentation]);
+
+  edited[presentation] = strToU8(
+    strFromU8(edited[presentation]).replace('cy="9144000"', 'cy="9144001"'),
+  );
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), [
+        "set_slide_size",
+      ]),
+    /also changed other presentation fields/u,
+  );
+});
+
 test("native snapshot keeps unrequested core metadata while committing slide edits", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const noEdit = unzipSync(source);
@@ -267,13 +316,10 @@ test("native snapshot comparison ignores generated field GUIDs but not field sem
   edited[part] = strToU8(
     strFromU8(edited[part]).replace('type="slidenum"', 'type="datetime"'),
   );
-  const changedType = preserveOriginalPptxParts(
-    source,
-    zipSync(noEdit),
-    zipSync(edited),
-    ["set_master_theme"],
+  assert.throws(
+    () => preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), ["set_master_theme"]),
+    /exactly one edited master theme/u,
   );
-  assert.deepEqual(changedType.report.changedParts, [part]);
 
   const unrelatedMasterChange = preserveOriginalPptxParts(
     source,
@@ -288,6 +334,56 @@ test("native snapshot comparison ignores generated field GUIDs but not field sem
   assert.deepEqual(
     unzipSync(unrelatedMasterChange.bytes)[part],
     unzipSync(source)[part],
+  );
+});
+
+test("master theme edit splits only the selected original layout and retains unrelated theme bytes", async () => {
+  const source = new Uint8Array(await readFile(new URL(
+    "../../eval/public/downloads/lo-master-layouts.pptx", import.meta.url,
+  )));
+  const original = unzipSync(source);
+  const noEdit = unzipSync(source);
+  const master = "ppt/slideMasters/slideMaster1.xml";
+  const masterRels = "ppt/slideMasters/_rels/slideMaster1.xml.rels";
+  const normalizedMaster = "ppt/slideMasters/slideMaster2.xml";
+  const normalizedRels = "ppt/slideMasters/_rels/slideMaster2.xml.rels";
+  const theme = "ppt/theme/theme2.xml";
+  noEdit[normalizedMaster] = original[master].slice();
+  const rels = new DOMParser().parseFromString(strFromU8(original[masterRels]), "application/xml");
+  for (const relationship of [...rels.getElementsByTagName("Relationship")]) {
+    const target = relationship.getAttribute("Target");
+    if (target?.endsWith("theme1.xml"))
+      relationship.setAttribute("Target", "../theme/theme2.xml");
+    else if (target?.includes("slideLayout") && !target.endsWith("slideLayout10.xml"))
+      relationship.parentNode.removeChild(relationship);
+  }
+  noEdit[normalizedRels] = strToU8(new XMLSerializer().serializeToString(rels));
+  const edited = unzipSync(zipSync(noEdit));
+  edited[theme] = strToU8(strFromU8(edited[theme])
+    .replace('name="Office Theme"', 'name="Spellbook verified theme"')
+    .replace(/(<a:accent1>\s*<a:srgbClr val=")[^"]+/u, "$14f46e5"));
+  const result = preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), ["set_master_theme"]);
+  const merged = unzipSync(result.bytes);
+  const clonedMaster = result.report.changedParts.find((part) =>
+    part.startsWith("ppt/slideMasters/slideMaster1-spellbook-") && part.endsWith(".xml"),
+  );
+  const clonedTheme = result.report.changedParts.find((part) =>
+    part.startsWith("ppt/theme/theme1-spellbook-") && part.endsWith(".xml"),
+  );
+  assert.ok(clonedMaster);
+  assert.ok(clonedTheme);
+  assert.deepEqual(merged["ppt/theme/theme1.xml"], original["ppt/theme/theme1.xml"]);
+  assert.match(strFromU8(merged[clonedTheme]), /Spellbook verified theme/u);
+  assert.match(strFromU8(merged[clonedTheme]), /4f46e5/u);
+  assert.match(strFromU8(merged["ppt/slideLayouts/_rels/slideLayout10.xml.rels"]), /slideMaster1-spellbook-/u);
+  assert.deepEqual(merged["ppt/slideLayouts/_rels/slideLayout2.xml.rels"], original["ppt/slideLayouts/_rels/slideLayout2.xml.rels"]);
+  assert.ok(result.report.semanticPatchedParts.includes(clonedMaster));
+  edited[theme] = strToU8(strFromU8(edited[theme]).replace(
+    'fmtScheme name="Office"', 'fmtScheme name="Unrequested"',
+  ));
+  assert.throws(
+    () => preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), ["set_master_theme"]),
+    /non-theme mutation/u,
   );
 });
 

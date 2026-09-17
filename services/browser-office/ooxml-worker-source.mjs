@@ -230,6 +230,321 @@ function remapAuthoredRelationships(part, bytes, original, noEdit) {
   return changed ? serializeXml(document) : bytes;
 }
 
+function directXmlChild(parent, namespace, localName) {
+  const matches = [...parent.childNodes].filter(
+    (child) =>
+      child.nodeType === 1 &&
+      child.namespaceURI === namespace &&
+      child.localName === localName,
+  );
+  if (matches.length !== 1)
+    throw new Error(`Native snapshot needs exactly one ${localName} node.`);
+  return matches[0];
+}
+
+function themeEditableNodes(document) {
+  const root = document.documentElement;
+  if (root.namespaceURI !== drawingNamespace || root.localName !== "theme")
+    throw new Error("Native snapshot has an invalid theme.");
+  const elements = directXmlChild(root, drawingNamespace, "themeElements");
+  const colors = directXmlChild(elements, drawingNamespace, "clrScheme");
+  const fonts = directXmlChild(elements, drawingNamespace, "fontScheme");
+  const nodes = new Map([
+    ["themeName", [root, "name"]],
+    ["colorSchemeName", [colors, "name"]],
+    ["fontSchemeName", [fonts, "name"]],
+  ]);
+  for (const name of [
+    "dk1", "lt1", "dk2", "lt2", "accent1", "accent2", "accent3",
+    "accent4", "accent5", "accent6", "hlink", "folHlink",
+  ]) {
+    const slot = directXmlChild(colors, drawingNamespace, name);
+    const value = [...slot.childNodes].find((child) => child.nodeType === 1);
+    if (
+      !value ||
+      value.namespaceURI !== drawingNamespace ||
+      !["srgbClr", "sysClr"].includes(value.localName)
+    )
+      throw new Error(`Native snapshot has an unsupported theme color ${name}.`);
+    nodes.set(`color:${name}`, [value, value.localName === "sysClr" ? "lastClr" : "val"]);
+  }
+  for (const role of ["majorFont", "minorFont"]) {
+    const font = directXmlChild(fonts, drawingNamespace, role);
+    for (const name of ["latin", "ea", "cs"])
+      nodes.set(`font:${role}:${name}`, [directXmlChild(font, drawingNamespace, name), "typeface"]);
+  }
+  return nodes;
+}
+
+function mergeThemeValues(originalBytes, noEditBytes, editedBytes, part) {
+  const original = parseXml({ [part]: originalBytes }, part);
+  const noEdit = parseXml({ [part]: noEditBytes }, part);
+  const edited = parseXml({ [part]: editedBytes }, part);
+  const originalNodes = themeEditableNodes(original);
+  const baselineNodes = themeEditableNodes(noEdit);
+  const editedNodes = themeEditableNodes(edited);
+  let changed = 0;
+  for (const [key, [editedNode, editedAttribute]] of editedNodes) {
+    const [baselineNode, baselineAttribute] = baselineNodes.get(key);
+    const [originalNode, originalAttribute] = originalNodes.get(key);
+    const before = baselineNode.getAttribute(baselineAttribute);
+    const after = editedNode.getAttribute(editedAttribute);
+    if (before === after) continue;
+    if (key.startsWith("color:") && !/^[0-9a-f]{6}$/iu.test(after))
+      throw new Error(`Native snapshot has an invalid theme color ${key}.`);
+    if (key.startsWith("color:") && originalNode.localName === "sysClr") {
+      const explicit = original.createElementNS(drawingNamespace, "a:srgbClr");
+      explicit.setAttribute("val", after);
+      originalNode.parentNode.replaceChild(explicit, originalNode);
+    } else originalNode.setAttribute(originalAttribute, after);
+    // Compare the complete same-engine XML after undoing only the fields that
+    // this command is allowed to change. A collateral theme rewrite fails.
+    if (key.startsWith("color:") || key.startsWith("font:")) {
+      editedNode.parentNode.replaceChild(
+        noEdit.importNode(baselineNode, true),
+        editedNode,
+      );
+    } else editedNode.setAttribute(editedAttribute, before);
+    changed += 1;
+  }
+  if (!changed || !sameEngineExportPart(part, serializeXml(edited), noEditBytes))
+    throw new Error("Native snapshot theme contains a non-theme mutation.");
+  return serializeXml(original);
+}
+
+function relationshipsOfType(entries, sourcePart, type) {
+  const relsPath = relationshipsPath(sourcePart);
+  if (!entries[relsPath])
+    throw new Error(`Native snapshot is missing relationships for ${sourcePart}.`);
+  const document = parseXml(entries, relsPath);
+  return relationshipElements(document)
+    .filter((relationship) =>
+      relationship.getAttribute("Type")?.endsWith(`/${type}`) &&
+      relationship.getAttribute("TargetMode") !== "External",
+    )
+    .map((relationship) => ({
+      id: relationship.getAttribute("Id"),
+      target: resolvePart(sourcePart, relationship.getAttribute("Target")),
+    }));
+}
+
+function singleRelationshipTarget(entries, sourcePart, type) {
+  const targets = relationshipsOfType(entries, sourcePart, type);
+  if (targets.length !== 1)
+    throw new Error(`Native snapshot cannot identify ${type} for ${sourcePart}.`);
+  return targets[0].target;
+}
+
+function setRelationshipTarget(entries, sourcePart, type, target) {
+  const relsPath = relationshipsPath(sourcePart);
+  const document = parseXml(entries, relsPath);
+  const matching = relationshipElements(document).filter((relationship) =>
+    relationship.getAttribute("Type")?.endsWith(`/${type}`),
+  );
+  if (matching.length !== 1)
+    throw new Error(`Native snapshot cannot retarget ${type} for ${sourcePart}.`);
+  matching[0].setAttribute("Target", relativePart(sourcePart, target));
+  entries[relsPath] = serializeXml(document);
+}
+
+function mergeMasterThemeIntoOriginal(original, noEdit, edited) {
+  const themeParts = Object.keys(edited).filter(
+    (part) =>
+      /^ppt\/theme\/theme[^/]+\.xml$/u.test(part) &&
+      !sameEngineExportPart(part, noEdit[part], edited[part]),
+  );
+  if (themeParts.length !== 1)
+    throw new Error("Native snapshot needs exactly one edited master theme.");
+  const sourceTheme = themeParts[0];
+  const normalizedMasters = Object.keys(noEdit).filter(
+    (part) => /^ppt\/slideMasters\/slideMaster[^/]+\.xml$/u.test(part),
+  );
+  const sourceMasters = normalizedMasters.filter(
+    (part) => singleRelationshipTarget(noEdit, part, "theme") === sourceTheme,
+  );
+  if (sourceMasters.length !== 1)
+    throw new Error("Native snapshot cannot identify the edited master.");
+  const sourceLayouts = relationshipsOfType(noEdit, sourceMasters[0], "slideLayout")
+    .map(({ target }) => target);
+  if (!sourceLayouts.length)
+    throw new Error("Native snapshot edited master has no layouts.");
+  const originalLayouts = Object.keys(original).filter(
+    (part) => /^ppt\/slideLayouts\/slideLayout[^/]+\.xml$/u.test(part),
+  );
+  const selected = new Set(sourceLayouts.map((source) => {
+    const identity = slideLayoutIdentity(noEdit, source);
+    const matches = originalLayouts.filter((part) => {
+      const candidate = slideLayoutIdentity(original, part);
+      return candidate.name === identity.name && candidate.type === identity.type;
+    });
+    if (matches.length !== 1)
+      throw new Error(`Native snapshot cannot uniquely map layout ${identity.name}.`);
+    return matches[0];
+  }));
+  const owners = new Set([...selected].map((part) =>
+    singleRelationshipTarget(original, part, "slideMaster"),
+  ));
+  if (owners.size !== 1)
+    throw new Error("Native snapshot selected layouts have different original masters.");
+  const owner = [...owners][0];
+  const ownerLayouts = relationshipsOfType(original, owner, "slideLayout");
+  if (![...selected].every((part) => ownerLayouts.some(({ target }) => target === part)))
+    throw new Error("Native snapshot master does not own a selected layout.");
+  const originalTheme = singleRelationshipTarget(original, owner, "theme");
+  const themeBytes = mergeThemeValues(
+    original[originalTheme], noEdit[sourceTheme], edited[sourceTheme], originalTheme,
+  );
+  const patched = {};
+  if (selected.size === ownerLayouts.length) {
+    patched[originalTheme] = themeBytes;
+    return patched;
+  }
+  const masterCopy = nextPartPath(original, owner);
+  const themeCopy = nextPartPath(original, originalTheme);
+  const oldMaster = parseXml(original, owner);
+  const newMaster = parseXml(original, owner);
+  const oldRelsPath = relationshipsPath(owner);
+  const oldRels = parseXml(original, oldRelsPath);
+  const newRels = parseXml(original, oldRelsPath);
+  const pruneMaster = (master, rels, keepSelected) => {
+    const ids = master.getElementsByTagNameNS(presentationNamespace, "sldLayoutId");
+    const byId = new Map([...ids].map((element) => [
+      element.getAttributeNS(relationshipAttributeNamespace, "id"), element,
+    ]));
+    for (const relationship of relationshipElements(rels)) {
+      if (!relationship.getAttribute("Type")?.endsWith("/slideLayout")) continue;
+      const target = resolvePart(owner, relationship.getAttribute("Target"));
+      if (selected.has(target) === keepSelected) continue;
+      const id = relationship.getAttribute("Id");
+      const element = byId.get(id);
+      if (!element) throw new Error(`Native snapshot master lacks layout ${id}.`);
+      element.parentNode.removeChild(element);
+      relationship.parentNode.removeChild(relationship);
+    }
+  };
+  pruneMaster(oldMaster, oldRels, false);
+  pruneMaster(newMaster, newRels, true);
+  const themeRelation = relationshipElements(newRels).find(
+    (relationship) => relationship.getAttribute("Type")?.endsWith("/theme"),
+  );
+  if (!themeRelation) throw new Error("Native snapshot master has no theme link.");
+  themeRelation.setAttribute("Target", relativePart(masterCopy, themeCopy));
+  patched[owner] = serializeXml(oldMaster);
+  patched[oldRelsPath] = serializeXml(oldRels);
+  patched[masterCopy] = serializeXml(newMaster);
+  patched[relationshipsPath(masterCopy)] = serializeXml(newRels);
+  patched[themeCopy] = themeBytes;
+  for (const layout of selected) {
+    const entries = { ...original };
+    setRelationshipTarget(entries, layout, "slideMaster", masterCopy);
+    patched[relationshipsPath(layout)] = entries[relationshipsPath(layout)];
+  }
+  const presentation = parseXml(original, presentationPath);
+  const presentationRels = parseXml(original, presentationRelationshipsPath);
+  const masterIds = directXmlChild(
+    presentation.documentElement, presentationNamespace, "sldMasterIdLst",
+  );
+  const existingIds = [...masterIds.getElementsByTagNameNS(presentationNamespace, "sldMasterId")]
+    .map((element) => Number(element.getAttribute("id")));
+  const nextId = Math.max(...existingIds) + 1;
+  if (!Number.isSafeInteger(nextId) || nextId > 0xffffffff)
+    throw new Error("Native snapshot has no available master ID.");
+  const relationshipId = nextRelationshipId(presentationRels);
+  const sourceRelationship = relationshipElements(presentationRels).find(
+    (relationship) =>
+      relationship.getAttribute("Type")?.endsWith("/slideMaster") &&
+      resolvePart(presentationPath, relationship.getAttribute("Target")) === owner,
+  );
+  if (!sourceRelationship)
+    throw new Error("Native snapshot original master is not presented.");
+  const newRelationship = sourceRelationship.cloneNode(true);
+  newRelationship.setAttribute("Id", relationshipId);
+  newRelationship.setAttribute("Target", relativePart(presentationPath, masterCopy));
+  presentationRels.documentElement.appendChild(newRelationship);
+  const newMasterId = presentation.createElementNS(presentationNamespace, "p:sldMasterId");
+  newMasterId.setAttribute("id", String(nextId));
+  newMasterId.setAttributeNS(relationshipAttributeNamespace, "r:id", relationshipId);
+  masterIds.appendChild(newMasterId);
+  patched[presentationPath] = serializeXml(presentation);
+  patched[presentationRelationshipsPath] = serializeXml(presentationRels);
+  const contentTypes = parseXml(original, contentTypesPath);
+  const context = { entries: original, contentTypes };
+  copyContentType(context, owner, masterCopy);
+  copyContentType(context, originalTheme, themeCopy);
+  patched[contentTypesPath] = serializeXml(contentTypes);
+  return patched;
+}
+
+function slideSizeFromPresentation(entries) {
+  const document = parseXml(entries, presentationPath);
+  const sizes = [
+    ...document.getElementsByTagNameNS(presentationNamespace, "sldSz"),
+  ];
+  if (sizes.length !== 1)
+    throw new Error("Native snapshot needs exactly one slide size.");
+  const [width, height] = ["cx", "cy"].map((attribute) =>
+    sizes[0].getAttribute(attribute),
+  );
+  if (![width, height].every((value) => /^[1-9]\d*$/u.test(value ?? "")))
+    throw new Error("Native snapshot has an invalid slide size.");
+  return { document, element: sizes[0], width, height };
+}
+
+function replaceXmlNumericAttribute(tag, attribute, value) {
+  const pattern = new RegExp(`(\\b${attribute}\\s*=\\s*)(["'])([0-9]+)\\2`, "u");
+  if (!pattern.test(tag))
+    throw new Error(`Native snapshot cannot patch slide size ${attribute}.`);
+  return tag.replace(pattern, (_match, prefix, quote) =>
+    `${prefix}${quote}${value}${quote}`,
+  );
+}
+
+function mergeSlideSizeIntoOriginal(original, noEdit, edited) {
+  if (
+    !samePartBytes(
+      noEdit[presentationRelationshipsPath],
+      edited[presentationRelationshipsPath],
+    )
+  )
+    throw new Error("Slide size edit changed presentation relationships.");
+  const baseline = slideSizeFromPresentation(noEdit);
+  const candidate = slideSizeFromPresentation(edited);
+  if (
+    baseline.width === candidate.width &&
+    baseline.height === candidate.height
+  )
+    throw new Error("Slide size edit did not change the slide size.");
+  candidate.element.setAttribute("cx", baseline.width);
+  candidate.element.setAttribute("cy", baseline.height);
+  if (
+    !sameEngineExportPart(
+      presentationPath,
+      serializeXml(candidate.document),
+      noEdit[presentationPath],
+    )
+  )
+    throw new Error("Slide size edit also changed other presentation fields.");
+  const source = strFromU8(original[presentationPath]);
+  const tags = [...source.matchAll(/<(?:[A-Za-z_][\w.-]*:)?sldSz\b[^>]*>/gu)];
+  if (tags.length !== 1)
+    throw new Error("Original presentation slide size is not patchable.");
+  const replacement = replaceXmlNumericAttribute(
+    replaceXmlNumericAttribute(tags[0][0], "cx", candidate.width),
+    "cy",
+    candidate.height,
+  );
+  const bytes = strToU8(
+    `${source.slice(0, tags[0].index)}${replacement}${source.slice(tags[0].index + tags[0][0].length)}`,
+  );
+  const reopened = slideSizeFromPresentation({ [presentationPath]: bytes });
+  if (
+    reopened.width !== candidate.width ||
+    reopened.height !== candidate.height
+  )
+    throw new Error("Original presentation slide size patch did not persist.");
+  return bytes;
+}
+
 // Office can rewrite unrelated package parts even when no edit was made.
 // Compare two exports from that same engine, then apply only their actual
 // difference to the user's original package. Reopening the result and proving
@@ -265,12 +580,18 @@ export function preserveOriginalPptxParts(
 
   const merged = {};
   const changedParts = [];
+  const semanticPatchedParts = [];
   const suppressedNoopParts = [];
   const suppressedOutOfBudgetParts = [];
+  const semanticMasterThemePatch =
+    sourceOperations.length === 1 && sourceOperations[0] === "set_master_theme"
+      ? mergeMasterThemeIntoOriginal(original, noEdit, edited)
+      : null;
   const paths = new Set([
     ...Object.keys(original),
     ...Object.keys(noEdit),
     ...Object.keys(edited),
+    ...Object.keys(semanticMasterThemePatch ?? {}),
   ]);
   for (const part of [...paths].sort()) {
     // No current native command edits package core properties. Impress
@@ -286,8 +607,14 @@ export function preserveOriginalPptxParts(
       (budget.allowPartCreationOrDeletion ||
         Boolean(original[part]) === Boolean(edited[part]));
     const authoredChange =
+      !semanticMasterThemePatch &&
       part !== "docProps/core.xml" && engineChanged && withinBudget;
-    if (authoredChange && !part.endsWith(".rels")) {
+    const semanticSlideSizePatch =
+      authoredChange &&
+      part === presentationPath &&
+      sourceOperations.length === 1 &&
+      sourceOperations[0] === "set_slide_size";
+    if (authoredChange && !part.endsWith(".rels") && !semanticSlideSizePatch) {
       const related = relationshipsPath(part);
       if (
         samePartBytes(noEdit[related], edited[related]) &&
@@ -303,11 +630,18 @@ export function preserveOriginalPptxParts(
           `Native snapshot needs relationship remapping before preserving ${part}.`,
         );
     }
-    const selected = authoredChange
-      ? part.endsWith(".rels")
+    const selected = semanticMasterThemePatch && Object.hasOwn(semanticMasterThemePatch, part)
+      ? semanticMasterThemePatch[part]
+      : authoredChange
+      ? semanticSlideSizePatch
+        ? mergeSlideSizeIntoOriginal(original, noEdit, edited)
+        : part.endsWith(".rels")
         ? remapAuthoredRelationships(part, edited[part], original, noEdit)
         : edited[part]
       : original[part];
+    if (semanticSlideSizePatch) semanticPatchedParts.push(part);
+    if (semanticMasterThemePatch && Object.hasOwn(semanticMasterThemePatch, part))
+      semanticPatchedParts.push(part);
     if (selected) merged[part] = selected;
     if (!samePartBytes(original[part], selected)) changedParts.push(part);
     if (!authoredChange && !samePartBytes(original[part], noEdit[part]))
@@ -330,7 +664,12 @@ export function preserveOriginalPptxParts(
   inspectOoxmlDocument(bytes);
   return {
     bytes,
-    report: { changedParts, suppressedNoopParts, suppressedOutOfBudgetParts },
+    report: {
+      changedParts,
+      semanticPatchedParts,
+      suppressedNoopParts,
+      suppressedOutOfBudgetParts,
+    },
   };
 }
 

@@ -625,7 +625,7 @@ function assertPersistedNativeIntent(
     throw new Error(
       `browser_native_snapshot_not_persisted:${differences[0].path}${
         browserProbeMode
-          ? `:${JSON.stringify({ difference: differences[0], preservation: preservationReport })}`
+          ? `:${JSON.stringify({ differences, preservation: preservationReport })}`
           : ""
       }`,
     );
@@ -1413,11 +1413,19 @@ async function commitProductPackageMutation(prepared, nativeValue) {
         preservationReport,
       );
     } catch (error) {
-      const restored = await restoreProductPackageSnapshot(
-        prepared.beforeBytes,
-        prepared.beforeRevision,
-        "browser_native_snapshot_rollback_failed",
-      );
+      let restored;
+      try {
+        restored = await restoreProductPackageSnapshot(
+          prepared.beforeBytes,
+          prepared.beforeRevision,
+          "browser_native_snapshot_rollback_failed",
+        );
+      } catch (rollbackError) {
+        throw new Error(
+          `browser_native_snapshot_rollback_failed:${error instanceof Error ? error.message : String(error)}:${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          { cause: error },
+        );
+      }
       reconciledModelRevision = restored.revision;
       unreconciledModelRevision = "";
       throw error;
@@ -2696,9 +2704,30 @@ function waitForBrowserProbeEvent(match, timeoutMs = 30_000) {
 
 async function browserProbeNativeCall(nativeRequest) {
   const id = `browser-probe-native-${++requestSequence}`;
-  browserProbePort.postMessage({ id, request: nativeRequest });
+  let request = nativeRequest;
+  if (
+    ["insert_image", "replace_image", "insert_media", "replace_media"].includes(
+      nativeRequest.operation,
+    )
+  ) {
+    const response = await networkFetch(
+      `/fixtures/probe-assets/${encodeURIComponent(nativeRequest.assetId)}`,
+    );
+    if (!response.ok) throw new Error("probe_asset_not_found");
+    request = {
+      ...nativeRequest,
+      assetBytes: await response.arrayBuffer(),
+      mediaType: response.headers.get("content-type")?.split(";")[0],
+    };
+  }
+  browserProbePort.postMessage({ id, request });
   const event = await waitForBrowserProbeEvent({ id }, 120_000);
-  if (event.error) throw new Error(event.error);
+  if (Object.hasOwn(event, "error"))
+    throw new Error(event.error || "browser_probe_native_error_without_detail");
+  if (event.value === undefined)
+    throw new Error(
+      `browser_probe_returned_no_value:${JSON.stringify({ event, activity: browserProbeActivity, phaseTrace: browserProbePhaseTrace })}`,
+    );
   return event.value;
 }
 

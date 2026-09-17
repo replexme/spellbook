@@ -4,42 +4,10 @@ import { randomBytes, createHash, timingSafeEqual } from "node:crypto";
 import { readFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import { probeAssetForId } from "./probe-assets.mjs";
 
 const MAX_BYTES = 50_000_000;
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const PROBE_IMAGE_ASSET_ID = "00000000-0000-4000-8000-000000000001";
-const PROBE_MEDIA_ASSET_ID = "00000000-0000-4000-8000-000000000002";
-const PROBE_REPLACEMENT_IMAGE_ASSET_ID = "00000000-0000-4000-8000-000000000003";
-const PROBE_REPLACEMENT_MEDIA_ASSET_ID = "00000000-0000-4000-8000-000000000004";
-const PROBE_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-  "base64",
-);
-const PROBE_REPLACEMENT_PNG = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADklEQVQImWP4z8DwH4QBEfcD/RSF9bkAAAAASUVORK5CYII=",
-  "base64",
-);
-const probeWav = (sampleValue) => {
-  const sampleRate = 8000;
-  const samples = sampleRate / 4;
-  const bytes = Buffer.alloc(44 + samples);
-  bytes.write("RIFF", 0, "ascii");
-  bytes.writeUInt32LE(bytes.length - 8, 4);
-  bytes.write("WAVEfmt ", 8, "ascii");
-  bytes.writeUInt32LE(16, 16);
-  bytes.writeUInt16LE(1, 20);
-  bytes.writeUInt16LE(1, 22);
-  bytes.writeUInt32LE(sampleRate, 24);
-  bytes.writeUInt32LE(sampleRate, 28);
-  bytes.writeUInt16LE(1, 32);
-  bytes.writeUInt16LE(8, 34);
-  bytes.write("data", 36, "ascii");
-  bytes.writeUInt32LE(samples, 40);
-  bytes.fill(sampleValue, 44);
-  return bytes;
-};
-const PROBE_WAV = probeWav(128);
-const PROBE_REPLACEMENT_WAV = probeWav(160);
 const escapeHtml = (s) =>
   s.replace(
     /[&<>"']/g,
@@ -155,18 +123,8 @@ export async function createProbe({
           )
         : null;
       if (probeAssetMatch && req.method === "GET") {
-        if (probeAssetMatch[1].toLowerCase() === PROBE_IMAGE_ASSET_ID)
-          return reply(200, PROBE_PNG, "image/png");
-        if (probeAssetMatch[1].toLowerCase() === PROBE_MEDIA_ASSET_ID)
-          return reply(200, PROBE_WAV, "audio/wav");
-        if (
-          probeAssetMatch[1].toLowerCase() === PROBE_REPLACEMENT_IMAGE_ASSET_ID
-        )
-          return reply(200, PROBE_REPLACEMENT_PNG, "image/png");
-        if (
-          probeAssetMatch[1].toLowerCase() === PROBE_REPLACEMENT_MEDIA_ASSET_ID
-        )
-          return reply(200, PROBE_REPLACEMENT_WAV, "audio/wav");
+        const asset = probeAssetForId(probeAssetMatch[1]);
+        if (asset) return reply(200, asset.bytes, asset.mediaType);
         return reply(404, { error: "asset_not_found" });
       }
       if (
