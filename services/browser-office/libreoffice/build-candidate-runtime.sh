@@ -177,7 +177,7 @@ wasm_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm.$expected_patch_sha.$wasm_config
 wasm_filesystem_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm-filesystem.$expected_patch_sha.$wasm_configuration_sha"
 mkdir -p "$wasm_build"
 if [[ ! -f "$wasm_build/Makefile" ]] || \
-   ! -f "$wasm_configuration_marker" ]] || \
+   [[ ! -f "$wasm_configuration_marker" ]] || \
    [[ "$(<"$wasm_configuration_marker")" != "$wasm_configuration" ]]; then
   # The Korean browser package needs the translations submodule, but a normal
   # `git submodule update` downloads the complete multi-gigabyte history. Fetch
