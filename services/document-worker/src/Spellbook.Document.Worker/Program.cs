@@ -54,6 +54,7 @@ app.MapPost("/internal/jobs/scan-render", (
         {
             await storage.DownloadAsync(job.InputObject, inputPath, cancellationToken);
         }
+        WorkerFailure.RejectCompoundFile(inputPath);
         string? validationObject = null;
         if (baselinePath is not null)
         {
@@ -220,7 +221,7 @@ static async Task ExecuteJob(
             errorType = exception.GetType().Name,
             error = exception.Message
         }));
-        callback = new WorkerCallback(jobId, "failed", null, SafeError(exception));
+        callback = new WorkerCallback(jobId, "failed", null, SafeError(exception), WorkerFailure.Code(exception));
     }
     await storage.UploadControlReceiptAsync(receiptObject, callback, cancellationToken);
     await CallbackAsync(clients, callbackUrl, callback, cancellationToken);
@@ -284,7 +285,7 @@ public sealed record ScanRenderJob(
     PackageChangeBudgetRequest? ChangeBudget = null);
 public sealed record PatchRenderJob(string JobId, string CallbackUrl, string StorageNamespace, string FormatId, string InputObject, string OutputDocumentObject, string OutputPrefix, EditCommandBatch Command, Dictionary<string, string>? AssetObjects = null);
 public sealed record WorkerOutputs(string GraphObject, string? ScanObject, string? ValidationObject, string? DocumentObject, int SlideCount, string DocumentSha256);
-public sealed record WorkerCallback(string JobId, string Status, WorkerOutputs? Outputs, string? Error);
+public sealed record WorkerCallback(string JobId, string Status, WorkerOutputs? Outputs, string? Error, string? ErrorCode = null);
 
 public sealed class ChangeBudgetExceededException(
     string validationObject,

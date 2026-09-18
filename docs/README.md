@@ -7,6 +7,7 @@ The repository is governed by a small set of documents with distinct jobs:
 - [Browser editing engine](../services/office-editor/libreoffice/README.md): upstream pins, patch series and promotion workflow.
 - [Headless render engine](../services/document-worker/libreoffice/README.md): PowerPoint-fidelity patch and upgrade workflow.
 - [Format support](product/format-support.md): the user-visible support truth for each document type.
+- [Design system](product/design-system.md): the four layers every product screen is built from, the colour roles and the rules for verification wording.
 - [Multi-format roadmap](product/multiformat-roadmap.md): how PPTX becomes one adapter without flattening DOCX or page-layout semantics.
 - [Self-hosting](delivery/self-hosting.md): installation, secrets, storage and operational requirements.
 - [Storage-pressure verification](delivery/storage-pressure-verification-2026-09-15.md): packaged runtime evidence for atomic rejection and durable failure receipts under disk pressure.

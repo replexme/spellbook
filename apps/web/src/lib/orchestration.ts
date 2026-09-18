@@ -86,19 +86,19 @@ export async function uploadDocument(
   file: File,
 ): Promise<{ id: string }> {
   await ensureSchema();
+  // Reason codes; the product UI turns each into a sentence and a fix.
   const format = availableDocumentFormatForFile(file.name);
-  if (!format)
-    throw new HttpError(400, "This document format is not available yet.");
-  if (file.size <= 0 || file.size > format.maxBytes)
-    throw new HttpError(
-      400,
-      `${format.label} must be between 1 byte and ${Math.floor(format.maxBytes / 1024 / 1024)} MB.`,
-    );
+  if (!format) throw new HttpError(400, "unsupported_format");
+  if (file.size <= 0) throw new HttpError(400, "empty_file");
+  if (file.size > format.maxBytes) throw new HttpError(400, "file_too_large");
   const data = Buffer.from(await file.arrayBuffer());
   if (data[0] !== 0x50 || data[1] !== 0x4b)
     throw new HttpError(
       400,
-      "The uploaded file is not a valid ZIP-based document package.",
+      // OLE compound files: password-protected OOXML or a renamed legacy .ppt.
+      data.subarray(0, 4).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0]))
+        ? "encrypted_or_legacy_file"
+        : "invalid_package",
     );
 
   const documentId = randomUUID();
@@ -128,8 +128,8 @@ export async function uploadDocument(
       values (${documentId}, ${session.accountId}, ${file.name}, ${format.id}, 'processing', ${versionId}, ${versionId})
     `;
     await transaction`
-      insert into spellbook_versions (id, document_id, kind, status, document_object)
-      values (${versionId}, ${documentId}, 'original', 'processing', ${documentObject})
+      insert into spellbook_versions (id, document_id, kind, status, document_object, document_bytes)
+      values (${versionId}, ${documentId}, 'original', 'processing', ${documentObject}, ${data.length})
     `;
     await transaction`
       insert into spellbook_jobs (id, job_type, document_id, version_id, status, payload)
@@ -588,7 +588,7 @@ export async function handleWorkerCallback(
       );
       return;
     }
-    await markJobFailure(job, callback.error ?? "worker_failed");
+    await markJobFailure(job, callback.error ?? "worker_failed", workerErrorCode(callback));
     return;
   }
   let dispatch: Dispatch | null = null;
@@ -1523,9 +1523,19 @@ async function claimJob(
   return rows.length > 0;
 }
 
+/**
+ * The document worker's reason code for a failed job ("encrypted_or_legacy_file",
+ * "invalid_package", ...). Read defensively: older workers send none.
+ */
+function workerErrorCode(callback: WorkerCallback): string | null {
+  const code = (callback as { errorCode?: unknown }).errorCode;
+  return typeof code === "string" && /^[a-z][a-z_]{2,63}$/.test(code) ? code : null;
+}
+
 async function markJobFailure(
   job: Record<string, any>,
   error: string,
+  code: string | null = null,
 ): Promise<void> {
   await db().begin(async (transaction) => {
     await transaction`select id from spellbook_documents where id = ${job.document_id} for update`;
@@ -1550,6 +1560,8 @@ async function markJobFailure(
       await transaction`update spellbook_edit_requests set status = 'failed', last_error = ${error}, updated_at = now() where id = ${job.edit_request_id}`;
     }
     await transaction`update spellbook_documents set status = ${job.job_type === "scan_render" ? "failed" : "ready"}, last_error = ${error}, updated_at = now() where id = ${job.document_id}`;
+    if (job.job_type === "scan_render")
+      await transaction`update spellbook_documents set failure_code = ${code} where id = ${job.document_id}`;
     if (job.edit_request_id)
       await restoreRefinementInput(
         transaction,

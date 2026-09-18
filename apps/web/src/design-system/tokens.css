@@ -1,0 +1,184 @@
+/*
+ * Spellbook design tokens.
+ *
+ * Two layers:
+ * 1. Primitive palette (--sb-*): raw values. Only this file may use them.
+ * 2. Semantic roles (--ds-*): what components and screens consume.
+ *
+ * Colour roles carry meaning, not decoration:
+ * - ink    → text and the one primary action on a surface
+ * - ai     → only things the AI did or is doing (never a generic accent)
+ * - ok     → a check that code actually performed and passed
+ * - warn   → something the person should look at (fonts, unverified result)
+ * - danger → failure or destructive action
+ * - focus  → keyboard focus only
+ *
+ * Colour literals are allowed only in this file; see design-system.test.ts.
+ */
+:root {
+  color-scheme: light;
+
+  /* ── Primitive palette ─────────────────────────────────────────── */
+  --sb-gray-0: #ffffff;
+  --sb-gray-25: #fbfcfd;
+  --sb-gray-50: #f5f7f8;
+  --sb-gray-75: #f0f3f5;
+  --sb-gray-100: #eceff2;
+  --sb-gray-150: #e3e7eb;
+  --sb-gray-200: #dce1e6;
+  --sb-gray-300: #c6cdd4;
+  --sb-gray-400: #8a949e;
+  --sb-gray-500: #69737d;
+  --sb-gray-600: #4b5661;
+  --sb-gray-700: #35404a;
+  --sb-gray-800: #202a33;
+  --sb-gray-900: #151b22;
+  --sb-canvas: #e5e9ec;
+  --sb-teal-50: #e3f2ee;
+  --sb-teal-100: #cfe8e1;
+  --sb-teal-200: #a6d5ca;
+  --sb-teal-600: #0f6f61;
+  --sb-teal-700: #0b584e;
+  --sb-green-50: #e7f3ea;
+  --sb-green-600: #2b7a3d;
+  --sb-amber-50: #fff3dc;
+  --sb-amber-200: #efd29c;
+  --sb-amber-500: #d08a1e;
+  --sb-amber-700: #94590a;
+  --sb-red-50: #fdecea;
+  --sb-red-200: #f1c5bf;
+  --sb-red-600: #b43a2f;
+  --sb-red-700: #962e25;
+  --sb-blue-600: #2574db;
+  --sb-pptx: #d24726;
+  --sb-scrim: rgb(21 27 34 / 42%);
+  --sb-shadow-color: 21 27 34;
+
+  /* ── Surfaces ──────────────────────────────────────────────────── */
+  --ds-bg-app: var(--sb-gray-50);
+  --ds-bg-surface: var(--sb-gray-0);
+  --ds-bg-subtle: var(--sb-gray-25);
+  --ds-bg-muted: var(--sb-gray-75);
+  --ds-bg-sunken: var(--sb-canvas);
+  --ds-bg-hover: var(--sb-gray-100);
+  --ds-bg-pressed: var(--sb-gray-150);
+  --ds-bg-inverse: var(--sb-gray-900);
+  --ds-scrim: var(--sb-scrim);
+
+  /* ── Text ──────────────────────────────────────────────────────── */
+  --ds-text: var(--sb-gray-900);
+  --ds-text-secondary: var(--sb-gray-600);
+  --ds-text-tertiary: var(--sb-gray-400);
+  --ds-text-disabled: var(--sb-gray-300);
+  --ds-text-inverse: var(--sb-gray-0);
+
+  /* ── Lines ─────────────────────────────────────────────────────── */
+  --ds-border: var(--sb-gray-200);
+  --ds-border-subtle: var(--sb-gray-100);
+  --ds-border-strong: var(--sb-gray-300);
+
+  /* ── Roles ─────────────────────────────────────────────────────── */
+  --ds-action: var(--sb-gray-900);
+  --ds-action-hover: var(--sb-gray-700);
+  --ds-action-text: var(--sb-gray-0);
+  --ds-ai: var(--sb-teal-600);
+  --ds-ai-hover: var(--sb-teal-700);
+  --ds-ai-soft: var(--sb-teal-50);
+  --ds-ai-soft-strong: var(--sb-teal-100);
+  --ds-ai-line: var(--sb-teal-200);
+  --ds-ok: var(--sb-green-600);
+  --ds-ok-soft: var(--sb-green-50);
+  --ds-warn: var(--sb-amber-700);
+  --ds-warn-dot: var(--sb-amber-500);
+  --ds-warn-soft: var(--sb-amber-50);
+  --ds-warn-line: var(--sb-amber-200);
+  --ds-danger: var(--sb-red-600);
+  --ds-danger-hover: var(--sb-red-700);
+  --ds-danger-soft: var(--sb-red-50);
+  --ds-danger-line: var(--sb-red-200);
+  --ds-focus: var(--sb-blue-600);
+  --ds-file-pptx: var(--sb-pptx);
+  --ds-editor-accent: var(--sb-gray-700);
+
+  /* ── Type ──────────────────────────────────────────────────────── */
+  --ds-font-sans:
+    "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Malgun Gothic",
+    "Noto Sans KR", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ds-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  /* Seven steps (11.5 · 12.5 · 13 · 14 · 16 · 18 · 26); nothing else. */
+  --ds-text-xs: 11.5px;
+  --ds-text-sm: 12.5px;
+  --ds-text-md: 13px;
+  --ds-text-base: 14px;
+  --ds-text-lg: 16px;
+  --ds-text-xl: 18px;
+  --ds-text-2xl: 26px;
+  --ds-leading-tight: 1.3;
+  --ds-leading: 1.5;
+  --ds-leading-relaxed: 1.62;
+  --ds-weight-regular: 400;
+  --ds-weight-medium: 500;
+  --ds-weight-semibold: 600;
+  --ds-weight-bold: 700;
+
+  /* ── Space (4px rhythm) ────────────────────────────────────────── */
+  --ds-space-0: 2px;
+  --ds-space-1: 4px;
+  --ds-space-2: 8px;
+  --ds-space-3: 12px;
+  --ds-space-4: 16px;
+  --ds-space-5: 20px;
+  --ds-space-6: 24px;
+  --ds-space-8: 32px;
+  --ds-space-10: 40px;
+  --ds-space-12: 48px;
+  --ds-space-16: 64px;
+
+  /* ── Shape ─────────────────────────────────────────────────────── */
+  --ds-radius-xs: 4px;
+  --ds-radius-sm: 6px;
+  --ds-radius-md: 8px;
+  --ds-radius-lg: 12px;
+  --ds-radius-xl: 14px;
+  --ds-radius-pill: 999px;
+  --ds-control-sm: 26px;
+  --ds-control-md: 30px;
+  --ds-control-lg: 40px;
+
+  /* ── Elevation: only floating things get shadows ───────────────── */
+  --ds-shadow-1: 0 1px 2px rgb(var(--sb-shadow-color) / 5%);
+  --ds-shadow-2:
+    0 1px 2px rgb(var(--sb-shadow-color) / 5%),
+    0 8px 24px rgb(var(--sb-shadow-color) / 9%);
+  --ds-shadow-3:
+    0 2px 6px rgb(var(--sb-shadow-color) / 6%),
+    0 20px 52px rgb(var(--sb-shadow-color) / 18%);
+
+  /* ── Motion ────────────────────────────────────────────────────── */
+  --ds-duration-fast: 120ms;
+  --ds-duration: 180ms;
+  --ds-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ── Layering ──────────────────────────────────────────────────── */
+  --ds-z-raised: 5;
+  --ds-z-panel: 20;
+  --ds-z-menu: 60;
+  --ds-z-dialog: 80;
+  --ds-z-toast: 90;
+
+  /* ── Layout ────────────────────────────────────────────────────── */
+  --ds-topbar-height: 48px;
+  --ds-panel-width: 380px;
+  --ds-content-width: 1180px;
+
+  /* ── Deprecated aliases for pre-system screens (do not use) ────── */
+  --ds-bg-canvas: var(--ds-bg-sunken);
+  --ds-bg-selected: var(--ds-ai-soft);
+  --ds-accent: var(--ds-ai);
+  --ds-accent-hover: var(--ds-ai-hover);
+  --ds-accent-soft: var(--ds-ai-soft);
+  --ds-success: var(--ds-ok);
+  --ds-warning: var(--ds-warn);
+  --ds-danger-border: var(--ds-danger-line);
+  --ds-ppt: var(--ds-file-pptx);
+}

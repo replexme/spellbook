@@ -201,6 +201,60 @@ public sealed class PackageChangeBudgetTests : IDisposable
     }
 
     [Fact]
+    public void IgnoresRandomChartAxisIdsButNotAxisLinks()
+    {
+        var source = TestPresentationFactory.Create(directory);
+        var baseline = Path.Combine(directory, "chart-axis-baseline.pptx");
+        var candidate = Path.Combine(directory, "chart-axis-candidate.pptx");
+        File.Copy(source, baseline);
+        File.Copy(source, candidate);
+        AddChart(baseline, "40817986", "18128015", crossFirst: "18128015");
+        AddChart(candidate, "79433342", "37366181", crossFirst: "37366181");
+
+        var ignored = new PptxPackageChangeBudgetValidator().Validate(
+            baseline,
+            candidate,
+            new PackageChangeBudgetRequest(ContractVersions.Current, ["slide_parts"], [0]));
+        Assert.True(ignored.Valid, string.Join("\n", ignored.Errors));
+        Assert.Empty(ignored.Changes);
+
+        // The first axis now crosses itself: a real change to the chart.
+        AddChart(candidate, "79433342", "37366181", crossFirst: "79433342");
+        var relinked = new PptxPackageChangeBudgetValidator().Validate(
+            baseline,
+            candidate,
+            new PackageChangeBudgetRequest(ContractVersions.Current, ["slide_parts"], [0]));
+        Assert.False(relinked.Valid);
+        Assert.Equal("chart_parts", Assert.Single(relinked.Changes).Category);
+    }
+
+    private static void AddChart(string path, string first, string second, string crossFirst)
+    {
+        XNamespace chart = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+        var document = new XDocument(
+            new XElement(
+                chart + "chartSpace",
+                new XElement(
+                    chart + "chart",
+                    new XElement(
+                        chart + "plotArea",
+                        new XElement(
+                            chart + "barChart",
+                            new XElement(chart + "axId", new XAttribute("val", first)),
+                            new XElement(chart + "axId", new XAttribute("val", second))),
+                        new XElement(
+                            chart + "catAx",
+                            new XElement(chart + "axId", new XAttribute("val", first)),
+                            new XElement(chart + "crossAx", new XAttribute("val", crossFirst))),
+                        new XElement(
+                            chart + "valAx",
+                            new XElement(chart + "axId", new XAttribute("val", second)),
+                            new XElement(chart + "crossAx", new XAttribute("val", first)))))));
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Update);
+        Replace(archive, "ppt/charts/chart1.xml", document);
+    }
+
+    [Fact]
     public void IgnoresSlideLayoutObjectRenumberingButNotPlaceholderChanges()
     {
         var source = TestPresentationFactory.Create(directory);

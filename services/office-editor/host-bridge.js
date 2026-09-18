@@ -36,10 +36,33 @@
     if (attempts++ < 120) timer = setTimeout(openExtension, 250);
   }
 
+  // Phones open documents in the editor's view mode, where neither saves nor
+  // AI edits apply. The host asks for edit mode when it needs the document
+  // writable; switching this way does not focus the page or open a keyboard.
+  function ensureEditMode(origin) {
+    const map = globalThis.app?.map;
+    if (
+      map?.isReadOnlyMode?.() &&
+      !globalThis.app?.file?.readOnly &&
+      typeof map._enterEditMode === "function"
+    ) {
+      document.getElementById("mobile-edit-button")?.style.setProperty("display", "none");
+      map._enterEditMode("edit");
+    }
+    window.parent.postMessage(
+      { type: "spellbook.edit-mode", edit: Boolean(map?.isEditMode?.()) },
+      origin,
+    );
+  }
+
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent) return;
     const expectedOrigin = globalThis.app?.map?.wopi?.PostMessageOrigin;
     if (expectedOrigin && event.origin !== expectedOrigin) return;
+    if (event.data?.type === "spellbook.ensure-edit") {
+      ensureEditMode(event.origin);
+      return;
+    }
     if (event.data?.type !== "spellbook.open-extension") return;
     requested = true;
     clearTimeout(timer);

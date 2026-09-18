@@ -58,7 +58,11 @@ public sealed record ElementNode(
     string SourceHash,
     IReadOnlyList<IReadOnlyList<string>>? TableCells = null,
     bool FlipHorizontal = false,
-    bool FlipVertical = false);
+    bool FlipVertical = false,
+    // For graphic frames: table, chart, diagram (SmartArt), ole or other.
+    string? GraphicKind = null,
+    // A chart whose data lives in a linked (external) workbook.
+    bool ExternalData = false);
 
 public sealed record EditTarget(int SlideIndex, string ElementId, string SourceHash);
 

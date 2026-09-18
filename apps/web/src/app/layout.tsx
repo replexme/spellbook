@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 
-import "./globals.css";
-import "./design-system.css";
+import "@/design-system/tokens.css";
+import "@/design-system/base.css";
+import "@/design-system/components.css";
+import "@/design-system/patterns.css";
 
 export const metadata: Metadata = {
   title: "Spellbook — AI PowerPoint Editor",

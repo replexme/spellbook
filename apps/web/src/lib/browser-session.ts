@@ -257,6 +257,7 @@ export async function saveBrowserDocument(
         digest,
         preservationObject: current.preservation_object,
         saveRevision: locked.save_revision,
+        bytes: data.length,
       });
     });
   } catch (error) {

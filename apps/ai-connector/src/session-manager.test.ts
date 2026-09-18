@@ -1,3 +1,6 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -5,6 +8,7 @@ import {
   isAllowedAiIdentity,
   selectedProvider,
   stableIdentityKey,
+  trackConnectedAt,
 } from "./session-manager.js";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -62,5 +66,21 @@ describe("local AI subscription identity", () => {
     expect(selectedProvider({ model: "gpt-5.6-sol", effort: "high" })).toBe(
       "codex",
     );
+  });
+});
+
+describe("trackConnectedAt", () => {
+  it("records the date only for a login started through the service", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "spellbook-connected-"));
+    try {
+      expect(await trackConnectedAt(home, true, false)).toBeNull();
+      const at = new Date("2026-09-18T01:00:00.000Z");
+      expect(await trackConnectedAt(home, true, true, at)).toBe(at.toISOString());
+      expect(await trackConnectedAt(home, true, false)).toBe(at.toISOString());
+      expect(await trackConnectedAt(home, false, false)).toBeNull();
+      expect(await trackConnectedAt(home, true, false)).toBeNull();
+    } finally {
+      await fs.rm(home, { recursive: true, force: true });
+    }
   });
 });

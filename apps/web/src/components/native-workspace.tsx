@@ -1,22 +1,49 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
-import ReactMarkdown from "react-markdown";
-import { ModelControl } from "./model-control";
-import { SpellbookBrand, SpellbookIcon } from "./spellbook-ui";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Banner, Icon, IconButton, Tabs } from "@/design-system";
+import { collaboraCssVariables } from "@/design-system/editor-theme";
 import type { AvailableModel, ModelSettings } from "@/lib/ai-models";
-import { normalizeQuotedStrongMarkdown } from "@/lib/markdown";
+import type {
+  DocumentSummary,
+  TurnHistoryItem,
+  VersionHistoryItem,
+} from "@/lib/history-types";
 import { compactNativeTaskResultForTransport } from "@/lib/native-image-transport";
-import { CHATGPT_SECURITY_URL, useAiAccount } from "@/lib/use-ai-account";
+import type { TurnSummary } from "@/lib/native-turn-summary";
 import { uploadImageAsset, uploadMediaAsset } from "@/lib/upload-image";
+import { useAiAccount } from "@/lib/use-ai-account";
 import type { AiConnectorConfig } from "@/lib/ai-connector-config";
-import "./native-workspace.css";
+import { CompareDialog, type ComparePair } from "./workspace/compare-dialog";
+import { Composer } from "./workspace/composer";
+import { ConnectSteps } from "./workspace/connect-steps";
+import { buildConversation, type LiveMessage } from "./workspace/conversation";
+import { ConversationLog } from "./workspace/conversation-log";
+import { when, type PermissionMode } from "./copy";
+import { DownloadDialog } from "./workspace/download-dialog";
+import { OpeningView } from "./workspace/opening";
+import { PhoneSlides } from "./workspace/phone-slides";
+import { suggestionsFor, type EditorSelection } from "./workspace/request-scope";
+import { RestoreConfirmDialog, type RestoreTarget } from "./workspace/restore-confirm";
+import {
+  marksFor,
+  outcomeOf,
+  ResultCard,
+  RunningCard,
+  type CardTurn,
+  type EvidencePair,
+} from "./workspace/result-card";
+import { saveView, WorkspaceTopBar } from "./workspace/top-bar";
+import {
+  manualEditRuns,
+  restoreImpact,
+  savedAfter,
+  undoActionFor,
+  type TimelineTurn,
+  type UndoAction,
+} from "./workspace/turn-timeline";
+import { restoreLead, type VersionEntry } from "./workspace/version-entries";
+import { VersionPanel } from "./workspace/version-panel";
 
 interface LaunchBase {
   documentId: string;
@@ -40,22 +67,68 @@ interface BrowserLaunch extends LaunchBase {
 }
 
 export type NativeLaunch = WopiLaunch | BrowserLaunch;
-type Message = {
-  id: number;
-  role: "user" | "assistant";
-  text: string;
-  tools: string[];
-  status: "running" | "done" | "error" | "review";
-};
-type PendingTurn = {
+
+type Message = LiveMessage;
+export type PendingTurn = {
   draft: string;
-  permission: "read_only" | "selection" | "slides" | "document";
+  permission: PermissionMode;
   model?: ModelSettings;
 };
 
+const PHONE_QUERY = "(max-width: 760px)";
+
+/** A screenshot from a task result, as an object URL (revoked on unmount). */
+function pngUrl(image: { pngBytes?: unknown; pngBase64?: unknown } | undefined) {
+  if (!image) return null;
+  try {
+    const raw = image.pngBytes;
+    const bytes =
+      typeof image.pngBase64 === "string"
+        ? Uint8Array.from(atob(image.pngBase64), (c) => c.charCodeAt(0))
+        : Array.isArray(raw)
+          ? Uint8Array.from(raw as number[], (value) => value & 255)
+          : raw instanceof Uint8Array
+            ? Uint8Array.from(raw)
+            : raw instanceof ArrayBuffer
+              ? new Uint8Array(raw.slice(0))
+              : null;
+    return bytes?.length ? URL.createObjectURL(new Blob([bytes], { type: "image/png" })) : null;
+  } catch {
+    return null;
+  }
+}
+
+function lastAssistantIndex(items: Message[]) {
+  for (let index = items.length - 1; index >= 0; index -= 1)
+    if (items[index]!.role === "assistant") return index;
+  return -1;
+}
+
+function clip(text: string, limit = 40) {
+  const value = text.replace(/\s+/g, " ").trim();
+  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
+}
+
 // Product UI, also mounted by the isolated native integration harness. The
 // launch capability is document-scoped; no provider credential enters here.
-export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
+export function NativeWorkspace({
+  launch,
+  openingPreview,
+  openingPreviews = [],
+  initialHistory = [],
+  initialQueued = null,
+  onReload,
+}: {
+  launch: NativeLaunch;
+  openingPreview?: string | null;
+  /** Saved previews of every slide, shown while the editor opens. */
+  openingPreviews?: Array<string | null>;
+  /** Requests already loaded by the opening screen. */
+  initialHistory?: TurnHistoryItem[];
+  /** A request written on the opening screen, sent once the editor is ready. */
+  initialQueued?: PendingTurn | null;
+  onReload?: () => void;
+}) {
   const office = useRef<HTMLIFrameElement>(null),
     form = useRef<HTMLFormElement>(null);
   const port = useRef<MessagePort | null>(null),
@@ -65,15 +138,15 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
     bottom = useRef<HTMLDivElement>(null),
     assetInput = useRef<HTMLInputElement>(null);
   const turnRequested = useRef(false),
+    /** This editor load saved once before AI edits, so they are checked against its own export. */
+    baselineSaved = useRef(false),
     saveRevision = useRef(0),
     pendingSaveRevision = useRef<number | null>(null),
     pendingTurn = useRef<PendingTurn | null>(null),
     editorModified = useRef(false),
     downloadAfterRevision = useRef<number | null>(null),
     browserOpening = useRef(false),
-    browserRevision = useRef(
-      launch.editorKind === "browser" ? launch.revision : "",
-    ),
+    browserRevision = useRef(launch.editorKind === "browser" ? launch.revision : ""),
     pendingBrowserSave = useRef<{
       requestId: string;
       revision: string | null;
@@ -81,47 +154,90 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
     } | null>(null);
   const dispatchedLocalJobs = useRef(new Set<string>());
   const assetPayloads = useRef(
-    new Map<
-      string,
-      { mediaType: string; bytes: ArrayBuffer; fileName: string }
-    >(),
+    new Map<string, { mediaType: string; bytes: ArrayBuffer; fileName: string }>(),
   );
   const loadingAssets = useRef(new Set<string>());
+  /** Calls this page makes to the editor itself (selection, reveal, undo). */
+  const hostCalls = useRef(
+    new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>(),
+  );
+  /** Screenshots the AI looked at, kept only in this page ("taskId:index" → object URL). */
+  const imageUrls = useRef(new Map<string, string>());
+  const [images, setImages] = useState<Map<string, string>>(new Map());
   const [engineReady, setEngineReady] = useState(false),
     [bridgeReady, setBridgeReady] = useState(false),
     [sessionObserved, setSessionObserved] = useState(false);
-  const [panel, setPanel] = useState(true),
+  const [phone, setPhone] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(PHONE_QUERY).matches,
+  );
+  // Mounted only in the browser (after the launch request), so the first
+  // render can already start with the canvas on narrow screens.
+  const [panel, setPanel] = useState(
+      () => typeof window === "undefined" || !window.matchMedia(PHONE_QUERY).matches,
+    ),
+    [panelTab, setPanelTab] = useState<"ai" | "versions">("ai"),
     [text, setText] = useState("");
   useEffect(() => {
-    const narrowScreen = window.matchMedia("(max-width: 760px)");
-    const keepCanvasVisible = () => {
+    const narrowScreen = window.matchMedia(PHONE_QUERY);
+    const follow = () => {
+      setPhone(narrowScreen.matches);
       if (narrowScreen.matches) setPanel(false);
     };
-    keepCanvasVisible();
-    narrowScreen.addEventListener("change", keepCanvasVisible);
-    return () => narrowScreen.removeEventListener("change", keepCanvasVisible);
+    follow();
+    narrowScreen.addEventListener("change", follow);
+    return () => narrowScreen.removeEventListener("change", follow);
   }, []);
   const [messages, setMessages] = useState<Message[]>([]),
     [busy, setBusy] = useState(false);
+  const [queued, setQueued] = useState<PendingTurn | null>(initialQueued);
   const [error, setError] = useState(""),
-    [saveState, setSaveState] = useState("저장됨");
+    [saveState, setSaveState] = useState("저장됨"),
+    [savedAt, setSavedAt] = useState<string | null>(null);
+  const saveStateRef = useRef(saveState);
+  saveStateRef.current = saveState;
   const [uploadingAsset, setUploadingAsset] = useState(false),
     [assetNotice, setAssetNotice] = useState("");
-  const [permission, setPermission] = useState<
-    "read_only" | "selection" | "slides" | "document"
-  >("selection");
+  const [permission, setPermission] = useState<PermissionMode>(initialQueued?.permission ?? "selection");
   const [model, setModel] = useState<ModelSettings>();
+  const [lookingAt, setLookingAt] = useState<{ slideIndex: number; url: string } | null>(null);
+  const [history, setHistory] = useState<TurnHistoryItem[]>(initialHistory);
+  const [versions, setVersions] = useState<VersionHistoryItem[]>([]),
+    [versionsLoading, setVersionsLoading] = useState(false),
+    [versionsError, setVersionsError] = useState<string | null>(null);
+  const [documentSummary, setDocumentSummary] = useState<DocumentSummary | null>(null);
+  const [selection, setSelection] = useState<EditorSelection | null>(null);
+  const [undone, setUndone] = useState<Map<string, string>>(new Map());
+  const [undoing, setUndoing] = useState<string | null>(null);
+  const [freshTurns, setFreshTurns] = useState<Set<string>>(new Set());
+  const [phoneSlide, setPhoneSlide] = useState(0);
+  const [editModeConfirmed, setEditModeConfirmed] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<RestoreTarget | null>(null);
+  const [editorMounted, setEditorMounted] = useState(true);
+  const [compare, setCompare] = useState<{
+    title: string;
+    subtitle: string;
+    pairs: ComparePair[];
+    changes?: TurnSummary["changes"];
+    imageSource: string;
+    turn?: CardTurn;
+    restoreEntry?: VersionEntry;
+  } | null>(null);
+  const [download, setDownload] = useState<{
+    summary: DocumentSummary | null;
+    loading: boolean;
+    busy: boolean;
+  } | null>(null);
   const ai = useAiAccount(launch.aiConnector);
   const aiConnected = Boolean(ai.account);
   const origin = new URL(launch.editorUrl).origin;
+  const documentBase = `/api/documents/${launch.documentId}`;
   const api = useCallback(
     async (path: string, body?: unknown, signal?: AbortSignal) => {
       const response = await fetch(`${launch.apiBase}/${path}`, {
         method: body === undefined ? "GET" : "POST",
         headers: {
-          ...(launch.accessToken
-            ? { authorization: `Bearer ${launch.accessToken}` }
-            : {}),
+          ...(launch.accessToken ? { authorization: `Bearer ${launch.accessToken}` } : {}),
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -134,13 +250,54 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
     },
     [launch.apiBase, launch.accessToken],
   );
+  const documentApi = useCallback(
+    async (path: string, init?: RequestInit) => {
+      const response = await fetch(`${documentBase}/${path}`, {
+        ...init,
+        headers: {
+          ...(launch.accessToken ? { authorization: `Bearer ${launch.accessToken}` } : {}),
+          ...(init?.body ? { "content-type": "application/json" } : {}),
+        },
+        cache: "no-store",
+      });
+      const value = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(value.error ?? "request_failed");
+      return value;
+    },
+    [documentBase, launch.accessToken],
+  );
   const loadModels = useCallback(
     (signal: AbortSignal): Promise<{ models: AvailableModel[] }> =>
-      ai.mode === "local"
-        ? ai.localRequest("/v1/models")
-        : api("models", undefined, signal),
+      ai.mode === "local" ? ai.localRequest("/v1/models") : api("models", undefined, signal),
     [ai.localRequest, ai.mode, api],
   );
+  const refreshHistory = useCallback(async () => {
+    try {
+      const value = (await api("turns")) as { turns: TurnHistoryItem[] };
+      setHistory(value.turns);
+    } catch {
+      // History is additive; the live event stream still renders cards.
+    }
+  }, [api]);
+  const refreshVersions = useCallback(async () => {
+    setVersionsLoading(true);
+    try {
+      const value = (await documentApi("versions")) as { versions: VersionHistoryItem[] };
+      setVersions(value.versions);
+      setVersionsError(null);
+    } catch (cause) {
+      setVersionsError(cause instanceof Error ? cause.message : "versions_unavailable");
+    } finally {
+      setVersionsLoading(false);
+    }
+  }, [documentApi]);
+  const refreshSummary = useCallback(async () => {
+    try {
+      setDocumentSummary((await documentApi("summary")) as DocumentSummary);
+    } catch {
+      // Previews and sizes are optional; the editor is the document.
+    }
+  }, [documentApi]);
   const dispatchLocalJob = useCallback(
     async (job: { jobId?: unknown }) => {
       if (ai.mode !== "local" || typeof job.jobId !== "string")
@@ -172,9 +329,7 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
         turnRequested.current = false;
         setBusy(false);
         setText(pending.draft);
-        setError(
-          cause instanceof Error ? cause.message : "요청을 보내지 못했습니다.",
-        );
+        setError(cause instanceof Error ? cause.message : "요청을 보내지 못했어요.");
       }
     },
     [ai.mode, api, dispatchLocalJob],
@@ -182,11 +337,7 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
   const sendOffice = useCallback(
     (MessageId: string, Values: unknown = {}) => {
       if (launch.editorKind === "browser") {
-        port.current?.postMessage({
-          type: "command",
-          messageId: MessageId,
-          values: Values,
-        });
+        port.current?.postMessage({ type: "command", messageId: MessageId, values: Values });
         return;
       }
       office.current?.contentWindow?.postMessage(
@@ -196,6 +347,47 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
     },
     [launch.editorKind, origin],
   );
+  const requestSave = useCallback(
+    (state = "저장 중…") => {
+      pendingSaveRevision.current = saveRevision.current + 1;
+      setSaveState(state);
+      sendOffice("Action_Save", { Notify: true, DontSaveIfUnmodified: false });
+    },
+    [sendOffice],
+  );
+  /** Runs one editor operation for this page (not for the AI) and waits for it. */
+  const callEditor = useCallback(
+    (request: Record<string, unknown>, timeoutMs = 15_000) =>
+      new Promise<unknown>((resolve, reject) => {
+        const channel = port.current;
+        if (!channel) {
+          reject(new Error("editor_not_connected"));
+          return;
+        }
+        const id = `host-${crypto.randomUUID()}`;
+        const timer = setTimeout(() => {
+          hostCalls.current.delete(id);
+          reject(new Error("editor_timeout"));
+        }, timeoutMs);
+        hostCalls.current.set(id, { resolve, reject, timer });
+        channel.postMessage({ id, request });
+      }),
+    [],
+  );
+  /** Keeps the task's screenshots in this page; the server drops them when the request ends. */
+  const rememberImages = useCallback((taskId: string, list: unknown[]) => {
+    let changed = false;
+    list.forEach((image, index) => {
+      const key = `${taskId}:${index}`;
+      if (imageUrls.current.has(key)) return;
+      const url = pngUrl(image as { pngBytes?: unknown; pngBase64?: unknown });
+      if (!url) return;
+      imageUrls.current.set(key, url);
+      changed = true;
+    });
+    if (changed) setImages(new Map(imageUrls.current));
+    return imageUrls.current.get(`${taskId}:0`) ?? null;
+  }, []);
   const deliverTask = useCallback(
     (task: {
       id?: string;
@@ -206,58 +398,31 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
         slideIndex?: number;
         expectedRevision?: string;
         expectedSlides?: string;
-        permission?: {
-          mode?: string;
-          slideIndexes?: number[];
-          elementIds?: string[];
-        };
+        permission?: { mode?: string; slideIndexes?: number[]; elementIds?: string[] };
       };
     }) => {
       const request = task.request;
       const operation = request?.operation ?? "";
-      const assetOperations = new Set([
-        "insert_image",
-        "replace_image",
-        "insert_media",
-        "replace_media",
-      ]);
-      if (
-        !request ||
-        !assetOperations.has(operation) ||
-        typeof task.id !== "string"
-      ) {
+      const assetOperations = new Set(["insert_image", "replace_image", "insert_media", "replace_media"]);
+      if (!request || !assetOperations.has(operation) || typeof task.id !== "string") {
         port.current?.postMessage(task);
         return;
       }
       const assetId = request.assetId ?? "";
-      if (
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-          assetId,
-        )
-      ) {
-        void api("result", {
-          id: task.id,
-          error: "invalid_document_asset",
-        }).catch((cause) => setError(cause.message));
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(assetId)) {
+        void api("result", { id: task.id, error: "invalid_document_asset" }).catch((cause) =>
+          setError(cause.message),
+        );
         return;
       }
-      const deliver = (payload: {
-        mediaType: string;
-        bytes: ArrayBuffer;
-        fileName: string;
-      }) => {
+      const deliver = (payload: { mediaType: string; bytes: ArrayBuffer; fileName: string }) => {
         // Transfer a fresh copy because MessagePort detaches transferred buffers.
         // Task redelivery is safe: the extension caches the result by task id.
         const bytes = payload.bytes.slice(0);
         port.current?.postMessage(
           {
             id: task.id,
-            request: {
-              ...request,
-              mediaType: payload.mediaType,
-              fileName: payload.fileName,
-              assetBytes: bytes,
-            },
+            request: { ...request, mediaType: payload.mediaType, fileName: payload.fileName, assetBytes: bytes },
           },
           [bytes],
         );
@@ -269,16 +434,11 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
       }
       if (loadingAssets.current.has(task.id)) return;
       loadingAssets.current.add(task.id);
-      const imageUrl = new URL(
-        `/api/documents/${launch.documentId}/assets/${assetId}`,
-        window.location.origin,
-      );
+      const imageUrl = new URL(`/api/documents/${launch.documentId}/assets/${assetId}`, window.location.origin);
       void fetch(imageUrl, { cache: "no-store" })
         .then(async (response) => {
           if (!response.ok) throw new Error("asset_download_failed");
-          const mediaType = response.headers
-            .get("content-type")
-            ?.split(";", 1)[0];
+          const mediaType = response.headers.get("content-type")?.split(";", 1)[0];
           const allowedTypes = [
             "image/png",
             "image/jpeg",
@@ -289,90 +449,61 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
             "video/mp4",
             "video/webm",
           ];
-          if (!mediaType || !allowedTypes.includes(mediaType))
-            throw new Error("invalid_asset_type");
+          if (!mediaType || !allowedTypes.includes(mediaType)) throw new Error("invalid_asset_type");
           const bytes = await response.arrayBuffer();
-          const maximumBytes = mediaType.startsWith("image/")
-            ? 5_000_000
-            : 25_000_000;
-          if (!bytes.byteLength || bytes.byteLength > maximumBytes)
-            throw new Error("invalid_asset_size");
-          const signature = new Uint8Array(
-            bytes,
-            0,
-            Math.min(16, bytes.byteLength),
-          );
+          const maximumBytes = mediaType.startsWith("image/") ? 5_000_000 : 25_000_000;
+          if (!bytes.byteLength || bytes.byteLength > maximumBytes) throw new Error("invalid_asset_size");
+          const signature = new Uint8Array(bytes, 0, Math.min(16, bytes.byteLength));
           const png =
             signature.length >= 8 &&
-            [137, 80, 78, 71, 13, 10, 26, 10].every(
-              (value, index) => signature[index] === value,
-            );
+            [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => signature[index] === value);
           const jpeg = signature[0] === 0xff && signature[1] === 0xd8;
-          const textAt = (start: number, end: number) =>
-            String.fromCharCode(...signature.slice(start, end));
+          const textAt = (start: number, end: number) => String.fromCharCode(...signature.slice(start, end));
           const mediaSignature =
             (mediaType === "audio/mpeg" &&
-              (textAt(0, 3) === "ID3" ||
-                (signature[0] === 0xff && (signature[1]! & 0xe0) === 0xe0))) ||
-            (mediaType === "audio/wav" &&
-              textAt(0, 4) === "RIFF" &&
-              textAt(8, 12) === "WAVE") ||
+              (textAt(0, 3) === "ID3" || (signature[0] === 0xff && (signature[1]! & 0xe0) === 0xe0))) ||
+            (mediaType === "audio/wav" && textAt(0, 4) === "RIFF" && textAt(8, 12) === "WAVE") ||
             (mediaType === "audio/ogg" && textAt(0, 4) === "OggS") ||
             (mediaType === "video/webm" &&
               signature[0] === 0x1a &&
               signature[1] === 0x45 &&
               signature[2] === 0xdf &&
               signature[3] === 0xa3) ||
-            (["audio/mp4", "video/mp4"].includes(mediaType) &&
-              textAt(4, 8) === "ftyp");
+            (["audio/mp4", "video/mp4"].includes(mediaType) && textAt(4, 8) === "ftyp");
           if (
             (mediaType === "image/png" && !png) ||
             (mediaType === "image/jpeg" && !jpeg) ||
             (!mediaType.startsWith("image/") && !mediaSignature)
           )
             throw new Error("invalid_asset_bytes");
-          const payload: {
-            mediaType: string;
-            bytes: ArrayBuffer;
-            fileName: string;
-          } = {
-            mediaType,
-            bytes,
-            fileName: `${assetId}.${
-              mediaType === "image/png"
-                ? "png"
-                : mediaType === "image/jpeg"
-                  ? "jpg"
-                  : mediaType === "audio/mpeg"
-                    ? "mp3"
-                    : mediaType === "audio/wav"
-                      ? "wav"
-                      : mediaType === "audio/ogg"
-                        ? "ogg"
-                        : mediaType === "audio/mp4"
-                          ? "m4a"
-                          : mediaType === "video/webm"
-                            ? "webm"
-                            : "mp4"
-            }`,
-          };
+          const extension =
+            mediaType === "image/png"
+              ? "png"
+              : mediaType === "image/jpeg"
+                ? "jpg"
+                : mediaType === "audio/mpeg"
+                  ? "mp3"
+                  : mediaType === "audio/wav"
+                    ? "wav"
+                    : mediaType === "audio/ogg"
+                      ? "ogg"
+                      : mediaType === "audio/mp4"
+                        ? "m4a"
+                        : mediaType === "video/webm"
+                          ? "webm"
+                          : "mp4";
+          const payload = { mediaType, bytes, fileName: `${assetId}.${extension}` };
           assetPayloads.current.set(task.id!, payload);
           const cachedBytes = () =>
-            [...assetPayloads.current.values()].reduce(
-              (total, candidate) => total + candidate.bytes.byteLength,
-              0,
-            );
+            [...assetPayloads.current.values()].reduce((total, candidate) => total + candidate.bytes.byteLength, 0);
           while (assetPayloads.current.size > 4 || cachedBytes() > 50_000_000)
-            assetPayloads.current.delete(
-              assetPayloads.current.keys().next().value!,
-            );
+            assetPayloads.current.delete(assetPayloads.current.keys().next().value!);
           deliver(payload);
         })
         .catch((cause) =>
           api("result", {
             id: task.id,
-            error:
-              cause instanceof Error ? cause.message : "asset_download_failed",
+            error: cause instanceof Error ? cause.message : "asset_download_failed",
           }).catch((error) => setError(error.message)),
         )
         .finally(() => loadingAssets.current.delete(task.id!));
@@ -384,22 +515,17 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
       if (launch.editorKind !== "browser" || browserOpening.current) return;
       browserOpening.current = true;
       try {
-        const response = await fetch(`${launch.contentApiBase}/contents`, {
-          cache: "no-store",
-        });
+        const response = await fetch(`${launch.contentApiBase}/contents`, { cache: "no-store" });
         if (!response.ok) {
           const value = await response.json().catch(() => ({}));
           throw new Error(value.error ?? "browser_document_download_failed");
         }
         const revision = response.headers.get("etag") ?? "";
-        const contentType = response.headers
-          .get("content-type")
-          ?.split(";", 1)[0];
+        const contentType = response.headers.get("content-type")?.split(";", 1)[0];
         const bytes = await response.arrayBuffer();
         if (
           revision !== launch.revision ||
-          contentType !==
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+          contentType !== "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
           !bytes.byteLength ||
           bytes.byteLength > launch.maxBytes ||
           new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 2))[0] !== 0x50 ||
@@ -421,20 +547,13 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
         );
       } catch (cause) {
         browserOpening.current = false;
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "브라우저에서 PPTX를 열지 못했습니다.",
-        );
+        setError(cause instanceof Error ? cause.message : "브라우저에서 PPTX를 열지 못했어요.");
       }
     },
     [launch],
   );
   const saveBrowserDocument = useCallback(
-    async (
-      channel: MessagePort,
-      message: { requestId?: unknown; revision?: unknown; bytes?: unknown },
-    ) => {
+    async (channel: MessagePort, message: { requestId?: unknown; revision?: unknown; bytes?: unknown }) => {
       if (
         launch.editorKind !== "browser" ||
         typeof message.requestId !== "string" ||
@@ -452,32 +571,24 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
         });
         return;
       }
-      pendingBrowserSave.current = {
-        requestId: message.requestId,
-        revision: null,
-        acknowledgementSent: false,
-      };
+      pendingBrowserSave.current = { requestId: message.requestId, revision: null, acknowledgementSent: false };
       pendingSaveRevision.current = saveRevision.current + 1;
       try {
         const response = await fetch(`${launch.contentApiBase}/contents`, {
           method: "PUT",
           headers: {
-            "content-type":
-              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "content-type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             "if-match": browserRevision.current,
           },
           body: message.bytes,
           cache: "no-store",
         });
         const value = await response.json().catch(() => ({}));
-        if (!response.ok)
-          throw new Error(value.error ?? "browser_document_save_failed");
+        if (!response.ok) throw new Error(value.error ?? "browser_document_save_failed");
         const revision = response.headers.get("etag") ?? value.revision ?? "";
-        if (typeof revision !== "string" || !revision)
-          throw new Error("browser_save_revision_missing");
+        if (typeof revision !== "string" || !revision) throw new Error("browser_save_revision_missing");
         const pendingRequest = pendingBrowserSave.current;
-        if (!pendingRequest || pendingRequest.requestId !== message.requestId)
-          return;
+        if (!pendingRequest || pendingRequest.requestId !== message.requestId) return;
         browserRevision.current = revision;
         pendingRequest.revision = revision;
         setSaveState(value.unchanged ? "저장 확인 중…" : "저장 검사 중…");
@@ -487,32 +598,34 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
           type: "save-result",
           requestId: message.requestId,
           ok: false,
-          error:
-            cause instanceof Error
-              ? cause.message
-              : "browser_document_save_failed",
+          error: cause instanceof Error ? cause.message : "browser_document_save_failed",
         });
         pendingSaveRevision.current = null;
         editorModified.current = true;
         setSaveState("저장 실패");
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "브라우저에서 PPTX를 저장하지 못했습니다.",
-        );
+        setError(cause instanceof Error ? cause.message : "브라우저에서 PPTX를 저장하지 못했어요.");
       }
     },
     [launch],
   );
-  useLayoutEffect(() => {
-    if (input.current) {
-      input.current.style.height = "0px";
-      input.current.style.height = `${Math.min(180, Math.max(64, input.current.scrollHeight))}px`;
-    }
-  }, [text]);
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "nearest" });
-  }, [messages]);
+  }, [messages, history.length]);
+  useEffect(() => {
+    if (saveState === "저장됨") setSavedAt(when(Date.now()));
+  }, [saveState]);
+  useEffect(() => {
+    if (!busy) setLookingAt(null);
+  }, [busy]);
+  useEffect(
+    () => () => {
+      for (const url of imageUrls.current.values()) URL.revokeObjectURL(url);
+      imageUrls.current.clear();
+      for (const call of hostCalls.current.values()) clearTimeout(call.timer);
+      hostCalls.current.clear();
+    },
+    [],
+  );
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== origin) return;
@@ -522,9 +635,7 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
         event.data?.protocolVersion === 1 &&
         typeof event.data.bridgeSessionId === "string" &&
         event.data.bridgeSessionId.length > 0;
-      const wopiBridge =
-        launch.editorKind === "wopi" &&
-        event.data?.type === "spellbook.extension-ready";
+      const wopiBridge = launch.editorKind === "wopi" && event.data?.type === "spellbook.extension-ready";
       if ((browserBridge || wopiBridge) && event.source) {
         const sessionId = browserBridge
           ? event.data.bridgeSessionId
@@ -540,6 +651,20 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
         port.current = channel.port1;
         channel.port1.onmessage = (result) => {
           if (port.current !== channel.port1) return;
+          if (result.data?.type === "selection") {
+            const value = result.data.value as EditorSelection | undefined;
+            if (value && Number.isInteger(value.activeSlide) && Array.isArray(value.selected)) setSelection(value);
+            return;
+          }
+          const hostCall =
+            typeof result.data?.id === "string" ? hostCalls.current.get(result.data.id) : undefined;
+          if (hostCall) {
+            hostCalls.current.delete(result.data.id);
+            clearTimeout(hostCall.timer);
+            if (typeof result.data.error === "string") hostCall.reject(new Error(result.data.error));
+            else hostCall.resolve(result.data.value);
+            return;
+          }
           if (browserBridge) {
             if (result.data?.type === "ready") {
               void openBrowserDocument(channel.port1);
@@ -549,19 +674,13 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
               browserOpening.current = false;
               setEngineReady(true);
               setBridgeReady(true);
-              setSaveState(
-                result.data.recovered ? "복구된 변경 사항 있음" : "저장됨",
-              );
+              setSaveState(result.data.recovered ? "복구된 변경 사항 있음" : "저장됨");
               return;
             }
             if (result.data?.type === "modified") {
               editorModified.current = result.data.modified === true;
               setSaveState((current) =>
-                result.data.modified
-                  ? "변경 사항 있음"
-                  : pendingSaveRevision.current !== null
-                    ? current
-                    : "저장됨",
+                result.data.modified ? "변경 사항 있음" : pendingSaveRevision.current !== null ? current : "저장됨",
               );
               return;
             }
@@ -571,10 +690,7 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
             }
             if (result.data?.type === "save-response") {
               if (!result.data.success) {
-                if (
-                  pendingBrowserSave.current?.requestId ===
-                  result.data.requestId
-                ) {
+                if (pendingBrowserSave.current?.requestId === result.data.requestId) {
                   pendingBrowserSave.current = null;
                   pendingSaveRevision.current = null;
                   downloadAfterRevision.current = null;
@@ -601,10 +717,7 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
               if (modified && (waiting || downloadWaiting)) {
                 pendingSaveRevision.current = saveRevision.current + 1;
                 setSaveState("추가 변경 사항 저장 중…");
-                sendOffice("Action_Save", {
-                  Notify: true,
-                  DontSaveIfUnmodified: false,
-                });
+                sendOffice("Action_Save", { Notify: true, DontSaveIfUnmodified: false });
               } else if (!modified) {
                 if (waiting) {
                   pendingTurn.current = null;
@@ -612,9 +725,8 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
                 }
                 if (downloadWaiting) {
                   downloadAfterRevision.current = null;
-                  window.location.assign(
-                    `/api/documents/${launch.documentId}/download`,
-                  );
+                  setDownload(null);
+                  window.location.assign(`/api/documents/${launch.documentId}/download`);
                 }
               }
               return;
@@ -622,9 +734,7 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
             if (result.data?.type === "error") {
               browserOpening.current = false;
               setError(
-                typeof result.data.error === "string"
-                  ? result.data.error
-                  : "브라우저 편집기에서 오류가 발생했습니다.",
+                typeof result.data.error === "string" ? result.data.error : "브라우저 편집기에서 오류가 생겼어요.",
               );
               return;
             }
@@ -633,32 +743,32 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
             setBridgeReady(true);
             return;
           }
-          if (typeof result.data?.id === "string")
-            void api(
-              "result",
-              compactNativeTaskResultForTransport(result.data),
-            ).catch((e) => setError(e.message));
+          if (typeof result.data?.id === "string") {
+            const list = result.data?.value?.images;
+            if (Array.isArray(list) && list.length) {
+              const url = rememberImages(result.data.id, list);
+              if (url) setLookingAt({ slideIndex: Number(list[0]?.slideIndex) || 0, url });
+            }
+            void api("result", compactNativeTaskResultForTransport(result.data)).catch((e) => setError(e.message));
+          }
         };
         (event.source as Window).postMessage(
           browserBridge
-            ? {
-                type: "spellbook.browser-office-connect",
-                protocolVersion: 1,
-              }
-            : {
-                type: "spellbook.connect",
-                bridgeSessionId: sessionId === "legacy" ? undefined : sessionId,
-              },
+            ? { type: "spellbook.browser-office-connect", protocolVersion: 1 }
+            : { type: "spellbook.connect", bridgeSessionId: sessionId === "legacy" ? undefined : sessionId },
           origin,
           [channel.port2],
         );
         return;
       }
       if (event.source !== office.current?.contentWindow) return;
+      if (event.data?.type === "spellbook.edit-mode") {
+        setEditModeConfirmed(event.data.edit === true);
+        return;
+      }
       let value;
       try {
-        value =
-          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        value = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
       } catch {
         return;
       }
@@ -677,23 +787,19 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
           if (waiting) {
             setBusy(false);
             setText(waiting.draft);
-            setError("AI 작업 전에 현재 편집 내용을 저장하지 못했습니다.");
+            setError("AI 작업 전에 지금 편집 내용을 저장하지 못했어요.");
           }
         }
       }
       if (value?.MessageId === "Doc_ModifiedStatus") {
         editorModified.current = value.Values?.Modified === true;
         setSaveState((current) =>
-          value.Values?.Modified
-            ? "변경 사항 있음"
-            : pendingSaveRevision.current !== null
-              ? current
-              : "저장됨",
+          value.Values?.Modified ? "변경 사항 있음" : pendingSaveRevision.current !== null ? current : "저장됨",
         );
       }
     };
     window.addEventListener("message", onMessage);
-    if (launch.editorKind === "wopi" && !submitted.current) {
+    if (launch.editorKind === "wopi" && !submitted.current && editorMounted) {
       submitted.current = true;
       form.current?.submit();
     }
@@ -707,6 +813,8 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
     sendOffice,
     dispatchTurn,
     launch.documentId,
+    editorMounted,
+    rememberImages,
   ]);
   useEffect(() => {
     if (launch.editorKind !== "wopi" || !engineReady || bridgeReady) return;
@@ -715,42 +823,54 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
       // disabled. Close it through the editor's own message contract so the
       // document canvas, not an upstream product tour, is the first frame.
       sendOffice("welcome-close");
-      office.current?.contentWindow?.postMessage(
-        { type: "spellbook.open-extension" },
-        origin,
-      );
+      office.current?.contentWindow?.postMessage({ type: "spellbook.open-extension" }, origin);
     };
     open();
     const timer = setInterval(open, 500);
     return () => clearInterval(timer);
   }, [engineReady, bridgeReady, launch.editorKind, origin, sendOffice]);
+  // Phones open the editor in its read-only mobile mode; AI edits and the
+  // saves around them need edit mode, so ask for it until it is confirmed.
+  useEffect(() => {
+    if (!phone || launch.editorKind !== "wopi" || !engineReady || editModeConfirmed) return;
+    const ask = () => office.current?.contentWindow?.postMessage({ type: "spellbook.ensure-edit" }, origin);
+    ask();
+    const timer = setInterval(ask, 1_000);
+    return () => clearInterval(timer);
+  }, [phone, launch.editorKind, engineReady, editModeConfirmed, origin]);
+  useEffect(() => {
+    void refreshHistory();
+    void refreshVersions();
+    void refreshSummary();
+  }, [refreshHistory, refreshVersions, refreshSummary]);
+  // Each finished save can add a version, previews and a size.
+  const lastSaveState = useRef(saveState);
+  useEffect(() => {
+    const previous = lastSaveState.current;
+    lastSaveState.current = saveState;
+    if (saveState !== "저장됨" || previous === "저장됨") return;
+    void refreshVersions();
+    void refreshHistory();
+    void refreshSummary();
+  }, [saveState, refreshHistory, refreshSummary, refreshVersions]);
   useEffect(() => {
     if (!bridgeReady) return;
     let stopped = false,
       lastEvent = 0,
       timer: ReturnType<typeof setTimeout>;
     const abort = new AbortController();
+    void refreshHistory();
     const poll = async () => {
       try {
-        const response = await api(
-          `poll?after=${lastEvent}`,
-          undefined,
-          abort.signal,
-        );
+        const response = await api(`poll?after=${lastEvent}`, undefined, abort.signal);
         if (stopped) return;
-        if (response.localJob && ai.mode === "local" && aiConnected)
-          await dispatchLocalJob(response.localJob);
-        saveRevision.current =
-          response.session?.saveRevision ?? saveRevision.current;
+        if (response.localJob && ai.mode === "local" && aiConnected) await dispatchLocalJob(response.localJob);
+        saveRevision.current = response.session?.saveRevision ?? saveRevision.current;
         setSessionObserved(true);
-        if (response.session?.status === "validating")
-          setSaveState("저장 검사 중…");
+        if (response.session?.status === "validating") setSaveState("저장 검사 중…");
         else if (response.session?.status === "active") {
           const completedRevision = pendingSaveRevision.current;
-          if (
-            completedRevision !== null &&
-            saveRevision.current >= completedRevision
-          ) {
+          if (completedRevision !== null && saveRevision.current >= completedRevision) {
             const browserSave = pendingBrowserSave.current;
             if (browserSave?.revision) {
               if (!browserSave.acknowledgementSent) {
@@ -777,20 +897,14 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
                 if (editorModified.current) {
                   pendingSaveRevision.current = saveRevision.current + 1;
                   setSaveState("AI 작업 전 저장 중…");
-                  sendOffice("Action_Save", {
-                    Notify: true,
-                    DontSaveIfUnmodified: false,
-                  });
+                  sendOffice("Action_Save", { Notify: true, DontSaveIfUnmodified: false });
                 } else {
                   pendingTurn.current = null;
                   void dispatchTurn(waiting);
                 }
               }
             }
-          } else if (
-            pendingSaveRevision.current === null &&
-            !editorModified.current
-          ) {
+          } else if (pendingSaveRevision.current === null && !editorModified.current) {
             setSaveState("저장됨");
           }
           if (
@@ -801,9 +915,8 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
             saveRevision.current >= downloadAfterRevision.current
           ) {
             downloadAfterRevision.current = null;
-            window.location.assign(
-              `/api/documents/${launch.documentId}/download`,
-            );
+            setDownload(null);
+            window.location.assign(`/api/documents/${launch.documentId}/download`);
           }
         } else if (response.session?.status === "failed") {
           const waiting = pendingTurn.current;
@@ -815,72 +928,102 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
               type: "save-result",
               requestId: browserSave.requestId,
               ok: false,
-              error:
-                response.session.error ?? "browser_document_validation_failed",
+              error: response.session.error ?? "browser_document_validation_failed",
             });
           }
           pendingTurn.current = null;
           pendingSaveRevision.current = null;
           setSaveState("저장 실패");
-          setError(
-            response.session.error ?? "저장 파일을 검증하지 못했습니다.",
-          );
+          setError(response.session.error ?? "저장한 파일을 검사하지 못했어요.");
           if (waiting) {
             setBusy(false);
             setText(waiting.draft);
           }
         }
         if (response.task) deliverTask(response.task);
+        let finishedTurn = false;
         for (const event of response.events) {
           lastEvent = event.id;
           if (event.type === "start")
             setMessages((items) => {
               const pending = items.at(-1);
-              const user: Message = {
-                id: -event.id,
-                role: "user",
-                text: event.text,
+              const assistant: Message = {
+                id: event.id,
+                role: "assistant",
+                text: "",
                 tools: [],
-                status: "done",
+                status: "running",
+                turnId: event.turnId,
+                permission: event.permission ?? pending?.permission,
+                at: event.at,
               };
+              // The request this page just sent gets its turn id.
+              if (pending?.role === "user" && !pending.turnId && pending.text === event.text)
+                return [...items.slice(0, -1), { ...pending, turnId: event.turnId, at: event.at }, assistant];
               return [
                 ...items,
-                ...(pending?.role === "user" && pending.text === event.text
-                  ? []
-                  : [user]),
                 {
-                  id: event.id,
-                  role: "assistant",
-                  text: "",
+                  id: -event.id,
+                  role: "user",
+                  text: event.text,
                   tools: [],
-                  status: "running",
+                  status: "done",
+                  permission: event.permission,
+                  turnId: event.turnId,
+                  at: event.at,
                 },
+                assistant,
               ];
             });
           else if (event.type === "error") {
             turnRequested.current = false;
-            setError(event.error);
+            finishedTurn = true;
             setBusy(false);
-            setMessages((items) =>
-              items.map((m, i) =>
-                i === items.length - 1 ? { ...m, status: "error" } : m,
-              ),
-            );
+            // A turn failure belongs on its card; only errors without a turn
+            // (older events) fall back to the panel alert.
+            if (!event.turnId) setError(event.error);
+            setMessages((items) => {
+              const index = lastAssistantIndex(items);
+              if (index < 0) return items;
+              return items.map((m, i) =>
+                i === index
+                  ? { ...m, status: "error", error: event.error, summary: event.summary ?? m.summary, finishedAt: event.at }
+                  : m,
+              );
+            });
+          } else if (event.type === "restored") {
+            setMessages((items) => [
+              ...items,
+              {
+                id: event.id,
+                role: "system",
+                text: `${when(event.at)} 이전 버전으로 돌아갔어요`,
+                tools: [],
+                status: "done",
+                at: event.at,
+              },
+            ]);
+          } else if (event.type === "undone" && typeof event.turnId === "string") {
+            setUndone((current) => new Map(current).set(event.turnId, event.at));
           } else if (["delta", "tool", "done"].includes(event.type)) {
             if (event.type === "done") {
+              finishedTurn = true;
               setBusy(false);
               if (event.changed && turnRequested.current) {
                 setSaveState("저장 중…");
-                sendOffice("Action_Save", {
-                  Notify: true,
-                  DontSaveIfUnmodified: false,
-                });
+                sendOffice("Action_Save", { Notify: true, DontSaveIfUnmodified: false });
               }
+              if (turnRequested.current && typeof event.turnId === "string")
+                setFreshTurns((current) => new Set(current).add(event.turnId));
+              const firstChanged = event.summary?.changedSlides?.[0];
+              if (turnRequested.current && Number.isInteger(firstChanged)) setPhoneSlide(firstChanged);
               turnRequested.current = false;
             }
-            setMessages((items) =>
-              items.map((m, i) =>
-                i !== items.length - 1
+            setMessages((items) => {
+              const index = lastAssistantIndex(items);
+              if (index < 0) return items;
+              return items.map((m, i) =>
+                i !== index
                   ? m
                   : event.type === "delta"
                     ? { ...m, text: m.text + event.delta }
@@ -889,16 +1032,23 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
                       : {
                           ...m,
                           text: event.text || m.text,
-                          status:
-                            event.status === "needs_review" ? "review" : "done",
+                          status: event.status === "needs_review" ? "review" : "done",
+                          summary: event.summary ?? m.summary,
+                          changed: event.changed,
+                          reviewed: event.reviewed,
+                          turnId: event.turnId ?? m.turnId,
+                          finishedAt: event.at,
                         },
-              ),
-            );
+              );
+            });
           }
         }
+        if (finishedTurn) {
+          void refreshHistory();
+          void refreshVersions();
+        }
       } catch (e) {
-        if (!stopped)
-          setError(e instanceof Error ? e.message : "연결을 확인하세요.");
+        if (!stopped) setError(e instanceof Error ? e.message : "연결을 확인하세요.");
       }
       if (!stopped) timer = setTimeout(poll, 250);
     };
@@ -913,11 +1063,15 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
     api,
     deliverTask,
     sendOffice,
+    requestSave,
     launch.apiBase,
+    launch.documentId,
     ai.mode,
     aiConnected,
     dispatchLocalJob,
     dispatchTurn,
+    refreshHistory,
+    refreshVersions,
   ]);
   useEffect(
     () => () => {
@@ -931,61 +1085,93 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
     if (!aiConnected) setModel(undefined);
   }, [aiConnected]);
   useEffect(() => {
-    if (
-      launch.editorKind !== "wopi" ||
-      !aiConnected ||
-      !engineReady ||
-      !bridgeReady ||
-      !sessionObserved ||
-      saveRevision.current !== 0 ||
-      pendingSaveRevision.current !== null
-    )
-      return;
-    pendingSaveRevision.current = 1;
-    setSaveState("AI 편집 기준 준비 중…");
-    sendOffice("Action_Save", {
-      Notify: true,
-      DontSaveIfUnmodified: false,
-    });
-  }, [
-    aiConnected,
-    bridgeReady,
-    engineReady,
-    launch.editorKind,
-    sendOffice,
-    sessionObserved,
-  ]);
-  async function submit() {
-    if (!text.trim() || busy || !bridgeReady || !aiConnected) return;
+    if (panel && panelTab === "versions") void refreshVersions();
+  }, [panel, panelTab, refreshVersions]);
+  const editorAccepts =
+    bridgeReady && sessionObserved && (!phone || launch.editorKind !== "wopi" || editModeConfirmed);
+
+  /* Sending: save unsaved edits first so the request starts from a version. */
+  const startTurn = useCallback(
+    async (pending: PendingTurn) => {
+      setError("");
+      setBusy(true);
+      setMessages((items) => [
+        ...items,
+        {
+          id: -Date.now(),
+          role: "user",
+          text: pending.draft,
+          tools: [],
+          status: "done",
+          permission: pending.permission,
+          at: new Date().toISOString(),
+        },
+      ]);
+      // A save still in flight (for example the baseline save that starts
+      // as the editor becomes ready) must finish first: the server refuses
+      // AI edits while it checks a save. The poll sends the request after it.
+      if (pendingSaveRevision.current !== null) {
+        pendingTurn.current = pending;
+        return;
+      }
+      // The save AI edits are checked against must come from the editor that
+      // is open now: a file the editor wrote earlier and opened again exports
+      // with different chart ids and layout numbers, which the server's
+      // edit-scope check would count as changes the AI made. So the first
+      // request of every editor load saves first.
+      if (
+        editorModified.current ||
+        (launch.editorKind === "wopi" && !baselineSaved.current) ||
+        saveStateRef.current !== "저장됨"
+      ) {
+        baselineSaved.current = true;
+        pendingTurn.current = pending;
+        requestSave("AI 작업 전 저장 중…");
+        return;
+      }
+      await dispatchTurn(pending);
+    },
+    [dispatchTurn, launch.editorKind, requestSave],
+  );
+  function submit() {
+    if (!text.trim() || busy || queued || !aiConnected) return;
     const pending: PendingTurn = { draft: text, permission, model };
     setText("");
     setError("");
-    setBusy(true);
-    setMessages((items) => [
-      ...items,
-      {
-        id: -Date.now(),
-        role: "user",
-        text: pending.draft,
-        tools: [],
-        status: "done",
-      },
-    ]);
-    if (
-      editorModified.current ||
-      (launch.editorKind === "wopi" && saveRevision.current === 0) ||
-      saveState !== "저장됨"
-    ) {
-      pendingTurn.current = pending;
-      pendingSaveRevision.current = saveRevision.current + 1;
-      setSaveState("AI 작업 전 저장 중…");
-      sendOffice("Action_Save", {
-        Notify: true,
-        DontSaveIfUnmodified: false,
-      });
+    // Written before the editor is ready (on a phone: before it switched
+    // to edit mode, which saving needs): keep it and send it once it is.
+    if (!editorAccepts) {
+      setQueued(pending);
       return;
     }
-    await dispatchTurn(pending);
+    void startTurn(pending);
+  }
+  useEffect(() => {
+    if (!queued || !editorAccepts || busy || !aiConnected) return;
+    const next = { ...queued, model: queued.model ?? model };
+    setQueued(null);
+    void startTurn(next);
+  }, [queued, editorAccepts, busy, aiConnected, model, startTurn]);
+  function cancelQueued() {
+    if (!queued) return;
+    setText(queued.draft);
+    setQueued(null);
+  }
+  function stop() {
+    if (queued) {
+      cancelQueued();
+      return;
+    }
+    const waiting = pendingTurn.current;
+    if (waiting) {
+      pendingTurn.current = null;
+      pendingSaveRevision.current = null;
+      setBusy(false);
+      setText(waiting.draft);
+      setError("AI 요청을 취소했어요.");
+      return;
+    }
+    void api("cancel", {}).catch((e) => setError(e.message));
   }
   async function uploadConversationAsset(file: File) {
     setUploadingAsset(true);
@@ -995,493 +1181,594 @@ export function NativeWorkspace({ launch }: { launch: NativeLaunch }) {
       const uploaded = file.type.startsWith("image/")
         ? await uploadImageAsset(launch.documentId, file)
         : await uploadMediaAsset(launch.documentId, file);
-      setAssetNotice(`${uploaded.fileName} 업로드됨`);
-      setText((current) =>
-        current.trim()
-          ? current
-          : `업로드한 ${uploaded.fileName} 파일을 현재 슬라이드에 넣어줘`,
-      );
+      setAssetNotice(`${uploaded.fileName} 올림`);
+      setText((current) => (current.trim() ? current : `올린 ${uploaded.fileName} 파일을 지금 슬라이드에 넣어 줘`));
       input.current?.focus();
     } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "파일을 업로드하지 못했습니다.",
-      );
+      setError(cause instanceof Error ? cause.message : "파일을 올리지 못했어요.");
     } finally {
       setUploadingAsset(false);
       if (assetInput.current) assetInput.current.value = "";
     }
   }
-  // Collabora runs in an iframe, so these bridge values mirror the semantic
-  // tokens in design-system.css rather than relying on inherited CSS vars.
-  const theme =
-    "--color-primary=#d24726;--color-primary-dark=#b43a20;--color-primary-lighter=#fff2ed;--color-main-text=#11181f;--color-main-background=#fbfcfd;--color-canvas=#e8ecef;--color-border=#d7dce1;--color-toolbar-border=#e4e8ec;--orange1-txt-primary-color=210,71,38";
+
+  /* Save first, wait for the editor to release the file, restore, reopen. */
+  async function restoreTo(versionId: string) {
+    if (restoring || busy) return;
+    setRestoring(versionId);
+    setError("");
+    try {
+      if (saveStateRef.current !== "저장됨") {
+        requestSave();
+        const deadline = Date.now() + 60_000;
+        while (saveStateRef.current !== "저장됨") {
+          if (saveStateRef.current === "저장 실패" || Date.now() > deadline)
+            throw new Error("되돌리기 전에 지금 편집 내용을 저장하지 못했어요.");
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+      }
+      port.current?.close();
+      port.current = null;
+      setBridgeReady(false);
+      setEngineReady(false);
+      setEditorMounted(false);
+      if (launch.editorKind === "wopi") {
+        const deadline = Date.now() + 20_000;
+        while (Date.now() < deadline) {
+          const state = (await api("state")) as { editorLocked: boolean };
+          if (!state.editorLocked) break;
+          await new Promise((resolve) => setTimeout(resolve, 700));
+        }
+      }
+      await documentApi(`versions/${versionId}/restore`, { method: "POST", body: "{}" });
+      if (onReload) onReload();
+      else window.location.reload();
+    } catch (cause) {
+      setRestoring(null);
+      setEditorMounted(true);
+      setError(cause instanceof Error ? cause.message : "이전 버전으로 돌아가지 못했어요.");
+    }
+  }
+
+  async function openDownload() {
+    setDownload({ summary: null, loading: true, busy: false });
+    try {
+      const summary = (await documentApi("summary")) as DocumentSummary;
+      setDownload((current) => (current ? { ...current, summary, loading: false } : current));
+    } catch {
+      setDownload((current) => (current ? { ...current, loading: false } : current));
+    }
+  }
+  function startDownload() {
+    const downloadUrl = `/api/documents/${launch.documentId}/download`;
+    if (saveState === "저장됨") {
+      setDownload(null);
+      window.location.assign(downloadUrl);
+      return;
+    }
+    const nextRevision = saveRevision.current + 1;
+    pendingSaveRevision.current = nextRevision;
+    downloadAfterRevision.current = nextRevision;
+    setDownload((current) => (current ? { ...current, busy: true } : current));
+    setSaveState("다운로드 준비 중…");
+    sendOffice("Action_Save", { Notify: true, DontSaveIfUnmodified: false });
+  }
+
+  /* ── Conversation ───────────────────────────────────────────────── */
+  const historyById = useMemo(() => new Map(history.map((turn) => [turn.id, turn])), [history]);
+  const liveMessages = useMemo<Message[]>(
+    () =>
+      queued
+        ? [
+            ...messages,
+            {
+              id: -1,
+              role: "user",
+              text: queued.draft,
+              tools: [],
+              status: "done",
+              permission: queued.permission,
+              queued: true,
+            },
+          ]
+        : messages,
+    [messages, queued],
+  );
+  const timelineTurns = useMemo<TimelineTurn[]>(
+    () =>
+      history.map((turn) => ({
+        turnId: turn.id,
+        requestText: turn.requestText,
+        startedAt: turn.createdAt,
+        changed: turn.summary?.outcome === "changed" || turn.summary?.outcome === "unverified",
+        undone: Boolean(turn.undoneAt ?? undone.get(turn.id)),
+      })),
+    [history, undone],
+  );
+  const conversation = useMemo(
+    () =>
+      buildConversation({
+        history,
+        messages: liveMessages,
+        runs: manualEditRuns(versions, timelineTurns),
+        undone,
+      }),
+    [history, liveMessages, versions, timelineTurns, undone],
+  );
+  const latestTurnKey = useMemo(() => {
+    for (let index = conversation.length - 1; index >= 0; index -= 1) {
+      const item = conversation[index]!;
+      if (item.kind === "turn") return item.key;
+    }
+    return null;
+  }, [conversation]);
+
+  /** Before/after images: the AI's own while this page has them, else saved previews. */
+  const pairsFor = useCallback(
+    (turn: CardTurn): EvidencePair[] => {
+      const summary = turn.summary;
+      if (!summary) return [];
+      const saved = (turn.turnId ? historyById.get(turn.turnId)?.savedPreviews : undefined) ?? [];
+      return summary.evidence.map((item) => {
+        const before = item.before ? (images.get(item.before) ?? null) : null;
+        const after = item.after ? (images.get(item.after) ?? null) : null;
+        if (before || after)
+          return {
+            slideIndex: item.slideIndex,
+            before,
+            after,
+            source: "ai" as const,
+            framing: item.framing ?? "slide",
+            ...(item.stale ? { stale: true } : {}),
+          };
+        const preview = saved.find((candidate) => candidate.slideIndex === item.slideIndex);
+        return {
+          slideIndex: item.slideIndex,
+          before: preview?.before ?? null,
+          after: preview?.after ?? null,
+          source: "saved" as const,
+          framing: "slide" as const,
+        };
+      });
+    },
+    [historyById, images],
+  );
+
+  const dirty = ["변경 사항 있음", "복구된 변경 사항 있음", "저장 실패"].includes(saveState);
+  const editorLive = engineReady && bridgeReady && !restoring;
+  const running =
+    busy || Boolean(queued) || messages.some((message) => message.role === "assistant" && message.status === "running");
+  const undoFor = (turn: CardTurn, key: string): UndoAction | null =>
+    running
+      ? null
+      : undoActionFor({
+          summary: turn.summary,
+          outcome: outcomeOf(turn),
+          beforeVersionId: turn.beforeVersionId,
+          undone: Boolean(turn.undoneAt),
+          latest: key === latestTurnKey,
+          editorLive,
+          changedSince:
+            dirty ||
+            (turn.turnId ? savedAfter(versions, turn.turnId, turn.finishedAt) : true),
+        });
+
+  /* ── Going back ─────────────────────────────────────────────────── */
+  function openTurnRestore(turn: CardTurn, fallback = false) {
+    const versionId = turn.beforeVersionId;
+    if (!versionId) {
+      setError("이 요청 전에 저장한 버전을 찾지 못했어요. 버전 기록에서 골라 주세요.");
+      return;
+    }
+    const at =
+      versions.find((version) => version.id === versionId)?.createdAt ??
+      turn.startedAt ??
+      new Date().toISOString();
+    setRestoreTarget({
+      versionId,
+      at,
+      lead: `“${clip(turn.requestText || "AI 요청")}” 요청 전 상태로 돌아가요.`,
+      impact: restoreImpact(versions, timelineTurns, at, turn.turnId),
+      unsaved: dirty,
+      fallback,
+    });
+  }
+  function openVersionRestore(entry: VersionEntry, mode: "this" | "before") {
+    const versionId = mode === "before" ? entry.parentVersionId : entry.versionId;
+    if (!versionId) return;
+    const at =
+      mode === "before"
+        ? (versions.find((version) => version.id === versionId)?.createdAt ?? entry.at)
+        : entry.at;
+    setRestoreTarget({
+      versionId,
+      at,
+      lead: restoreLead(entry, mode),
+      impact: restoreImpact(versions, timelineTurns, at, mode === "before" ? entry.members[0]?.turn?.id : null),
+      unsaved: dirty,
+    });
+  }
+  /** Undo by the plan's rules: the editor's own undo when nothing came after, else a saved version. */
+  async function undoTurn(turn: CardTurn, action: UndoAction) {
+    if (action.kind === "restore" || !turn.turnId || !turn.summary?.revisions) {
+      openTurnRestore(turn);
+      return;
+    }
+    const { revisions, undoSteps } = turn.summary;
+    setUndoing(turn.turnId);
+    setError("");
+    try {
+      await callEditor(
+        {
+          operation: "undo_turn",
+          steps: undoSteps,
+          expectedRevision: revisions.after,
+          targetRevision: revisions.before,
+        },
+        60_000,
+      );
+    } catch {
+      setUndoing(null);
+      openTurnRestore(turn, true);
+      return;
+    }
+    setUndone((current) => new Map(current).set(turn.turnId!, new Date().toISOString()));
+    try {
+      await api("undo", { turnId: turn.turnId });
+    } catch {
+      setError("되돌렸지만 버전 기록에 ‘되돌림’으로 남기지 못했어요. 문서는 요청 전 상태예요.");
+    }
+    requestSave("되돌린 내용 저장 중…");
+    setUndoing(null);
+  }
+  function reveal(slideIndex: number, elementId: string | null) {
+    if (phone) {
+      setPhoneSlide(slideIndex);
+      return;
+    }
+    void callEditor({ operation: "reveal", slideIndex, elementId }).catch(() =>
+      setError("편집기에서 그 슬라이드를 열지 못했어요."),
+    );
+  }
+
+  /* ── Keyboard: ⌘S saves; ⌘Z / ⇧⌘Z undo and redo outside text fields ─ */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key === "s") {
+        event.preventDefault();
+        if (engineReady && !restoring) requestSave();
+        return;
+      }
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (!engineReady || phone) return;
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        sendOffice("Send_UNO_Command", { Command: ".uno:Undo" });
+      } else if ((key === "z" && event.shiftKey) || key === "y") {
+        event.preventDefault();
+        sendOffice("Send_UNO_Command", { Command: ".uno:Redo" });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [engineReady, phone, requestSave, restoring, sendOffice]);
+
+  function openTurnCompare(turn: CardTurn) {
+    const summary = turn.summary;
+    if (!summary || !turn.turnId) return;
+    const pairs = pairsFor(turn);
+    const saved = pairs.some((pair) => pair.source === "saved");
+    setCompare({
+      title: "무엇이 바뀌었나",
+      subtitle: `“${turn.requestText || "AI 요청"}” · AI · ${when(turn.finishedAt ?? turn.startedAt)}`,
+      pairs: pairs.map((pair) => ({
+        slideIndex: pair.slideIndex,
+        before: pair.before,
+        after: pair.after,
+        marks: marksFor(summary, pair.slideIndex, pair.framing),
+      })),
+      changes: summary.changes,
+      imageSource: saved
+        ? "서버에서 그린 저장본 미리보기"
+        : pairs.some((pair) => pair.framing === "window")
+          ? "AI가 본 편집기 창 전체 · 바뀐 곳 테두리는 슬라이드만 찍은 그림에 그려요"
+          : "AI가 편집기에서 본 화면",
+      turn,
+    });
+  }
+  function openVersionCompare(entry: VersionEntry) {
+    const parent = versions.find((version) => version.id === entry.parentVersionId);
+    const count = Math.max(entry.previews.length, parent?.previews.length ?? 0);
+    setCompare({
+      title: "이전 버전과 비교",
+      subtitle: `${entry.title} · ${when(entry.at)}`,
+      pairs: Array.from({ length: count }, (_, slideIndex) => ({
+        slideIndex,
+        before: parent?.previews[slideIndex] ?? null,
+        after: entry.previews[slideIndex] ?? null,
+        marks: [],
+      })),
+      imageSource: "서버에서 그린 저장본 미리보기",
+      restoreEntry: entry,
+    });
+  }
+
+  const renderTurn = (turn: CardTurn) => {
+    const key = `t:${turn.turnId ?? turn.key}`;
+    if (outcomeOf(turn) === "running")
+      return <RunningCard turn={turn} lookingAt={lookingAt} onStop={stop} />;
+    return (
+      <ResultCard
+        turn={turn}
+        pairs={pairsFor(turn)}
+        undo={undoFor(turn, key)}
+        undoBusy={undoing === turn.turnId}
+        onUndo={(target, action) => void undoTurn(target, action)}
+        onCompare={openTurnCompare}
+        onRetry={(value, scope) => {
+          setText(value);
+          if (scope) setPermission(scope);
+          input.current?.focus();
+        }}
+        onReveal={editorLive || phone ? reveal : undefined}
+        fresh={Boolean(turn.turnId && freshTurns.has(turn.turnId))}
+      />
+    );
+  };
+
+  const save = saveView(saveState, engineReady, savedAt);
+  const panelOpen = phone || panel;
+  const phonePreviews = documentSummary?.previews.length ? documentSummary.previews : openingPreviews;
+  const compareUndo = compare?.turn ? undoFor(compare.turn, `t:${compare.turn.turnId}`) : null;
   return (
-    <main className={`native-workspace ${panel ? "with-chat" : ""}`}>
-      <header className="native-topbar">
-        <a className="native-brand" href="/" aria-label="Spellbook 홈">
-          <SpellbookBrand compact />
-        </a>
-        <span className="native-topbar-divider" />
-        <div className="native-file">
-          <strong title={launch.fileName}>
-            {launch.fileName.replace(/\.pptx$/i, "")}
-          </strong>
-          <span
-            className={`native-save-state ${saveState === "저장 실패" ? "is-error" : ""}`}
-            role="status"
-          >
-            <span aria-hidden="true" />
-            {engineReady ? saveState : "문서 여는 중…"}
-          </span>
-        </div>
-        <div className="native-topbar-actions">
-          <div className="native-action-group" aria-label="편집 이력과 저장">
-            <button
-              className="ds-icon-button"
-              aria-label="실행 취소"
-              title="실행 취소"
-              disabled={!engineReady}
-              onClick={() =>
-                sendOffice("Send_UNO_Command", { Command: ".uno:Undo" })
-              }
-            >
-              <SpellbookIcon name="undo" />
-            </button>
-            <button
-              className="ds-icon-button"
-              aria-label="다시 실행"
-              title="다시 실행"
-              disabled={!engineReady}
-              onClick={() =>
-                sendOffice("Send_UNO_Command", { Command: ".uno:Redo" })
-              }
-            >
-              <SpellbookIcon name="redo" />
-            </button>
-            <button
-              className="ds-icon-button"
-              aria-label="저장"
-              title="저장"
-              disabled={!engineReady}
-              onClick={() => {
-                pendingSaveRevision.current = saveRevision.current + 1;
-                setSaveState("저장 중…");
-                sendOffice("Action_Save", {
-                  Notify: true,
-                  DontSaveIfUnmodified: false,
-                });
-              }}
-            >
-              <SpellbookIcon name="save" />
-            </button>
-          </div>
-          <button
-            className="ds-button is-secondary is-compact native-download"
-            aria-label="PPTX 다운로드"
-            disabled={!engineReady || saveState.endsWith("중…")}
-            onClick={() => {
-              const downloadUrl = `/api/documents/${launch.documentId}/download`;
-              if (saveState === "저장됨") {
-                window.location.assign(downloadUrl);
-                return;
-              }
-              const nextRevision = saveRevision.current + 1;
-              pendingSaveRevision.current = nextRevision;
-              downloadAfterRevision.current = nextRevision;
-              setSaveState("다운로드 준비 중…");
-              sendOffice("Action_Save", {
-                Notify: true,
-                DontSaveIfUnmodified: false,
-              });
-            }}
-          >
-            <SpellbookIcon name="download" size={16} />
-            <span className="native-download-label">PPTX 다운로드</span>
-          </button>
-          <button
-            className={`ds-button is-compact native-ai-toggle ${panel ? "active" : ""}`}
-            aria-label="AI와 편집"
-            aria-expanded={panel}
-            onClick={() => setPanel(!panel)}
-          >
-            <SpellbookIcon name="sparkles" size={16} />
-            <span className="native-ai-toggle-label">AI와 편집</span>
-          </button>
-        </div>
-      </header>
-      <section className="native-canvas" aria-label="프레젠테이션 편집">
+    <main className={`ws ${panelOpen ? "has-panel" : ""} ${phone ? "is-phone" : ""}`}>
+      <WorkspaceTopBar
+        fileName={launch.fileName}
+        save={save}
+        onSave={() => requestSave()}
+        editorReady={engineReady}
+        onUndo={() => sendOffice("Send_UNO_Command", { Command: ".uno:Undo" })}
+        onRedo={() => sendOffice("Send_UNO_Command", { Command: ".uno:Redo" })}
+        versionsOpen={panelOpen && panelTab === "versions"}
+        onVersions={() => {
+          if (!phone && panel && panelTab === "versions") setPanel(false);
+          else {
+            setPanelTab("versions");
+            setPanel(true);
+          }
+        }}
+        onDownload={() => void openDownload()}
+        panelOpen={panelOpen}
+        onTogglePanel={() => {
+          if (phone) {
+            setPanelTab("ai");
+            input.current?.focus();
+            return;
+          }
+          if (panel && panelTab === "ai") setPanel(false);
+          else {
+            setPanelTab("ai");
+            setPanel(true);
+          }
+        }}
+      />
+      {phone ? <PhoneSlides previews={phonePreviews} index={phoneSlide} onIndex={setPhoneSlide} /> : null}
+      <section className="ws-editor" aria-label="프레젠테이션 편집" aria-hidden={phone || undefined}>
         {launch.editorKind === "wopi" ? (
-          <form
-            ref={form}
-            target="spellbook-office"
-            method="post"
-            action={launch.editorUrl}
-            hidden
-          >
+          <form ref={form} target="spellbook-office" method="post" action={launch.editorUrl} hidden>
             <input name="access_token" value={launch.accessToken} readOnly />
             <input name="access_token_ttl" value={launch.expiresAt} readOnly />
-            <input name="css_variables" value={theme} readOnly />
-            <input
-              name="ui_defaults"
-              value="UIMode=tabbed;PresentationSidebar=false;"
-              readOnly
-            />
+            <input name="css_variables" value={collaboraCssVariables()} readOnly />
+            <input name="ui_defaults" value="UIMode=tabbed;PresentationSidebar=false;" readOnly />
           </form>
         ) : null}
-        <iframe
-          ref={office}
-          name="spellbook-office"
-          title="PPT 편집기"
-          src={launch.editorKind === "browser" ? launch.editorUrl : undefined}
-          allow="clipboard-read; clipboard-write; cross-origin-isolated"
-        />
+        {editorMounted ? (
+          <iframe
+            ref={office}
+            name="spellbook-office"
+            title="PPT 편집기"
+            src={launch.editorKind === "browser" ? launch.editorUrl : undefined}
+            allow="clipboard-read; clipboard-write; cross-origin-isolated"
+            tabIndex={phone ? -1 : undefined}
+          />
+        ) : null}
         {!engineReady ? (
-          <div className="native-loading">
-            <span className="native-spinner" />
-            <strong>프레젠테이션을 열고 있습니다</strong>
-            <p>편집할 수 있는 상태로 준비 중입니다.</p>
-          </div>
+          <OpeningView
+            preview={restoring ? null : openingPreview}
+            previews={restoring ? [] : openingPreviews}
+            message={restoring ? "이전 버전을 불러오고 있어요" : "편집기 준비 중 · 처음 열 때는 1분쯤 걸려요"}
+          />
         ) : null}
       </section>
-      {panel ? (
-        <aside className="native-chat" aria-label="AI 편집 대화">
-          <header className="native-chat-header">
-            <div className="native-chat-title">
-              <span className="native-assistant-mark">
-                <SpellbookIcon name="sparkles" size={17} />
-              </span>
-              <div>
-                <strong>AI와 편집</strong>
-                <span>
-                  {!bridgeReady
-                    ? "편집기 연결 중"
-                    : ai.status === "loading"
-                      ? "AI 연결 확인 중"
-                      : aiConnected
-                        ? `${ai.runtime?.displayName ?? "AI"} 연결됨`
-                        : ai.status === "error"
-                          ? "AI 연결 상태 확인 필요"
-                          : "AI 연결 필요"}
-                </span>
-              </div>
-            </div>
-            <button
-              className="ds-icon-button"
-              aria-label="AI 대화 접기"
-              onClick={() => setPanel(false)}
-            >
-              <SpellbookIcon name="close" size={18} />
-            </button>
+      {panelOpen ? (
+        <aside className="ws-panel" aria-label="AI와 버전 기록">
+          <header className="ws-panel-header">
+            <Tabs
+              label="패널"
+              idPrefix="ws-panel"
+              value={panelTab}
+              onChange={setPanelTab}
+              options={[
+                { value: "ai", label: "AI", icon: "sparkles" },
+                { value: "versions", label: "버전 기록", icon: "clock" },
+              ]}
+            />
+            {phone ? null : <IconButton icon="close" label="패널 닫기" size="sm" onClick={() => setPanel(false)} />}
           </header>
-          <div
-            className="native-chat-history"
-            role="log"
-            aria-label="대화 내용"
-          >
-            {!aiConnected ? (
-              <div className="native-ai-gate">
-                <span className="native-ai-gate-mark" aria-hidden="true">
-                  <SpellbookIcon name="sparkles" size={22} />
-                </span>
-                {ai.status === "loading" ? (
-                  <>
-                    <h1>AI 연결을 확인하고 있습니다</h1>
-                    <p>프레젠테이션은 기다리지 않고 바로 편집할 수 있습니다.</p>
-                    <span className="ds-spinner" role="status" />
-                  </>
-                ) : ai.status === "error" ? (
-                  <>
-                    <h1>AI 연결 상태를 확인하지 못했습니다</h1>
-                    <p>
-                      직접 편집은 계속 사용할 수 있습니다. 네트워크를 확인한 뒤
-                      다시 시도해 주세요.
-                    </p>
-                    <button
-                      className="ds-button is-secondary"
-                      type="button"
-                      onClick={() => void ai.load()}
-                    >
-                      연결 상태 다시 확인
-                    </button>
-                  </>
-                ) : ai.deviceLogin ? (
-                  <>
-                    <p className="ds-kicker">마지막 단계</p>
-                    <h1>OpenAI에서 연결을 승인하세요</h1>
-                    <p>
-                      아래 일회용 코드를 입력하면 이 문서를 다시 열지 않아도 AI
-                      편집이 활성화됩니다.
-                    </p>
-                    <div className="native-device-code">
-                      <strong>{ai.deviceLogin.userCode}</strong>
-                      <button
-                        className="ds-button is-secondary is-compact"
-                        type="button"
-                        onClick={() => void ai.copyCode()}
-                      >
-                        {ai.codeCopied ? "복사됨" : "코드 복사"}
-                      </button>
-                    </div>
-                    <a
-                      className="ds-button is-primary"
-                      href={ai.deviceLogin.verificationUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      OpenAI 코드 입력 화면 열기
-                      <SpellbookIcon name="arrowRight" size={15} />
-                    </a>
-                    <p className="native-ai-gate-note" role="status">
-                      승인 완료를 기다리고 있습니다…
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <h1>AI 편집을 사용하려면 연결이 필요합니다</h1>
-                    <p>
-                      PPT는 지금 바로 직접 편집할 수 있습니다. Codex 또는 Claude
-                      Code 구독을 연결하면 같은 화면을 보며 수정하고 결과까지
-                      확인합니다.
-                    </p>
-                    {ai.message ? (
-                      <p className="system-alert is-danger" role="alert">
-                        {ai.message}
-                      </p>
-                    ) : null}
-                    <button
-                      className="ds-button is-primary"
-                      type="button"
-                      disabled={ai.connecting}
-                      onClick={() => void ai.connect()}
-                    >
-                      {ai.connecting ? "연결 준비 중…" : "내 AI 구독 연결"}
-                    </button>
-                    <a
-                      className="native-security-link"
-                      href={CHATGPT_SECURITY_URL}
-                      target="_blank"
-                      rel="noreferrer"
-                      hidden={ai.mode === "local"}
-                    >
-                      장치 코드 인증을 먼저 켜야 하나요?
-                      <SpellbookIcon name="arrowRight" size={14} />
-                    </a>
-                  </>
-                )}
-              </div>
-            ) : !messages.length ? (
-              <div className="native-chat-welcome">
-                <h1>어느 부분을 고칠까요?</h1>
-                <p>
-                  슬라이드에서 직접 수정하거나,
-                  <br />
-                  바꿀 부분을 선택하고 이야기하세요.
-                </p>
-                <div className="native-suggestions">
-                  {[
-                    "선택한 문장을 더 간결하게",
-                    "선택한 요소의 위치를 설명해줘",
-                  ].map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => {
-                        setText(s);
-                        input.current?.focus();
-                      }}
-                    >
-                      {s}
-                      <SpellbookIcon name="arrowRight" size={15} />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {aiConnected
-              ? messages.map((m) => (
-                  <article
-                    key={m.id}
-                    className={`native-chat-message ${m.role}`}
-                  >
-                    {m.role === "assistant" ? (
-                      <div className="native-message-label">
-                        <SpellbookIcon name="sparkles" size={15} /> Spellbook
+          {panelTab === "versions" ? (
+            <div className="ws-panel-body" id="ws-panel-panel-versions" role="tabpanel" aria-labelledby="ws-panel-tab-versions">
+              <VersionPanel
+                versions={versions}
+                loading={versionsLoading}
+                error={versionsError}
+                restoring={Boolean(restoring)}
+                onRestore={openVersionRestore}
+                onCompare={openVersionCompare}
+                onReload={() => void refreshVersions()}
+              />
+            </div>
+          ) : (
+            <>
+              <div
+                className="ws-panel-body"
+                id="ws-panel-panel-ai"
+                role="tabpanel"
+                aria-labelledby="ws-panel-tab-ai"
+              >
+                {!aiConnected ? (
+                  <div className="ai-empty">
+                    {ai.status === "ready" ? (
+                      <div>
+                        <h2>AI를 연결해 주세요</h2>
+                        <p>연결하면 AI가 이 화면을 보고 고친 뒤, 다시 보고 확인해요.</p>
                       </div>
                     ) : null}
-                    {m.tools.length ? (
-                      <details className="native-tool-history">
-                        <summary>
-                          {m.status === "running" ? (
-                            <span className="native-spinner" />
-                          ) : (
-                            <span>{m.status === "done" ? "✓" : "!"}</span>
-                          )}
-                          {m.tools.at(-1)}
-                        </summary>
-                        <ol>
-                          {m.tools.map((t, i) => (
-                            <li key={i}>{t}</li>
-                          ))}
-                        </ol>
-                      </details>
-                    ) : null}
-                    <ReactMarkdown>
-                      {normalizeQuotedStrongMarkdown(m.text)}
-                    </ReactMarkdown>
-                    {m.status === "running" && !m.text && !m.tools.length ? (
-                      <span className="native-thinking">
-                        슬라이드를 확인하고 있습니다…
-                      </span>
-                    ) : null}
-                    {m.status === "review" ? (
-                      <p className="native-warning">
-                        변경은 반영됐지만 화면 검증은 완료되지 않았습니다.
-                      </p>
-                    ) : null}
-                  </article>
-                ))
-              : null}
-            <div ref={bottom} />
-          </div>
-          {aiConnected ? (
-            <footer className="native-composer-area">
-              {error ? (
-                <div className="native-chat-error" role="alert">
-                  {error}
-                  <button
-                    className="ds-icon-button"
-                    aria-label="알림 닫기"
-                    onClick={() => setError("")}
-                  >
-                    <SpellbookIcon name="close" size={15} />
-                  </button>
-                </div>
-              ) : null}
-              <div className="native-composer">
-                <input
-                  ref={assetInput}
-                  className="native-asset-input"
-                  type="file"
-                  accept="image/png,image/jpeg,audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/mp4,video/mp4,video/webm"
-                  disabled={busy || uploadingAsset}
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0];
-                    if (file) void uploadConversationAsset(file);
-                  }}
-                />
-                <textarea
-                  ref={input}
-                  aria-label="AI에게 요청"
-                  placeholder="이 슬라이드에서 바꿀 내용을 알려주세요"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (
-                      e.key === "Enter" &&
-                      !e.shiftKey &&
-                      !e.nativeEvent.isComposing
-                    ) {
-                      e.preventDefault();
-                      void submit();
-                    }
-                  }}
-                />
-                <div className="native-composer-controls">
-                  <div className="native-composer-left">
-                    <button
-                      className="ds-icon-button native-asset-button"
-                      type="button"
-                      aria-label="이미지 또는 미디어 첨부"
-                      title="이미지 또는 미디어 첨부"
-                      disabled={busy || uploadingAsset}
-                      onClick={() => assetInput.current?.click()}
-                    >
-                      {uploadingAsset ? (
-                        <span className="native-spinner" />
-                      ) : (
-                        <SpellbookIcon name="paperclip" size={16} />
-                      )}
-                    </button>
-                    <ModelControl
-                      value={model}
-                      onChange={setModel}
-                      disabled={busy}
-                      loadModels={loadModels}
-                    />
+                    <ConnectSteps ai={ai} />
                   </div>
-                  {busy ? (
-                    <button
-                      className="native-send"
-                      aria-label="AI 작업 중지"
-                      onClick={() => {
-                        const waiting = pendingTurn.current;
-                        if (waiting) {
-                          pendingTurn.current = null;
-                          pendingSaveRevision.current = null;
-                          setBusy(false);
-                          setText(waiting.draft);
-                          setError("AI 요청을 취소했습니다.");
-                          return;
-                        }
-                        void api("cancel", {}).catch((e) =>
-                          setError(e.message),
-                        );
-                      }}
-                    >
-                      <SpellbookIcon name="stop" size={16} />
-                    </button>
-                  ) : (
-                    <button
-                      className="native-send"
-                      aria-label="메시지 보내기"
-                      disabled={!bridgeReady || !text.trim()}
-                      onClick={() => void submit()}
-                    >
-                      <SpellbookIcon name="arrowRight" size={17} />
-                    </button>
-                  )}
-                </div>
+                ) : null}
+                {conversation.length ? (
+                  <ConversationLog items={conversation} renderTurn={renderTurn} onCancelQueued={cancelQueued} />
+                ) : aiConnected ? (
+                  <div className="ai-empty">
+                    <div>
+                      <h2>무엇을 바꿀까요?</h2>
+                      <p>AI는 고친 뒤 화면을 다시 보고 확인해요. 요청마다 되돌리기가 있어요.</p>
+                    </div>
+                    {suggestionsFor(selection).map((group) => (
+                      <div key={group.title} className="ai-suggestions">
+                        <p>{group.title}</p>
+                        {group.items.map((item) => (
+                          <button
+                            key={item.text}
+                            type="button"
+                            className="ai-suggestion"
+                            onClick={() => {
+                              setText(item.text);
+                              setPermission(item.scope);
+                              input.current?.focus();
+                            }}
+                          >
+                            <span>
+                              {item.text}
+                              {item.note ? <small> · {item.note}</small> : null}
+                            </span>
+                            <Icon name="arrowRight" size={14} />
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <div ref={bottom} />
               </div>
-              {assetNotice ? (
-                <p className="native-asset-notice" role="status">
-                  <SpellbookIcon name="check" size={13} /> {assetNotice}
-                </p>
-              ) : null}
-              <div className="native-context-controls">
-                <label className="native-permission">
-                  <span>
-                    <SpellbookIcon name="shield" size={14} /> AI 편집 범위
-                  </span>
-                  <select
-                    aria-label="AI 편집 범위"
-                    value={permission}
-                    disabled={busy}
-                    onChange={(e) =>
-                      setPermission(e.target.value as typeof permission)
-                    }
+              <footer className="ws-panel-footer">
+                {error ? (
+                  <Banner
+                    tone="danger"
+                    role="alert"
+                    action={<IconButton icon="close" label="알림 닫기" size="sm" onClick={() => setError("")} />}
                   >
-                    <option value="selection">선택한 요소</option>
-                    <option value="slides">현재 슬라이드</option>
-                    <option value="read_only">읽기 전용</option>
-                    <option value="document">프레젠테이션 전체</option>
-                  </select>
-                </label>
-              </div>
-              <p className="native-composer-hint">
-                AI의 변경도 편집기에서 되돌릴 수 있습니다.
-              </p>
-            </footer>
-          ) : (
-            <footer className="native-connect-footer">
-              <SpellbookIcon name="file" size={15} />
-              <span>
-                AI 연결 전에도 리본과 캔버스의 모든 직접 편집은 가능합니다.
-              </span>
-            </footer>
+                    {error}
+                  </Banner>
+                ) : null}
+                {assetNotice ? (
+                  <Banner tone="ok" role="status">
+                    {assetNotice}
+                  </Banner>
+                ) : null}
+                {aiConnected && engineReady && !bridgeReady ? (
+                  <p className="composer-hint" role="status">
+                    편집기와 AI를 잇는 중이에요. 요청을 먼저 적어 두면 연결되는 대로 보낼게요.
+                  </p>
+                ) : null}
+                {aiConnected ? (
+                  <>
+                    <input
+                      ref={assetInput}
+                      className="ds-visually-hidden"
+                      type="file"
+                      tabIndex={-1}
+                      accept="image/png,image/jpeg,audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/mp4,video/mp4,video/webm"
+                      disabled={busy || uploadingAsset}
+                      onChange={(event) => {
+                        const file = event.currentTarget.files?.[0];
+                        if (file) void uploadConversationAsset(file);
+                      }}
+                    />
+                    <Composer
+                      text={text}
+                      onText={setText}
+                      onSubmit={submit}
+                      onStop={stop}
+                      busy={busy || Boolean(queued)}
+                      canSend
+                      permission={permission}
+                      onPermission={setPermission}
+                      model={model}
+                      onModel={setModel}
+                      loadModels={loadModels}
+                      onAttach={() => assetInput.current?.click()}
+                      attaching={uploadingAsset}
+                      inputRef={input}
+                      selection={selection}
+                    />
+                  </>
+                ) : (
+                  <p className="composer-hint">AI 연결 전에도 편집기에서 직접 고칠 수 있어요.</p>
+                )}
+              </footer>
+            </>
           )}
         </aside>
       ) : null}
+      <CompareDialog
+        open={Boolean(compare)}
+        onClose={() => setCompare(null)}
+        title={compare?.title ?? ""}
+        subtitle={compare?.subtitle ?? ""}
+        pairs={compare?.pairs ?? []}
+        changes={compare?.changes}
+        imageSource={compare?.imageSource ?? ""}
+        onRestore={
+          compare?.turn && compareUndo
+            ? () => {
+                const turn = compare.turn!;
+                setCompare(null);
+                void undoTurn(turn, compareUndo);
+              }
+            : compare?.restoreEntry?.parentVersionId
+              ? () => {
+                  const entry = compare.restoreEntry!;
+                  setCompare(null);
+                  openVersionRestore(entry, "before");
+                }
+              : undefined
+        }
+        restoreLabel={compare?.turn ? (compareUndo?.kind === "native" ? "이 요청 되돌리기" : "이 요청 전으로 돌아가기") : "이 저장 전으로 돌아가기"}
+      />
+      <RestoreConfirmDialog
+        target={restoreTarget}
+        busy={Boolean(restoring)}
+        onCancel={() => setRestoreTarget(null)}
+        onConfirm={(target) => {
+          setRestoreTarget(null);
+          void restoreTo(target.versionId);
+        }}
+      />
+      <DownloadDialog
+        open={Boolean(download)}
+        onClose={() => setDownload(null)}
+        fileName={launch.fileName}
+        summary={download?.summary ?? null}
+        loading={download?.loading ?? false}
+        saved={saveState === "저장됨"}
+        busy={download?.busy ?? false}
+        waiting={!download?.busy && saveState.endsWith("중…")}
+        onDownload={startDownload}
+      />
     </main>
   );
 }

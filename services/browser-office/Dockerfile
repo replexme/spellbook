@@ -5,6 +5,7 @@ RUN corepack enable
 WORKDIR /workspace
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
+COPY contracts ./contracts
 COPY services/browser-office ./services/browser-office
 COPY services/office-editor/extension/mutation-contract.generated.js ./services/office-editor/extension/mutation-contract.generated.js
 COPY services/office-editor/extension/operations.js ./services/office-editor/extension/operations.js
@@ -33,7 +34,9 @@ RUN apt-get update \
       /usr/local/bin/pnpx \
       /usr/local/bin/yarn \
       /usr/local/bin/yarnpkg
+COPY --from=build /workspace/contracts ./contracts
 COPY --from=build /workspace/services/browser-office ./services/browser-office
+COPY services/office-session-spike/probe-assets.mjs services/office-session-spike/persistence-evidence.mjs services/office-session-spike/document-state-evidence.mjs ./services/office-session-spike/
 COPY --from=build /workspace/services/office-editor/extension/mutation-contract.generated.js ./services/office-editor/extension/mutation-contract.generated.js
 COPY --from=build /workspace/services/office-editor/extension/operations.js ./services/office-editor/extension/operations.js
 COPY --from=build /workspace/eval/public/fixtures/general-native-surface.pptx ./eval/public/fixtures/general-native-surface.pptx

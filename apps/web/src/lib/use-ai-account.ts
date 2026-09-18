@@ -27,6 +27,8 @@ export interface AiDeviceLogin {
 
 type AccountResponse = {
   account?: { account?: AiAccount | null } | null;
+  /** When the subscription was connected through this service; null if unknown. */
+  connectedAt?: string | null;
   runtime?: {
     provider: string;
     displayName: string;
@@ -188,6 +190,7 @@ export function useAiAccount(config: AiConnectorConfig) {
   const account = accountResponse?.account?.account ?? null;
   return {
     account,
+    connectedAt: account ? (accountResponse?.connectedAt ?? null) : null,
     codeCopied,
     connect,
     connecting,

@@ -668,6 +668,76 @@ public sealed class DocumentEngineTests : IDisposable
     }
 
     [Fact]
+    public void InspectorNamesGraphicFrameKindsAndLinkedChartData()
+    {
+        var path = TestPresentationFactory.Create(directory);
+        XNamespace p = "http://schemas.openxmlformats.org/presentationml/2006/main";
+        XNamespace a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        XNamespace r = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        XNamespace c = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+        XElement Frame(uint id, string name, string uri, params object[] data) => new(
+            p + "graphicFrame",
+            new XElement(p + "nvGraphicFramePr",
+                new XElement(p + "cNvPr", new XAttribute("id", id), new XAttribute("name", name)),
+                new XElement(p + "cNvGraphicFramePr"),
+                new XElement(p + "nvPr")),
+            new XElement(p + "xfrm",
+                new XElement(a + "off", new XAttribute("x", 0), new XAttribute("y", 0)),
+                new XElement(a + "ext", new XAttribute("cx", 914400), new XAttribute("cy", 914400))),
+            new XElement(a + "graphic", new XElement(a + "graphicData", new XAttribute("uri", uri), data)));
+        using (var archive = ZipFile.Open(path, ZipArchiveMode.Update))
+        {
+            var slide = ReadXml(archive, "ppt/slides/slide1.xml");
+            slide.Descendants(p + "spTree").Single().Add(
+                Frame(10, "Table", "http://schemas.openxmlformats.org/drawingml/2006/table", new XElement(a + "tbl")),
+                Frame(11, "Linked Chart", "http://schemas.openxmlformats.org/drawingml/2006/chart",
+                    new XElement(c + "chart", new XAttribute(r + "id", "rIdChart"))),
+                Frame(12, "Diagram", "http://schemas.openxmlformats.org/drawingml/2006/diagram"),
+                Frame(13, "Embedded Workbook", "http://schemas.openxmlformats.org/presentationml/2006/ole"));
+            Replace(archive, "ppt/slides/slide1.xml", slide);
+            Write(archive, "ppt/charts/chart1.xml",
+                $"""<?xml version="1.0" encoding="UTF-8"?><c:chartSpace xmlns:c="{c}" xmlns:r="{r}"><c:externalData r:id="rIdData"/></c:chartSpace>""");
+            Write(archive, "ppt/charts/_rels/chart1.xml.rels",
+                """<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdData" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject" Target="file:///C:/data/sales.xlsx" TargetMode="External"/></Relationships>""");
+        }
+        AddInternalRelationship(
+            path,
+            "ppt/slides/_rels/slide1.xml.rels",
+            "rIdChart",
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart",
+            "../charts/chart1.xml");
+
+        var elements = new PresentationInspector().Inspect(path).Slides[0].Elements;
+
+        Assert.Null(elements.Single(element => element.Name == "Title Box").GraphicKind);
+        Assert.Equal("table", elements.Single(element => element.Name == "Table").GraphicKind);
+        var chart = elements.Single(element => element.Name == "Linked Chart");
+        Assert.Equal("chart", chart.GraphicKind);
+        Assert.True(chart.ExternalData);
+        Assert.Equal("diagram", elements.Single(element => element.Name == "Diagram").GraphicKind);
+        Assert.Equal("ole", elements.Single(element => element.Name == "Embedded Workbook").GraphicKind);
+    }
+
+    [Fact]
+    public void WorkerFailuresBecomeStableReasonCodes()
+    {
+        var compound = Path.Combine(directory, "protected.pptx");
+        File.WriteAllBytes(compound, [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]);
+        var rejected = Assert.Throws<InvalidDataException>(() => WorkerFailure.RejectCompoundFile(compound));
+        Assert.Equal("encrypted_or_legacy_file", WorkerFailure.Code(rejected));
+
+        var broken = Path.Combine(directory, "broken.pptx");
+        File.WriteAllBytes(broken, [0x50, 0x4B, 0x03, 0x04, 0x00, 0x00]);
+        var zip = Assert.ThrowsAny<InvalidDataException>(() => new PresentationInspector().Inspect(broken));
+        Assert.Equal("invalid_package", WorkerFailure.Code(zip));
+
+        Assert.Equal("broken_presentation", WorkerFailure.Code(new InvalidDataException("The package has no presentation part.")));
+        Assert.Equal("render_failed", WorkerFailure.Code(new InvalidOperationException("LibreOffice did not create a PDF.")));
+        Assert.Equal("storage_capacity_exhausted", WorkerFailure.Code(new InvalidDataException("storage_capacity_exhausted")));
+        Assert.Equal("processing_failed", WorkerFailure.Code(new TimeoutException("slow")));
+    }
+
+    [Fact]
     public void PatcherPreservesAFileThatTheOpenXmlSdkCannotFullyLoad()
     {
         var path = TestPresentationFactory.Create(directory);

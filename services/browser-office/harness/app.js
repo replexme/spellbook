@@ -678,6 +678,44 @@ async function observeNativeDocument() {
   return result.value;
 }
 
+// A small sample of the visible canvas. Comparing samples tells whether the
+// editor has repainted since an edit; LibreOffice paints after the model
+// changes, not at the moment the edit call returns.
+function canvasFingerprint() {
+  try {
+    const sample = document.createElement("canvas");
+    sample.width = 48;
+    sample.height = 27;
+    const context = sample.getContext("2d", { willReadFrequently: true });
+    if (!context) return "";
+    context.drawImage(canvas, 0, 0, sample.width, sample.height);
+    const pixels = context.getImageData(0, 0, sample.width, sample.height).data;
+    let hash = 0;
+    for (let index = 0; index < pixels.length; index += 4)
+      hash =
+        (hash * 31 + pixels[index] + pixels[index + 1] * 3 + pixels[index + 2] * 7) >>> 0;
+    return String(hash);
+  } catch {
+    return "";
+  }
+}
+
+// Waits until the canvas differs from `previous` and then holds still for
+// one sample. Returns false when it never changed within the time limit.
+async function waitForRepaint(previous, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = canvasFingerprint();
+  let changed = !previous || last !== previous;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const next = canvasFingerprint();
+    if (next !== previous) changed = true;
+    if (changed && next === last) return true;
+    last = next;
+  }
+  return changed;
+}
+
 async function captureVisibleBrowserCanvas() {
   await new Promise((resolve, reject) => {
     const timer = setTimeout(
@@ -714,23 +752,32 @@ async function captureVisibleBrowserCanvas() {
   return Array.from(bytes);
 }
 
-async function attachBrowserVisualEvidence(nativeRequest, value) {
+async function attachBrowserVisualEvidence(nativeRequest, value, paintBeforeEdit = null) {
   let targets = [];
   const activeSlide = value?.activeSlide;
   let showingSlide = activeSlide;
   const images = [];
   let captureError = null;
+  const changed = new Set(
+    Array.isArray(value?.changedSlideIndexes) ? value.changedSlideIndexes : [],
+  );
   try {
     targets = browserCaptureTargets(nativeRequest, value);
     for (const slideIndex of targets) {
+      let fresh = true;
       if (showingSlide !== slideIndex) {
+        const beforeShow = canvasFingerprint();
         await request("show-slide", { slideIndex });
         showingSlide = slideIndex;
-      }
+        await waitForRepaint(beforeShow);
+      } else if (paintBeforeEdit !== null && changed.has(slideIndex))
+        fresh = await waitForRepaint(paintBeforeEdit);
+      else await waitForRepaint(null, 800);
       images.push({
         slideIndex,
         pngBytes: await captureVisibleBrowserCanvas(),
         source: "browser_canvas",
+        ...(fresh ? {} : { stale: true }),
       });
     }
   } catch (error) {
@@ -2295,7 +2342,68 @@ async function handleProductHostMessage(message) {
     }
     return;
   }
+  if (
+    typeof message.id === "string" &&
+    ["selection", "reveal"].includes(message.request?.operation)
+  ) {
+    // Host reads for the request box and result cards: no package commit,
+    // no screenshots.
+    try {
+      const result = await request("native", { nativeRequest: message.request });
+      postHost({ id: message.id, value: result.value });
+    } catch (error) {
+      postHost({
+        id: message.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return;
+  }
+  if (
+    typeof message.id === "string" &&
+    message.request?.operation === "undo_turn"
+  ) {
+    // Undo one AI request through the package history each AI edit added,
+    // so the result is the exact package from before the request. If the
+    // document moved on, or the result is not the pre-request state, every
+    // undone step is redone and nothing changes.
+    try {
+      const { steps, expectedRevision, targetRevision } = message.request;
+      if (
+        !Number.isInteger(steps) ||
+        steps < 1 ||
+        steps > 50 ||
+        typeof expectedRevision !== "string" ||
+        typeof targetRevision !== "string"
+      )
+        throw new Error("invalid_undo_request");
+      const live = await observeNativeDocument();
+      if (live.revision !== expectedRevision)
+        throw new Error("document_changed_since_turn");
+      let undone = 0;
+      while (undone < steps && (await undoProductMutation())) undone += 1;
+      const after = await observeNativeDocument();
+      if (undone !== steps || after.revision !== targetRevision) {
+        while (undone > 0 && (await redoProductMutation())) undone -= 1;
+        throw new Error(
+          undone === 0
+            ? "undo_result_mismatch"
+            : "undo_result_mismatch_not_restored",
+        );
+      }
+      rememberReconciledObservation(after);
+      postHost({ id: message.id, value: { ...after, undone: steps } });
+    } catch (error) {
+      postHost({
+        id: message.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return;
+  }
   if (typeof message.id === "string" && message.request) {
+    const paintBeforeEdit =
+      message.request.operation === "observe" ? null : canvasFingerprint();
     try {
       markBrowserProbePhase("prepare");
       const prepared = await prepareProductPackageMutation(message.request);
@@ -2316,7 +2424,7 @@ async function handleProductHostMessage(message) {
         value = await withPackageDocumentMetadata(committed ?? result.value);
       }
       markBrowserProbePhase("visual-capture");
-      value = await attachBrowserVisualEvidence(message.request, value);
+      value = await attachBrowserVisualEvidence(message.request, value, paintBeforeEdit);
       markBrowserProbePhase("status");
       const status = await request("status");
       reportHostModified(
@@ -2376,6 +2484,8 @@ function connectProductHost(event) {
 
 let runtimeReady = false;
 let productHeartbeat = null;
+let lastSelectionKey = "";
+let selectionTick = 0;
 let checkpointInFlight = false;
 let lastCheckpointAt = 0;
 function startProductHeartbeat() {
@@ -2390,6 +2500,17 @@ function startProductHeartbeat() {
         commands.length > 0 ||
         Boolean(unreconciledModelRevision);
       reportHostModified(modified);
+      // Tell the host what is selected, about every 1.5 seconds.
+      if (++selectionTick % 2 === 0) {
+        const selection = await request("native", {
+          nativeRequest: { operation: "selection" },
+        }).catch(() => null);
+        const key = JSON.stringify(selection?.value ?? null);
+        if (selection?.value && key !== lastSelectionKey) {
+          lastSelectionKey = key;
+          postHost({ type: "selection", value: selection.value });
+        }
+      }
       if (modified && Date.now() - lastCheckpointAt >= 10_000) {
         const live = await observeNativeDocument();
         if (live.revision !== reconciledModelRevision)

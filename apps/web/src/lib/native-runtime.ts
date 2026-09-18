@@ -24,6 +24,7 @@ import {
 } from "./native-conversation";
 import { signNativeConnectorToken } from "./native-connector-token";
 import { aiConnectorConfig } from "./ai-connector-config";
+import { loadTurnSummary } from "./native-turn-summary";
 import {
   jobRedeliverySeconds,
   NATIVE_AGENT_LEASE_SECONDS,
@@ -149,7 +150,7 @@ export async function submitNativeTurn(
     `;
     await sql`
       insert into spellbook_native_events (session_id,turn_id,event_type,payload)
-      values (${native.id},${turnId},'start',${sql.json({ text })})
+      values (${native.id},${turnId},'start',${sql.json({ text, permission, turnId })})
     `;
   });
   if (execution === "local")
@@ -221,7 +222,7 @@ export async function pollNativeSession(
     return { id: candidate.id, request: candidate.request };
   });
   const events = await db()`
-    select id::text, event_type as type, payload
+    select id::text, event_type as type, payload, turn_id::text as turn_id, created_at
     from spellbook_native_events where session_id=${native.id} and id>${after}
     order by spellbook_native_events.id limit 200
   `;
@@ -245,13 +246,39 @@ export async function pollNativeSession(
     events: events.map((event) => ({
       id: Number(event.id),
       type: event.type,
+      turnId: event.turn_id ?? undefined,
+      at: new Date(event.created_at).toISOString(),
       ...event.payload,
     })),
     session: {
       status: native.status,
       saveRevision: native.save_revision,
       error: native.last_error,
+      workingVersionId: native.working_version_id,
+      editorLocked: Boolean(
+        native.wopi_lock &&
+          (!native.lock_expires_at ||
+            new Date(native.lock_expires_at).getTime() > Date.now()),
+      ),
     },
+  };
+}
+
+/**
+ * Session state without consuming events or tasks. Used while the editor is
+ * closed (e.g. before a restore) to learn when the editor released its lock.
+ */
+export async function nativeSessionState(session: Session, documentId: string) {
+  const native = await ownedSession(session, documentId, undefined, true);
+  return {
+    status: native.status as string,
+    saveRevision: native.save_revision as number,
+    workingVersionId: native.working_version_id as string,
+    editorLocked: Boolean(
+      native.wopi_lock &&
+        (!native.lock_expires_at ||
+          new Date(native.lock_expires_at).getTime() > Date.now()),
+    ),
   };
 }
 
@@ -292,9 +319,10 @@ async function failInterruptedNativeTurn(
       update spellbook_native_tasks set status='expired',error='native_agent_interrupted',updated_at=now()
       where turn_id=${stale.turn_id} and status in ('queued','delivered')
     `;
+    const summary = await storeTurnSummary(sql, stale.turn_id);
     await sql`
       insert into spellbook_native_events (session_id,turn_id,event_type,payload)
-      values (${stale.session_id},${stale.turn_id},'error',${sql.json({ error: INTERRUPTED_NATIVE_TURN_MESSAGE })})
+      values (${stale.session_id},${stale.turn_id},'error',${sql.json({ error: summary?.failure?.message ?? INTERRUPTED_NATIVE_TURN_MESSAGE, summary } as never)})
     `;
   });
 }
@@ -387,7 +415,36 @@ export async function completeNativeTask(
       and expires_at > now() returning id
   `;
   if (!updated) throw new HttpError(409, "native_task_inactive");
+  if (value) await recordEditorEngine(native.editor_mode, (value as { engine?: unknown }).engine);
   return { ok: true };
+}
+
+/**
+ * What the running editor engine can do, as its own observations report it.
+ * The import summary uses it to say what AI cannot change in a file before
+ * the file is opened. One row per editor mode; written only when it changes.
+ */
+async function recordEditorEngine(editorMode: unknown, engine: unknown) {
+  const facts = engine as { patchLevel?: unknown; supportedOperations?: unknown } | null;
+  if (
+    (editorMode !== "wopi" && editorMode !== "browser") ||
+    !facts ||
+    !Array.isArray(facts.supportedOperations)
+  )
+    return;
+  const operations = facts.supportedOperations
+    .filter((operation): operation is string => typeof operation === "string" && operation.length <= 64)
+    .slice(0, 500)
+    .sort();
+  const patchLevel = typeof facts.patchLevel === "string" ? facts.patchLevel.slice(0, 64) : null;
+  await db()`
+    insert into spellbook_editor_engines (editor_mode, patch_level, supported_operations, seen_at)
+    values (${editorMode}, ${patchLevel}, ${db().json(operations)}, now())
+    on conflict (editor_mode) do update set
+      patch_level=excluded.patch_level, supported_operations=excluded.supported_operations, seen_at=now()
+    where spellbook_editor_engines.patch_level is distinct from excluded.patch_level
+      or spellbook_editor_engines.supported_operations is distinct from excluded.supported_operations
+  `.catch(() => undefined);
 }
 
 export async function cancelNativeTurn(session: Session, documentId: string) {
@@ -400,8 +457,10 @@ export async function cancelNativeTurn(session: Session, documentId: string) {
     await sql`update spellbook_native_turns set status='cancelled', last_error='사용자가 작업을 중단했습니다.', updated_at=now() where job_id=${turn.job_id}`;
     await sql`update spellbook_jobs set status='failed', error='user_cancelled', updated_at=now() where id=${turn.job_id} and status in ('queued','running')`;
     await sql`update spellbook_native_tasks set status='expired', error='user_cancelled', updated_at=now() where turn_id=(select id from spellbook_native_turns where job_id=${turn.job_id}) and status in ('queued','delivered')`;
+    const [cancelled] = await sql`select id from spellbook_native_turns where job_id=${turn.job_id}`;
+    const summary = cancelled ? await storeTurnSummary(sql, cancelled.id) : null;
     await sql`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
-      select session_id,id,'error',${sql.json({ error: "작업을 중단했습니다." })} from spellbook_native_turns where job_id=${turn.job_id}`;
+      select session_id,id,'error',${sql.json({ error: "작업을 중단했습니다.", summary } as never)} from spellbook_native_turns where job_id=${turn.job_id}`;
   });
   return { ok: true };
 }
@@ -571,8 +630,9 @@ export async function completeNativeTurn(
     const [turn] =
       await sql`update spellbook_native_turns set status='completed', assistant_text=${text},
       changed=${changed}, reviewed=${reviewed}, updated_at=now() where job_id=${job.id} returning id,session_id`;
+    const summary = await storeTurnSummary(sql, turn.id);
     await sql`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
-      values (${turn.session_id},${turn.id},'done',${sql.json({ text, changed, reviewed, status: typeof result?.status === "string" ? result.status : "completed" })})`;
+      values (${turn.session_id},${turn.id},'done',${sql.json({ text, changed, reviewed, status: typeof result?.status === "string" ? result.status : "completed", turnId: turn.id, summary } as never)})`;
   });
 }
 
@@ -583,9 +643,64 @@ export async function failNativeTurn(jobId: string, error: string) {
       where job_id=${jobId} and status in ('queued','running') returning id,session_id`;
     await sql`update spellbook_jobs set status='failed',error=${error.slice(0, 1_000)},updated_at=now()
       where id=${jobId} and status in ('queued','running')`;
-    if (turn)
+    if (turn) {
+      const summary = await storeTurnSummary(sql, turn.id);
       await sql`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
-      values (${turn.session_id},${turn.id},'error',${sql.json({ error: "AI 편집을 완료하지 못했습니다. 다시 시도하세요." })})`;
+      values (${turn.session_id},${turn.id},'error',${sql.json({ error: summary?.failure?.message ?? "AI가 요청을 끝내지 못했어요. 다시 요청해 주세요.", turnId: turn.id, summary } as never)})`;
+    }
+  });
+}
+
+/**
+ * Computes the result-card summary from the turn's editor records and stores
+ * it. The screenshots the AI looked at are kept only while the request runs:
+ * the page that relayed them keeps its own copies, and after a reload the
+ * card shows the saved versions' previews instead.
+ */
+async function storeTurnSummary(sql: any, turnId: string) {
+  const summary = await loadTurnSummary(sql, turnId);
+  if (summary)
+    await sql`update spellbook_native_turns set summary=${sql.json(summary as never)} where id=${turnId}`;
+  await sql`
+    update spellbook_native_tasks set result = result - 'images'
+    where turn_id=${turnId} and result is not null and jsonb_typeof(result->'images') is not null
+  `;
+  return summary;
+}
+
+/**
+ * Records that the person undid a request in the editor (its own undo
+ * history, checked there against the request's before/after states). Only
+ * the latest request of the session can be undone this way; the next save
+ * is labelled as that undo.
+ */
+export async function markNativeUndo(session: Session, documentId: string, turnId: unknown) {
+  if (typeof turnId !== "string" || !/^[0-9a-f-]{36}$/i.test(turnId))
+    throw new HttpError(400, "invalid_native_turn");
+  const native = await ownedSession(session, documentId);
+  return db().begin(async (sql) => {
+    await sql`select id from spellbook_native_sessions where id=${native.id} for update`;
+    const [latest] = await sql`
+      select id, status, changed, undone_at from spellbook_native_turns
+      where session_id=${native.id} order by created_at desc limit 1
+    `;
+    if (!latest || latest.id !== turnId) throw new HttpError(409, "undo_not_latest_request");
+    if (latest.status !== "completed" || !latest.changed)
+      throw new HttpError(409, "undo_nothing_changed");
+    if (latest.undone_at) return { turnId, undoneAt: new Date(latest.undone_at).toISOString() };
+    const [marked] = await sql`
+      update spellbook_native_turns set undone_at=now(), updated_at=now()
+      where id=${turnId} returning undone_at
+    `;
+    await sql`
+      update spellbook_native_sessions set pending_undo_turn_id=${turnId}, pending_undo_at=now(), updated_at=now()
+      where id=${native.id}
+    `;
+    await sql`
+      insert into spellbook_native_events (session_id,turn_id,event_type,payload)
+      values (${native.id},${turnId},'undone',${sql.json({ turnId })})
+    `;
+    return { turnId, undoneAt: new Date(marked.undone_at).toISOString() };
   });
 }
 

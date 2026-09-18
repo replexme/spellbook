@@ -13,17 +13,46 @@ interface ManagedSession {
   client: AppServerClient;
   home: string;
   email: string;
+  isolated: boolean;
+}
+
+const CONNECTED_AT_FILE = "spellbook-connected-at";
+
+/**
+ * When a subscription was connected through this service. Written the first
+ * time a login started here is seen connected; an account that was already
+ * connected has no known date and reports null rather than a guess.
+ */
+export async function trackConnectedAt(
+  home: string,
+  connected: boolean,
+  loginStarted: boolean,
+  now = new Date(),
+): Promise<string | null> {
+  const file = path.join(home, CONNECTED_AT_FILE);
+  if (!connected) {
+    await fs.rm(file, { force: true });
+    return null;
+  }
+  const stored = await fs.readFile(file, "utf8").then((value) => value.trim(), () => "");
+  if (stored && !Number.isNaN(Date.parse(stored))) return stored;
+  if (!loginStarted) return null;
+  const value = now.toISOString();
+  await fs.writeFile(file, `${value}\n`, { mode: 0o600 });
+  return value;
 }
 
 export class SessionManager {
   private readonly sessions = new Map<string, Promise<ManagedSession>>();
   private readonly claude = new ClaudeCodeClient();
+  private readonly loginsStarted = new Set<string>();
 
   async status(rawEmail: string): Promise<{
     account: unknown;
     providers: Array<{ id: "codex" | "claude_code"; connected: boolean }>;
     rateLimits: unknown;
     runtime: typeof activeAiRuntime;
+    connectedAt: string | null;
   }> {
     const session = await this.get(rawEmail);
     const codex = await session.client.accountRead();
@@ -39,28 +68,47 @@ export class SessionManager {
         rateLimits = null;
       }
     }
+    const codexConnected = codex.account?.type === "chatgpt";
+    // Only isolated homes belong to this service; a shared ~/.codex is the
+    // person's own and gets no marker file.
+    const connectedAt = session.isolated
+      ? await trackConnectedAt(
+          session.home,
+          codexConnected,
+          this.loginsStarted.has(session.email),
+        ).catch(() => null)
+      : null;
+    if (codexConnected) this.loginsStarted.delete(session.email);
     return {
       account: codex.account ? codex : claude,
       providers: [
-        { id: "codex", connected: codex.account?.type === "chatgpt" },
+        { id: "codex", connected: codexConnected },
         { id: "claude_code", connected: claude.account?.type === "claude" },
       ],
       rateLimits,
       runtime: activeAiRuntime,
+      connectedAt,
     };
   }
 
   async startLogin(rawEmail: string): Promise<unknown> {
-    return (await this.get(rawEmail)).client.startDeviceLogin();
+    const session = await this.get(rawEmail);
+    this.loginsStarted.add(session.email);
+    return session.client.startDeviceLogin();
   }
 
   async startBrowserLogin(rawEmail: string): Promise<unknown> {
-    return (await this.get(rawEmail)).client.startBrowserLogin();
+    const session = await this.get(rawEmail);
+    this.loginsStarted.add(session.email);
+    return session.client.startBrowserLogin();
   }
 
   async logout(rawEmail: string): Promise<void> {
     const session = await this.get(rawEmail);
     await session.client.logout();
+    this.loginsStarted.delete(session.email);
+    if (session.isolated)
+      await fs.rm(path.join(session.home, CONNECTED_AT_FILE), { force: true });
   }
 
   async models(rawEmail: string): Promise<AvailableModel[]> {
@@ -129,6 +177,7 @@ export class SessionManager {
       }),
       home,
       email,
+      isolated: location.isolated,
     };
   }
 }

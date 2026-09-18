@@ -1,4 +1,5 @@
-import { listDocuments, uploadDocument } from "@/lib/orchestration";
+import { uploadDocument } from "@/lib/orchestration";
+import { listLibrary } from "@/lib/document-library";
 import { requireSession, routeError } from "@/lib/http";
 
 export const runtime = "nodejs";
@@ -6,7 +7,7 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   try {
     return Response.json({
-      documents: await listDocuments(await requireSession(request)),
+      documents: await listLibrary(await requireSession(request)),
     });
   } catch (error) {
     return routeError(error);

@@ -85,6 +85,17 @@ export async function deleteObject(objectName: string): Promise<void> {
   await fs.rm(objectPath(objectName), { force: true });
 }
 
+/** Removes everything stored for one document: uploads, versions, previews and assets. */
+export async function deleteDocumentObjects(
+  accountId: string,
+  documentId: string,
+): Promise<void> {
+  await fs.rm(objectPath(accountPrefix(accountId, documentId)), {
+    recursive: true,
+    force: true,
+  });
+}
+
 export async function getJsonObject<T>(objectName: string): Promise<T> {
   return JSON.parse((await getObject(objectName)).toString("utf8")) as T;
 }

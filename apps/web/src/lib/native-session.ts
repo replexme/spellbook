@@ -587,6 +587,8 @@ export async function wopiPutFile(
         digest,
         preservationObject: context.preservationObject,
         saveRevision: session.save_revision,
+        editorModified: modifiedByUser(request),
+        bytes: data.length,
       });
     });
   } catch (error) {
@@ -595,6 +597,17 @@ export async function wopiPutFile(
   }
   await dispatchNativeSave(jobId, payload!);
   return { version: versionId, unchanged: false };
+}
+
+/**
+ * Collabora states whether a person changed the document since the last
+ * save. A forced save of an unchanged document (the AI baseline) says false.
+ */
+function modifiedByUser(request: Request): boolean | null {
+  const value =
+    request.headers.get("x-cool-wopi-ismodifiedbyuser") ??
+    request.headers.get("x-lool-wopi-ismodifiedbyuser");
+  return value === "true" ? true : value === "false" ? false : null;
 }
 
 export class WopiLockConflict extends Error {

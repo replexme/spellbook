@@ -7978,6 +7978,144 @@ function spellbookDocumentOperation(request) {
     return result(after, slideIndex);
   };
 
+  // Host-only reads for the request box and result cards. They neither
+  // enumerate the deck nor render, so the host can call them on every
+  // selection change without slowing the editor.
+  if (request.operation === "selection") {
+    const currentPage = controller.getCurrentPage();
+    let activeSlide = 0;
+    for (let index = 0; index < pages.getCount(); index++)
+      if (uno.sameUnoObject(pages.getByIndex(index), currentPage)) {
+        activeSlide = index;
+        break;
+      }
+    let selection;
+    try {
+      selection = controller.getSelection();
+    } catch (_) {}
+    const chosen = [];
+    try {
+      if (selection && typeof selection.getCount === "function")
+        for (let index = 0; index < selection.getCount(); index++)
+          chosen.push(selection.getByIndex(index));
+      else if (selection) chosen.push(selection);
+    } catch (_) {}
+    // Editing text inside a box selects a text range; its text is the box.
+    try {
+      if (!chosen.length && selection && typeof selection.getText === "function")
+        chosen.push(selection.getText());
+    } catch (_) {}
+    const isChosen = (shape) =>
+      chosen.some((item) => {
+        try {
+          return uno.sameUnoObject(item, shape);
+        } catch (_) {
+          return false;
+        }
+      });
+    const page = pages.getByIndex(activeSlide);
+    const selected = [];
+    for (let index = 0; index < page.getCount(); index++) {
+      const shape = page.getByIndex(index);
+      if (!isChosen(shape)) continue;
+      let text = null;
+      try {
+        text = shape.getString();
+      } catch (_) {}
+      selected.push({
+        elementId: `${activeSlide}/${index}`,
+        name: safeCall(shape, "getName", ""),
+        kind: safeCall(shape, "getShapeType", "unknown"),
+        presentationObject: safeProperty(shape, "IsPresentationObject"),
+        text: typeof text === "string" ? text.slice(0, 80) : null,
+      });
+    }
+    return {
+      activeSlide,
+      slideCount: pages.getCount(),
+      selectionCount: chosen.length,
+      selected,
+      // What this engine can edit, so the request box only suggests edits
+      // that would run here.
+      editableOperations: Object.keys(mutationContracts).filter(
+        (operation) => {
+          try {
+            mutationContractFor(operation);
+            return true;
+          } catch (_) {
+            return false;
+          }
+        },
+      ),
+    };
+  }
+  if (request.operation === "reveal") {
+    const slideIndex = request.slideIndex;
+    if (
+      !Number.isInteger(slideIndex) ||
+      slideIndex < 0 ||
+      slideIndex >= pages.getCount()
+    )
+      throw new Error("invalid_reveal_slide");
+    controller.setCurrentPage(pages.getByIndex(slideIndex));
+    let revealed = null;
+    if (
+      typeof request.elementId === "string" &&
+      /^\d+(?:\/\d+)+$/.test(request.elementId) &&
+      Number(request.elementId.split("/")[0]) === slideIndex
+    )
+      try {
+        controller.select(resolveShape(request.elementId));
+        revealed = request.elementId;
+      } catch (_) {}
+    return { activeSlide: slideIndex, revealed };
+  }
+  // Undo one AI request by exactly the undo actions it recorded. It runs only
+  // while the document is still in the state that request left, and it keeps
+  // the result only when that equals the state before the request; otherwise
+  // the undone actions are redone and the document is left as it was.
+  if (request.operation === "undo_turn") {
+    const steps = request.steps;
+    if (
+      !Number.isInteger(steps) ||
+      steps < 1 ||
+      steps > 50 ||
+      typeof request.expectedRevision !== "string" ||
+      typeof request.targetRevision !== "string"
+    )
+      throw new Error("invalid_undo_request");
+    const before = read();
+    if (before.revision !== request.expectedRevision)
+      throw new Error("document_changed_since_turn");
+    const undo = model.getUndoManager();
+    if (undo.getAllUndoActionTitles().length < steps)
+      throw new Error("undo_history_missing");
+    let undone = 0;
+    try {
+      for (; undone < steps; undone++) undo.undo();
+    } catch (_) {
+      for (; undone > 0; undone--) undo.redo();
+      throw new Error("undo_failed");
+    }
+    const after = read();
+    if (after.revision !== request.targetRevision) {
+      for (let index = 0; index < steps; index++) undo.redo();
+      throw new Error(
+        read().revision === before.revision
+          ? "undo_result_mismatch"
+          : "undo_result_mismatch_not_restored",
+      );
+    }
+    return {
+      ...after,
+      layoutAudit: withAuditDelta(before, after),
+      changedSlideIndexes: [],
+      images: [],
+      visualEvidenceComplete: true,
+      undone: steps,
+    };
+  }
+
   if (request.operation !== "edit_batch") return executeSingle(request);
 
   const before = read();

@@ -108,7 +108,7 @@ public sealed class PresentationInspector
                 var master = Related(archive, layout.Value.Path, "/slideMaster");
                 if (master is not null) inherited.Add(master.Value.Xml);
             }
-            slides.Add(InspectSlide(index, $"/{partPath}", slide, hasExternalContentRisk, hasFontRisk, inherited));
+            slides.Add(InspectSlide(index, $"/{partPath}", slide, hasExternalContentRisk, hasFontRisk, inherited, LinkedChartRelationships(archive, partPath)));
         }
 
         return new ElementGraph(
@@ -137,7 +137,55 @@ public sealed class PresentationInspector
     internal static XElement? ShapeTransform(XElement shape) => shape.Elements().FirstOrDefault(e => e.Name.LocalName == "xfrm")
         ?? shape.Elements().Where(e => e.Name.LocalName is "spPr" or "grpSpPr").SelectMany(e => e.Elements()).FirstOrDefault(e => e.Name.LocalName == "xfrm");
 
-    private static SlideGraph InspectSlide(int slideIndex, string partUri, XDocument slide, bool hasExternalContentRisk, bool hasFontRisk, IReadOnlyList<XDocument> inherited)
+    // Slide relationship ids of charts whose data is a linked, external workbook.
+    private static IReadOnlySet<string> LinkedChartRelationships(ZipArchive archive, string slidePath)
+    {
+        var linked = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var relation in RelationshipsOf(archive, slidePath))
+        {
+            var type = (string?)relation.Attribute("Type");
+            var target = (string?)relation.Attribute("Target");
+            var id = (string?)relation.Attribute("Id");
+            if (id is null || target is null || type?.EndsWith("/chart", StringComparison.Ordinal) != true ||
+                string.Equals((string?)relation.Attribute("TargetMode"), "External", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var chartPath = ResolvePartPath(slidePath, target);
+            if (archive.GetEntry(chartPath) is not { } chartEntry) continue;
+            var dataId = LoadXml(chartEntry).Descendants()
+                .FirstOrDefault(element => element.Name.LocalName == "externalData")?
+                .Attributes().FirstOrDefault(attribute => attribute.Name.LocalName == "id")?.Value;
+            if (dataId is null) continue;
+            var data = RelationshipsOf(archive, chartPath)
+                .FirstOrDefault(element => (string?)element.Attribute("Id") == dataId);
+            if (string.Equals((string?)data?.Attribute("TargetMode"), "External", StringComparison.OrdinalIgnoreCase))
+                linked.Add(id);
+        }
+        return linked;
+    }
+
+    private static IEnumerable<XElement> RelationshipsOf(ZipArchive archive, string partPath)
+    {
+        var slash = partPath.LastIndexOf('/') + 1;
+        var relPath = partPath[..slash] + "_rels/" + partPath[slash..] + ".rels";
+        return archive.GetEntry(relPath) is { } entry
+            ? LoadXml(entry).Root?.Elements() ?? []
+            : [];
+    }
+
+    private static string? GraphicKindOf(XElement frame)
+    {
+        var uri = (string?)frame.Descendants().FirstOrDefault(element => element.Name.LocalName == "graphicData")?.Attribute("uri");
+        return uri switch
+        {
+            DrawingMlGraphicTypes.Table => "table",
+            DrawingMlGraphicTypes.Chart => "chart",
+            DrawingMlGraphicTypes.Diagram => "diagram",
+            DrawingMlGraphicTypes.Ole => "ole",
+            _ => "other"
+        };
+    }
+
+    private static SlideGraph InspectSlide(int slideIndex, string partUri, XDocument slide, bool hasExternalContentRisk, bool hasFontRisk, IReadOnlyList<XDocument> inherited, IReadOnlySet<string> linkedCharts)
     {
         var shapeTree = slide.Descendants().FirstOrDefault(element => element.Name.LocalName == "spTree") ??
             throw new InvalidDataException($"Slide {slideIndex + 1} has no shape tree.");
@@ -213,6 +261,11 @@ public sealed class PresentationInspector
                 hasUnsupported = true;
             }
 
+            var graphicKind = kind == "graphicFrame" ? GraphicKindOf(shape) : null;
+            var chartRelationship = graphicKind == "chart"
+                ? shape.Descendants().FirstOrDefault(element => element.Name.LocalName == "chart")?
+                    .Attributes().FirstOrDefault(attribute => attribute.Name.LocalName == "id")?.Value
+                : null;
             var rotationRaw = (string?)transform?.Attribute("rot");
             var rotation = long.TryParse(rotationRaw, out var rotationUnits) ? rotationUnits / 60000d : 0d;
             elements.Add(new ElementNode(
@@ -234,7 +287,9 @@ public sealed class PresentationInspector
                     .Where(e => e.Name.LocalName == "tr").Select(row => (IReadOnlyList<string>)row.Elements()
                         .Where(e => e.Name.LocalName == "tc").Select(PptxTextContent.Read).ToArray()).ToArray(),
                 (string?)transform?.Attribute("flipH") is "1" or "true",
-                (string?)transform?.Attribute("flipV") is "1" or "true"));
+                (string?)transform?.Attribute("flipV") is "1" or "true",
+                graphicKind,
+                chartRelationship is not null && linkedCharts.Contains(chartRelationship)));
         }
 
         if (hasExternalContentRisk)

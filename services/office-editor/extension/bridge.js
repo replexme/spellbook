@@ -245,6 +245,9 @@ window.addEventListener("message", (event) => {
         "replace_image",
         "insert_media",
         "replace_media",
+        "selection",
+        "reveal",
+        "undo_turn",
       ].includes(message.request?.operation)
     )
       return;
@@ -273,7 +276,39 @@ window.addEventListener("message", (event) => {
         connection.postMessage({ id: message.id, error: error.message }),
     );
   };
+  // Tell the host what is selected so the request box can say
+  // "선택 · 제목 상자 (3번)". Selection changes surface as command-state and
+  // slide changes; reads are coalesced and queued behind document operations.
+  const editorMap = window.parent.app?.map;
+  let selectionQueued = false;
+  let lastSelection = "";
+  const publishSelection = () => {
+    if (selectionQueued || !connection) return;
+    selectionQueued = true;
+    setTimeout(() => {
+      selectionQueued = false;
+      const task = tail.then(() =>
+        cool.callRemote(spellbookDocumentOperation, {
+          operation: "selection",
+          mutationContracts: spellbookMutationContracts,
+        }),
+      );
+      tail = task.catch(() => undefined);
+      task.then(
+        (value) => {
+          const key = JSON.stringify(value);
+          if (key === lastSelection) return;
+          lastSelection = key;
+          connection.postMessage({ type: "selection", value });
+        },
+        () => undefined,
+      );
+    }, 350);
+  };
+  editorMap?.on?.("commandstatechanged", publishSelection);
+  editorMap?.on?.("updateparts", publishSelection);
   connection.postMessage({ type: "ready" });
+  publishSelection();
 });
 const announceReady = () => {
   if (connection) {

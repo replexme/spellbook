@@ -125,12 +125,9 @@ test("a PPTX reaches the live canvas, edits, saves and downloads", async ({
   );
   const browserEditor = page.url().includes("/browser-documents/");
   await expect(page.getByTitle("PPT 편집기")).toBeVisible();
-  await expect(page.locator(".native-save-state")).toContainText("저장됨", {
+  await expect(page.locator(".ws-save")).toHaveText(/^저장됨/, {
     timeout: 60_000,
   });
-  await expect(page.locator(".native-chat-title span").last()).toHaveText(
-    "AI 연결 필요",
-  );
 
   const editor = page.frameLocator('iframe[title="PPT 편집기"]');
   await expect(editor.locator("body")).toBeVisible();
@@ -140,15 +137,13 @@ test("a PPTX reaches the live canvas, edits, saves and downloads", async ({
       "closed",
     );
   await expect(editor.getByText("Explore The New")).toHaveCount(0);
-  await expect(
-    page.getByRole("complementary", { name: "AI 편집 대화" }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("AI 편집을 사용하려면 연결이 필요합니다"),
-  ).toBeVisible();
-  await expect(
-    page.getByText("PPT는 지금 바로 직접 편집할 수 있습니다."),
-  ).toBeVisible();
+  const panel = page.getByRole("complementary", { name: "AI와 버전 기록" });
+  await expect(panel).toBeVisible();
+  // Without an AI connection the panel explains that direct editing works.
+  if (await panel.getByRole("heading", { name: "AI를 연결해 주세요" }).isVisible())
+    await expect(
+      panel.getByText("AI 연결 전에도 편집기에서 직접 고칠 수 있어요."),
+    ).toBeVisible();
 
   const replacement = `Spellbook round trip ${Date.now()}`;
   const changed = browserEditor
@@ -156,16 +151,18 @@ test("a PPTX reaches the live canvas, edits, saves and downloads", async ({
     : await editThroughCollaboraBridge(page, replacement);
   expect(changed).toBe(true);
 
-  await page.getByRole("button", { name: "저장", exact: true }).click();
-  await expect(page.locator(".native-save-state")).toContainText("저장", {
-    timeout: 5_000,
-  });
-  await expect(page.locator(".native-save-state")).toHaveText("저장됨", {
+  // The save state in the top bar is also the save button while unsaved.
+  await page.getByRole("button", { name: /저장 안 됨/ }).click();
+  await expect(page.locator(".ws-save")).toHaveText(/^저장됨/, {
     timeout: 60_000,
   });
 
   const downloadEvent = page.waitForEvent("download", { timeout: 60_000 });
-  await page.getByRole("button", { name: "PPTX 다운로드" }).click();
+  await page.getByRole("button", { name: "PPTX 내려받기" }).click();
+  await page
+    .getByRole("dialog", { name: "내려받기" })
+    .getByRole("button", { name: "PPTX 내려받기" })
+    .click();
   const download = await downloadEvent;
 
   await fs.mkdir(evidenceDir, { recursive: true });
@@ -200,46 +197,38 @@ test("a PPTX reaches the live canvas, edits, saves and downloads", async ({
   });
 });
 
-test("a narrow screen starts on the canvas and retains AI and download access", async ({
+test("a phone shows saved slides and the AI panel while the editor keeps running", async ({
   page,
 }) => {
   test.skip(!documentId, "SPELLBOOK_SELFHOST_DOCUMENT_ID is required");
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/documents/${documentId}`);
-  await expect(page.getByTitle("PPT 편집기")).toBeVisible();
-  await expect(page.locator(".native-loading")).toHaveCount(0, {
+  // The editor stays mounted out of sight so AI requests still reach it.
+  await expect(page.getByTitle("PPT 편집기")).toBeAttached();
+  await expect(page.locator(".ws-opening")).toHaveCount(0, {
     timeout: 60_000,
   });
+  const slides = page.getByRole("region", { name: "슬라이드 미리보기" });
   await expect(
-    page.frameLocator('iframe[title="PPT 편집기"]').locator("body"),
-  ).toHaveAttribute("data-state", "document-ready");
-  await expect(
-    page.frameLocator('iframe[title="PPT 편집기"]').locator("body"),
-  ).toHaveAttribute("data-default-slide-pane", "closed");
-  await expect(
-    page.getByRole("complementary", { name: "AI 편집 대화" }),
-  ).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "PPTX 다운로드" }),
+    slides.getByText("보기만 가능 · 직접 편집은 큰 화면에서", { exact: false }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("complementary", { name: "AI와 버전 기록" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "PPTX 내려받기" }),
+  ).toBeVisible();
+  await expect(
+    page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+  ).resolves.toBe(true);
   await fs.mkdir(evidenceDir, { recursive: true });
   await page.screenshot({ path: path.join(evidenceDir, "mobile-editor.png") });
-  await page.getByRole("button", { name: "AI와 편집" }).click();
-  await expect(
-    page.getByRole("complementary", { name: "AI 편집 대화" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "AI 대화 접기" }).click();
-  await expect(
-    page.getByRole("complementary", { name: "AI 편집 대화" }),
-  ).toHaveCount(0);
+  // A large screen gets the editor itself back.
   await page.setViewportSize({ width: 1200, height: 844 });
-  await expect(
-    page.frameLocator('iframe[title="PPT 편집기"]').locator("body"),
-  ).toHaveAttribute("data-default-slide-pane", "open");
+  await expect(page.getByTitle("PPT 편집기")).toBeVisible();
+  await expect(slides).toHaveCount(0);
   await page.setViewportSize({ width: 390, height: 844 });
-  await expect(
-    page.frameLocator('iframe[title="PPT 편집기"]').locator("body"),
-  ).toHaveAttribute("data-default-slide-pane", "closed");
+  await expect(slides).toBeVisible();
 });
 
 async function editThroughBrowserBridge(page: Page, replacement: string) {

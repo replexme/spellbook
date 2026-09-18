@@ -264,6 +264,21 @@ export async function runMigrations(): Promise<void> {
       created_at timestamptz not null default now()
     );
     create index if not exists spellbook_native_events_session_idx on spellbook_native_events(session_id, id);
+    alter table spellbook_native_turns add column if not exists summary jsonb;
+    alter table spellbook_versions add column if not exists restored_from_version_id uuid references spellbook_versions(id);
+    alter table spellbook_versions add column if not exists editor_modified boolean;
+    alter table spellbook_versions add column if not exists document_bytes bigint;
+    alter table spellbook_versions add column if not exists undone_turn_id uuid;
+    alter table spellbook_native_turns add column if not exists undone_at timestamptz;
+    alter table spellbook_native_sessions add column if not exists pending_undo_turn_id uuid;
+    alter table spellbook_native_sessions add column if not exists pending_undo_at timestamptz;
+    alter table spellbook_documents add column if not exists failure_code text;
+    create table if not exists spellbook_editor_engines (
+      editor_mode text primary key check (editor_mode in ('wopi','browser')),
+      patch_level text,
+      supported_operations jsonb not null default '[]'::jsonb,
+      seen_at timestamptz not null default now()
+    );
   `);
 }
 

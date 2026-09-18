@@ -2,3 +2,62 @@
 .spellbook-extension-bridge-active #sidebar-panel {
   display: none !important;
 }
+
+/*
+ * Spellbook's own top bar carries the brand, file name, save state and
+ * undo/redo, so the editor's duplicates are hidden. The editor's
+ * document-type colour (orange for presentations) becomes the neutral accent
+ * Spellbook passes at launch; teal stays reserved for the AI.
+ */
+body[data-doctype] {
+  --doc-type: var(--spellbook-editor-accent-rgb, 163, 62, 3);
+}
+
+/* Outranks the editor's branding.css (html:not([data-theme]) .main-nav). */
+html body .main-nav.hasnotebookbar {
+  background-color: var(--color-main-background) !important;
+}
+
+.main-nav.hasnotebookbar .ui-tab.notebookbar:not(.selected) {
+  color: var(--color-main-text) !important;
+}
+
+/*
+ * Also hidden: the editing/viewing mode switch (viewing mode blocks AI
+ * edits and its white label was made for the coloured bar removed above)
+ * and the status bar's own "Saving..." text (DocumentStatus).
+ */
+#document-header,
+#document-titlebar,
+#shortcutstoolbox .unoSave,
+.notebookbar .unoUndo,
+.notebookbar .unoRedo,
+.main-nav #viewMode,
+#DocumentStatus {
+  display: none !important;
+}
+
+/*
+ * The slide list keeps its thumbnails and buttons, not its large title, and
+ * gives the canvas the width the title took. Only the normal view: the
+ * expanded slide sorter keeps its own grid.
+ */
+.navigation-header .navigation-title {
+  display: none !important;
+}
+
+#main-document-content:not(.panes-expanded) #navigation-sidebar {
+  width: 176px;
+}
+
+#main-document-content:not(.panes-expanded) .navigation-header {
+  height: 36px;
+  padding: 4px 8px;
+}
+
+#main-document-content:not(.panes-expanded) #slide-sorter .preview-img {
+  min-width: 124px;
+  max-width: 132px;
+  margin-left: 6px;
+  margin-right: 6px;
+}

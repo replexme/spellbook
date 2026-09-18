@@ -23,6 +23,8 @@ public sealed class PptxPackageChangeBudgetValidator
         "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties";
     private static readonly XNamespace CollaboraExtensionNamespace =
         "urn:com:collaboraoffice:names:experimental:ooxml:xmlns:coext:1.0";
+    private static readonly XNamespace ChartNamespace =
+        "http://schemas.openxmlformats.org/drawingml/2006/chart";
 
     public static IReadOnlySet<string> Categories { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -255,6 +257,27 @@ public sealed class PptxPackageChangeBudgetValidator
                     .Descendants(PresentationNamespace + "txBody")
                     .Descendants(DrawingNamespace + "t"))
                     text.Value = $"__office_placeholder_cache_{++textIndex}__";
+            }
+        }
+
+        // LibreOffice picks random chart axis ids when it exports a chart it
+        // has loaded, so two saves of an unchanged chart can differ only in
+        // those numbers. The ids only link chart types to their axes and axes
+        // to each other inside this part; renumbering them by first
+        // appearance keeps every link, so an added, removed or re-linked axis
+        // still changes the hash.
+        if (part.StartsWith("ppt/charts/", StringComparison.Ordinal))
+        {
+            var axisIds = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var reference in document.Descendants()
+                .Where(element => element.Name == ChartNamespace + "axId"
+                    || element.Name == ChartNamespace + "crossAx"))
+            {
+                var value = (string?)reference.Attribute("val");
+                if (value is null) continue;
+                if (!axisIds.TryGetValue(value, out var ordinal))
+                    axisIds[value] = ordinal = (axisIds.Count + 1).ToString();
+                reference.SetAttributeValue("val", ordinal);
             }
         }
 
