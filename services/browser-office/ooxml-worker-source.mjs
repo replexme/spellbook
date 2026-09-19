@@ -914,10 +914,12 @@ function contentTypePartKey(partName) {
   }
 }
 
+// OPC: the extension follows the last period of the last segment, so the
+// package relationships part /_rels/.rels has the extension "rels".
 function partExtension(part) {
   const name = part.slice(part.lastIndexOf("/") + 1);
   const dot = name.lastIndexOf(".");
-  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
 // OPC resolves a part's content type from an Override for the part name

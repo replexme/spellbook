@@ -1862,6 +1862,43 @@ test("native snapshot declares content types for author parts the engine dropped
   assert.ok(result.report.semanticPatchedParts.includes("[Content_Types].xml"));
 });
 
+test("native snapshot keeps the author's manifest when the engine declares .rels explicitly", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  assert.match(
+    strFromU8(original["[Content_Types].xml"]),
+    /<Default Extension="rels" /u,
+  );
+  // LibreOffice also writes an Override for the package relationships part,
+  // which the author's Default for the "rels" extension already covers.
+  const engineSave = (text) => ({
+    ...original,
+    "[Content_Types].xml": strToU8(
+      strFromU8(original["[Content_Types].xml"]).replace(
+        "</Types>",
+        '<Override PartName="/_rels/.rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/></Types>',
+      ),
+    ),
+    "ppt/slides/slide1.xml": strToU8(
+      strFromU8(original["ppt/slides/slide1.xml"]).replace(
+        "Spellbook 검증 العربية",
+        text,
+      ),
+    ),
+  });
+  const result = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(engineSave("Spellbook 검증 العربية")),
+    zipSync(engineSave("Edited")),
+    ["replace_text"],
+  );
+  const merged = unzipSync(result.bytes);
+  assert.deepEqual(
+    merged["[Content_Types].xml"],
+    original["[Content_Types].xml"],
+  );
+  assert.deepEqual(result.report.changedParts, ["ppt/slides/slide1.xml"]);
+});
+
 test("native snapshot removes the data part's pointer to a dropped SmartArt drawing", async () => {
   const fixture = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
   const authorIds = {
