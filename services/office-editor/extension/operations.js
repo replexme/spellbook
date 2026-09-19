@@ -1042,7 +1042,33 @@ function spellbookDocumentOperation(request) {
       };
     });
   };
+  // A set_slide_metadata field as the slide observation reports it.
+  const footerObservationKeys = {
+    footerVisible: "visible",
+    footerText: "text",
+  };
+  const slideMetadataValue = (slide, name) =>
+    name === "duration"
+      ? slide?.timing?.highResolutionDuration
+      : name === "autoAdvance"
+        ? slide?.timing?.autoAdvance
+        : name === "backgroundObjectsVisible"
+          ? slide?.backgroundObjectsVisible
+          : slide?.footer?.[footerObservationKeys[name] ?? name];
   const sectionDetails = () => {
+    // An engine without slide sections (the browser's) is given the sections
+    // its package holds, so observation and revision cover them there too.
+    if (!propertyIsSupported(model, "SlideSections"))
+      return Array.isArray(request.packageSections)
+        ? request.packageSections.map(
+            ({ id, name, startSlideIndex, slideCount }) => ({
+              id,
+              name,
+              startSlideIndex,
+              slideCount,
+            }),
+          )
+        : [];
     const raw = safeProperty(model, "SlideSections");
     if (!raw) return [];
     const slideIndexByName = new Map(
@@ -3064,14 +3090,6 @@ function spellbookDocumentOperation(request) {
         command.op === "set_slide_layout"
           ? before.masters[command.masterIndex]
           : null;
-      const slideMetadataValue = (slide, name) =>
-        name === "duration"
-          ? slide?.timing?.highResolutionDuration
-          : name === "autoAdvance"
-            ? slide?.timing?.autoAdvance
-            : name === "backgroundObjectsVisible"
-              ? slide?.backgroundObjectsVisible
-              : slide?.footer?.[name];
       if (
         command.op === "set_slide_metadata" &&
         Object.entries(slideMetadataExpected).every(
@@ -8739,17 +8757,9 @@ function spellbookDocumentOperation(request) {
       const metadataApplied = expectedMetadata.every(
         ({ reference, metadata }) => {
           const slide = after.slides[currentPageIndex(reference)];
-          return Object.entries(metadata).every(([name, value]) => {
-            const observed =
-              name === "duration"
-                ? slide?.timing?.highResolutionDuration
-                : name === "autoAdvance"
-                  ? slide?.timing?.autoAdvance
-                  : name === "backgroundObjectsVisible"
-                    ? slide?.backgroundObjectsVisible
-                    : slide?.footer?.[name];
-            return observed === value;
-          });
+          return Object.entries(metadata).every(
+            ([name, value]) => slideMetadataValue(slide, name) === value,
+          );
         },
       );
       const namesApplied = expectedNames.every(({ reference, name }) => {

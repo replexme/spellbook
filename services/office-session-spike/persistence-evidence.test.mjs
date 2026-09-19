@@ -583,6 +583,47 @@ test("ambiguous named shapes retain observed values instead of borrowing a mask"
   assert.equal(normalized.slides[0].elements[0].x, 30);
 });
 
+test("slides that share a name are compared by their index", () => {
+  // A duplicated slide keeps its source's name. The reopened title of the
+  // second slide carries a resolved default that the live one inherited.
+  const slide = (slideIndex, fontSize, state) => ({
+    slideIndex,
+    name: "page1",
+    elements: [
+      {
+        objectName: "Title 1",
+        text: "Agenda",
+        fontSize,
+        propertyStates: { fontSize: state },
+      },
+    ],
+  });
+  const live = {
+    masters: [],
+    slides: [slide(0, 44, "DIRECT_VALUE"), slide(1, 18, "DEFAULT_VALUE")],
+  };
+  const reopened = {
+    masters: [],
+    slides: [slide(0, 44, "DIRECT_VALUE"), slide(1, 32, "DIRECT_VALUE")],
+  };
+  assert.deepEqual(
+    formatCanonicalDifferences(
+      normalizeDocumentPersistenceState(live),
+      normalizeDocumentPersistenceState(reopened, { authoredBy: live }),
+    ),
+    [],
+  );
+  // A value the live slide authored is still compared.
+  reopened.slides[0].elements[0].fontSize = 40;
+  assert.equal(
+    formatCanonicalDifferences(
+      normalizeDocumentPersistenceState(live),
+      normalizeDocumentPersistenceState(reopened, { authoredBy: live }),
+    )[0]?.path,
+    "$.slides[0].elements[0].fontSize",
+  );
+});
+
 test("document persistence compares authored properties and ignores recalculated defaults", () => {
   const state = (fill, lineColor, fillState, lineState) => ({
     masters: [],

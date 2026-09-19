@@ -360,9 +360,7 @@ async function runNativeBridgeProbe() {
     "general-native-surface-navigation-probe.pptx",
   );
   const before = (
-    await request("native", {
-      nativeRequest: { operation: "observe", captureSlideIndexes: [] },
-    })
+    await requestNative({ operation: "observe", captureSlideIndexes: [] })
   ).value;
   if (!before?.slides?.length || before.unit !== "1/100mm")
     throw new Error(
@@ -384,23 +382,21 @@ async function runNativeBridgeProbe() {
     );
   const replacement = `${target.text} · browser AI bridge`;
   const edited = (
-    await request("native", {
-      nativeRequest: {
-        operation: "edit",
-        expectedRevision: before.revision,
-        expectedSlides: JSON.stringify(before.slides),
-        command: {
-          op: "replace_text",
-          elementId: target.elementId,
-          text: replacement,
-        },
-        permission: {
-          mode: "selection",
-          elementIds: [target.elementId],
-          slideIndexes: [],
-        },
-        suppressCapture: true,
+    await requestNative({
+      operation: "edit",
+      expectedRevision: before.revision,
+      expectedSlides: JSON.stringify(before.slides),
+      command: {
+        op: "replace_text",
+        elementId: target.elementId,
+        text: replacement,
       },
+      permission: {
+        mode: "selection",
+        elementIds: [target.elementId],
+        slideIndexes: [],
+      },
+      suppressCapture: true,
     })
   ).value;
   const changed = edited.slides
@@ -410,9 +406,7 @@ async function runNativeBridgeProbe() {
     throw new Error("Browser native edit did not change the selected text.");
   await request("dispatch", { unoCommand: "Undo" });
   const restored = (
-    await request("native", {
-      nativeRequest: { operation: "observe", captureSlideIndexes: [] },
-    })
+    await requestNative({ operation: "observe", captureSlideIndexes: [] })
   ).value;
   if (restored.revision !== before.revision)
     throw new Error(
@@ -481,12 +475,10 @@ function inspectPackage(bytes) {
   });
 }
 
-// The top-level shapes the commands name, by slide and authored name, so the
-// preservation merge can keep every other shape as the author wrote it. Null
-// when a command names no element or a target cannot be identified.
 // The slide and author's name of every element each command names, or the
-// slide it names; the preservation merge decides from the operation what it
-// may change there.
+// slide it names, so the preservation merge can keep everything else as the
+// author wrote it; it decides from the operation what it may change there.
+// Null when a command names neither or a target cannot be identified.
 function nativeSnapshotTargets(observation, commands) {
   const targets = [];
   for (const command of commands) {
@@ -541,10 +533,32 @@ function preserveNativeSnapshot(
   });
 }
 
+// The browser engine keeps no slide sections; the package holds them. Each
+// engine request carries the sections of the package it observes, so its
+// observation and revision cover them as the Office engine's do.
+const packageSectionsByBytes = new WeakMap();
+async function packageSectionsOf(bytes) {
+  if (!bytes) return [];
+  if (!packageSectionsByBytes.has(bytes))
+    packageSectionsByBytes.set(
+      bytes,
+      (await inspectPackage(bytes)).report.sections,
+    );
+  return packageSectionsByBytes.get(bytes);
+}
+
+async function requestNative(nativeRequest) {
+  return request("native", {
+    nativeRequest: {
+      ...nativeRequest,
+      packageSections: await packageSectionsOf(currentBytes),
+    },
+  });
+}
+
 async function withPackageDocumentMetadata(value) {
   if (!currentBytes || !value || typeof value !== "object") return value;
-  const metadata = await inspectPackage(currentBytes);
-  return { ...value, sections: metadata.report.sections };
+  return { ...value, sections: await packageSectionsOf(currentBytes) };
 }
 
 function verifyPreparedSlideTopology(command, report) {
@@ -583,6 +597,7 @@ async function serializeNativeDocument({
     const saved = await request("inspect-saved", {
       path: outputPath,
       detailSlideIndex,
+      packageSections: await packageSectionsOf(bytes),
     });
     return { bytes, observation: saved.value };
   } finally {
@@ -625,6 +640,7 @@ async function inspectNativeDocumentBytes(bytes, detailSlideIndex) {
     const observed = await request("inspect-saved", {
       path,
       detailSlideIndex,
+      packageSections: await packageSectionsOf(bytes),
     });
     return observed.value;
   } finally {
@@ -745,8 +761,9 @@ async function undoMutation() {
 }
 
 async function observeNativeDocument() {
-  const result = await request("native", {
-    nativeRequest: { operation: "observe", captureSlideIndexes: [] },
+  const result = await requestNative({
+    operation: "observe",
+    captureSlideIndexes: [],
   });
   if (
     !result.value ||
@@ -1904,13 +1921,11 @@ async function redoProductMutation() {
     next.nativeRedoAvailable = false;
   } else if (canReplayNative) {
     const replayed = (
-      await request("native", {
-        nativeRequest: {
-          ...next.nativeRequest,
-          expectedRevision: current.revision,
-          expectedSlides: JSON.stringify(current.slides),
-          suppressCapture: true,
-        },
+      await requestNative({
+        ...next.nativeRequest,
+        expectedRevision: current.revision,
+        expectedSlides: JSON.stringify(current.slides),
+        suppressCapture: true,
       })
     ).value;
     if (
@@ -2454,9 +2469,7 @@ async function handleProductHostMessage(message) {
     // Host reads for the request box and result cards: no package commit,
     // no screenshots.
     try {
-      const result = await request("native", {
-        nativeRequest: message.request,
-      });
+      const result = await requestNative(message.request);
       postHost({ id: message.id, value: result.value });
     } catch (error) {
       postHost({
@@ -2520,9 +2533,7 @@ async function handleProductHostMessage(message) {
         value = await commitProductPackageReload(prepared);
       } else {
         markBrowserProbePhase("native-execute");
-        const result = await request("native", {
-          nativeRequest: message.request,
-        });
+        const result = await requestNative(message.request);
         markBrowserProbePhase("package-commit");
         const committed = await commitProductPackageMutation(
           prepared,
@@ -2613,9 +2624,9 @@ function startProductHeartbeat() {
       reportHostModified(modified);
       // Tell the host what is selected, about every 1.5 seconds.
       if (++selectionTick % 2 === 0) {
-        const selection = await request("native", {
-          nativeRequest: { operation: "selection" },
-        }).catch(() => null);
+        const selection = await requestNative({ operation: "selection" }).catch(
+          () => null,
+        );
         const key = JSON.stringify(selection?.value ?? null);
         if (selection?.value && key !== lastSelectionKey) {
           lastSelectionKey = key;

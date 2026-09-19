@@ -73,9 +73,15 @@ function assetSignatureIsValid(bytes, mediaType) {
   return signatures[mediaType] === true;
 }
 
+// This engine keeps no slide sections; the package the product holds does.
+// The product sends them with each request, and every observation this
+// thread makes for that request includes them.
+let packageSections = [];
+
 function observeDocument(request = {}) {
   return spellbookDocumentOperation({
     operation: "observe",
+    packageSections,
     ...request,
     captureSlideIndexes: [],
     mutationContracts: spellbookMutationContracts,
@@ -109,10 +115,11 @@ function withSavedDocumentModel(path, operation) {
   }
 }
 
-function inspectSavedDocument(path, detailSlideIndex) {
+function inspectSavedDocument(path, detailSlideIndex, savedSections) {
   return withSavedDocumentModel(path, (created) =>
     spellbookDocumentOperation({
       operation: "observe",
+      packageSections: savedSections,
       captureSlideIndexes: [],
       ...(Number.isSafeInteger(detailSlideIndex) ? { detailSlideIndex } : {}),
       mutationContracts: spellbookMutationContracts,
@@ -529,6 +536,9 @@ function start() {
             event.data.nativeRequest?.operation === "observe"
               ? { ...event.data.nativeRequest, captureSlideIndexes: [] }
               : { ...event.data.nativeRequest, suppressCapture: true };
+          packageSections = Array.isArray(nativeRequest.packageSections)
+            ? nativeRequest.packageSections
+            : [];
           post("native-complete", {
             requestId,
             value: [
@@ -576,6 +586,9 @@ function start() {
             value: inspectSavedDocument(
               event.data.path,
               event.data.detailSlideIndex,
+              Array.isArray(event.data.packageSections)
+                ? event.data.packageSections
+                : [],
             ),
           });
           break;

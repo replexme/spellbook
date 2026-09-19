@@ -90,6 +90,14 @@ function authoredArrayEntry(value, authored, index) {
     const [key, name] = identity;
     const matches = authored.filter((candidate) => candidate?.[key] === name);
     if (matches.length === 1) return matches[0];
+    // A duplicated slide keeps its source's name; slides that share a name
+    // pair by their index.
+    if (key === "name" && matches.length > 1)
+      return (
+        matches.find(
+          (candidate) => candidate?.slideIndex === value.slideIndex,
+        ) ?? null
+      );
     // A changed or duplicate name is not evidence that the indexed object is
     // the same object. Keep every observed value in the comparison.
     return null;
