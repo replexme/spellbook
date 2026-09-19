@@ -4131,7 +4131,25 @@ function spellbookDocumentOperation(request) {
       const actualTexts = after.slides[slideIndex].elements
         .find((candidate) => candidate.elementId === command.elementId)
         ?.diagram?.semanticNodes?.map((candidate) => candidate.text);
-      const applied = stableJson(actualTexts) === stableJson(expectedTexts);
+      // Both engines list nodes breadth-first and add a node as the last
+      // top-level one, so it appears after the existing top-level nodes, not
+      // at the end. Require exactly one new node with the requested text and
+      // every existing node in its previous order.
+      const addedOnce = (texts) =>
+        Array.isArray(texts) &&
+        texts.length === beforeTexts.length + 1 &&
+        texts.some(
+          (text, index) =>
+            text === node.text &&
+            stableJson([
+              ...texts.slice(0, index),
+              ...texts.slice(index + 1),
+            ]) === stableJson(beforeTexts),
+        );
+      const applied =
+        action === "add"
+          ? addedOnce(actualTexts)
+          : stableJson(actualTexts) === stableJson(expectedTexts);
       if (
         !applied ||
         (!request.transactionActive &&
