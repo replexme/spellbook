@@ -63,14 +63,17 @@ test("session Undo after save becomes a new recoverable delta without erasing Un
     }),
     null,
   );
-  assert.throws(() =>
+  // Undo by reopening the saved package gives the live model a new revision;
+  // the identical bytes are still the saved document.
+  assert.equal(
     journalSnapshotFromSavedBase({
       baseBytes: saved,
       currentBytes: saved.slice(),
       baseRevision: "saved-revision",
-      currentRevision: "different-revision",
+      currentRevision: "reopened-revision",
       reason: "undo",
     }),
+    null,
   );
 });
 

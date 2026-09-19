@@ -84,7 +84,7 @@ test("a manual Undo returning to the checkpoint base removes only its aggregate"
   assert.deepEqual(undoHistory, []);
 });
 
-test("manual checkpoints reject noncontiguous or unpersisted revisions", () => {
+test("manual checkpoints reject a noncontiguous history", () => {
   const base = Uint8Array.of(1);
   const edited = Uint8Array.of(2);
   const commands = [];
@@ -118,21 +118,27 @@ test("manual checkpoints reject noncontiguous or unpersisted revisions", () => {
   );
   assert.equal(commands.length, 1);
   assert.equal(undoHistory.length, 1);
-  assert.throws(
-    () =>
-      recordManualProductCheckpoint({
-        commands: [],
-        undoHistory: [],
-        redoHistory: [],
-        beforeBytes: base,
-        afterBytes: base,
-        beforeRevision: "base",
-        afterRevision: "changed",
-        beforeSlides: [],
-        reason: "manual_save",
-      }),
-    /matching persisted revision/u,
-  );
+});
+
+test("a reopened package with a new live revision but the same bytes records nothing", () => {
+  const base = Uint8Array.of(1);
+  const commands = [];
+  const undoHistory = [];
+  const redoHistory = [{ command: { op: "stale_redo" } }];
+  const recorded = recordManualProductCheckpoint({
+    commands,
+    undoHistory,
+    redoHistory,
+    beforeBytes: base,
+    afterBytes: base.slice(),
+    beforeRevision: "live-before-reopen",
+    afterRevision: "reopened",
+    beforeSlides: [],
+    reason: "manual_autosave",
+  });
+  assert.equal(recorded, null);
+  assert.deepEqual(commands, []);
+  assert.deepEqual(undoHistory, []);
 });
 
 test("checkpoint rollback snapshot preserves redo and native availability flags", () => {

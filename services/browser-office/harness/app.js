@@ -693,7 +693,11 @@ function canvasFingerprint() {
     let hash = 0;
     for (let index = 0; index < pixels.length; index += 4)
       hash =
-        (hash * 31 + pixels[index] + pixels[index + 1] * 3 + pixels[index + 2] * 7) >>> 0;
+        (hash * 31 +
+          pixels[index] +
+          pixels[index + 1] * 3 +
+          pixels[index + 2] * 7) >>>
+        0;
     return String(hash);
   } catch {
     return "";
@@ -752,7 +756,11 @@ async function captureVisibleBrowserCanvas() {
   return Array.from(bytes);
 }
 
-async function attachBrowserVisualEvidence(nativeRequest, value, paintBeforeEdit = null) {
+async function attachBrowserVisualEvidence(
+  nativeRequest,
+  value,
+  paintBeforeEdit = null,
+) {
   let targets = [];
   const activeSlide = value?.activeSlide;
   let showingSlide = activeSlide;
@@ -1417,13 +1425,10 @@ async function commitProductPackageReload(prepared) {
     return after;
   } catch (error) {
     restoreProductEditState(previousState);
-    const restored = await restoreProductPackageSnapshot(
+    await restoreProductPackageSnapshot(
       prepared.beforeBytes,
-      prepared.beforeRevision,
       "browser_package_reload_rollback_failed",
     );
-    reconciledModelRevision = restored.revision;
-    unreconciledModelRevision = "";
     throw error;
   }
 }
@@ -1462,11 +1467,9 @@ async function commitProductPackageMutation(prepared, nativeValue) {
         preservationReport,
       );
     } catch (error) {
-      let restored;
       try {
-        restored = await restoreProductPackageSnapshot(
+        await restoreProductPackageSnapshot(
           prepared.beforeBytes,
-          prepared.beforeRevision,
           "browser_native_snapshot_rollback_failed",
         );
       } catch (rollbackError) {
@@ -1475,8 +1478,6 @@ async function commitProductPackageMutation(prepared, nativeValue) {
           { cause: error },
         );
       }
-      reconciledModelRevision = restored.revision;
-      unreconciledModelRevision = "";
       throw error;
     }
     const journalCommand = {
@@ -1514,13 +1515,10 @@ async function commitProductPackageMutation(prepared, nativeValue) {
       await persistCheckpoint();
     } catch (error) {
       restoreProductEditState(previousState);
-      const restored = await restoreProductPackageSnapshot(
+      await restoreProductPackageSnapshot(
         prepared.beforeBytes,
-        prepared.beforeRevision,
         "browser_native_snapshot_checkpoint_and_rollback_failed",
       );
-      reconciledModelRevision = restored.revision;
-      unreconciledModelRevision = "";
       throw error;
     }
     observed.lastMutation = {
@@ -1532,13 +1530,10 @@ async function commitProductPackageMutation(prepared, nativeValue) {
     return;
   }
   if (!productMutationMatches(prepared, nativeValue)) {
-    const restored = await restoreProductPackageSnapshot(
+    await restoreProductPackageSnapshot(
       prepared.beforeBytes,
-      prepared.beforeRevision,
       "browser_native_package_disagreement_rollback_failed",
     );
-    reconciledModelRevision = restored.revision;
-    unreconciledModelRevision = "";
     throw new Error("Browser native and package edits disagree.");
   }
   if (!prepared.mutation.report.changedParts.length) {
@@ -1563,13 +1558,10 @@ async function commitProductPackageMutation(prepared, nativeValue) {
         throw new Error("browser_package_slide_edit_not_persisted");
     } catch (error) {
       restoreProductEditState(previousState);
-      const restored = await restoreProductPackageSnapshot(
+      await restoreProductPackageSnapshot(
         prepared.beforeBytes,
-        prepared.beforeRevision,
         "browser_slide_edit_rollback_failed",
       );
-      reconciledModelRevision = restored.revision;
-      unreconciledModelRevision = "";
       throw error;
     }
   }
@@ -1608,13 +1600,10 @@ async function commitProductPackageMutation(prepared, nativeValue) {
     await persistCheckpoint();
   } catch (error) {
     restoreProductEditState(previousState);
-    const restored = await restoreProductPackageSnapshot(
+    await restoreProductPackageSnapshot(
       prepared.beforeBytes,
-      prepared.beforeRevision,
       "browser_package_checkpoint_and_rollback_failed",
     );
-    reconciledModelRevision = restored.revision;
-    unreconciledModelRevision = "";
     throw error;
   }
   observed.lastMutation = prepared.mutation.report;
@@ -1660,14 +1649,19 @@ async function replayRecoveredCommands(base, recoveredCommands) {
 // quantize shape geometry while restoring an otherwise identical edit, which
 // changes its live revision. The journal retains the exact PPTX for each side
 // of the edit, so reopen that package when the native result is not exact.
-async function restoreProductPackageSnapshot(bytes, revision, errorCode) {
+// Reopening an exact package is how Undo, Redo and rollback return to a
+// saved state, and the reopened model becomes the reconciled baseline. Its
+// observation can differ from the live model that produced those bytes in
+// import-normalized details (a substituted font name, a master's placeholder
+// count), so that earlier live revision is not an identity for the reopened
+// document; the package bytes are.
+async function restoreProductPackageSnapshot(bytes, errorCode) {
   try {
     await writeAndOpen(bytes, filename);
     const restored = await observeNativeDocument();
-    if (restored.revision !== revision) {
-      unreconciledModelRevision = restored.revision;
-      throw new Error(errorCode);
-    }
+    reconciledModelRevision = restored.revision;
+    unreconciledModelRevision = "";
+    rememberReconciledObservation(restored);
     return restored;
   } catch (error) {
     unreconciledModelRevision ||= errorCode;
@@ -1677,25 +1671,17 @@ async function restoreProductPackageSnapshot(bytes, revision, errorCode) {
 
 async function restoreProductHistoryPackage({
   targetBytes,
-  targetRevision,
   rollbackBytes,
-  rollbackRevision,
   errorCode,
 }) {
   try {
-    return await restoreProductPackageSnapshot(
-      targetBytes,
-      targetRevision,
-      errorCode,
-    );
+    return await restoreProductPackageSnapshot(targetBytes, errorCode);
   } catch (error) {
     try {
       await restoreProductPackageSnapshot(
         rollbackBytes,
-        rollbackRevision,
-        "browser_history_package_rollback_revision_mismatch",
+        "browser_history_package_rollback_failed",
       );
-      unreconciledModelRevision = "";
     } catch (rollbackError) {
       unreconciledModelRevision = "browser_history_package_rollback_failed";
       throw new Error(
@@ -1716,17 +1702,15 @@ async function undoProductMutation() {
     unreconciledModelRevision = current.revision;
     return false;
   }
-  const useNativeUndo = previous.nativeUndoAvailable === true;
-  if (useNativeUndo) {
+  let reached;
+  if (previous.nativeUndoAvailable === true) {
     await request("dispatch", { unoCommand: "Undo" });
-    const restored = await observeNativeDocument();
-    if (restored.revision !== previous.beforeRevision) {
-      await restoreProductHistoryPackage({
+    reached = await observeNativeDocument();
+    if (reached.revision !== previous.beforeRevision) {
+      reached = await restoreProductHistoryPackage({
         targetBytes: previous.beforeBytes,
-        targetRevision: previous.beforeRevision,
         rollbackBytes: previous.afterBytes,
-        rollbackRevision: previous.afterRevision,
-        errorCode: "browser_package_undo_revision_mismatch",
+        errorCode: "browser_package_undo_failed",
       });
       // Reopening the package clears Impress's native history. Redo must use
       // the exact journaled package too, rather than replaying the command.
@@ -1738,17 +1722,15 @@ async function undoProductMutation() {
     currentBytes = previous.beforeBytes.slice();
     previous.nativeUndoAvailable = false;
   } else {
-    await restoreProductHistoryPackage({
+    reached = await restoreProductHistoryPackage({
       targetBytes: previous.beforeBytes,
-      targetRevision: previous.beforeRevision,
       rollbackBytes: previous.afterBytes,
-      rollbackRevision: previous.afterRevision,
-      errorCode: "browser_package_undo_revision_mismatch",
+      errorCode: "browser_package_undo_failed",
     });
   }
   productUndoHistory.pop();
   productRedoHistory.push(previous);
-  reconciledModelRevision = previous.beforeRevision;
+  reconciledModelRevision = reached.revision;
   unreconciledModelRevision = "";
   try {
     rebaseCommandsToSavedBase("undo");
@@ -1757,11 +1739,8 @@ async function undoProductMutation() {
     restoreProductEditState(previousState);
     await restoreProductPackageSnapshot(
       previous.afterBytes,
-      previous.afterRevision,
       "browser_undo_checkpoint_rollback_failed",
     );
-    reconciledModelRevision = previous.afterRevision;
-    unreconciledModelRevision = "";
     throw error;
   }
   reportHostModified(commands.length > 0);
@@ -1780,20 +1759,22 @@ async function redoProductMutation() {
     return false;
   }
   const useNativeRedo = next.nativeRedoAvailable === true;
+  // Replaying the command reproduces the recorded result only from the same
+  // live model it first ran on; a reopened package is a different model.
   const canReplayNative =
     !useNativeRedo &&
     next.nativeRequest &&
-    typeof next.nativeRequest === "object";
+    typeof next.nativeRequest === "object" &&
+    current.revision === next.beforeRevision;
+  let reached;
   if (useNativeRedo) {
     await request("dispatch", { unoCommand: "Redo" });
-    const restored = await observeNativeDocument();
-    if (restored.revision !== next.afterRevision) {
-      await restoreProductHistoryPackage({
+    reached = await observeNativeDocument();
+    if (reached.revision !== next.afterRevision) {
+      reached = await restoreProductHistoryPackage({
         targetBytes: next.afterBytes,
-        targetRevision: next.afterRevision,
         rollbackBytes: next.beforeBytes,
-        rollbackRevision: next.beforeRevision,
-        errorCode: "browser_package_redo_revision_mismatch",
+        errorCode: "browser_package_redo_failed",
       });
       next.nativeRequest = null;
       next.nativeUndoAvailable = false;
@@ -1823,30 +1804,26 @@ async function redoProductMutation() {
     ) {
       await restoreProductPackageSnapshot(
         next.beforeBytes,
-        next.beforeRevision,
         "browser_native_replay_rollback_failed",
       );
-      reconciledModelRevision = next.beforeRevision;
-      unreconciledModelRevision = "";
       throw new Error("browser_native_replay_revision_mismatch");
     }
+    reached = replayed;
     currentBytes = next.afterBytes.slice();
     next.nativeUndoAvailable =
       next.persistence === "native_snapshot" ||
       nativeUndoAvailableFor(next.nativeCommand?.op);
     next.nativeRedoAvailable = false;
   } else {
-    await restoreProductHistoryPackage({
+    reached = await restoreProductHistoryPackage({
       targetBytes: next.afterBytes,
-      targetRevision: next.afterRevision,
       rollbackBytes: next.beforeBytes,
-      rollbackRevision: next.beforeRevision,
-      errorCode: "browser_package_redo_revision_mismatch",
+      errorCode: "browser_package_redo_failed",
     });
   }
   productRedoHistory.pop();
   productUndoHistory.push(next);
-  reconciledModelRevision = next.afterRevision;
+  reconciledModelRevision = reached.revision;
   unreconciledModelRevision = "";
   try {
     rebaseCommandsToSavedBase("redo");
@@ -1855,11 +1832,8 @@ async function redoProductMutation() {
     restoreProductEditState(previousState);
     await restoreProductPackageSnapshot(
       next.beforeBytes,
-      next.beforeRevision,
       "browser_redo_checkpoint_rollback_failed",
     );
-    reconciledModelRevision = next.beforeRevision;
-    unreconciledModelRevision = "";
     throw error;
   }
   reportHostModified(true);
@@ -1926,9 +1900,12 @@ async function checkpointLiveNativeState(live, reason) {
   const beforeRevision = previousState.reconciledModelRevision;
   if (reconciledObservation?.revision !== beforeRevision)
     throw new Error("browser_native_baseline_unavailable");
+  // A direct human edit has no command list; null selects the human-edit
+  // preservation budget instead of an AI operation family.
   const preserved = await preserveAndInspectNativeDocument(
     previousState.currentBytes,
     live.textDetails?.slideIndex,
+    null,
   );
   const afterBytes = preserved.bytes;
   assertPersistedNativeIntent(
@@ -2349,7 +2326,9 @@ async function handleProductHostMessage(message) {
     // Host reads for the request box and result cards: no package commit,
     // no screenshots.
     try {
-      const result = await request("native", { nativeRequest: message.request });
+      const result = await request("native", {
+        nativeRequest: message.request,
+      });
       postHost({ id: message.id, value: result.value });
     } catch (error) {
       postHost({
@@ -2424,7 +2403,11 @@ async function handleProductHostMessage(message) {
         value = await withPackageDocumentMetadata(committed ?? result.value);
       }
       markBrowserProbePhase("visual-capture");
-      value = await attachBrowserVisualEvidence(message.request, value, paintBeforeEdit);
+      value = await attachBrowserVisualEvidence(
+        message.request,
+        value,
+        paintBeforeEdit,
+      );
       markBrowserProbePhase("status");
       const status = await request("status");
       reportHostModified(
@@ -2512,6 +2495,9 @@ function startProductHeartbeat() {
         }
       }
       if (modified && Date.now() - lastCheckpointAt >= 10_000) {
+        // A failed checkpoint waits for the next interval instead of
+        // re-serializing the whole document on every tick.
+        lastCheckpointAt = Date.now();
         const live = await observeNativeDocument();
         if (live.revision !== reconciledModelRevision)
           await checkpointLiveNativeState(live, "manual_autosave");
@@ -2816,6 +2802,9 @@ function waitForBrowserProbeEvent(match, timeoutMs = 30_000) {
               phaseTrace: browserProbePhaseTrace,
               pendingOfficeRequests: [...pending.keys()].slice(-5),
               pendingPackageRequests: [...mutationPending.keys()].slice(-5),
+              hostErrors: browserProbeEvents
+                .filter((event) => event.type === "error")
+                .slice(-3),
             })}`,
           ),
         );

@@ -69,11 +69,9 @@ export function journalSnapshotFromSavedBase({
     !reason
   )
     throw new TypeError("A journal snapshot needs bounded revision identity.");
-  if (sameBytes(baseBytes, currentBytes)) {
-    if (baseRevision !== currentRevision)
-      throw new Error("The live document differs from its saved PPTX base.");
-    return null;
-  }
+  // Identical bytes are the saved document itself, even when a package
+  // reopen gave the live model a different revision than the one saved.
+  if (sameBytes(baseBytes, currentBytes)) return null;
   return {
     op: "native_snapshot",
     persistence: "native_snapshot",

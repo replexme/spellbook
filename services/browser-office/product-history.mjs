@@ -68,9 +68,11 @@ export function recordManualProductCheckpoint({
   const firstRevision = coalesce
     ? previousEntry.beforeRevision
     : beforeRevision;
+  // Identical bytes are the same persisted document. The live revision can
+  // still differ after a package reopen, whose import normalizes details the
+  // earlier live model had not; the caller has already proved that every
+  // intended change is in these bytes, so there is nothing to record.
   if (sameBytes(firstBytes, afterBytes)) {
-    if (firstRevision !== afterRevision)
-      throw new Error("The manual edit has no matching persisted revision.");
     if (coalesce) {
       commands.pop();
       undoHistory.pop();
