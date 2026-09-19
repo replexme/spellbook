@@ -583,10 +583,10 @@ diff --git a/sd/source/ui/unoidl/unoobj.cxx b/sd/source/ui/unoidl/unoobj.cxx
  
 +    // The dash and line ends PPTX export writes, as PowerPoint presets.
 +    if (PropertyName == u"SpellbookLineDash"_ustr)
-+        return uno::Any(oox::DrawingML::GetPresetLineDash(uno::Reference<beans::XPropertySet>(mpShape)));
++        return uno::Any(oox::drawingml::DrawingML::GetPresetLineDash(uno::Reference<beans::XPropertySet>(mpShape)));
 +    if (PropertyName == u"SpellbookLineStartArrow"_ustr
 +        || PropertyName == u"SpellbookLineEndArrow"_ustr)
-+        return uno::Any(oox::DrawingML::GetPresetLineArrow(
++        return uno::Any(oox::drawingml::DrawingML::GetPresetLineArrow(
 +            uno::Reference<beans::XPropertySet>(mpShape),
 +            PropertyName == u"SpellbookLineStartArrow"_ustr));
 +

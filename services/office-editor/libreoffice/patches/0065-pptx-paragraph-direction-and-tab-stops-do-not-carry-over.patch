@@ -106,7 +106,7 @@ diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
 +    aParagraphs[0]->setPropertyValue(u"ParaFirstLineIndent"_ustr,
 +                                     cpo::uno::Any(sal_Int32(-600)));
 +    aParagraphs[0]->setPropertyValue(u"ParaTabStops"_ustr,
-+                                     cpo::uno::Any(uno::Sequence<style::TabStop>{ aTabStop }));
++                                     cpo::uno::Any(cpo::uno::Sequence<style::TabStop>{ aTabStop }));
 +
 +    // Import replaced the tab stop of a paragraph with an indent by one at
 +    // zero, and gave the second paragraph, which sets neither, the first
@@ -120,7 +120,7 @@ diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
 +    const auto tabStops = [&aParagraphs](size_t nParagraph) {
 +        return aParagraphs[nParagraph]
 +            ->getPropertyValue(u"ParaTabStops"_ustr)
-+            .get<uno::Sequence<style::TabStop>>();
++            .get<cpo::uno::Sequence<style::TabStop>>();
 +    };
 +    CPPUNIT_ASSERT_EQUAL(sal_Int16(text::WritingMode2::RL_TB), direction(0));
 +    CPPUNIT_ASSERT_EQUAL(sal_Int32(1), tabStops(0).getLength());
