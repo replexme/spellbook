@@ -42,6 +42,117 @@ test("product persistence admission checks changed semantics across save/reopen"
   );
 });
 
+test("product persistence admission compares rebuilt animation containers in their saved form", () => {
+  const indefinite = { trigger: null, offset: null, repeat: 0 };
+  const effect = (duration) => ({
+    nodeType: 1,
+    semanticNodeType: 1,
+    preset: { id: "ooo-entrance-appear" },
+    duration: null,
+    end: null,
+    fill: 3,
+    restart: 0,
+    children: [
+      {
+        nodeType: 5,
+        semanticNodeType: null,
+        preset: {},
+        duration,
+        end: null,
+        fill: 0,
+        restart: 0,
+        children: [],
+      },
+    ],
+  });
+  const tree = ({
+    rootDuration,
+    rootRestart,
+    sequenceDuration,
+    containerFill,
+    effectDuration,
+  }) => ({
+    nodeType: 1,
+    semanticNodeType: 5,
+    preset: {},
+    duration: rootDuration,
+    end: null,
+    fill: 0,
+    restart: rootRestart,
+    children: [
+      {
+        nodeType: 2,
+        semanticNodeType: 4,
+        preset: {},
+        duration: sequenceDuration,
+        end: null,
+        fill: 0,
+        restart: 0,
+        children: [
+          {
+            nodeType: 1,
+            semanticNodeType: null,
+            preset: {},
+            duration: null,
+            end: null,
+            fill: containerFill,
+            restart: 0,
+            children: [effect(effectDuration)],
+          },
+        ],
+      },
+    ],
+  });
+  const state = (roots) => ({
+    slides: [{ animations: { roots } }],
+    masters: [],
+  });
+  const before = state([]);
+  // LibreOffice's rebuilt sequence, as the live document holds it.
+  const expected = state([
+    tree({
+      rootDuration: null,
+      rootRestart: 0,
+      sequenceDuration: null,
+      containerFill: 0,
+      effectDuration: 0.5,
+    }),
+  ]);
+  // The same sequence after a PPTX save and reopen.
+  const observed = state([
+    tree({
+      rootDuration: indefinite,
+      rootRestart: 3,
+      sequenceDuration: indefinite,
+      containerFill: 3,
+      effectDuration: 0.5,
+    }),
+  ]);
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({ before, expected, observed }),
+    [],
+  );
+  const changedEffect = state([
+    tree({
+      rootDuration: indefinite,
+      rootRestart: 3,
+      sequenceDuration: indefinite,
+      containerFill: 3,
+      effectDuration: 1,
+    }),
+  ]);
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({
+      before,
+      expected,
+      observed: changedEffect,
+    }).map(({ path }) => path),
+    [
+      "$.slides[0].animations.roots[0].children[0].children[0].children[0].children[0].duration",
+    ],
+  );
+});
+
 test("product persistence admission refuses missing observed state", () => {
   assert.throws(
     () =>

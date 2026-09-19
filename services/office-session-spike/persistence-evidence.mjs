@@ -263,6 +263,68 @@ function withoutInactiveStyleValues(slides, authoredSlides = slides) {
   return slides;
 }
 
+// css.animations constants and EffectNodeType values as observed.
+const ANIMATION_NODE_PAR = 1;
+const ANIMATION_NODE_SEQ = 2;
+const ANIMATION_FILL_DEFAULT = 0;
+const ANIMATION_FILL_FREEZE = 2;
+const ANIMATION_FILL_HOLD = 3;
+const ANIMATION_FILL_AUTO = 5;
+const ANIMATION_RESTART_WRITTEN = new Set([1, 2, 3]);
+const ANIMATION_RESTART_NEVER = 3;
+const EFFECT_NODE_MAIN_SEQUENCE = 4;
+const EFFECT_NODE_TIMING_ROOT = 5;
+
+// A Timing value (INDEFINITE or MEDIA) is observed as an event without a
+// trigger; a real event has a numeric trigger.
+const isObservedTiming = (value) =>
+  Boolean(value) && typeof value === "object" && value.trigger === null;
+
+/**
+ * LibreOffice rebuilds an edited animation sequence: it clears the main
+ * sequence's duration and creates the click and with containers without a
+ * fill. Its PPTX save writes what PowerPoint uses instead, and a reopened deck
+ * holds those values: dur="indefinite" on the main sequence and on a timing
+ * root without a duration, restart="never" on the root, no fill on either,
+ * and fill="hold" on a container that FREEZE, DEFAULT or AUTO resolves to
+ * (PPTXAnimationExport and AnimationExporter::GetFillMode). Containers are
+ * compared in that saved form; effect nodes and their animations are compared
+ * as observed, except that FREEZE and HOLD both save as "hold".
+ */
+function withSavedAnimationContainers(slides) {
+  const visit = (node) => {
+    if (!node || typeof node !== "object") return;
+    const effectNodeType = node.semanticNodeType;
+    if (effectNodeType === EFFECT_NODE_MAIN_SEQUENCE) {
+      node.duration = "indefinite";
+      node.fill = ANIMATION_FILL_DEFAULT;
+    } else if (effectNodeType === EFFECT_NODE_TIMING_ROOT) {
+      if (node.duration === null || isObservedTiming(node.duration))
+        node.duration = "indefinite";
+      if (!ANIMATION_RESTART_WRITTEN.has(node.restart))
+        node.restart = ANIMATION_RESTART_NEVER;
+      node.fill = ANIMATION_FILL_DEFAULT;
+    } else {
+      if (!ANIMATION_RESTART_WRITTEN.has(node.restart)) node.restart = 0;
+      if (node.fill === ANIMATION_FILL_FREEZE) node.fill = ANIMATION_FILL_HOLD;
+      const container =
+        !node.preset?.id &&
+        [ANIMATION_NODE_PAR, ANIMATION_NODE_SEQ].includes(node.nodeType);
+      if (
+        container &&
+        [ANIMATION_FILL_DEFAULT, ANIMATION_FILL_AUTO].includes(node.fill) &&
+        (node.duration === null || isObservedTiming(node.duration)) &&
+        (node.end === null || isObservedTiming(node.end))
+      )
+        node.fill = ANIMATION_FILL_HOLD;
+    }
+    for (const child of node.children ?? []) visit(child);
+  };
+  for (const slide of slides)
+    for (const root of slide.animations?.roots ?? []) visit(root);
+  return slides;
+}
+
 /**
  * Captures the persisted slide/master model while using the detailed UNO text
  * enumeration as the source of truth for the requested slide. The compact
@@ -319,35 +381,37 @@ export function normalizeDocumentPersistenceState(
       const rightIdentity = `${right.name ?? ""}\u0000${right.layout ?? ""}\u0000${stableJson(right)}`;
       return leftIdentity.localeCompare(rightIdentity, "en");
     });
-  const slides = withoutInactiveStyleValues(
-    withCanonicalShapeIdentity(
-      withoutTransientEmptyPlaceholderDefaults(
-        withoutMergedContinuationFormatting(
-          (state?.slides ?? []).map(
-            ({ masterIndex: _masterIndex, ...slide }, index) => {
-              const { masterIndex: _authoredMasterIndex, ...authoredSlide } =
-                authoredArrayEntry(slide, authoredBy?.slides, index) ?? {};
-              const normalized = withoutObservationOnlyFields(
-                withoutComputedPropertyValues(
-                  structuredClone(slide),
-                  authoredSlide,
-                ),
-              );
-              if (normalized.transition) {
-                const {
-                  effect: _effect,
-                  speed: _speed,
-                  ...persistedTransition
-                } = normalized.transition;
-                normalized.transition = persistedTransition;
-              }
-              return normalized;
-            },
+  const slides = withSavedAnimationContainers(
+    withoutInactiveStyleValues(
+      withCanonicalShapeIdentity(
+        withoutTransientEmptyPlaceholderDefaults(
+          withoutMergedContinuationFormatting(
+            (state?.slides ?? []).map(
+              ({ masterIndex: _masterIndex, ...slide }, index) => {
+                const { masterIndex: _authoredMasterIndex, ...authoredSlide } =
+                  authoredArrayEntry(slide, authoredBy?.slides, index) ?? {};
+                const normalized = withoutObservationOnlyFields(
+                  withoutComputedPropertyValues(
+                    structuredClone(slide),
+                    authoredSlide,
+                  ),
+                );
+                if (normalized.transition) {
+                  const {
+                    effect: _effect,
+                    speed: _speed,
+                    ...persistedTransition
+                  } = normalized.transition;
+                  normalized.transition = persistedTransition;
+                }
+                return normalized;
+              },
+            ),
           ),
         ),
       ),
+      authoredBy?.slides,
     ),
-    authoredBy?.slides,
   );
   return { slides, masters };
 }

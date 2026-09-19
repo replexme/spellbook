@@ -145,11 +145,12 @@ let reconciledModelRevision = "";
 let unreconciledModelRevision = "";
 let reconciledObservation = null;
 // The engine's save of the live document at one reconciled revision, taken
-// before an edit or kept from the previous edit's save. Comparing two saves
-// of the same live document isolates what the edit changed. A fresh load of
-// the saved file can differ from the live document in details no edit made
-// (for example an empty paragraph's alignment), and comparing against it let
-// those differences reach the author's file.
+// when the document opens or kept from the previous edit's save. Comparing
+// two saves of the same live document isolates what the edit changed. A
+// fresh load of the saved file can differ from the live document in details
+// no edit made (for example an empty paragraph's alignment), and comparing
+// against it let those differences reach the author's file. A save taken at
+// open has no revision until the opener observes the document.
 let liveExportBaseline = null;
 
 function captureProductEditState() {
@@ -332,6 +333,16 @@ async function writeAndOpen(bytes, name = "document.pptx") {
       });
     }
   }
+  if (productMode)
+    // Saving to PPTX completes the live model (it adds a master's missing
+    // placeholders), so a first save taken later would change what an edit
+    // reports about the masters. Save once before anything observes the
+    // document; the save is also the preservation baseline for the first
+    // edit.
+    liveExportBaseline = {
+      revision: null,
+      bytes: await serializeNativeDocument(),
+    };
   setState("document-ready", `${filename} · ${result.slideCount} slides`);
   for (const button of [insertSlideButton, undoButton, saveButton])
     button.disabled = false;
@@ -649,17 +660,20 @@ async function preserveAndInspectNativeDocument(
   return { bytes, observation, report: preserved.report, serialized };
 }
 
-// A save of the live document for the preservation baseline, only when the
-// live model is the reconciled one; otherwise the caller falls back to a
-// fresh load of the saved file.
-async function liveExportBaselineAt(liveRevision) {
-  if (!liveRevision || liveRevision !== reconciledModelRevision) return null;
-  if (liveExportBaseline?.revision !== liveRevision)
-    liveExportBaseline = {
-      revision: liveRevision,
-      bytes: await serializeNativeDocument(),
-    };
-  return liveExportBaseline.bytes.slice();
+// The kept save of the live document when it matches the reconciled live
+// model; otherwise the caller falls back to a fresh load of the saved file.
+function liveExportBaselineAt(liveRevision) {
+  return liveRevision &&
+    liveRevision === reconciledModelRevision &&
+    liveExportBaseline?.revision === liveRevision
+    ? liveExportBaseline.bytes.slice()
+    : null;
+}
+
+// Binds the save taken at open to the revision observed right after it.
+function bindOpenExportBaseline(revision) {
+  if (liveExportBaseline && liveExportBaseline.revision === null)
+    liveExportBaseline.revision = revision;
 }
 
 function assertPersistedNativeIntent(
@@ -1138,7 +1152,7 @@ async function prepareProductPackageMutation(nativeRequest) {
       beforeBytes: currentBytes.slice(),
       beforeRevision: reconciledModelRevision,
       beforeObservation,
-      baselineBytes: await liveExportBaselineAt(beforeObservation.revision),
+      baselineBytes: liveExportBaselineAt(beforeObservation.revision),
       beforeSlides: expectedSlides,
       nativeRequest: structuredClone(nativeRequest),
       persistedNativeRequest: {
@@ -1205,7 +1219,7 @@ async function prepareProductPackageMutation(nativeRequest) {
       beforeBytes: currentBytes.slice(),
       beforeRevision: reconciledModelRevision,
       beforeObservation,
-      baselineBytes: await liveExportBaselineAt(beforeObservation.revision),
+      baselineBytes: liveExportBaselineAt(beforeObservation.revision),
       beforeSlides: expectedSlides,
       nativeRequest: {
         operation: nativeRequest.operation,
@@ -1732,6 +1746,7 @@ async function restoreProductPackageSnapshot(bytes, errorCode) {
     const restored = await observeNativeDocument();
     reconciledModelRevision = restored.revision;
     unreconciledModelRevision = "";
+    bindOpenExportBaseline(restored.revision);
     rememberReconciledObservation(restored);
     return restored;
   } catch (error) {
@@ -2222,6 +2237,7 @@ async function openProductDocument(message) {
   reconciledModelRevision = live.revision;
   baseModelRevision =
     commands[0]?.reconciliation?.beforeRevision ?? live.revision;
+  bindOpenExportBaseline(live.revision);
   rememberReconciledObservation(live);
   const modified = commands.length > 0;
   lastReportedModified = !modified;
