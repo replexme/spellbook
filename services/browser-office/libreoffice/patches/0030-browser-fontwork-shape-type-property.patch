@@ -1,0 +1,74 @@
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2831,6 +2831,31 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookSemanticDiagramEditsSurvivePp
+     CPPUNIT_ASSERT(!hasNodeText(u"Undone"_ustr));
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookFontworkShapeTypeIsObservable)
++{
++    createSdImpressDocModelOnly();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShape> xShape(
++        xFactory->createInstance("com.sun.star.drawing.CustomShape"), uno::UNO_QUERY_THROW);
++    xShapes->add(xShape);
++    uno::Reference<beans::XPropertySet> xProperties(xShape, uno::UNO_QUERY_THROW);
++    CPPUNIT_ASSERT_EQUAL(OUString(),
++                         xProperties->getPropertyValue("SpellbookFontworkShapeType").get<OUString>());
++
++    xProperties->setPropertyValue(
++        "CustomShapeGeometry",
++        uno::Any(comphelper::InitPropertySequence(
++            { { "Type", uno::Any(u"fontwork-arch-up-curve"_ustr) },
++              { "TextPath", uno::Any(comphelper::InitPropertySequence(
++                                { { "TextPath", uno::Any(true) } })) } })));
++    CPPUNIT_ASSERT_EQUAL(u"fontwork-arch-up-curve"_ustr,
++                         xProperties->getPropertyValue("SpellbookFontworkShapeType").get<OUString>());
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxTextShadowRoundTrip)
+ {
+     createSdImpressDocModelOnly();
+diff --git a/sd/source/ui/unoidl/unoobj.cxx b/sd/source/ui/unoidl/unoobj.cxx
+--- a/sd/source/ui/unoidl/unoobj.cxx
++++ b/sd/source/ui/unoidl/unoobj.cxx
+@@ -64,6 +64,8 @@
+ #include <svx/svdogrp.hxx>
+ #include <svx/svdundo.hxx>
+ #include <svx/diagram/IDiagramHelper.hxx>
++#include <svx/sdasitm.hxx>
++#include <svx/svdoashp.hxx>
+ #include <svx/diagram/datamodel.hxx>
+ #include <o3tl/typed_flags_set.hxx>
+ #include <vcl/svapp.hxx>
+@@ -1324,6 +1326,26 @@ css::uno::Any SAL_CALL SdXShape::getPropertyValue( const OUString& PropertyName
+ 
+     uno::Any aRet;
+ 
++    if (PropertyName == u"SpellbookFontworkShapeType"_ustr)
++    {
++        // The browser bridge cannot read CustomShapeGeometry, a sequence of
++        // property sequences; expose the WordArt shape type it needs. Empty
++        // when the shape does not draw its text along a path.
++        const auto* pCustomShape = dynamic_cast<const SdrObjCustomShape*>(mpShape->GetSdrObject());
++        if (!pCustomShape)
++            return uno::Any(OUString());
++        const SdrCustomShapeGeometryItem& rGeometry
++            = pCustomShape->GetMergedItem(SDRATTR_CUSTOMSHAPE_GEOMETRY);
++        OUString aType;
++        bool bTextPath = false;
++        if (const uno::Any* pType = rGeometry.GetPropertyValueByName(u"Type"_ustr))
++            *pType >>= aType;
++        if (const uno::Any* pTextPath
++            = rGeometry.GetPropertyValueByName(u"TextPath"_ustr, u"TextPath"_ustr))
++            *pTextPath >>= bTextPath;
++        return uno::Any(bTextPath ? aType : OUString());
++    }
++
+     if (PropertyName == u"SpellbookDiagramState"_ustr)
+     {
+         const OUString aState = spellbookDiagramState(mpShape->GetSdrObject());

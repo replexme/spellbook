@@ -64,6 +64,22 @@ Calc and Writer but strips Impress/Draw, so its package omitted the Impress UI
 assets. The build now explicitly requests `calc writer impress`, checks the
 configured module state, and refuses a receipt or admission when the produced
 package lacks those assets. A corrected browser product run is still required.
+The `browser-undo-v30` source series adds five fixes found by that product
+run. Patch `0026` keeps a slide's visual transition when it also advances
+automatically: the automatic-advance branch had marked the whole transition as
+read, so the effect was dropped on reload. Patch `0027` sets an existing
+animation effect's duration, delay and start mode as one native Undo step.
+Patch `0028` makes attribute Undo and Redo on a text object restore the saved
+object items exactly; applying the saved set first copied the other state's
+first-paragraph attributes back into the object, so undoing a shadow applied
+to the selected object left it at object level. Patch `0029` writes semantic
+SmartArt edits to the saved data model: export previously wrote the data
+captured at import, so node text, added nodes and removed nodes were lost on
+reload. Only changes made since the first edit are applied, an unedited or
+fully undone diagram is written as imported, and the stale cached drawing is
+not written. Patch `0030` exposes the WordArt shape type as a read-only shape
+property because the browser bridge cannot read custom-shape geometry. This
+series has not been compiled or run yet.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

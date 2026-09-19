@@ -1570,6 +1570,22 @@ function spellbookDocumentOperation(request) {
   );
   const fontworkDetails = (shape, shapeKind) => {
     if (!String(shapeKind).endsWith("CustomShape")) return null;
+    // The browser bridge cannot read CustomShapeGeometry (a sequence of
+    // property sequences). Its engine exposes the WordArt shape type as a
+    // virtual property, absent from the property set info, so read it
+    // directly; an engine without it reports no WordArt.
+    if (engineIdentity.engineImage === "browser-wasm") {
+      let type = "";
+      try {
+        type = String(
+          shape.getPropertyValue("SpellbookFontworkShapeType") ?? "",
+        );
+      } catch (_) {
+        return null;
+      }
+      const preset = fontworkPresets[type];
+      return preset ? { preset } : null;
+    }
     let geometry;
     try {
       geometry = Array.from(safeProperty(shape, "CustomShapeGeometry") ?? []);

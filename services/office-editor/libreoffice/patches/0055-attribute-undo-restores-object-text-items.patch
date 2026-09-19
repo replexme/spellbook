@@ -1,0 +1,141 @@
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -32,6 +32,7 @@
+ #include <com/sun/star/drawing/XDrawPagesSupplier.hpp>
+ #include <com/sun/star/document/XUndoManagerSupplier.hpp>
+ #include <com/sun/star/beans/XPropertySet.hpp>
++#include <com/sun/star/beans/XPropertyState.hpp>
+ #include <com/sun/star/beans/XPropertyContainer.hpp>
+ #include <com/sun/star/beans/PropertyAttribute.hpp>
+ #include <com/sun/star/container/XEnumerationAccess.hpp>
+@@ -64,6 +65,7 @@
+ #include <editeng/editobj.hxx>
+ #include <editeng/editview.hxx>
+ #include <editeng/eeitem.hxx>
++#include <editeng/shdditem.hxx>
+ #include <editeng/escapementitem.hxx>
+ #include <editeng/fhgtitem.hxx>
+ #include <editeng/flditem.hxx>
+@@ -79,9 +81,11 @@
+ #include <sfx2/request.hxx>
+ #include <sfx2/viewfrm.hxx>
+ #include <svl/intitem.hxx>
++#include <svl/itemset.hxx>
+ #include <svl/srchitem.hxx>
+ #include <svx/svxids.hrc>
+ #include <svx/svdoashp.hxx>
++#include <svx/svdundo.hxx>
+ #include <svx/svdpagv.hxx>
+ #include <svx/svdorect.hxx>
+ #include <svx/svdhdl.hxx>
+@@ -1395,6 +1399,51 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testAutoAdvanceKeepsTransitionEffectOnRelo
+     CPPUNIT_ASSERT(pPage->GetPresChange() == PresChange::Auto);
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testObjectTextAttributeUndoRestoresObjectItems)
++{
++    createSdImpressDoc();
++    auto pImpressDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
++    CPPUNIT_ASSERT(pImpressDocument);
++    SdPage* pPage = pImpressDocument->GetDoc()->GetSdPage(0, PageKind::Standard);
++    CPPUNIT_ASSERT(pPage);
++    uno::Reference<drawing::XShapes> xShapes(pPage->getUnoPage(), uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShape> xShape(
++        xFactory->createInstance(u"com.sun.star.drawing.CustomShape"_ustr),
++        uno::UNO_QUERY_THROW);
++    xShape->setPosition(awt::Point(1000, 1000));
++    xShape->setSize(awt::Size(10000, 3000));
++    xShapes->add(xShape);
++    uno::Reference<text::XText>(xShape, uno::UNO_QUERY_THROW)->setString(u"Object text"_ustr);
++    uno::Reference<beans::XPropertySet> xProperties(xShape, uno::UNO_QUERY_THROW);
++    uno::Reference<beans::XPropertyState> xState(xShape, uno::UNO_QUERY_THROW);
++    CPPUNIT_ASSERT_EQUAL(beans::PropertyState_DEFAULT_VALUE,
++                         xState->getPropertyState(u"CharShadowed"_ustr));
++
++    // What a character attribute applied to the selected object records: one
++    // attribute Undo that also saves the text, then the item on the object.
++    SdrObject* pObject = SdrObject::getSdrObjectFromXShape(xShape);
++    CPPUNIT_ASSERT(dynamic_cast<SdrObjCustomShape*>(pObject));
++    SdrUndoAttrObj aUndo(*pObject, false, true);
++    SfxItemSetFixed<EE_CHAR_SHADOW, EE_CHAR_SHADOW> aShadow(
++        pObject->getSdrModelFromSdrObject().GetItemPool());
++    aShadow.Put(SvxShadowedItem(true, EE_CHAR_SHADOW));
++    pObject->SetMergedItemSetAndBroadcast(aShadow);
++    CPPUNIT_ASSERT(xProperties->getPropertyValue(u"CharShadowed"_ustr).get<bool>());
++
++    // Undo copied the edited text's first-paragraph shadow back into the
++    // object before restoring the text, leaving a shadow no Undo removed.
++    aUndo.Undo();
++    CPPUNIT_ASSERT_EQUAL(beans::PropertyState_DEFAULT_VALUE,
++                         xState->getPropertyState(u"CharShadowed"_ustr));
++    CPPUNIT_ASSERT(!xProperties->getPropertyValue(u"CharShadowed"_ustr).get<bool>());
++
++    aUndo.Redo();
++    CPPUNIT_ASSERT_EQUAL(beans::PropertyState_DIRECT_VALUE,
++                         xState->getPropertyState(u"CharShadowed"_ustr));
++    CPPUNIT_ASSERT(xProperties->getPropertyValue(u"CharShadowed"_ustr).get<bool>());
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testDocumentStructureSectionsUndoRedoRoundtrip)
+ {
+     createSdImpressDoc();
+diff --git a/svx/source/svdraw/svdundo.cxx b/svx/source/svdraw/svdundo.cxx
+--- a/svx/source/svdraw/svdundo.cxx
++++ b/svx/source/svdraw/svdundo.cxx
+@@ -31,6 +31,7 @@
+ #include <svx/xfillit0.hxx>
+ #include <svx/strings.hrc>
+ #include <svx/dialmgr.hxx>
++#include <editeng/eeitem.hxx>
+ #include <editeng/outlobj.hxx>
+ #include <svx/svdogrp.hxx>
+ #include <sdr/properties/itemsettools.hxx>
+@@ -312,6 +313,28 @@ SdrUndoAttrObj::~SdrUndoAttrObj()
+     m_pTextRedo.reset();
+ }
+ 
++namespace
++{
++// Applying an item set to a text object also copies the first paragraph's
++// attributes into the object item set (TextProperties::ItemSetChanged).
++// Undo and Redo apply the saved set while the object still holds the other
++// state's text, so a character attribute the saved set does not contain
++// (for example the shadow added with the object selected) was copied back and
++// survived at object level. Once the saved text is back, the saved set is
++// authoritative for the text items.
++void lcl_RestoreSavedTextItems(SdrObject& rObject, const SfxItemSet& rSaved)
++{
++    std::vector<sal_uInt16> aStale;
++    const SfxItemSet& rCurrent = rObject.GetMergedItemSet();
++    for (sal_uInt16 nWhich = EE_ITEMS_START; nWhich <= EE_ITEMS_END; ++nWhich)
++        if (rSaved.GetItemState(nWhich, false) != SfxItemState::SET
++            && rCurrent.GetItemState(nWhich, false) == SfxItemState::SET)
++            aStale.push_back(nWhich);
++    for (const sal_uInt16 nWhich : aStale)
++        rObject.GetProperties().ClearObjectItemDirect(nWhich);
++}
++}
++
+ void SdrUndoAttrObj::Undo()
+ {
+     E3DModifySceneSnapRectUpdater aUpdater(mxObj.get());
+@@ -412,6 +435,8 @@ void SdrUndoAttrObj::Undo()
+         if(m_pTextUndo)
+         {
+             mxObj->SetOutlinerParaObject(*m_pTextUndo);
++            if(moUndoSet)
++                lcl_RestoreSavedTextItems(*mxObj, *moUndoSet);
+         }
+     }
+ 
+@@ -494,6 +519,8 @@ void SdrUndoAttrObj::Redo()
+         if(m_pTextRedo)
+         {
+             mxObj->SetOutlinerParaObject(*m_pTextRedo);
++            if(moRedoSet)
++                lcl_RestoreSavedTextItems(*mxObj, *moRedoSet);
+         }
+     }
+ 

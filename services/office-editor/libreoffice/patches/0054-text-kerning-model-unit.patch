@@ -1,0 +1,34 @@
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -1130,8 +1130,7 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testDocumentStructureTextPropertiesUndoRed
+     std::vector<EECharAttrib> aAttributes;
+     rChangedText.GetCharAttribs(0, aAttributes);
+     const sal_Int32 nTextLength = rChangedText.GetTextLen(0);
+-    const sal_Int16 nExpectedKerning
+-        = static_cast<sal_Int16>(sanitiseMm100ToTwip(sal_Int32(44)));
++    const sal_Int16 nExpectedKerning = 44;
+     const bool bKerningApplied = std::any_of(
+         aAttributes.begin(), aAttributes.end(), [&](const EECharAttrib& rAttribute) {
+             const auto* pKerning = dynamic_cast<const SvxKerningItem*>(rAttribute.pAttr);
+diff --git a/sd/source/ui/view/drviews2.cxx b/sd/source/ui/view/drviews2.cxx
+--- a/sd/source/ui/view/drviews2.cxx
++++ b/sd/source/ui/view/drviews2.cxx
+@@ -2949,13 +2949,11 @@ void handleSetTextProperties(SlideCommandContext& rCtx, const std::string& rKey,
+     }
+     if (oKerning)
+     {
+-        const sal_Int64 nTwips = sanitiseMm100ToTwip(*oKerning);
+-        if (nTwips < std::numeric_limits<sal_Int16>::min()
+-            || nTwips > std::numeric_limits<sal_Int16>::max())
+-            throw lang::IllegalArgumentException(u"Text kerning conversion out of range"_ustr,
+-                                                  nullptr, 0);
++        // Impress text items use the model's 1/100 mm unit: PPTX import
++        // converts a:rPr/@spc into 1/100 mm and export converts it back.
++        // Converting to twips stored 57% of the requested spacing.
+         aTextAttributes.Put(
+-            SvxKerningItem(static_cast<sal_Int16>(nTwips), EE_CHAR_KERNING));
++            SvxKerningItem(static_cast<sal_Int16>(*oKerning), EE_CHAR_KERNING));
+     }
+     if (oEscapement)
+         aTextAttributes.Put(SvxEscapementItem(

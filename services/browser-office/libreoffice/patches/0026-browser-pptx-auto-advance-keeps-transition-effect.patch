@@ -1,0 +1,82 @@
+diff --git a/include/oox/ppt/slidetransitioncontext.hxx b/include/oox/ppt/slidetransitioncontext.hxx
+--- a/include/oox/ppt/slidetransitioncontext.hxx
++++ b/include/oox/ppt/slidetransitioncontext.hxx
+@@ -48,6 +48,7 @@ namespace oox::ppt {
+         PropertyMap&                    maSlideProperties;
+         bool                            mbHasTransition;
+         bool                            mbHasTransitionDuration;
++        bool                            mbHasAdvanceTime;
+         SlideTransition                 maTransition;
+     };
+ 
+diff --git a/oox/source/ppt/slidetransitioncontext.cxx b/oox/source/ppt/slidetransitioncontext.cxx
+--- a/oox/source/ppt/slidetransitioncontext.cxx
++++ b/oox/source/ppt/slidetransitioncontext.cxx
+@@ -38,6 +38,7 @@ SlideTransitionContext::SlideTransitionContext( FragmentHandler2 const & rParent
+ , maSlideProperties( aProperties )
+ , mbHasTransition( false )
+ , mbHasTransitionDuration( false )
++, mbHasAdvanceTime( false )
+ {
+     // ST_TransitionSpeed
+     maTransition.setOoxTransitionSpeed( rAttribs.getToken( XML_spd, XML_fast ) );
+@@ -61,7 +62,10 @@ SlideTransitionContext::SlideTransitionContext( FragmentHandler2 const & rParent
+     if(rAttribs.hasAttribute( XML_advTm ))
+     {
+         maTransition.setOoxAdvanceTime( rAttribs.getInteger( XML_advTm, -1 ) );
+-        mbHasTransition = true; // Timing-only <p:transition> has no effect child.
++        // A timing-only <p:transition> has no effect child. Track it
++        // separately: mbHasTransition marks the first effect element, and
++        // setting it here made every effect after advTm be ignored.
++        mbHasAdvanceTime = true;
+     }
+ }
+ 
+@@ -190,7 +194,7 @@ void SlideTransitionContext::onEndElement()
+ {
+     if( isCurrentElement(PPT_TOKEN( transition )) )
+     {
+-        if( mbHasTransition || mbHasTransitionDuration )
++        if( mbHasTransition || mbHasTransitionDuration || mbHasAdvanceTime )
+         {
+             maTransition.setSlideProperties( maSlideProperties );
+             mbHasTransition = false;
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2314,6 +2314,35 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookMetadataLineAndParagraphPrope
+     assertChanged("after PPTX reload", true);
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookAutoAdvanceKeepsTransitionEffectOnReload)
++{
++    createSdImpressDocModelOnly();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<beans::XPropertySet> xPageProperties(
++        xPagesSupplier->getDrawPages()->getByIndex(0), uno::UNO_QUERY_THROW);
++    xPageProperties->setPropertyValue("TransitionType", uno::Any(sal_Int16(37)));
++    xPageProperties->setPropertyValue("TransitionSubtype", uno::Any(sal_Int16(101)));
++    xPageProperties->setPropertyValue("HighResDuration", uno::Any(5.0));
++    xPageProperties->setPropertyValue("Change", uno::Any(sal_Int32(1)));
++
++    // advTm and the visual effect share one p:transition; reloading must keep both.
++    saveAndReloadSdImpressDocModelOnly("Impress Office Open XML");
++    xPagesSupplier.set(mxComponent, uno::UNO_QUERY_THROW);
++    xPageProperties.set(xPagesSupplier->getDrawPages()->getByIndex(0), uno::UNO_QUERY_THROW);
++    sal_Int16 nValue = 0;
++    double fValue = 0.0;
++    sal_Int32 nChange = 0;
++    CPPUNIT_ASSERT(xPageProperties->getPropertyValue("TransitionType") >>= nValue);
++    CPPUNIT_ASSERT_EQUAL(sal_Int16(37), nValue);
++    CPPUNIT_ASSERT(xPageProperties->getPropertyValue("TransitionSubtype") >>= nValue);
++    CPPUNIT_ASSERT_EQUAL(sal_Int16(101), nValue);
++    CPPUNIT_ASSERT(xPageProperties->getPropertyValue("HighResDuration") >>= fValue);
++    CPPUNIT_ASSERT_DOUBLES_EQUAL(5.0, fValue, 0.001);
++    CPPUNIT_ASSERT(xPageProperties->getPropertyValue("Change") >>= nChange);
++    CPPUNIT_ASSERT_EQUAL(sal_Int32(1), nChange);
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookDocumentDesignAndAnimationCommands)
+ {
+     createSdImpressDocModelOnly();

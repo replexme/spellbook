@@ -1,0 +1,633 @@
+diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
+--- a/oox/source/export/drawingml.cxx
++++ b/oox/source/export/drawingml.cxx
+@@ -44,7 +44,10 @@
+ #include <basegfx/range/b2drange.hxx>
+ #include <basegfx/utils/gradienttools.hxx>
+ 
++#include <map>
+ #include <numeric>
++#include <set>
++#include <vector>
+ #include <string_view>
+ 
+ #include <com/sun/star/awt/CharSet.hpp>
+@@ -97,7 +100,12 @@
+ #include <com/sun/star/text/XTextRange.hpp>
+ #include <com/sun/star/text/XTextFrame.hpp>
+ #include <com/sun/star/style/CaseMap.hpp>
++#include <com/sun/star/xml/dom/NodeType.hpp>
++#include <com/sun/star/xml/dom/XDocument.hpp>
++#include <com/sun/star/xml/dom/XElement.hpp>
++#include <com/sun/star/xml/dom/XNode.hpp>
+ #include <com/sun/star/xml/dom/XNodeList.hpp>
++#include <com/sun/star/xml/dom/XText.hpp>
+ #include <com/sun/star/xml/sax/Writer.hpp>
+ #include <com/sun/star/xml/sax/XSAXSerializable.hpp>
+ #include <com/sun/star/container/XNamed.hpp>
+@@ -105,6 +113,7 @@
+ #include <com/sun/star/drawing/XDrawPagesSupplier.hpp>
+ #include <com/sun/star/drawing/RectanglePoint.hpp>
+ 
++#include <comphelper/hash.hxx>
+ #include <comphelper/propertyvalue.hxx>
+ #include <comphelper/random.hxx>
+ #include <comphelper/seqstream.hxx>
+@@ -129,6 +138,8 @@
+ #include <editeng/escapementitem.hxx>
+ #include <editeng/unonrule.hxx>
+ #include <docmodel/uno/UnoComplexColor.hxx>
++#include <svx/diagram/IDiagramHelper.hxx>
++#include <svx/diagram/datamodel.hxx>
+ #include <svx/svdoashp.hxx>
+ #include <svx/svdomedia.hxx>
+ #include <svx/svdtrans.hxx>
+@@ -6306,6 +6317,413 @@ OString DrawingML::WriteWdpPicture( const OUString& rFileId, const Sequence< sal
+     return OUStringToOString(aId, RTL_TEXTENCODING_UTF8);
+ }
+ 
++namespace
++{
++constexpr OUString gaSpellbookDiagramNamespace
++    = u"http://schemas.openxmlformats.org/drawingml/2006/diagram"_ustr;
++constexpr OUString gaSpellbookDrawingNamespace
++    = u"http://schemas.openxmlformats.org/drawingml/2006/main"_ustr;
++constexpr OUString gaSpellbookDiagramDrawingNamespace
++    = u"http://schemas.microsoft.com/office/drawing/2008/diagram"_ustr;
++
++std::vector<uno::Reference<xml::dom::XElement>>
++lcl_spellbookDiagramChildren(const uno::Reference<xml::dom::XNode>& xParent,
++                             const OUString& rNamespace, const OUString& rLocalName)
++{
++    std::vector<uno::Reference<xml::dom::XElement>> aChildren;
++    for (uno::Reference<xml::dom::XNode> xChild = xParent->getFirstChild(); xChild.is();
++         xChild = xChild->getNextSibling())
++    {
++        if (xChild->getNodeType() == xml::dom::NodeType_ELEMENT_NODE
++            && xChild->getNamespaceURI() == rNamespace && xChild->getLocalName() == rLocalName)
++            aChildren.emplace_back(xChild, uno::UNO_QUERY);
++    }
++    return aChildren;
++}
++
++uno::Reference<xml::dom::XElement>
++lcl_spellbookDiagramChild(const uno::Reference<xml::dom::XNode>& xParent,
++                          const OUString& rNamespace, const OUString& rLocalName)
++{
++    const auto aChildren = lcl_spellbookDiagramChildren(xParent, rNamespace, rLocalName);
++    return aChildren.empty() ? uno::Reference<xml::dom::XElement>() : aChildren.front();
++}
++
++OUString lcl_spellbookDiagramTypeName(svx::diagram::TypeConstant eType)
++{
++    switch (eType)
++    {
++        case svx::diagram::TypeConstant::XML_doc:
++            return u"doc"_ustr;
++        case svx::diagram::TypeConstant::XML_node:
++            return u"node"_ustr;
++        case svx::diagram::TypeConstant::XML_asst:
++            return u"asst"_ustr;
++        case svx::diagram::TypeConstant::XML_parTrans:
++            return u"parTrans"_ustr;
++        case svx::diagram::TypeConstant::XML_sibTrans:
++            return u"sibTrans"_ustr;
++        case svx::diagram::TypeConstant::XML_pres:
++            return u"pres"_ustr;
++        case svx::diagram::TypeConstant::XML_parOf:
++            return u"parOf"_ustr;
++        case svx::diagram::TypeConstant::XML_presOf:
++            return u"presOf"_ustr;
++        case svx::diagram::TypeConstant::XML_presParOf:
++            return u"presParOf"_ustr;
++        default:
++            return OUString();
++    }
++}
++
++// Model data the engine adds has no ids for connections or transition
++// points. Derive stable GUIDs so every save of the same diagram is identical.
++OUString lcl_spellbookDerivedDiagramId(const OUString& rKey)
++{
++    const OString aKey = OUStringToOString(rKey, RTL_TEXTENCODING_UTF8);
++    const std::vector<unsigned char> aHash = comphelper::Hash::calculateHash(
++        reinterpret_cast<const unsigned char*>(aKey.getStr()), aKey.getLength(),
++        comphelper::HashType::SHA1);
++    static constexpr char aHexDigits[] = "0123456789ABCDEF";
++    OStringBuffer aId("{");
++    for (size_t nByte = 0; nByte < 16; ++nByte)
++    {
++        if (nByte == 4 || nByte == 6 || nByte == 8 || nByte == 10)
++            aId.append('-');
++        aId.append(aHexDigits[aHash[nByte] >> 4]);
++        aId.append(aHexDigits[aHash[nByte] & 0xF]);
++    }
++    aId.append('}');
++    return OStringToOUString(aId.makeStringAndClear(), RTL_TEXTENCODING_ASCII_US);
++}
++
++OUString lcl_spellbookDiagramConnectionId(const svx::diagram::Connection& rConnection)
++{
++    if (!rConnection.msModelId.isEmpty())
++        return rConnection.msModelId;
++    const OUString aKey = OUString::number(static_cast<sal_Int32>(rConnection.mnXMLType)) + "|"
++                          + rConnection.msSourceId + "|" + rConnection.msDestId + "|"
++                          + OUString::number(rConnection.mnSourceOrder);
++    return lcl_spellbookDerivedDiagramId(aKey);
++}
++
++// The imported model keeps a node's text as the first run of its first
++// paragraph (oox::drawingml::TextBody::toString).
++OUString lcl_spellbookDiagramPointText(const uno::Reference<xml::dom::XElement>& xPoint)
++{
++    const auto xText
++        = lcl_spellbookDiagramChild(xPoint, gaSpellbookDiagramNamespace, u"t"_ustr);
++    if (!xText.is())
++        return OUString();
++    const auto xParagraph
++        = lcl_spellbookDiagramChild(xText, gaSpellbookDrawingNamespace, u"p"_ustr);
++    if (!xParagraph.is())
++        return OUString();
++    const auto xRun = lcl_spellbookDiagramChild(xParagraph, gaSpellbookDrawingNamespace, u"r"_ustr);
++    if (!xRun.is())
++        return OUString();
++    const auto xRunText = lcl_spellbookDiagramChild(xRun, gaSpellbookDrawingNamespace, u"t"_ustr);
++    if (!xRunText.is())
++        return OUString();
++    OUStringBuffer aText;
++    for (uno::Reference<xml::dom::XNode> xChild = xRunText->getFirstChild(); xChild.is();
++         xChild = xChild->getNextSibling())
++        if (xChild->getNodeType() == xml::dom::NodeType_TEXT_NODE)
++            aText.append(xChild->getNodeValue());
++    return aText.makeStringAndClear();
++}
++
++// A node's text in the model is one run. Keep the first paragraph's and first
++// run's properties so the node keeps its formatting.
++void lcl_setSpellbookDiagramPointText(const uno::Reference<xml::dom::XDocument>& xDocument,
++                                      const uno::Reference<xml::dom::XElement>& xPoint,
++                                      const OUString& rText)
++{
++    uno::Reference<xml::dom::XNode> xParagraphProperties;
++    uno::Reference<xml::dom::XNode> xRunProperties;
++    uno::Reference<xml::dom::XElement> xText
++        = lcl_spellbookDiagramChild(xPoint, gaSpellbookDiagramNamespace, u"t"_ustr);
++    if (xText.is())
++    {
++        const auto aParagraphs
++            = lcl_spellbookDiagramChildren(xText, gaSpellbookDrawingNamespace, u"p"_ustr);
++        if (!aParagraphs.empty())
++        {
++            if (const auto xProperties = lcl_spellbookDiagramChild(
++                    aParagraphs.front(), gaSpellbookDrawingNamespace, u"pPr"_ustr);
++                xProperties.is())
++                xParagraphProperties = xProperties->cloneNode(true);
++            if (const auto xRun = lcl_spellbookDiagramChild(
++                    aParagraphs.front(), gaSpellbookDrawingNamespace, u"r"_ustr);
++                xRun.is())
++                if (const auto xProperties = lcl_spellbookDiagramChild(
++                        xRun, gaSpellbookDrawingNamespace, u"rPr"_ustr);
++                    xProperties.is())
++                    xRunProperties = xProperties->cloneNode(true);
++        }
++        for (const auto& xParagraph : aParagraphs)
++            xText->removeChild(xParagraph);
++    }
++    else
++    {
++        xText = xDocument->createElementNS(gaSpellbookDiagramNamespace, u"dgm:t"_ustr);
++        xText->appendChild(
++            xDocument->createElementNS(gaSpellbookDrawingNamespace, u"a:bodyPr"_ustr));
++        xText->appendChild(
++            xDocument->createElementNS(gaSpellbookDrawingNamespace, u"a:lstStyle"_ustr));
++        // dgm:t precedes the point's optional dgm:extLst.
++        if (const auto xExtensions
++            = lcl_spellbookDiagramChild(xPoint, gaSpellbookDiagramNamespace, u"extLst"_ustr);
++            xExtensions.is())
++            xPoint->insertBefore(xText, xExtensions);
++        else
++            xPoint->appendChild(xText);
++    }
++    const uno::Reference<xml::dom::XElement> xParagraph
++        = xDocument->createElementNS(gaSpellbookDrawingNamespace, u"a:p"_ustr);
++    if (xParagraphProperties.is())
++        xParagraph->appendChild(xParagraphProperties);
++    if (!rText.isEmpty())
++    {
++        const uno::Reference<xml::dom::XElement> xRun
++            = xDocument->createElementNS(gaSpellbookDrawingNamespace, u"a:r"_ustr);
++        if (xRunProperties.is())
++            xRun->appendChild(xRunProperties);
++        const uno::Reference<xml::dom::XElement> xRunText
++            = xDocument->createElementNS(gaSpellbookDrawingNamespace, u"a:t"_ustr);
++        xRunText->appendChild(xDocument->createTextNode(rText));
++        xRun->appendChild(xRunText);
++        xParagraph->appendChild(xRun);
++    }
++    xText->appendChild(xParagraph);
++}
++
++uno::Reference<xml::dom::XElement>
++lcl_createSpellbookDiagramPoint(const uno::Reference<xml::dom::XDocument>& xDocument,
++                                const OUString& rId, const OUString& rType,
++                                const OUString& rConnectionId)
++{
++    const uno::Reference<xml::dom::XElement> xPoint
++        = xDocument->createElementNS(gaSpellbookDiagramNamespace, u"dgm:pt"_ustr);
++    xPoint->setAttribute(u"modelId"_ustr, rId);
++    if (!rType.isEmpty() && rType != "node")
++        xPoint->setAttribute(u"type"_ustr, rType);
++    if (!rConnectionId.isEmpty())
++        xPoint->setAttribute(u"cxnId"_ustr, rConnectionId);
++    return xPoint;
++}
++
++void lcl_appendSpellbookDiagramPoint(const uno::Reference<xml::dom::XDocument>& xDocument,
++                                     const uno::Reference<xml::dom::XElement>& xPointList,
++                                     const svx::diagram::Point& rPoint, bool bTextPoint,
++                                     const OUString& rText)
++{
++    const uno::Reference<xml::dom::XElement> xPoint = lcl_createSpellbookDiagramPoint(
++        xDocument, rPoint.msModelId, lcl_spellbookDiagramTypeName(rPoint.mnXMLType),
++        rPoint.msCnxId);
++    const uno::Reference<xml::dom::XElement> xProperties
++        = xDocument->createElementNS(gaSpellbookDiagramNamespace, u"dgm:prSet"_ustr);
++    if (!rPoint.msPresentationAssociationId.isEmpty())
++        xProperties->setAttribute(u"presAssocID"_ustr, rPoint.msPresentationAssociationId);
++    if (!rPoint.msPresentationLayoutName.isEmpty())
++        xProperties->setAttribute(u"presName"_ustr, rPoint.msPresentationLayoutName);
++    if (!rPoint.msPresentationLayoutStyleLabel.isEmpty())
++        xProperties->setAttribute(u"presStyleLbl"_ustr, rPoint.msPresentationLayoutStyleLabel);
++    if (rPoint.mnLayoutStyleIndex >= 0)
++        xProperties->setAttribute(u"presStyleIdx"_ustr,
++                                  OUString::number(rPoint.mnLayoutStyleIndex));
++    if (rPoint.mnLayoutStyleCount >= 0)
++        xProperties->setAttribute(u"presStyleCnt"_ustr,
++                                  OUString::number(rPoint.mnLayoutStyleCount));
++    xPoint->appendChild(xProperties);
++    xPoint->appendChild(
++        xDocument->createElementNS(gaSpellbookDiagramNamespace, u"dgm:spPr"_ustr));
++    if (bTextPoint)
++        lcl_setSpellbookDiagramPointText(xDocument, xPoint, rText);
++    xPointList->appendChild(xPoint);
++}
++
++// PowerPoint gives every parent-child connection its own transition points;
++// a node the engine added has none.
++OUString lcl_appendSpellbookDiagramTransition(
++    const uno::Reference<xml::dom::XDocument>& xDocument,
++    const uno::Reference<xml::dom::XElement>& xPointList, const OUString& rConnectionId,
++    const OUString& rType)
++{
++    const OUString aId = lcl_spellbookDerivedDiagramId(rConnectionId + "|" + rType);
++    const uno::Reference<xml::dom::XElement> xPoint
++        = lcl_createSpellbookDiagramPoint(xDocument, aId, rType, rConnectionId);
++    xPoint->appendChild(
++        xDocument->createElementNS(gaSpellbookDiagramNamespace, u"dgm:prSet"_ustr));
++    xPoint->appendChild(
++        xDocument->createElementNS(gaSpellbookDiagramNamespace, u"dgm:spPr"_ustr));
++    lcl_setSpellbookDiagramPointText(xDocument, xPoint, OUString());
++    xPointList->appendChild(xPoint);
++    return aId;
++}
++
++void lcl_appendSpellbookDiagramConnection(
++    const uno::Reference<xml::dom::XDocument>& xDocument,
++    const uno::Reference<xml::dom::XElement>& xPointList,
++    const uno::Reference<xml::dom::XElement>& xConnectionList,
++    const svx::diagram::Connection& rConnection, const OUString& rId)
++{
++    const uno::Reference<xml::dom::XElement> xConnection
++        = xDocument->createElementNS(gaSpellbookDiagramNamespace, u"dgm:cxn"_ustr);
++    xConnection->setAttribute(u"modelId"_ustr, rId);
++    const OUString aType = lcl_spellbookDiagramTypeName(rConnection.mnXMLType);
++    if (!aType.isEmpty() && aType != "parOf")
++        xConnection->setAttribute(u"type"_ustr, aType);
++    xConnection->setAttribute(u"srcId"_ustr, rConnection.msSourceId);
++    xConnection->setAttribute(u"destId"_ustr, rConnection.msDestId);
++    xConnection->setAttribute(u"srcOrd"_ustr, OUString::number(rConnection.mnSourceOrder));
++    xConnection->setAttribute(u"destOrd"_ustr, OUString::number(rConnection.mnDestOrder));
++    OUString aParentTransition = rConnection.msParTransId;
++    OUString aSiblingTransition = rConnection.msSibTransId;
++    if (rConnection.mnXMLType == svx::diagram::TypeConstant::XML_parOf)
++    {
++        if (aParentTransition.isEmpty())
++            aParentTransition = lcl_appendSpellbookDiagramTransition(xDocument, xPointList, rId,
++                                                                      u"parTrans"_ustr);
++        if (aSiblingTransition.isEmpty())
++            aSiblingTransition = lcl_appendSpellbookDiagramTransition(xDocument, xPointList, rId,
++                                                                       u"sibTrans"_ustr);
++    }
++    if (!aParentTransition.isEmpty())
++        xConnection->setAttribute(u"parTransId"_ustr, aParentTransition);
++    if (!aSiblingTransition.isEmpty())
++        xConnection->setAttribute(u"sibTransId"_ustr, aSiblingTransition);
++    if (!rConnection.msPresId.isEmpty())
++        xConnection->setAttribute(u"presId"_ustr, rConnection.msPresId);
++    xConnectionList->appendChild(xConnection);
++}
++
++// The export writes the diagram data captured at import, while a semantic
++// edit changes the live data model (node text, added and removed nodes).
++// Apply every model change since the baseline recorded before the first edit
++// to a copy of the imported data. Returns an empty reference when the model
++// is back at that baseline, so an unedited diagram is written unchanged.
++uno::Reference<xml::dom::XDocument>
++lcl_spellbookDiagramData(const uno::Reference<xml::dom::XDocument>& xImported,
++                         const uno::Sequence<beans::PropertyValue>& rBaselinePoints,
++                         const uno::Sequence<OUString>& rBaselineConnections,
++                         svx::diagram::DiagramDataState& rState)
++{
++    std::map<OUString, OUString> aBaselineTexts;
++    for (const auto& rPoint : rBaselinePoints)
++    {
++        OUString aText;
++        rPoint.Value >>= aText;
++        aBaselineTexts[rPoint.Name] = aText;
++    }
++    const std::set<OUString> aBaselineConnections(rBaselineConnections.begin(),
++                                                  rBaselineConnections.end());
++    const uno::Reference<xml::dom::XDocument> xDocument(xImported->cloneNode(true),
++                                                        uno::UNO_QUERY);
++    if (!xDocument.is())
++        return {};
++    const uno::Reference<xml::dom::XElement> xRoot = xDocument->getDocumentElement();
++    if (!xRoot.is())
++        return {};
++    const uno::Reference<xml::dom::XElement> xPointList
++        = lcl_spellbookDiagramChild(xRoot, gaSpellbookDiagramNamespace, u"ptLst"_ustr);
++    if (!xPointList.is())
++        return {};
++
++    bool bChanged = false;
++    std::map<OUString, uno::Reference<xml::dom::XElement>> aPointElements;
++    for (const auto& xPoint :
++         lcl_spellbookDiagramChildren(xPointList, gaSpellbookDiagramNamespace, u"pt"_ustr))
++        aPointElements.emplace(xPoint->getAttribute(u"modelId"_ustr), xPoint);
++    std::set<OUString> aCurrentPoints;
++    for (const svx::diagram::Point& rPoint : rState.getPoints())
++    {
++        aCurrentPoints.insert(rPoint.msModelId);
++        const OUString aText = rPoint.msTextBody ? rPoint.msTextBody->msText : OUString();
++        const bool bTextPoint = rPoint.mnXMLType == svx::diagram::TypeConstant::XML_node
++                                || rPoint.mnXMLType == svx::diagram::TypeConstant::XML_asst;
++        const auto aBaseline = aBaselineTexts.find(rPoint.msModelId);
++        const auto aElement = aPointElements.find(rPoint.msModelId);
++        if (aBaseline == aBaselineTexts.end())
++        {
++            if (aElement == aPointElements.end())
++            {
++                lcl_appendSpellbookDiagramPoint(xDocument, xPointList, rPoint, bTextPoint, aText);
++                bChanged = true;
++            }
++        }
++        else if (bTextPoint && aBaseline->second != aText && aElement != aPointElements.end())
++        {
++            lcl_setSpellbookDiagramPointText(xDocument, aElement->second, aText);
++            bChanged = true;
++        }
++    }
++    for (const auto& rBaseline : aBaselineTexts)
++    {
++        if (aCurrentPoints.contains(rBaseline.first))
++            continue;
++        if (const auto aElement = aPointElements.find(rBaseline.first);
++            aElement != aPointElements.end())
++        {
++            xPointList->removeChild(aElement->second);
++            bChanged = true;
++        }
++    }
++
++    if (const uno::Reference<xml::dom::XElement> xConnectionList
++        = lcl_spellbookDiagramChild(xRoot, gaSpellbookDiagramNamespace, u"cxnLst"_ustr);
++        xConnectionList.is())
++    {
++        std::map<OUString, uno::Reference<xml::dom::XElement>> aConnectionElements;
++        for (const auto& xConnection : lcl_spellbookDiagramChildren(
++                 xConnectionList, gaSpellbookDiagramNamespace, u"cxn"_ustr))
++            aConnectionElements.emplace(xConnection->getAttribute(u"modelId"_ustr), xConnection);
++        std::set<OUString> aCurrentConnections;
++        for (const svx::diagram::Connection& rConnection : rState.getConnections())
++        {
++            const OUString aId = lcl_spellbookDiagramConnectionId(rConnection);
++            aCurrentConnections.insert(aId);
++            if (aBaselineConnections.contains(aId) || aConnectionElements.contains(aId))
++                continue;
++            lcl_appendSpellbookDiagramConnection(xDocument, xPointList, xConnectionList,
++                                                 rConnection, aId);
++            bChanged = true;
++        }
++        for (const OUString& rId : aBaselineConnections)
++        {
++            if (aCurrentConnections.contains(rId))
++                continue;
++            if (const auto aElement = aConnectionElements.find(rId);
++                aElement != aConnectionElements.end())
++            {
++                xConnectionList->removeChild(aElement->second);
++                bChanged = true;
++            }
++        }
++    }
++    if (!bChanged)
++        return {};
++
++    // The cached drawing still shows the old content and PowerPoint would
++    // display it instead of laying the diagram out again; the drawing is not
++    // written, so remove the data model's pointer to it as well.
++    const uno::Reference<xml::dom::XNodeList> xReferences = xDocument->getElementsByTagNameNS(
++        gaSpellbookDiagramDrawingNamespace, u"dataModelExt"_ustr);
++    std::vector<uno::Reference<xml::dom::XNode>> aReferences;
++    for (sal_Int32 nIndex = 0; xReferences.is() && nIndex < xReferences->getLength(); ++nIndex)
++        aReferences.push_back(xReferences->item(nIndex));
++    for (const auto& xReference : aReferences)
++    {
++        const uno::Reference<xml::dom::XNode> xExtension = xReference->getParentNode();
++        const uno::Reference<xml::dom::XNode> xExtensionList
++            = xExtension.is() ? xExtension->getParentNode() : uno::Reference<xml::dom::XNode>();
++        if (xExtensionList.is())
++            xExtensionList->removeChild(xExtension);
++    }
++    return xDocument;
++}
++}
++
+ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rXShape, int nDiagramId)
+ {
+     uno::Reference<beans::XPropertySet> xPropSet(rXShape, uno::UNO_QUERY);
+@@ -6317,6 +6735,8 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+     uno::Reference<xml::dom::XDocument> drawingDom;
+     uno::Sequence<uno::Sequence<uno::Any>> xDataRelSeq;
+     uno::Sequence<uno::Any> diagramDrawing;
++    uno::Sequence<beans::PropertyValue> aBaselinePoints;
++    uno::Sequence<OUString> aBaselineConnections;
+ 
+     // retrieve the doms from the GrabBag
+     uno::Sequence<beans::PropertyValue> propList;
+@@ -6340,6 +6760,10 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+         }
+         else if (propName == "OOXDiagramDataRels")
+             rProp.Value >>= xDataRelSeq;
++        else if (propName == "SpellbookDiagramBaselinePoints")
++            rProp.Value >>= aBaselinePoints;
++        else if (propName == "SpellbookDiagramBaselineConnections")
++            rProp.Value >>= aBaselineConnections;
+     }
+ 
+     // check that we have the 4 mandatory XDocuments
+@@ -6347,6 +6771,26 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+     if (!dataDom.is() || !layoutDom.is() || !styleDom.is() || !colorDom.is())
+         return;
+ 
++    // A semantically edited diagram writes its current model; its cached
++    // drawing would show the old content and is not written.
++    if (aBaselinePoints.hasElements())
++    {
++        SdrObject* pDiagram = SdrObject::getSdrObjectFromXShape(rXShape);
++        if (pDiagram && pDiagram->isDiagram())
++        {
++            if (const auto pState = pDiagram->getDiagramHelper()->extractDiagramDataState())
++            {
++                if (const auto xEdited = lcl_spellbookDiagramData(
++                        dataDom, aBaselinePoints, aBaselineConnections, *pState);
++                    xEdited.is())
++                {
++                    dataDom = xEdited;
++                    drawingDom.clear();
++                }
++            }
++        }
++    }
++
+     // generate a unique id
+     rtl::Reference<sax_fastparser::FastAttributeList> pDocPrAttrList
+         = sax_fastparser::FastSerializerHelper::createAttrList();
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2772,6 +2772,65 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookSemanticDiagramUsesOneNativeU
+     CPPUNIT_ASSERT(!hasTopLevelText(u"Added top"_ustr));
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookSemanticDiagramEditsSurvivePptxReload)
++{
++    createSdImpressDocModelOnly("pptx/smartart-children.pptx");
++    const auto diagram = [this]() {
++        auto pDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
++        CPPUNIT_ASSERT(pDocument);
++        SdrObject* pDiagram = pDocument->GetDoc()->GetSdPage(0, PageKind::Standard)->GetObj(0);
++        CPPUNIT_ASSERT(pDiagram);
++        CPPUNIT_ASSERT(pDiagram->isDiagram());
++        return pDiagram;
++    };
++    const auto hasNodeText = [&](const OUString& rExpected) {
++        const auto xHelper = diagram()->getDiagramHelper();
++        std::vector<OUString> aParents{ OUString() };
++        for (size_t nParent = 0; nParent < aParents.size() && nParent < 1000; ++nParent)
++            for (const auto& [rId, rText] : xHelper->getChildren(aParents[nParent]))
++            {
++                if (rText == rExpected)
++                    return true;
++                aParents.push_back(rId);
++            }
++        return false;
++    };
++    const auto mutate = [&](const OUString& rMutation) {
++        uno::Reference<beans::XPropertySet> xProperties(diagram()->getUnoShape(),
++                                                        uno::UNO_QUERY_THROW);
++        xProperties->setPropertyValue("SpellbookDiagramMutation", uno::Any(rMutation));
++    };
++    static constexpr OUString aFormat = u"Impress Office Open XML"_ustr;
++
++    // An unedited diagram is written back as it was imported.
++    CPPUNIT_ASSERT(hasNodeText(u"b"_ustr));
++    saveAndReloadSdImpressDocModelOnly(aFormat);
++    CPPUNIT_ASSERT(hasNodeText(u"b"_ustr));
++
++    // Without the export following the model, the saved data model still held
++    // the imported text and the reloaded diagram lost every semantic edit.
++    mutate(uR"json({"Action":"set","ExpectedText":"b","Occurrence":0,"Text":"Updated child"})json"_ustr);
++    mutate(uR"json({"Action":"add","ExpectedText":"","Occurrence":0,"Text":"Added top"})json"_ustr);
++    saveAndReloadSdImpressDocModelOnly(aFormat);
++    CPPUNIT_ASSERT(hasNodeText(u"Updated child"_ustr));
++    CPPUNIT_ASSERT(hasNodeText(u"Added top"_ustr));
++    CPPUNIT_ASSERT(!hasNodeText(u"b"_ustr));
++
++    mutate(uR"json({"Action":"delete","ExpectedText":"Added top","Occurrence":0,"Text":""})json"_ustr);
++    saveAndReloadSdImpressDocModelOnly(aFormat);
++    CPPUNIT_ASSERT(!hasNodeText(u"Added top"_ustr));
++    CPPUNIT_ASSERT(hasNodeText(u"Updated child"_ustr));
++
++    // Undo returns the model to its baseline, so the saved data is unchanged.
++    mutate(uR"json({"Action":"set","ExpectedText":"Updated child","Occurrence":0,"Text":"Undone"})json"_ustr);
++    auto pDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
++    CPPUNIT_ASSERT(pDocument);
++    pDocument->GetDoc()->GetDocSh()->GetUndoManager()->Undo();
++    saveAndReloadSdImpressDocModelOnly(aFormat);
++    CPPUNIT_ASSERT(hasNodeText(u"Updated child"_ustr));
++    CPPUNIT_ASSERT(!hasNodeText(u"Undone"_ustr));
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxTextShadowRoundTrip)
+ {
+     createSdImpressDocModelOnly();
+diff --git a/sd/source/ui/unoidl/unoobj.cxx b/sd/source/ui/unoidl/unoobj.cxx
+--- a/sd/source/ui/unoidl/unoobj.cxx
++++ b/sd/source/ui/unoidl/unoobj.cxx
+@@ -59,6 +59,7 @@
+ #include <svl/instrm.hxx>
+ #include <editeng/outlobj.hxx>
+ #include <Outliner.hxx>
++#include <comphelper/propertyvalue.hxx>
+ #include <comphelper/sequence.hxx>
+ #include <svx/svdogrp.hxx>
+ #include <svx/svdundo.hxx>
+@@ -391,6 +392,39 @@ OUString spellbookDiagramState(SdrObject* pObject)
+     return OUString::fromUtf8(aJson.str());
+ }
+ 
++// PPTX export writes the diagram data captured at import. Remember the model
++// as it was before the first semantic edit so that the export applies exactly
++// the changes made since then (DrawingML::WriteDiagram), and nothing when an
++// Undo has returned to it.
++void rememberSpellbookDiagramBaseline(SdrObject& rObject,
++                                      const svx::diagram::DiagramDataStatePtr& rState)
++{
++    if (!rState)
++        return;
++    uno::Any aGrabBag;
++    rObject.GetGrabBagItem(aGrabBag);
++    uno::Sequence<beans::PropertyValue> aEntries;
++    aGrabBag >>= aEntries;
++    for (const auto& rEntry : aEntries)
++        if (rEntry.Name == "SpellbookDiagramBaselinePoints")
++            return;
++    std::vector<beans::PropertyValue> aPoints;
++    for (const auto& rPoint : rState->getPoints())
++        aPoints.push_back(comphelper::makePropertyValue(
++            rPoint.msModelId, rPoint.msTextBody ? rPoint.msTextBody->msText : OUString()));
++    std::vector<OUString> aConnections;
++    for (const auto& rConnection : rState->getConnections())
++        if (!rConnection.msModelId.isEmpty())
++            aConnections.push_back(rConnection.msModelId);
++    std::vector<beans::PropertyValue> aNewEntries(aEntries.begin(), aEntries.end());
++    aNewEntries.push_back(comphelper::makePropertyValue(
++        u"SpellbookDiagramBaselinePoints"_ustr, comphelper::containerToSequence(aPoints)));
++    aNewEntries.push_back(comphelper::makePropertyValue(
++        u"SpellbookDiagramBaselineConnections"_ustr,
++        comphelper::containerToSequence(aConnections)));
++    rObject.SetGrabBagItem(uno::Any(comphelper::containerToSequence(aNewEntries)));
++}
++
+ void applySpellbookDiagramMutation(SdrObject* pObject, SdDrawDocument* pDocument,
+                                    const uno::Any& rValue)
+ {
+@@ -447,6 +481,7 @@ void applySpellbookDiagramMutation(SdrObject* pObject, SdDrawDocument* pDocument
+     }
+ 
+     auto xStartState = xHelper->extractDiagramDataState();
++    rememberSpellbookDiagramBaseline(*pObject, xStartState);
+     try
+     {
+         if (aAction == "add")

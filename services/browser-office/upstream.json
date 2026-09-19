@@ -9,12 +9,12 @@
     "candidateCommit": "dced3bc711d18407a2cc2400eb46e8261b663d95"
   },
   "sourceCandidate": {
-    "patchLevel": "browser-undo-v29",
+    "patchLevel": "browser-undo-v30",
     "wasmModules": ["calc", "writer", "impress"],
     "patchSeriesReady": true,
     "buildReady": false,
     "nativeSlideStructureReady": false,
-    "patchSeriesSha256": "8a92dc1613570927cce345242338b5d196420b000f661c416881cb0434ecdcd0",
+    "patchSeriesSha256": "d218c50a5e483c1a3ca524500f34ecdcdcaaf111b96ac488366f60c9bdd2b7e1",
     "patches": [
       "libreoffice/patches/0001-core-undo-identity.patch",
       "libreoffice/patches/0002-generic-pptx-edit-invariants.patch",
@@ -40,7 +40,12 @@
       "libreoffice/patches/0022-browser-pptx-fixed-date-placeholder-roundtrip.patch",
       "libreoffice/patches/0023-browser-pptx-auto-advance-millisecond-roundtrip.patch",
       "libreoffice/patches/0024-browser-pptx-paragraph-margin-semantics.patch",
-      "libreoffice/patches/0025-browser-pptx-paragraph-properties-emission.patch"
+      "libreoffice/patches/0025-browser-pptx-paragraph-properties-emission.patch",
+      "libreoffice/patches/0026-browser-pptx-auto-advance-keeps-transition-effect.patch",
+      "libreoffice/patches/0027-browser-animation-timing-command.patch",
+      "libreoffice/patches/0028-browser-attribute-undo-restores-object-text-items.patch",
+      "libreoffice/patches/0029-browser-pptx-semantic-diagram-data-follows-model.patch",
+      "libreoffice/patches/0030-browser-fontwork-shape-type-property.patch"
     ],
     "invariants": [
       "table-cell-native-undo",
@@ -114,7 +119,11 @@
       "CppunitTest_sd_uiimpress:testSpellbookMediaPlaybackUsesNativeUndo",
       "CppunitTest_sd_uiimpress:testSpellbookSemanticDiagramUsesOneNativeUndo",
       "CppunitTest_sd_uiimpress:testSpellbookPptxReadingOrderUsesShapeTreeOrder",
-      "CppunitTest_sd_uiimpress:testSpellbookPptxTextShadowRoundTrip"
+      "CppunitTest_sd_uiimpress:testSpellbookPptxTextShadowRoundTrip",
+      "CppunitTest_sd_uiimpress:testSpellbookAutoAdvanceKeepsTransitionEffectOnReload",
+      "CppunitTest_sd_uiimpress:testSpellbookObjectTextAttributeUndoRestoresObjectItems",
+      "CppunitTest_sd_uiimpress:testSpellbookSemanticDiagramEditsSurvivePptxReload",
+      "CppunitTest_sd_uiimpress:testSpellbookFontworkShapeTypeIsObservable"
     ]
   },
   "toolchain": {

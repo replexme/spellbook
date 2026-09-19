@@ -9,11 +9,11 @@
   },
   "runtimeImage": "collabora/code@sha256:379b8f1fc955dd6d01ba24adf61d1b177048ddaae179ae8c1e6a6342daccb282",
   "runtimePatchLevel": "stock",
-  "patchLevel": "undo-v30",
+  "patchLevel": "undo-v31",
   "sourcePatchSeriesReady": true,
   "sourceCandidateReady": false,
-  "patchSeriesSha256": "0ecef5b764d49a6026cd3902f1e59314a8b0e42a8c442481371aba510f57c1af",
-  "engineImageTag": "26.04.4.1-spellbook-undo-v30-r21-candidate",
+  "patchSeriesSha256": "5eaeaa18e6f49a1f84db0e8810ecf727c2a87f8aba090b067fed0a8d4bbffc44",
+  "engineImageTag": "26.04.4.1-spellbook-undo-v31-r1-candidate",
   "impressUiUnoCommandCount": 725,
   "impressUiUnoCommandsSha256": "ddfe8aeb5f798b6656b22276d219311bd30e9ce5c26cdf8ffe3d321f2c2f3fbb",
   "patches": [
@@ -66,7 +66,10 @@
     "patches/0049-pptx-fixed-date-placeholder-roundtrip.patch",
     "patches/0050-pptx-marker-bezier-readback.patch",
     "patches/0051-pptx-auto-advance-millisecond-roundtrip.patch",
-    "patches/0052-pptx-paragraph-margin-semantics.patch"
+    "patches/0052-pptx-paragraph-margin-semantics.patch",
+    "patches/0053-pptx-auto-advance-keeps-transition-effect.patch",
+    "patches/0054-text-kerning-model-unit.patch",
+    "patches/0055-attribute-undo-restores-object-text-items.patch"
   ],
   "requiredCppunitTargets": [
     "CppunitTest_sd_uiimpress",
@@ -107,6 +110,8 @@
     "CppunitTest_sd_uiimpress:testDocumentDesignSizeAndThemeUndoRoundtrip",
     "CppunitTest_sd_misc_tests:testApiTableCellTextUndo",
     "CppunitTest_sd_misc_tests:testApiTableInsertInheritsDimensions",
-    "CppunitTest_sd_misc_tests:testApiTableCellPropertyUndo"
+    "CppunitTest_sd_misc_tests:testApiTableCellPropertyUndo",
+    "CppunitTest_sd_uiimpress:testAutoAdvanceKeepsTransitionEffectOnReload",
+    "CppunitTest_sd_uiimpress:testObjectTextAttributeUndoRestoresObjectItems"
   ]
 }

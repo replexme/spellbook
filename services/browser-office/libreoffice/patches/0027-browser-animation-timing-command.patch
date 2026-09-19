@@ -1,0 +1,95 @@
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2454,6 +2454,33 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookDocumentDesignAndAnimationCom
+     pUndoManager->Redo();
+     CPPUNIT_ASSERT_EQUAL(sal_Int32(1), pPage->getMainSequence()->getCount());
+ 
++    // EffectNodeType: 1 on-click, 3 after-previous.
++    uno::Sequence<beans::PropertyValue> aTimingCommand{
++        comphelper::makePropertyValue(u"Action"_ustr, u"timing"_ustr),
++        comphelper::makePropertyValue(u"ObjectPath"_ustr, OUString::number(nShapeIndex)),
++        comphelper::makePropertyValue(u"SequenceIndex"_ustr, sal_Int32(0)),
++        comphelper::makePropertyValue(u"ExpectedPresetId"_ustr, u"ooo-entrance-appear"_ustr),
++        comphelper::makePropertyValue(u"Duration"_ustr, 1.5),
++        comphelper::makePropertyValue(u"Delay"_ustr, 0.4),
++        comphelper::makePropertyValue(u"Start"_ustr, u"on-click"_ustr),
++    };
++    const size_t nTimingUndoBefore = pUndoManager->GetUndoActionCount();
++    xPageProperties->setPropertyValue(u"SpellbookAnimationCommand"_ustr,
++                                      uno::Any(aTimingCommand));
++    CPPUNIT_ASSERT_EQUAL(size_t(1),
++                         pUndoManager->GetUndoActionCount() - nTimingUndoBefore);
++    auto assertTiming = [&](double fDuration, double fDelay, sal_Int16 nNodeType) {
++        auto pTimed = *pPage->getMainSequence()->getBegin();
++        CPPUNIT_ASSERT_DOUBLES_EQUAL(fDuration, pTimed->getDuration(), 0.001);
++        CPPUNIT_ASSERT_DOUBLES_EQUAL(fDelay, pTimed->getBegin(), 0.001);
++        CPPUNIT_ASSERT_EQUAL(nNodeType, pTimed->getNodeType());
++    };
++    assertTiming(1.5, 0.4, sal_Int16(1));
++    pUndoManager->Undo();
++    assertTiming(0.8, 0.1, sal_Int16(3));
++    pUndoManager->Redo();
++    assertTiming(1.5, 0.4, sal_Int16(1));
++
+     saveAndReloadSdImpressDocModelOnly("Impress Office Open XML");
+     pDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
+     CPPUNIT_ASSERT(pDocument);
+@@ -2469,6 +2496,8 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookDocumentDesignAndAnimationCom
+     CPPUNIT_ASSERT(std::abs(pMaster->GetSize().Width() - 30000) <= 1);
+     CPPUNIT_ASSERT(std::abs(pMaster->GetSize().Height() - 17000) <= 1);
+     CPPUNIT_ASSERT_EQUAL(sal_Int32(1), pPage->getMainSequence()->getCount());
++    CPPUNIT_ASSERT_DOUBLES_EQUAL(1.5, (*pPage->getMainSequence()->getBegin())->getDuration(),
++                                 0.001);
+     assertTheme();
+ }
+ 
+diff --git a/sd/source/ui/unoidl/unopage.cxx b/sd/source/ui/unoidl/unopage.cxx
+--- a/sd/source/ui/unoidl/unopage.cxx
++++ b/sd/source/ui/unoidl/unopage.cxx
+@@ -1514,8 +1514,10 @@ void SAL_CALL SdGenericDrawPage::setPropertyValue( const OUString& aPropertyName
+             }
+             else
+             {
+-                if (aValues.size()
+-                    != ((aAction == u"replace" || aAction == u"move") ? 5 : 4))
++                const size_t nExpectedValues = aAction == u"timing" ? 7
++                    : (aAction == u"replace" || aAction == u"move")   ? 5
++                                                                      : 4;
++                if (aValues.size() != nExpectedValues)
+                     throw lang::IllegalArgumentException(
+                         u"Invalid animation lifecycle command"_ustr, nullptr, 0);
+                 const sal_Int32 nSequenceIndex
+@@ -1543,6 +1545,19 @@ void SAL_CALL SdGenericDrawPage::setPropertyValue( const OUString& aPropertyName
+                     if (nTargetIndex < static_cast<sal_Int32>(aRemaining.size()))
+                         pInsertBefore = aRemaining[nTargetIndex];
+                 }
++                else if (aAction == u"timing")
++                {
++                    // Same bounded timing edit as the server's typed command:
++                    // one UndoAnimation snapshot, then the effect's own setters.
++                    fDuration = requiredCommandValue<double>(aValues, u"Duration");
++                    fDelay = requiredCommandValue<double>(aValues, u"Delay");
++                    nNodeType = animationStartMode(
++                        requiredCommandValue<OUString>(aValues, u"Start"));
++                    if (fDuration < 0.001 || fDuration > 60.0 || fDelay < 0.0
++                        || fDelay > 60.0)
++                        throw lang::IllegalArgumentException(
++                            u"Animation timing value is out of range"_ustr, nullptr, 0);
++                }
+                 else if (aAction != u"remove")
+                     throw lang::IllegalArgumentException(
+                         u"Unsupported animation lifecycle action"_ustr, nullptr, 0);
+@@ -1575,6 +1590,12 @@ void SAL_CALL SdGenericDrawPage::setPropertyValue( const OUString& aPropertyName
+                     pEffect->setBegin(fOldDelay);
+                     pEffect->setNodeType(nOldNodeType);
+                 }
++                else if (aAction == u"timing")
++                {
++                    pEffect->setDuration(fDuration);
++                    pEffect->setBegin(fDelay);
++                    pEffect->setNodeType(nNodeType);
++                }
+                 else
+                     pSequence->moveToBeforeEffect(pEffect, pInsertBefore);
+             }

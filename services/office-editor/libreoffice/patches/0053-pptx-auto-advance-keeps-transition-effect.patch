@@ -1,0 +1,83 @@
+diff --git a/include/oox/ppt/slidetransitioncontext.hxx b/include/oox/ppt/slidetransitioncontext.hxx
+--- a/include/oox/ppt/slidetransitioncontext.hxx
++++ b/include/oox/ppt/slidetransitioncontext.hxx
+@@ -48,6 +48,7 @@ namespace oox::ppt {
+         PropertyMap&                    maSlideProperties;
+         bool                            mbHasTransition;
+         bool                            mbHasTransitionDuration;
++        bool                            mbHasAdvanceTime;
+         SlideTransition                 maTransition;
+     };
+ 
+diff --git a/oox/source/ppt/slidetransitioncontext.cxx b/oox/source/ppt/slidetransitioncontext.cxx
+--- a/oox/source/ppt/slidetransitioncontext.cxx
++++ b/oox/source/ppt/slidetransitioncontext.cxx
+@@ -35,6 +35,7 @@ SlideTransitionContext::SlideTransitionContext( FragmentHandler2 const & rParent
+ , maSlideProperties( aProperties )
+ , mbHasTransition( false )
+ , mbHasTransitionDuration( false )
++, mbHasAdvanceTime( false )
+ {
+     // ST_TransitionSpeed
+     maTransition.setOoxTransitionSpeed( rAttribs.getToken( XML_spd, XML_fast ) );
+@@ -58,7 +59,10 @@ SlideTransitionContext::SlideTransitionContext( FragmentHandler2 const & rParent
+     if(rAttribs.hasAttribute( XML_advTm ))
+     {
+         maTransition.setOoxAdvanceTime( rAttribs.getInteger( XML_advTm, -1 ) );
+-        mbHasTransition = true; // Timing-only <p:transition> has no effect child.
++        // A timing-only <p:transition> has no effect child. Track it
++        // separately: mbHasTransition marks the first effect element, and
++        // setting it here made every effect after advTm be ignored.
++        mbHasAdvanceTime = true;
+     }
+ }
+ 
+@@ -181,7 +185,7 @@ void SlideTransitionContext::onEndElement()
+ {
+     if( isCurrentElement(PPT_TOKEN( transition )) )
+     {
+-        if( mbHasTransition || mbHasTransitionDuration )
++        if( mbHasTransition || mbHasTransitionDuration || mbHasAdvanceTime )
+         {
+             maTransition.setSlideProperties( maSlideProperties );
+             mbHasTransition = false;
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -1366,6 +1366,36 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testDocumentStructureMetadataLineAndParagr
+     assertChanged(true);
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testAutoAdvanceKeepsTransitionEffectOnReload)
++{
++    createSdImpressDoc();
++    auto pImpressDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
++    CPPUNIT_ASSERT(pImpressDocument);
++    SdPage* pPage = pImpressDocument->GetDoc()->GetSdPage(0, PageKind::Standard);
++    CPPUNIT_ASSERT(pPage);
++    uno::Reference<beans::XPropertySet> xPageProperties(pPage->getUnoPage(),
++                                                        uno::UNO_QUERY_THROW);
++    xPageProperties->setPropertyValue(u"TransitionType"_ustr, uno::Any(sal_Int16(37)));
++    xPageProperties->setPropertyValue(u"TransitionSubtype"_ustr, uno::Any(sal_Int16(101)));
++    xPageProperties->setPropertyValue(u"HighResDuration"_ustr, uno::Any(5.0));
++    xPageProperties->setPropertyValue(u"Change"_ustr, uno::Any(sal_Int32(1)));
++
++    // advTm and the visual effect share one p:transition; reloading must keep both.
++    saveAndReload(TestFilter::PPTX);
++    pImpressDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
++    CPPUNIT_ASSERT(pImpressDocument);
++    pPage = pImpressDocument->GetDoc()->GetSdPage(0, PageKind::Standard);
++    CPPUNIT_ASSERT(pPage);
++    xPageProperties.set(pPage->getUnoPage(), uno::UNO_QUERY_THROW);
++    sal_Int16 nValue = 0;
++    CPPUNIT_ASSERT(xPageProperties->getPropertyValue(u"TransitionType"_ustr) >>= nValue);
++    CPPUNIT_ASSERT_EQUAL(sal_Int16(37), nValue);
++    CPPUNIT_ASSERT(xPageProperties->getPropertyValue(u"TransitionSubtype"_ustr) >>= nValue);
++    CPPUNIT_ASSERT_EQUAL(sal_Int16(101), nValue);
++    CPPUNIT_ASSERT_DOUBLES_EQUAL(5.0, pPage->GetTime(), 0.001);
++    CPPUNIT_ASSERT(pPage->GetPresChange() == PresChange::Auto);
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testDocumentStructureSectionsUndoRedoRoundtrip)
+ {
+     createSdImpressDoc();
