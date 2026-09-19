@@ -168,6 +168,18 @@ async function waitForProbe(frame, predicate, timeoutMs, message) {
 
 export async function verifySlideshowPlayback(page, expected) {
   const expectation = normalizeExpected(expected);
+  // The browser Office runtime is an editor without a slideshow player, so
+  // there is no web playback to observe on that surface. Say so explicitly
+  // instead of waiting for Collabora's player; the edit itself is still
+  // proven by Undo/Redo, save and reopen of the persisted PPTX.
+  if (new URL(page.url()).searchParams.get("browserProbe") === "1")
+    return {
+      kind: expectation.kind,
+      slideIndex: expectation.slideIndex,
+      actualWebPlayback: false,
+      surface: "browser-office",
+      reason: "browser_runtime_has_no_slideshow_player",
+    };
   const frame = await findOfficeFrame(page, expectation.timeoutMs);
   await frame.evaluate(({ kind, slideIndex, targetSlideIndex }) => {
     const presenter = window.app.map.slideShowPresenter;

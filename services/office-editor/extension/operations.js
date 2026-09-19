@@ -55,6 +55,12 @@ function spellbookDocumentOperation(request) {
     if (contract.availability === "format_excluded")
       throw new Error("operation_not_supported_for_pptx");
     if (
+      engineIdentity.engineImage === "browser-wasm" &&
+      Array.isArray(contract.unavailableIn) &&
+      contract.unavailableIn.includes("browser")
+    )
+      throw new Error("operation_not_available_in_browser_runtime");
+    if (
       !Number.isInteger(contract.minEnginePatch) ||
       contract.minEnginePatch < 0 ||
       (enginePatchVersion < contract.minEnginePatch &&
@@ -357,39 +363,52 @@ function spellbookDocumentOperation(request) {
     try {
       const cursor = text === "" ? shape : shape.createTextCursor();
       if (cursor !== shape) cursor.gotoEnd(true);
-      Object.assign(
-        states,
-        collectPropertyStates(cursor, [
-          ["fontFamily", "CharFontName"],
-          ["wholeTextFormatting.fontFamily", "CharFontName"],
-          ["wholeTextFormatting.fontFamilyAsian", "CharFontNameAsian"],
-          ["wholeTextFormatting.fontFamilyComplex", "CharFontNameComplex"],
-          ["fontSize", "CharHeight"],
-          ["wholeTextFormatting.fontSize", "CharHeight"],
-          ["wholeTextFormatting.fontSizeAsian", "CharHeightAsian"],
-          ["wholeTextFormatting.fontSizeComplex", "CharHeightComplex"],
-          ["fontWeight", "CharWeight"],
-          ["wholeTextFormatting.fontWeight", "CharWeight"],
-          ["wholeTextFormatting.fontWeightAsian", "CharWeightAsian"],
-          ["wholeTextFormatting.fontWeightComplex", "CharWeightComplex"],
-          ["fontStyle", "CharPosture"],
-          ["wholeTextFormatting.fontStyle", "CharPosture"],
-          ["wholeTextFormatting.fontStyleAsian", "CharPostureAsian"],
-          ["wholeTextFormatting.fontStyleComplex", "CharPostureComplex"],
-          ["underline", "CharUnderline"],
-          ["wholeTextFormatting.underline", "CharUnderline"],
-          ["strikethrough", "CharStrikeout"],
-          ["wholeTextFormatting.strikethrough", "CharStrikeout"],
-          ["textShadow", "CharShadowed"],
-          ["color", "CharColor"],
-          ["wholeTextFormatting.color", "CharColor"],
-          ["paragraphAlignment", "ParaAdjust"],
-          ["wholeTextFormatting.paragraphAlignment", "ParaAdjust"],
-          ["characterSpacing", "CharKerning"],
-          ["scriptPosition.escapement", "CharEscapement"],
-          ["scriptPosition.relativeHeight", "CharEscapementHeight"],
-        ]),
-      );
+      const textMappings = [
+        ["fontFamily", "CharFontName"],
+        ["wholeTextFormatting.fontFamily", "CharFontName"],
+        ["wholeTextFormatting.fontFamilyAsian", "CharFontNameAsian"],
+        ["wholeTextFormatting.fontFamilyComplex", "CharFontNameComplex"],
+        ["fontSize", "CharHeight"],
+        ["wholeTextFormatting.fontSize", "CharHeight"],
+        ["wholeTextFormatting.fontSizeAsian", "CharHeightAsian"],
+        ["wholeTextFormatting.fontSizeComplex", "CharHeightComplex"],
+        ["fontWeight", "CharWeight"],
+        ["wholeTextFormatting.fontWeight", "CharWeight"],
+        ["wholeTextFormatting.fontWeightAsian", "CharWeightAsian"],
+        ["wholeTextFormatting.fontWeightComplex", "CharWeightComplex"],
+        ["fontStyle", "CharPosture"],
+        ["wholeTextFormatting.fontStyle", "CharPosture"],
+        ["wholeTextFormatting.fontStyleAsian", "CharPostureAsian"],
+        ["wholeTextFormatting.fontStyleComplex", "CharPostureComplex"],
+        ["underline", "CharUnderline"],
+        ["wholeTextFormatting.underline", "CharUnderline"],
+        ["strikethrough", "CharStrikeout"],
+        ["wholeTextFormatting.strikethrough", "CharStrikeout"],
+        ["textShadow", "CharShadowed"],
+        ["color", "CharColor"],
+        ["wholeTextFormatting.color", "CharColor"],
+        ["paragraphAlignment", "ParaAdjust"],
+        ["wholeTextFormatting.paragraphAlignment", "ParaAdjust"],
+        ["characterSpacing", "CharKerning"],
+        ["scriptPosition.escapement", "CharEscapement"],
+        ["scriptPosition.relativeHeight", "CharEscapementHeight"],
+      ];
+      const textStates = collectPropertyStates(cursor, textMappings);
+      // Formatting applied with the object selected (a toolbar or .uno
+      // command) lives in the object's own item set, not in a text portion,
+      // so a whole-text cursor reports that authored value as DEFAULT_VALUE.
+      // Take the object's state so persistence checks keep the real change.
+      if (cursor !== shape) {
+        const objectStates = collectPropertyStates(
+          shape,
+          textMappings.filter(
+            ([field]) => textStates[field] === "DEFAULT_VALUE",
+          ),
+        );
+        for (const [field, state] of Object.entries(objectStates))
+          if (state === "DIRECT_VALUE") textStates[field] = state;
+      }
+      Object.assign(states, textStates);
     } catch (_) {}
     return states;
   };
@@ -435,18 +454,18 @@ function spellbookDocumentOperation(request) {
     }
   };
   // The public command contract follows PowerPoint and expresses character
-  // spacing in points. LibreOffice stores SvxKerningItem values in twips, but
-  // the native text transform accepts 1/100 mm before converting to twips.
-  // Keep those boundaries explicit so observations never leak engine units
-  // and table-cell edits do not accidentally treat 1/100 mm as twips.
-  const pointsToKerningTwips = (value) => Math.round(Number(value) * 20);
+  // spacing in points. Impress CharKerning is 1/100 mm: PPTX import converts
+  // a:rPr/@spc (1/100 pt) to 1/100 mm and export converts it back. Treating
+  // it as twips stored 2 pt as 1.11 pt, so every boundary converts through
+  // 1/100 mm and observations report points rounded to 0.01 pt.
   const pointsToKerningMm100 = (value) =>
     Math.round((Number(value) * 2540) / 72);
-  const mm100ToKerningTwips = (value) => Math.round((Number(value) * 72) / 127);
-  const kerningTwipsToPoints = (value) => {
+  const kerningMm100ToPoints = (value) => {
     if (value === null || value === undefined) return null;
     const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric / 20 : null;
+    return Number.isFinite(numeric)
+      ? Math.round((numeric * 7200) / 2540) / 100
+      : null;
   };
   const stableJson = (value) => {
     const normalize = (candidate) => {
@@ -594,7 +613,7 @@ function spellbookDocumentOperation(request) {
             strikethrough: textProperty("CharStrikeout"),
             textShadow: textProperty("CharShadowed"),
             color: textProperty("CharColor"),
-            characterSpacing: kerningTwipsToPoints(textProperty("CharKerning")),
+            characterSpacing: kerningMm100ToPoints(textProperty("CharKerning")),
             paragraphAlignment: textProperty("ParaAdjust"),
             textMargins: {
               left: safeProperty(cell, "TextLeftDistance"),
@@ -742,7 +761,7 @@ function spellbookDocumentOperation(request) {
               strikethrough: safeProperty(portion, "CharStrikeout"),
               shadow: safeProperty(portion, "CharShadowed"),
               color: safeProperty(portion, "CharColor"),
-              spacing: kerningTwipsToPoints(
+              spacing: kerningMm100ToPoints(
                 safeProperty(portion, "CharKerning"),
               ),
               escapement: safeProperty(portion, "CharEscapement"),
@@ -1383,12 +1402,22 @@ function spellbookDocumentOperation(request) {
     const diagramData = safeProperty(shape, "DiagramData");
     const engineMarksDiagram = safeProperty(shape, "IsDiagram") === true;
     const namedAsDiagram = /^Diagram(?:\s|$)/i.test(name);
+    const semanticDiagramEngine =
+      hasEnginePatch(24) || runtimeSupports("set_smartart_node");
     let nativeState = null;
-    try {
-      const serialized = safeProperty(shape, "SpellbookDiagramState");
-      if (typeof serialized === "string" && serialized.length <= 50000)
-        nativeState = JSON.parse(serialized);
-    } catch (_) {}
+    // SpellbookDiagramState is answered by the patched engine's
+    // getPropertyValue but is not listed in XPropertySetInfo, so the
+    // property preflight in safeProperty would always hide it. Read it
+    // directly, and only where the patched engine can answer.
+    if (
+      semanticDiagramEngine &&
+      (importedAsGroup || engineMarksDiagram || diagramData || namedAsDiagram)
+    )
+      try {
+        const serialized = shape.getPropertyValue("SpellbookDiagramState");
+        if (typeof serialized === "string" && serialized.length <= 50000)
+          nativeState = JSON.parse(serialized);
+      } catch (_) {}
     if (!engineMarksDiagram && !diagramData && !namedAsDiagram && !nativeState)
       return null;
     const semanticNodes = [];
@@ -1417,9 +1446,7 @@ function spellbookDocumentOperation(request) {
     else collectText(shape);
     return {
       importedAsGroup,
-      semanticModelAvailable:
-        Boolean(nativeState) &&
-        (hasEnginePatch(24) || runtimeSupports("set_smartart_node")),
+      semanticModelAvailable: Boolean(nativeState) && semanticDiagramEngine,
       sourcePreservationDataAvailable: Boolean(
         safeProperty(shape, "InteropGrabBag"),
       ),
@@ -1491,17 +1518,76 @@ function spellbookDocumentOperation(request) {
         }[enumToken(safeProperty(shape, "Zoom"))] ?? null,
     };
   };
-  const fontworkDetails = (shape) => {
-    const style = safeProperty(shape, "FontWorkStyle");
-    if (style === null) return null;
-    return {
-      style,
-      adjust: safeProperty(shape, "FontWorkAdjust"),
-      distance: safeProperty(shape, "FontWorkDistance"),
-      start: safeProperty(shape, "FontWorkStart"),
-      mirror: safeProperty(shape, "FontWorkMirror"),
-      outline: safeProperty(shape, "FontWorkOutline"),
-    };
+  // PowerPoint WordArt transforms (a:prstTxWarp) import as custom shapes
+  // whose geometry type is a fontwork-* preset with TextPath enabled, and
+  // export maps the type back through the same table
+  // (oox/source/drawingml/presetgeometrynames.cxx). LibreOffice's legacy
+  // FontWork* item properties have no PPTX representation.
+  const fontworkShapeTypes = {
+    textPlain: "fontwork-plain-text",
+    textStop: "fontwork-stop",
+    textTriangle: "fontwork-triangle-up",
+    textTriangleInverted: "fontwork-triangle-down",
+    textChevron: "fontwork-chevron-up",
+    textChevronInverted: "fontwork-chevron-down",
+    textRingInside: "mso-spt142",
+    textRingOutside: "mso-spt143",
+    textArchUp: "fontwork-arch-up-curve",
+    textArchDown: "fontwork-arch-down-curve",
+    textCircle: "fontwork-circle-curve",
+    textButton: "fontwork-open-circle-curve",
+    textArchUpPour: "fontwork-arch-up-pour",
+    textArchDownPour: "fontwork-arch-down-pour",
+    textCirclePour: "fontwork-circle-pour",
+    textButtonPour: "fontwork-open-circle-pour",
+    textCurveUp: "fontwork-curve-up",
+    textCurveDown: "fontwork-curve-down",
+    textCanUp: "mso-spt174",
+    textCanDown: "mso-spt175",
+    textWave1: "fontwork-wave",
+    textWave2: "mso-spt157",
+    textDoubleWave1: "mso-spt158",
+    textWave4: "mso-spt159",
+    textInflate: "fontwork-inflate",
+    textDeflate: "mso-spt161",
+    textInflateBottom: "mso-spt162",
+    textDeflateBottom: "mso-spt163",
+    textInflateTop: "mso-spt164",
+    textDeflateTop: "mso-spt165",
+    textDeflateInflate: "mso-spt166",
+    textDeflateInflateDeflate: "mso-spt167",
+    textFadeRight: "fontwork-fade-right",
+    textFadeLeft: "fontwork-fade-left",
+    textFadeUp: "fontwork-fade-up",
+    textFadeDown: "fontwork-fade-down",
+    textSlantUp: "fontwork-slant-up",
+    textSlantDown: "fontwork-slant-down",
+    textCascadeUp: "fontwork-fade-up-and-right",
+    textCascadeDown: "fontwork-fade-up-and-left",
+  };
+  const fontworkPresets = Object.fromEntries(
+    Object.entries(fontworkShapeTypes).map(([preset, type]) => [type, preset]),
+  );
+  const fontworkDetails = (shape, shapeKind) => {
+    if (!String(shapeKind).endsWith("CustomShape")) return null;
+    let geometry;
+    try {
+      geometry = Array.from(safeProperty(shape, "CustomShapeGeometry") ?? []);
+    } catch (_) {
+      return null;
+    }
+    const valueOf = (entries, name) =>
+      safeMember(
+        entries.find((entry) => safeMember(entry, "Name") === name),
+        "Value",
+      );
+    const preset = fontworkPresets[String(valueOf(geometry, "Type") ?? "")];
+    let textPath = [];
+    try {
+      textPath = Array.from(valueOf(geometry, "TextPath") ?? []);
+    } catch (_) {}
+    if (!preset || valueOf(textPath, "TextPath") !== true) return null;
+    return { preset };
   };
   const material3dDetails = (shape) => {
     const color = safeProperty(shape, "D3DMaterialColor");
@@ -1674,7 +1760,7 @@ function spellbookDocumentOperation(request) {
               top: safeProperty(shape, "TextUpperDistance"),
               bottom: safeProperty(shape, "TextLowerDistance"),
             },
-            characterSpacing: kerningTwipsToPoints(
+            characterSpacing: kerningMm100ToPoints(
               safeTextProperty(shape, "CharKerning"),
             ),
             scriptPosition: {
@@ -1723,7 +1809,7 @@ function spellbookDocumentOperation(request) {
             connector: connectorDetails(shape, shapeKind),
             freeform: freeformDetails(shape, shapeKind),
             media: mediaDetails(shape, shapeKind),
-            fontwork: fontworkDetails(shape),
+            fontwork: fontworkDetails(shape, shapeKind),
             material3d: material3dDetails(shape),
             equation: equationDetails(shape, shapeKind),
             // PPTX does not persist LibreOffice's separate navigation-order
@@ -4224,6 +4310,7 @@ function spellbookDocumentOperation(request) {
       if (
         !effect ||
         !Number.isInteger(effect.effectIndex) ||
+        !Number.isInteger(effect.sequenceIndex) ||
         typeof effect.preset?.id !== "string" ||
         !effect.preset.id ||
         effect.preset.id.length > 128
@@ -4244,6 +4331,7 @@ function spellbookDocumentOperation(request) {
         {
           [`SetAnimationTiming.${element.zIndex}`]: {
             EffectIndex: effect.effectIndex,
+            SequenceIndex: effect.sequenceIndex,
             ExpectedPresetId: effect.preset.id,
             Duration: command.duration,
             Delay: command.delay,
@@ -4786,12 +4874,10 @@ function spellbookDocumentOperation(request) {
       )
         throw new Error("unsupported_character_spacing_target");
 
-      // The typed engine command accepts 1/100 mm, then stores kerning in
-      // integer twips. Readback is normalized back to PowerPoint points.
+      // The typed engine command stores kerning in 1/100 mm, the unit of
+      // Impress CharKerning. Readback is normalized back to PowerPoint points.
       const nativeSpacing = pointsToKerningMm100(command.spacing);
-      const expectedSpacing = kerningTwipsToPoints(
-        mm100ToKerningTwips(nativeSpacing),
-      );
+      const expectedSpacing = kerningMm100ToPoints(nativeSpacing);
       const beforeDetails = read(slideIndex);
       const beforePortions =
         beforeDetails.textDetails.elements
@@ -5195,7 +5281,6 @@ function spellbookDocumentOperation(request) {
       "set_object_lock",
       "set_line_style",
       "set_media_playback",
-      "set_fontwork",
       "set_3d_material",
       "set_printable",
     ]);
@@ -5482,37 +5567,6 @@ function spellbookDocumentOperation(request) {
           properties.VolumeDB = playback.volumeDb;
         if (playback.zoom !== null && playback.zoom !== undefined)
           properties.Zoom = zoomValues[playback.zoom];
-      } else if (command.op === "set_fontwork") {
-        const fontwork = command.fontwork;
-        const definitions = {
-          style: ["FontWorkStyle", 0, 6, "integer"],
-          adjust: ["FontWorkAdjust", 0, 3, "integer"],
-          distance: ["FontWorkDistance", -100000, 100000, "integer"],
-          start: ["FontWorkStart", -100000, 100000, "integer"],
-          mirror: ["FontWorkMirror", null, null, "boolean"],
-          outline: ["FontWorkOutline", null, null, "boolean"],
-        };
-        if (
-          !element.fontwork ||
-          !fontwork ||
-          typeof fontwork !== "object" ||
-          Array.isArray(fontwork) ||
-          Object.keys(fontwork).some(
-            (name) => !Object.hasOwn(definitions, name),
-          )
-        )
-          throw new Error("invalid_fontwork");
-        for (const [name, value] of Object.entries(fontwork)) {
-          if (value === null || value === undefined) continue;
-          const [propertyName, minimum, maximum, type] = definitions[name];
-          if (
-            (type === "boolean" && typeof value !== "boolean") ||
-            (type === "integer" &&
-              (!Number.isInteger(value) || !finite(value, minimum, maximum)))
-          )
-            throw new Error("invalid_fontwork");
-          properties[propertyName] = value;
-        }
       } else if (command.op === "set_3d_material") {
         const material = command.material3d;
         const definitions = {
@@ -5599,12 +5653,6 @@ function spellbookDocumentOperation(request) {
             7: "zoom_2_to_1",
             8: "zoom_4_to_1",
           })[value] === target.media?.zoom,
-        FontWorkStyle: ["fontwork", "style"],
-        FontWorkAdjust: ["fontwork", "adjust"],
-        FontWorkDistance: ["fontwork", "distance"],
-        FontWorkStart: ["fontwork", "start"],
-        FontWorkMirror: ["fontwork", "mirror"],
-        FontWorkOutline: ["fontwork", "outline"],
         D3DMaterialColor: ["material3d", "color"],
         D3DMaterialEmission: ["material3d", "emission"],
         D3DMaterialSpecular: ["material3d", "specular"],
@@ -5812,8 +5860,8 @@ function spellbookDocumentOperation(request) {
         format.characterSpacing !== null &&
         format.characterSpacing !== undefined
       ) {
-        properties.CharKerning = pointsToKerningTwips(format.characterSpacing);
-        expected.characterSpacing = kerningTwipsToPoints(
+        properties.CharKerning = pointsToKerningMm100(format.characterSpacing);
+        expected.characterSpacing = kerningMm100ToPoints(
           properties.CharKerning,
         );
       }
@@ -7468,6 +7516,15 @@ function spellbookDocumentOperation(request) {
       throw new Error("invalid_strikethrough");
     if (command.op === "text_shadow" && typeof command.shadow !== "boolean")
       throw new Error("invalid_text_shadow");
+    const fontworkShapeType =
+      command.op === "set_fontwork"
+        ? fontworkShapeTypes[command.fontwork?.preset]
+        : null;
+    if (
+      command.op === "set_fontwork" &&
+      (typeof fontworkShapeType !== "string" || !element.fontwork)
+    )
+      throw new Error("invalid_fontwork");
     if (
       ["fill_opacity", "line_opacity"].includes(command.op) &&
       !finite(command.opacity, 0, 100)
@@ -7533,6 +7590,7 @@ function spellbookDocumentOperation(request) {
       "ungroup",
       "duplicate_element",
       "delete_element",
+      "set_fontwork",
     ];
     if (!supported.includes(command.op)) throw new Error("unsupported_command");
     if (request.dryRun) return result(before, before.activeSlide);
@@ -7637,32 +7695,34 @@ function spellbookDocumentOperation(request) {
                         command.strikethrough
                       : command.op === "text_shadow"
                         ? element.textShadow === command.shadow
-                        : command.op === "font_family"
-                          ? typedTextFormattingMatches(before)
-                          : command.op === "font_color"
-                            ? wholeTextFormat(before)?.color ===
-                              Math.round(command.color)
-                            : command.op === "fill_color"
-                              ? element.fill === Math.round(command.color)
-                              : command.op === "line_color"
-                                ? element.lineColor ===
-                                  Math.round(command.color)
-                                : command.op === "line_width"
-                                  ? element.lineWidth ===
-                                    Math.round(command.size * 100)
-                                  : command.op === "fill_opacity"
-                                    ? element.fillOpacity ===
-                                      Math.round(command.opacity)
-                                    : command.op === "line_opacity"
-                                      ? element.lineOpacity ===
+                        : command.op === "set_fontwork"
+                          ? element.fontwork?.preset === command.fontwork.preset
+                          : command.op === "font_family"
+                            ? typedTextFormattingMatches(before)
+                            : command.op === "font_color"
+                              ? wholeTextFormat(before)?.color ===
+                                Math.round(command.color)
+                              : command.op === "fill_color"
+                                ? element.fill === Math.round(command.color)
+                                : command.op === "line_color"
+                                  ? element.lineColor ===
+                                    Math.round(command.color)
+                                  : command.op === "line_width"
+                                    ? element.lineWidth ===
+                                      Math.round(command.size * 100)
+                                    : command.op === "fill_opacity"
+                                      ? element.fillOpacity ===
                                         Math.round(command.opacity)
-                                      : command.op === "text_autofit"
-                                        ? autofit(element.textFitToSize) ===
-                                          command.autofit
-                                        : command.op === "rotate"
-                                          ? element.rotation ===
-                                            Math.round(command.degrees * 100)
-                                          : false;
+                                      : command.op === "line_opacity"
+                                        ? element.lineOpacity ===
+                                          Math.round(command.opacity)
+                                        : command.op === "text_autofit"
+                                          ? autofit(element.textFitToSize) ===
+                                            command.autofit
+                                          : command.op === "rotate"
+                                            ? element.rotation ===
+                                              Math.round(command.degrees * 100)
+                                            : false;
     if (unchanged) return result(before, slideIndex);
 
     const shape = resolveShape(command.elementId);
@@ -7738,6 +7798,12 @@ function spellbookDocumentOperation(request) {
     else if (command.op === "text_shadow")
       dispatch(".uno:Shadowed", [
         prop("Shadowed", uno.type.boolean, command.shadow),
+      ]);
+    else if (command.op === "set_fontwork")
+      // The Fontwork toolbar command replaces the preset geometry, resets its
+      // handles to the preset defaults and records one native Undo action.
+      dispatch(".uno:FontworkShapeType", [
+        prop("FontworkShapeType", uno.type.string, fontworkShapeType),
       ]);
     else if (command.op === "font_color")
       dispatch(".uno:Color", [
@@ -7891,48 +7957,51 @@ function spellbookDocumentOperation(request) {
                         command.strikethrough
                       : command.op === "text_shadow"
                         ? target?.textShadow === command.shadow
-                        : command.op === "font_family"
-                          ? typedTextFormattingMatches(after)
-                          : command.op === "font_color"
-                            ? wholeTextFormat(after)?.color ===
-                              Math.round(command.color)
-                            : command.op === "fill_color"
-                              ? target?.fill === Math.round(command.color)
-                              : command.op === "line_color"
-                                ? target?.lineColor ===
-                                  Math.round(command.color)
-                                : command.op === "line_width"
-                                  ? target?.lineWidth ===
-                                    Math.round(command.size * 100)
-                                  : command.op === "fill_opacity"
-                                    ? target?.fillOpacity ===
-                                      Math.round(command.opacity)
-                                    : command.op === "line_opacity"
-                                      ? target?.lineOpacity ===
+                        : command.op === "set_fontwork"
+                          ? target?.fontwork?.preset === command.fontwork.preset
+                          : command.op === "font_family"
+                            ? typedTextFormattingMatches(after)
+                            : command.op === "font_color"
+                              ? wholeTextFormat(after)?.color ===
+                                Math.round(command.color)
+                              : command.op === "fill_color"
+                                ? target?.fill === Math.round(command.color)
+                                : command.op === "line_color"
+                                  ? target?.lineColor ===
+                                    Math.round(command.color)
+                                  : command.op === "line_width"
+                                    ? target?.lineWidth ===
+                                      Math.round(command.size * 100)
+                                    : command.op === "fill_opacity"
+                                      ? target?.fillOpacity ===
                                         Math.round(command.opacity)
-                                      : command.op === "text_autofit"
-                                        ? autofit(target?.textFitToSize) ===
-                                          command.autofit
-                                        : command.op === "rotate"
-                                          ? target?.rotation ===
-                                            Math.round(command.degrees * 100)
-                                          : structuralOrDispatch
-                                            ? documentStateJson(
-                                                before.slides,
-                                              ) !==
-                                              documentStateJson(after.slides)
-                                            : command.op === "duplicate_element"
-                                              ? duplicate !== null &&
-                                                duplicateComparable(
-                                                  duplicate,
-                                                ) ===
-                                                  duplicateComparable(element)
-                                              : !target &&
-                                                after.slides[slideIndex]
-                                                  .topLevelElementCount ===
-                                                  before.slides[slideIndex]
-                                                    .topLevelElementCount -
-                                                    1;
+                                      : command.op === "line_opacity"
+                                        ? target?.lineOpacity ===
+                                          Math.round(command.opacity)
+                                        : command.op === "text_autofit"
+                                          ? autofit(target?.textFitToSize) ===
+                                            command.autofit
+                                          : command.op === "rotate"
+                                            ? target?.rotation ===
+                                              Math.round(command.degrees * 100)
+                                            : structuralOrDispatch
+                                              ? documentStateJson(
+                                                  before.slides,
+                                                ) !==
+                                                documentStateJson(after.slides)
+                                              : command.op ===
+                                                  "duplicate_element"
+                                                ? duplicate !== null &&
+                                                  duplicateComparable(
+                                                    duplicate,
+                                                  ) ===
+                                                    duplicateComparable(element)
+                                                : !target &&
+                                                  after.slides[slideIndex]
+                                                    .topLevelElementCount ===
+                                                    before.slides[slideIndex]
+                                                      .topLevelElementCount -
+                                                      1;
     const intrinsic = (value) => {
       const copy = { ...value };
       delete copy.alignedWith;
@@ -8002,7 +8071,11 @@ function spellbookDocumentOperation(request) {
     } catch (_) {}
     // Editing text inside a box selects a text range; its text is the box.
     try {
-      if (!chosen.length && selection && typeof selection.getText === "function")
+      if (
+        !chosen.length &&
+        selection &&
+        typeof selection.getText === "function"
+      )
         chosen.push(selection.getText());
     } catch (_) {}
     const isChosen = (shape) =>
@@ -8037,16 +8110,14 @@ function spellbookDocumentOperation(request) {
       selected,
       // What this engine can edit, so the request box only suggests edits
       // that would run here.
-      editableOperations: Object.keys(mutationContracts).filter(
-        (operation) => {
-          try {
-            mutationContractFor(operation);
-            return true;
-          } catch (_) {
-            return false;
-          }
-        },
-      ),
+      editableOperations: Object.keys(mutationContracts).filter((operation) => {
+        try {
+          mutationContractFor(operation);
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }),
     };
   }
   if (request.operation === "reveal") {

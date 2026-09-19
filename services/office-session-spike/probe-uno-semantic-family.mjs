@@ -23,15 +23,7 @@ const { chromium } = require("@playwright/test");
 const url = process.argv[2] ?? "http://localhost:3190";
 const reportPath = process.argv[3] ? path.resolve(process.argv[3]) : null;
 const scenario = process.argv[4];
-if (
-  ![
-    "semantic-assets",
-    "smartart-diagram",
-    "fontwork",
-    "object-3d",
-    "equation",
-  ].includes(scenario)
-)
+if (!["semantic-assets", "smartart-diagram", "fontwork"].includes(scenario))
   throw new Error("A known semantic feature scenario is required.");
 
 const expectedOperations = process.env.SPELLBOOK_PROBE_EXPECTED_OPERATIONS
@@ -201,59 +193,65 @@ try {
       throw new Error(
         "Image replacement did not preserve the target identity and change its content.",
       );
-    await editWithHistory(
-      { op: "insert_media", assetId: MEDIA_ASSET_ID, slideIndex },
-      true,
-    );
-    let media = topLevelElements().find((element) => element.media);
-    if (!media) throw new Error("Inserted media was not observed.");
-    await editWithHistory({
-      op: "set_media_playback",
-      elementId: media.elementId,
-      mediaPlayback: {
-        loop: media.media.loop !== true,
-        muted: media.media.muted !== true,
-        volumeDb: -1200,
-        zoom: "fit",
-      },
-    });
-    media = topLevelElements().find(
-      (element) => element.stableId === media.stableId,
-    );
-    if (!media) throw new Error("Edited media was not observable.");
-    const mediaStableId = media.stableId;
-    const mediaSourceId = media.media.sourceId;
-    const mediaPlayback = {
-      loop: media.media.loop,
-      muted: media.media.muted,
-      volumeDb: media.media.volumeDb,
-      zoom: media.media.zoom,
-    };
-    await editWithHistory(
-      {
-        op: "replace_media",
-        assetId: REPLACEMENT_MEDIA_ASSET_ID,
+    // A runtime that cannot host media (the browser build compiles avmedia
+    // out) is planned without the media operations; follow that plan.
+    const runsMedia =
+      !expectedOperations || expectedOperations.includes("insert_media");
+    if (runsMedia) {
+      await editWithHistory(
+        { op: "insert_media", assetId: MEDIA_ASSET_ID, slideIndex },
+        true,
+      );
+      let media = topLevelElements().find((element) => element.media);
+      if (!media) throw new Error("Inserted media was not observed.");
+      await editWithHistory({
+        op: "set_media_playback",
         elementId: media.elementId,
-        slideIndex,
-      },
-      true,
-    );
-    media = topLevelElements().find(
-      (element) => element.stableId === mediaStableId,
-    );
-    if (
-      !media ||
-      media.media.sourceId === mediaSourceId ||
-      stable({
+        mediaPlayback: {
+          loop: media.media.loop !== true,
+          muted: media.media.muted !== true,
+          volumeDb: -1200,
+          zoom: "fit",
+        },
+      });
+      media = topLevelElements().find(
+        (element) => element.stableId === media.stableId,
+      );
+      if (!media) throw new Error("Edited media was not observable.");
+      const mediaStableId = media.stableId;
+      const mediaSourceId = media.media.sourceId;
+      const mediaPlayback = {
         loop: media.media.loop,
         muted: media.media.muted,
         volumeDb: media.media.volumeDb,
         zoom: media.media.zoom,
-      }) !== stable(mediaPlayback)
-    )
-      throw new Error(
-        "Media replacement did not preserve target identity and playback settings while changing content.",
+      };
+      await editWithHistory(
+        {
+          op: "replace_media",
+          assetId: REPLACEMENT_MEDIA_ASSET_ID,
+          elementId: media.elementId,
+          slideIndex,
+        },
+        true,
       );
+      media = topLevelElements().find(
+        (element) => element.stableId === mediaStableId,
+      );
+      if (
+        !media ||
+        media.media.sourceId === mediaSourceId ||
+        stable({
+          loop: media.media.loop,
+          muted: media.media.muted,
+          volumeDb: media.media.volumeDb,
+          zoom: media.media.zoom,
+        }) !== stable(mediaPlayback)
+      )
+        throw new Error(
+          "Media replacement did not preserve target identity and playback settings while changing content.",
+        );
+    }
   } else if (scenario === "smartart-diagram") {
     let diagram = topLevelElements().find(
       (element) =>
@@ -293,48 +291,19 @@ try {
     });
   } else if (scenario === "fontwork") {
     const target = topLevelElements().find((element) => element.fontwork);
-    if (!target) throw new Error("No Fontwork object was observed.");
+    if (!target) throw new Error("No WordArt transform was observed.");
+    const preset =
+      target.fontwork.preset === "textArchUp" ? "textCurveDown" : "textArchUp";
     await editWithHistory({
       op: "set_fontwork",
       elementId: target.elementId,
-      fontwork: {
-        style: target.fontwork.style,
-        adjust: target.fontwork.adjust,
-        distance: Number(target.fontwork.distance ?? 0) + 50,
-        start: target.fontwork.start,
-        mirror: target.fontwork.mirror,
-        outline: target.fontwork.outline !== true,
-      },
+      fontwork: { preset },
     });
-  } else if (scenario === "object-3d") {
-    const target = topLevelElements().find((element) => element.material3d);
-    if (!target) throw new Error("No editable 3D material was observed.");
-    await editWithHistory({
-      op: "set_3d_material",
-      elementId: target.elementId,
-      material3d: {
-        color:
-          Number(target.material3d.color ?? 0) === 0x336699
-            ? 0x663399
-            : 0x336699,
-        emission: target.material3d.emission,
-        specular: target.material3d.specular,
-        specularIntensity: Math.min(
-          100,
-          Number(target.material3d.specularIntensity ?? 0) + 1,
-        ),
-        doubleSided: target.material3d.doubleSided !== true,
-      },
-    });
-  } else if (scenario === "equation") {
-    const target = topLevelElements().find((element) => element.equation);
-    if (!target) throw new Error("No editable equation was observed.");
-    const source = String(target.equation.source ?? "").trim();
-    await editWithHistory({
-      op: "set_equation_source",
-      elementId: target.elementId,
-      equationSource: source ? `{ ${source} } + 1` : "1 + 1",
-    });
+    const changed = topLevelElements().find(
+      (element) => element.stableId === target.stableId,
+    );
+    if (changed?.fontwork?.preset !== preset)
+      throw new Error("WordArt transform preset was not applied.");
   }
 
   const verifiedOperations = [...new Set(operations)].sort();

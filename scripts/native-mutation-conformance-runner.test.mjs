@@ -49,7 +49,7 @@ test("execution plan assigns a real PPTX and bounded operation routes to every s
   const plan = buildConformancePlan(capabilities, conformance);
   const scenarios = buildScenarioExecutionPlan(capabilities, conformance, plan);
 
-  assert.equal(scenarios.length, 15);
+  assert.equal(scenarios.length, 13);
   assert.equal(scenarios[0].name, "table-structure");
   assert.equal(scenarios.at(-1).name, "general-native-surface");
   scenarios.forEach(assertPinnedPublicSource);

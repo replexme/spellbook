@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { buildConformancePlan } from "../../scripts/native-mutation-conformance.mjs";
 import {
   candidateBrowserReportErrors,
   candidateNativeConformanceErrors,
@@ -41,9 +42,12 @@ const conformance = JSON.parse(
     "utf8",
   ),
 );
-const nativeOperations = Object.entries(capabilities.mutationModel.operations)
-  .filter(([, operation]) => operation.availability !== "format_excluded")
-  .map(([operation]) => operation)
+const browserPlan = buildConformancePlan(capabilities, conformance, {
+  enginePatchLevel: conformance.enginePatchLevel,
+  runtime: "browser",
+});
+const nativeOperations = Object.values(browserPlan.families)
+  .flatMap((family) => family.operations)
   .sort();
 
 test("PowerPoint admission requires the complete receipt-bound endurance report", () => {
@@ -103,7 +107,7 @@ test("PowerPoint admission requires the complete receipt-bound endurance report"
 });
 
 test("PowerPoint admission also requires every typed native operation", () => {
-  const scenarios = conformance.executionOrder.map((scenario) => ({
+  const scenarios = Object.keys(browserPlan.scenarios).map((scenario) => ({
     scenario,
     status: "passed",
     baseline: { sha256: "b".repeat(64), reopened: true },
@@ -144,6 +148,6 @@ test("PowerPoint admission also requires every typed native operation", () => {
       ...report,
       scenarios: scenarios.slice(1),
     }).join("; "),
-    /all 15 contract scenarios/u,
+    /all 12 contract scenarios/u,
   );
 });

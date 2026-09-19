@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
+import { formatCanonicalDifferences } from "./persistence-evidence.mjs";
 import { createRequire } from "node:module";
 import path from "node:path";
 
@@ -64,10 +65,14 @@ try {
     .find((element) => element.objectName === expected.objectName);
   const differences = expected.cells.flatMap(({ row, column, cell }) => {
     const actual = table?.table?.cellDetails?.[row]?.[column];
-    return JSON.stringify(persistedCellValues(actual)) ===
-      JSON.stringify(persistedCellValues(cell))
-      ? []
-      : [{ row, column, expected: cell, actual }];
+    const cellDifferences = formatCanonicalDifferences(
+      persistedCellValues(cell),
+      persistedCellValues(actual),
+      { path: `$.cells[${row}][${column}]` },
+    );
+    return cellDifferences.length
+      ? [{ row, column, differences: cellDifferences, expected: cell, actual }]
+      : [];
   });
   if (differences.length)
     throw new Error(

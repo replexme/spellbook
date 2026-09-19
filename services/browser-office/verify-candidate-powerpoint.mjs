@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { compareEditorImage } from "../../scripts/evaluate-office-editor-corpus.mjs";
 import { detectImageMagick } from "../../scripts/evaluate-render-corpus.mjs";
 import { exportPowerPointReferences } from "../../scripts/export-powerpoint-references.mjs";
+import { buildConformancePlan } from "../../scripts/native-mutation-conformance.mjs";
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
@@ -45,14 +46,21 @@ const nativeConformance = JSON.parse(
     "utf8",
   ),
 );
+// The browser candidate is admitted against the browser plan: operations the
+// contract marks unavailable in that runtime (media, WordArt) and scenarios
+// left without operations are not required of it.
+const browserNativePlan = buildConformancePlan(
+  nativeCapabilities,
+  nativeConformance,
+  { enginePatchLevel: nativeConformance.enginePatchLevel, runtime: "browser" },
+);
 const requiredNativeOperations = Object.freeze(
-  Object.entries(nativeCapabilities.mutationModel.operations)
-    .filter(([, operation]) => operation.availability !== "format_excluded")
-    .map(([operation]) => operation)
+  Object.values(browserNativePlan.families)
+    .flatMap((family) => family.operations)
     .sort(),
 );
 const requiredNativeScenarios = Object.freeze(
-  nativeConformance.executionOrder.slice().sort(),
+  Object.keys(browserNativePlan.scenarios).sort(),
 );
 
 export function candidateBrowserReportErrors(report) {

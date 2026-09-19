@@ -6,9 +6,16 @@
   const mutationContracts = global.spellbookMutationContracts;
   if (!mutationContracts || typeof mutationContracts !== "object")
     throw new Error("Browser native mutation contract is unavailable.");
+  // Format-excluded operations are never offered; operations the contract
+  // marks unavailable in the browser runtime (for example media, whose avmedia
+  // module the WASM build compiles out) are not advertised by this engine.
   const candidateOperations = Object.freeze(
     Object.entries(mutationContracts)
-      .filter(([, contract]) => contract.availability !== "format_excluded")
+      .filter(
+        ([, contract]) =>
+          contract.availability !== "format_excluded" &&
+          !(contract.unavailableIn ?? []).includes("browser"),
+      )
       .map(([operation]) => operation),
   );
 
@@ -555,22 +562,22 @@
           const timing = assertRecord(value, "Browser animation timing");
           assertExactKeys(
             timing,
-            ["EffectIndex", "ExpectedPresetId", "Duration", "Delay", "Start"],
+            [
+              "EffectIndex",
+              "SequenceIndex",
+              "ExpectedPresetId",
+              "Duration",
+              "Delay",
+              "Start",
+            ],
             "Browser animation timing",
           );
-          const targetPath = parsePath(
-            key.slice("SetAnimationTiming.".length),
-            "Browser animation target",
-          );
-          const target = resolveShape(
-            state.currentPage,
-            targetPath,
-            "Browser animation target",
-          );
+          const objectPath = key.slice("SetAnimationTiming.".length);
+          parsePath(objectPath, "Browser animation target");
           if (
-            !Number.isSafeInteger(timing.EffectIndex) ||
-            timing.EffectIndex < 0 ||
-            timing.EffectIndex > 99 ||
+            !Number.isSafeInteger(timing.SequenceIndex) ||
+            timing.SequenceIndex < 0 ||
+            timing.SequenceIndex > 199 ||
             typeof timing.ExpectedPresetId !== "string" ||
             !timing.ExpectedPresetId ||
             timing.ExpectedPresetId.length > 128 ||
@@ -587,68 +594,29 @@
             )
           )
             throw new Error("Browser animation timing is invalid.");
-          const root = state.currentPage.getAnimationNode();
-          const childrenOf = (node) => {
-            const children = [];
-            try {
-              const enumeration = node.createEnumeration();
-              while (enumeration.hasMoreElements())
-                children.push(enumeration.nextElement());
-            } catch {}
-            return children;
-          };
-          const sameTarget = (candidate) => {
-            const paragraphShape = candidate?.Shape;
-            try {
-              return uno.sameUnoObject(paragraphShape || candidate, target);
-            } catch {
-              return false;
-            }
-          };
-          const containsTarget = (node) =>
-            sameTarget(node?.Target) ||
-            childrenOf(node).some((child) => containsTarget(child));
-          const presetId = (node) =>
-            Array.from(node?.UserData ?? []).find(
-              (entry) => entry?.Name === "preset-id",
-            )?.Value;
-          const effects = [];
-          const collect = (node) => {
-            if (
-              presetId(node) === timing.ExpectedPresetId &&
-              containsTarget(node)
-            )
-              effects.push(node);
-            for (const child of childrenOf(node)) collect(child);
-          };
-          collect(root);
-          const effect = effects[timing.EffectIndex];
-          if (!effect)
-            throw new Error("Browser animation effect no longer matches.");
-          const semanticType = {
-            "on-click": 1,
-            "with-previous": 2,
-            "after-previous": 3,
-          }[timing.Start];
+          // Writing XAnimationNode members directly changed the slide without
+          // any native Undo action. The engine command records UndoAnimation
+          // and applies the effect's own setters, as the server command does.
           return {
             mutates: true,
-            apply: () => {
-              const setMember = (name, value) => {
-                const setter = effect[`set${name}`];
-                if (typeof setter === "function") setter.call(effect, value);
-                else effect[name] = value;
-              };
-              setMember("Duration", any("double", timing.Duration));
-              setMember("Begin", any("double", timing.Delay));
-              const userData = Array.from(effect.UserData ?? []);
-              const nodeType = userData.find(
-                (entry) => entry?.Name === "node-type",
-              );
-              if (!nodeType)
-                throw new Error("Browser animation start metadata is missing.");
-              nodeType.Value = semanticType;
-              setMember("UserData", userData);
-            },
+            nativeUndoManaged: true,
+            apply: () =>
+              state.currentPage.setPropertyValue(
+                "SpellbookAnimationCommand",
+                propertySequence([
+                  propertyValue("Action", "string", "timing"),
+                  propertyValue("ObjectPath", "string", objectPath),
+                  propertyValue("SequenceIndex", "long", timing.SequenceIndex),
+                  propertyValue(
+                    "ExpectedPresetId",
+                    "string",
+                    timing.ExpectedPresetId,
+                  ),
+                  propertyValue("Duration", "double", timing.Duration),
+                  propertyValue("Delay", "double", timing.Delay),
+                  propertyValue("Start", "string", timing.Start),
+                ]),
+              ),
           };
         },
       },
@@ -994,11 +962,9 @@
               properties.Kerning > 32767
             )
               throw new Error("Browser text kerning is invalid.");
-            addWrite(
-              "CharKerning",
-              "short",
-              Math.round((properties.Kerning * 72 * 20) / 2540),
-            );
+            // Kerning arrives in 1/100 mm, which is also the unit of Impress
+            // CharKerning; converting it to twips stored 57% of the request.
+            addWrite("CharKerning", "short", properties.Kerning);
           }
           if (Object.hasOwn(properties, "LanguageTag")) {
             if (

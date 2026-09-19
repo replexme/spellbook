@@ -14,9 +14,9 @@ const conformance = JSON.parse(
 test("native mutation plan covers every operation through family fixtures", () => {
   const plan = buildConformancePlan(capabilities, conformance);
 
-  assert.equal(plan.summary.operations, 97);
-  assert.equal(plan.summary.families, 24);
-  assert.equal(plan.summary.scenarios, 15);
+  assert.equal(plan.summary.operations, 95);
+  assert.equal(plan.summary.families, 22);
+  assert.equal(plan.summary.scenarios, 13);
   assert.equal(plan.summary.nativeTests, 32);
   assert.equal(Object.keys(plan.scenarios)[0], "table-structure");
   assert.equal(Object.keys(plan.scenarios).at(-1), "general-native-surface");

@@ -46,6 +46,41 @@ export function classifyNativePackagePart(part) {
   return "unknown";
 }
 
+// Direct human edits may use any LibreOffice feature, so they are not bound
+// to one command family. Macros and unrecognized package parts still stay out
+// of a saved candidate, matching the server's human-save policy.
+const humanEditCategories = [
+  "package_manifest",
+  "package_relationships",
+  "document_properties",
+  "presentation",
+  "presentation_relationships",
+  "slide_parts",
+  "slide_relationships",
+  "notes_parts",
+  "notes_relationships",
+  "notes_master_parts",
+  "notes_master_relationships",
+  "slide_layout_parts",
+  "slide_layout_relationships",
+  "slide_master_parts",
+  "slide_master_relationships",
+  "theme_parts",
+  "chart_parts",
+  "embedded_workbooks",
+  "media_parts",
+  "diagram_parts",
+  "custom_xml",
+  "comments",
+];
+
+export function humanEditPreservationBudget() {
+  return {
+    allowedCategories: new Set(humanEditCategories),
+    allowPartCreationOrDeletion: true,
+  };
+}
+
 export function nativePreservationBudget(operations) {
   if (
     !Array.isArray(operations) ||

@@ -420,6 +420,15 @@ function ooxmlAnimationTime(seconds) {
   return Math.trunc(seconds * 1_000 + Number.EPSILON) / 1_000;
 }
 
+// PPTX stores character spacing (a:rPr/@spc) in 1/100 pt and Impress stores
+// CharKerning in 1/100 mm. LibreOffice truncates in both directions, so one
+// save/reopen cycle can move the value by one 1/100 mm unit (~0.03 pt), below
+// PowerPoint's 0.1 pt spacing precision. A larger change remains a failure.
+function characterSpacingEquivalent(expected, observed) {
+  const mm100 = (points) => Math.round((points * 2540) / 72);
+  return Math.abs(mm100(expected) - mm100(observed)) <= 1;
+}
+
 function isFormatCanonicalEquivalent(expected, observed, path) {
   const numeric =
     typeof expected === "number" &&
@@ -433,10 +442,35 @@ function isFormatCanonicalEquivalent(expected, observed, path) {
     /\.table\.(?:rowHeights|columnWidths)\[\d+\]$/.test(path)
   )
     return quantizedGeometryEquivalent(expected, observed);
+  if (/(?:^|\.)(?:characterSpacing|spacing)$/.test(path))
+    return characterSpacingEquivalent(expected, observed);
   return (
     isAnimationTreeTime(path) &&
     Object.is(ooxmlAnimationTime(expected), observed)
   );
+}
+
+/**
+ * Exact comparison that accepts only the documented format quantization
+ * (geometry, animation times and character spacing). Reopen probes that check
+ * a subset of the document use this instead of raw JSON equality.
+ */
+export function formatCanonicalDifferences(
+  expected,
+  observed,
+  { path = "$", limit = 20 } = {},
+) {
+  const differences = [];
+  collectExactDifferences(
+    expected,
+    observed,
+    path,
+    "format-canonical",
+    differences,
+    limit,
+    true,
+  );
+  return differences;
 }
 
 function intendedDifference(expected, observed, path) {
@@ -527,6 +561,10 @@ function collectPersistenceDeltaDifferences(
 ) {
   if (differences.length >= limit) return;
   if (!firstPersistenceDifference(before, expected)) {
+    // The preserved candidate keeps the author's original XML for untouched
+    // objects, while the no-op baseline is the engine's own re-export. Both
+    // reopen through the same importer, so only the documented format
+    // quantization (not any other value) may differ here.
     collectExactDifferences(
       baseline,
       observed,
@@ -534,7 +572,7 @@ function collectPersistenceDeltaDifferences(
       "unchanged-after-normalization",
       differences,
       limit,
-      false,
+      true,
     );
     return;
   }

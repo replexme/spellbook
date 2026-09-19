@@ -111,6 +111,10 @@ export function buildScenarioExecutionPlan(
     .filter(
       ([, operation]) =>
         operation.availability !== "format_excluded" &&
+        !(
+          conformancePlan.runtime &&
+          (operation.unavailableIn ?? []).includes(conformancePlan.runtime)
+        ) &&
         operation.minEnginePatch <= conformancePlan.enginePatchLevel,
     )
     .map(([name, operation]) => [name, operation]);
@@ -118,7 +122,8 @@ export function buildScenarioExecutionPlan(
   return Object.entries(conformancePlan.scenarios).map(([name, scenario]) => {
     const routedFamilies = Object.entries(capabilities.mutationModel.families)
       .filter(([, family]) =>
-        conformance.fixtures[family.fixture].scenarios.includes(name),
+        // Families whose operations are all format-excluded have no fixture.
+        Boolean(conformance.fixtures[family.fixture]?.scenarios.includes(name)),
       )
       .map(([familyName]) => familyName);
     const allowedOperations = eligibleOperations
@@ -181,16 +186,15 @@ export function buildChangeBudget(
       );
     }),
   );
-  const allowPartCreationOrDeletion =
-    operations.some((operation) => {
-      const definition = capabilities.mutationModel.operations[operation];
-      return (
-        definition.allowPartCreationOrDeletion === true ||
-        capabilities.mutationModel.families[definition.family]
-          .allowPartCreationOrDeletion === true ||
-        ["create", "delete"].includes(definition.identityEffect)
-      );
-    });
+  const allowPartCreationOrDeletion = operations.some((operation) => {
+    const definition = capabilities.mutationModel.operations[operation];
+    return (
+      definition.allowPartCreationOrDeletion === true ||
+      capabilities.mutationModel.families[definition.family]
+        .allowPartCreationOrDeletion === true ||
+      ["create", "delete"].includes(definition.identityEffect)
+    );
+  });
   return {
     contractVersion: "1.0",
     allowedCategories,

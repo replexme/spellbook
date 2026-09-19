@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   classifyNativePackagePart,
+  humanEditPreservationBudget,
   nativePreservationBudget,
 } from "./native-preservation-policy.mjs";
 
@@ -53,10 +54,22 @@ test("browser preservation budget comes from operation families", () => {
   assert.equal(design.allowedCategories.has("unknown"), false);
 
   const size = nativePreservationBudget(["set_slide_size"]);
-  assert.deepEqual([...size.allowedCategories], ["presentation", "slide_parts"]);
+  assert.deepEqual(
+    [...size.allowedCategories],
+    ["presentation", "slide_parts"],
+  );
   assert.equal(size.allowedCategories.has("slide_master_parts"), false);
 
   const image = nativePreservationBudget(["insert_image"]);
   assert.ok(image.allowedCategories.has("media_parts"));
   assert.equal(image.allowPartCreationOrDeletion, true);
+});
+
+test("human edits keep macros and unknown parts out of the saved candidate", () => {
+  const human = humanEditPreservationBudget();
+  assert.equal(human.allowPartCreationOrDeletion, true);
+  for (const category of ["slide_parts", "theme_parts", "media_parts"])
+    assert.ok(human.allowedCategories.has(category), category);
+  for (const category of ["macros", "unknown"])
+    assert.equal(human.allowedCategories.has(category), false, category);
 });

@@ -23,9 +23,14 @@ const nativeCapabilities = JSON.parse(
     "utf8",
   ),
 );
+const browserRuntimeLimitations = new Set(
+  (nativeCapabilities.runtimeLimitations?.browser ?? []).map(({ op }) => op),
+);
 const completeNativeOperationSurface = Object.values(
   nativeCapabilities.operationGroups,
-).flat();
+)
+  .flat()
+  .filter((operation) => !browserRuntimeLimitations.has(operation));
 
 function loadFactory() {
   const context = {
@@ -370,7 +375,8 @@ test("browser adapter advertises the complete bounded PPTX operation surface", (
   );
   assert.equal(
     adapter.supportedOperations.length,
-    nativeCapabilities.aiExposure.operationCount,
+    nativeCapabilities.aiExposure.operationCount -
+      browserRuntimeLimitations.size,
   );
   assert.equal(
     adapter.engineIdentity.patchLevel,
@@ -389,7 +395,10 @@ test("browser runtime decodes image and media assets without exposing model URLs
     assert.match(officeThreadSource, new RegExp(`"${operation}"`, "u"));
   assert.match(officeThreadSource, /assetSignatureIsValid/u);
   assert.match(officeThreadSource, /GraphicProvider\.create/u);
-  assert.match(officeThreadSource, /SequenceInputStream\.createStreamFromSequence/u);
+  assert.match(
+    officeThreadSource,
+    /SequenceInputStream\.createStreamFromSequence/u,
+  );
   assert.match(officeThreadSource, /property\(\s*"InputStream"/u);
   assert.match(officeThreadSource, /dispatch\("InsertAVMedia"/u);
   assert.match(officeThreadSource, /"SpellbookReplaceObject"/u);
@@ -807,7 +816,7 @@ test("browser adapter writes text, formatting and notes in one native Undo group
   assert.equal(runtime.secondShape.textProperties.CharPosture, "italic");
   assert.equal(runtime.secondShape.textProperties.CharFontName, "Aptos");
   assert.equal(runtime.secondShape.textProperties.CharHeight, 20);
-  assert.equal(runtime.secondShape.textProperties.CharKerning, 20);
+  assert.equal(runtime.secondShape.textProperties.CharKerning, 35);
   assert.equal(runtime.secondShape.textProperties.CharEscapement, 33);
   assert.equal(runtime.secondShape.textProperties.CharEscapementHeight, 58);
   assert.equal(runtime.secondShape.textProperties.CharColor, 0x123456);

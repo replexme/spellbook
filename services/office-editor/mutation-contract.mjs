@@ -31,6 +31,7 @@ export const runtimeMutationContracts = (capabilities) => {
           identityEffect: contract.identityEffect,
           availability: contract.availability,
           minEnginePatch: contract.minEnginePatch,
+          unavailableIn: contract.unavailableIn ?? [],
         },
       ];
     }),

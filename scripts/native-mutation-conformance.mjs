@@ -44,6 +44,10 @@ export function buildConformancePlan(capabilities, conformance, options = {}) {
     .filter(
       ([, operation]) =>
         operation.availability !== "format_excluded" &&
+        !(
+          options.runtime &&
+          (operation.unavailableIn ?? []).includes(options.runtime)
+        ) &&
         operation.minEnginePatch <= enginePatchLevel &&
         (!requestedFamilies || requestedFamilies.has(operation.family)),
     )
@@ -135,6 +139,7 @@ export function buildConformancePlan(capabilities, conformance, options = {}) {
     contractVersion: conformance.version,
     mutationContractVersion: capabilities.mutationModel.version,
     enginePatchLevel,
+    runtime: options.runtime ?? null,
     summary: {
       operations: operations.length,
       families: selectedFamilyNames.length,

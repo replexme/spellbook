@@ -15,8 +15,6 @@
     "semantic-assets",
     "smartart-diagram",
     "fontwork",
-    "object-3d",
-    "equation",
     "general-native-surface"
   ],
   "genericProviders": {
@@ -495,46 +493,6 @@
         "exact_undo_redo",
         "save_reopen"
       ]
-    },
-    "object-3d": {
-      "minEnginePatch": 24,
-      "source": "eval/public/downloads/ox-shape-3d.pptx",
-      "sourceSha256": "e51fb1f09b3e9492b5b06a9bd31d0db16c0bf8b4455e7c5df65a97174715caa7",
-      "targetSlideIndexes": [0],
-      "apply": {
-        "script": "services/office-session-spike/probe-uno-semantic-family.mjs",
-        "args": ["object-3d"]
-      },
-      "reopen": {
-        "script": "services/office-session-spike/probe-uno-semantic-family-reopen.mjs"
-      },
-      "proves": [
-        "structure",
-        "apply_readback",
-        "single_undo",
-        "exact_undo_redo",
-        "save_reopen"
-      ]
-    },
-    "equation": {
-      "minEnginePatch": 24,
-      "source": "eval/public/downloads/lo-equation.pptx",
-      "sourceSha256": "b9bc871d807225cb92cbc2dfbead959e86920d3e0b2dc53ad6d59fb0110e45b7",
-      "targetSlideIndexes": [0],
-      "apply": {
-        "script": "services/office-session-spike/probe-uno-semantic-family.mjs",
-        "args": ["equation"]
-      },
-      "reopen": {
-        "script": "services/office-session-spike/probe-uno-semantic-family-reopen.mjs"
-      },
-      "proves": [
-        "structure",
-        "apply_readback",
-        "single_undo",
-        "exact_undo_redo",
-        "save_reopen"
-      ]
     }
   },
   "fixtures": {
@@ -634,14 +592,6 @@
     },
     "fontwork": {
       "scenarios": ["fontwork"],
-      "nativeTests": []
-    },
-    "object-3d": {
-      "scenarios": ["object-3d"],
-      "nativeTests": []
-    },
-    "equation": {
-      "scenarios": ["equation"],
       "nativeTests": []
     },
     "slide-transition": {

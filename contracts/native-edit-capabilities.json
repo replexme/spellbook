@@ -15,7 +15,7 @@
     }
   },
   "aiExposure": {
-    "operationCount": 97,
+    "operationCount": 95,
     "policy": "Expose every bounded operation except format-excluded mutations. Before execution, authorize against the current document permission and the live editor engine patch level. Availability records release-evidence maturity; it does not silently remove an implemented operation from the model schema."
   },
   "transaction": {
@@ -251,7 +251,12 @@
         "fixture": "smartart-diagram",
         "verification": ["structure", "save_reopen", "change_budget", "visual"],
         "allowPartCreationOrDeletion": true,
-        "changeBudget": ["slide_parts", "slide_relationships", "diagram_parts"]
+        "changeBudget": [
+          "slide_parts",
+          "slide_relationships",
+          "diagram_parts",
+          "package_manifest"
+        ]
       },
       "fontwork": {
         "domain": "slide_transform",
@@ -998,7 +1003,8 @@
         "execution": "platform_asset",
         "identityEffect": "create",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "unavailableIn": ["browser"]
       },
       "replace_media": {
         "family": "media_asset",
@@ -1006,7 +1012,8 @@
         "execution": "platform_asset",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 27
+        "minEnginePatch": 27,
+        "unavailableIn": ["browser"]
       },
       "set_media_playback": {
         "family": "media_playback",
@@ -1014,7 +1021,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 27
+        "minEnginePatch": 27,
+        "unavailableIn": ["browser"]
       },
       "set_smartart_node": {
         "family": "diagram_model",
@@ -1046,14 +1054,15 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 24
+        "minEnginePatch": 24,
+        "unavailableIn": ["browser"]
       },
       "set_3d_material": {
         "family": "object_3d",
         "target": "element",
         "execution": "native_transform",
         "identityEffect": "preserve",
-        "availability": "runtime_validation_required",
+        "availability": "format_excluded",
         "minEnginePatch": 24
       },
       "set_equation_source": {
@@ -1061,7 +1070,7 @@
         "target": "element",
         "execution": "native_transform",
         "identityEffect": "preserve",
-        "availability": "runtime_validation_required",
+        "availability": "format_excluded",
         "minEnginePatch": 24
       },
       "set_reading_order": {
@@ -1207,8 +1216,6 @@
       "add_smartart_node",
       "delete_smartart_node",
       "set_fontwork",
-      "set_3d_material",
-      "set_equation_source",
       "set_paragraph_format",
       "set_paragraph_list",
       "set_connector"
@@ -1242,8 +1249,6 @@
     "add_smartart_node",
     "delete_smartart_node",
     "set_fontwork",
-    "set_3d_material",
-    "set_equation_source",
     "set_reading_order",
     "add_animation_effect",
     "remove_animation_effect",
@@ -1255,8 +1260,38 @@
       "op": "set_printable",
       "format": "pptx",
       "reason": "PresentationML has no per-shape printable flag. LibreOffice's UNO Printable property is not representable in PPTX, so exposing it would promise state that the original format cannot preserve."
+    },
+    {
+      "op": "set_3d_material",
+      "format": "pptx",
+      "reason": "PowerPoint 3-D effects (a:scene3d/a:sp3d) import into LibreOffice only as preserved interop data; there is no editable 3-D model for them. The UNO D3DMaterial properties belong to LibreOffice 3-D scene objects, which PPTX cannot store, so the edit would not survive save."
+    },
+    {
+      "op": "set_equation_source",
+      "format": "pptx",
+      "reason": "The pinned LibreOffice PPTX importer rejects mc:Choice Requires=\"a14\" and loads an Office Math equation as its fallback picture. No editable formula object exists for a PPTX equation, so the equation is preserved as authored but cannot be edited."
     }
   ],
+  "runtimeLimitations": {
+    "browser": [
+      {
+        "op": "insert_media",
+        "reason": "The browser LibreOffice runtime is configured with --enable-wasm-strip, which compiles out avmedia, so it cannot create media objects. Existing audio and video are preserved from the original PPTX."
+      },
+      {
+        "op": "replace_media",
+        "reason": "The browser runtime has no avmedia support (compiled out by --enable-wasm-strip), so it cannot replace media objects."
+      },
+      {
+        "op": "set_media_playback",
+        "reason": "The browser runtime has no avmedia support (compiled out by --enable-wasm-strip), so media playback settings cannot be edited."
+      },
+      {
+        "op": "set_fontwork",
+        "reason": "The browser UNO bridge cannot read CustomShapeGeometry (its nested sequence types are not registered), so it can neither observe nor verify a WordArt transform preset."
+      }
+    ]
+  },
   "knownUnsafeTransactions": [
     {
       "kind": "multi_command_slide_structure",
@@ -1364,8 +1399,6 @@
           "add_smartart_node",
           "delete_smartart_node",
           "set_fontwork",
-          "set_3d_material",
-          "set_equation_source",
           "set_reading_order",
           "set_paragraph_format",
           "set_paragraph_list",
@@ -1637,68 +1670,55 @@
         "type": ["object", "null"],
         "additionalProperties": false,
         "properties": {
-          "style": { "type": ["integer", "null"], "minimum": 0, "maximum": 6 },
-          "adjust": { "type": ["integer", "null"], "minimum": 0, "maximum": 3 },
-          "distance": {
-            "type": ["integer", "null"],
-            "minimum": -100000,
-            "maximum": 100000
-          },
-          "start": {
-            "type": ["integer", "null"],
-            "minimum": -100000,
-            "maximum": 100000
-          },
-          "mirror": { "type": ["boolean", "null"] },
-          "outline": { "type": ["boolean", "null"] }
+          "preset": {
+            "type": ["string", "null"],
+            "enum": [
+              "textPlain",
+              "textStop",
+              "textTriangle",
+              "textTriangleInverted",
+              "textChevron",
+              "textChevronInverted",
+              "textRingInside",
+              "textRingOutside",
+              "textArchUp",
+              "textArchDown",
+              "textCircle",
+              "textButton",
+              "textArchUpPour",
+              "textArchDownPour",
+              "textCirclePour",
+              "textButtonPour",
+              "textCurveUp",
+              "textCurveDown",
+              "textCanUp",
+              "textCanDown",
+              "textWave1",
+              "textWave2",
+              "textDoubleWave1",
+              "textWave4",
+              "textInflate",
+              "textDeflate",
+              "textInflateBottom",
+              "textDeflateBottom",
+              "textInflateTop",
+              "textDeflateTop",
+              "textDeflateInflate",
+              "textDeflateInflateDeflate",
+              "textFadeRight",
+              "textFadeLeft",
+              "textFadeUp",
+              "textFadeDown",
+              "textSlantUp",
+              "textSlantDown",
+              "textCascadeUp",
+              "textCascadeDown",
+              null
+            ],
+            "description": "PowerPoint WordArt transform (a:prstTxWarp preset) for an observed WordArt shape."
+          }
         },
-        "required": [
-          "style",
-          "adjust",
-          "distance",
-          "start",
-          "mirror",
-          "outline"
-        ]
-      },
-      "material3d": {
-        "type": ["object", "null"],
-        "additionalProperties": false,
-        "properties": {
-          "color": {
-            "type": ["integer", "null"],
-            "minimum": 0,
-            "maximum": 16777215
-          },
-          "emission": {
-            "type": ["integer", "null"],
-            "minimum": 0,
-            "maximum": 16777215
-          },
-          "specular": {
-            "type": ["integer", "null"],
-            "minimum": 0,
-            "maximum": 16777215
-          },
-          "specularIntensity": {
-            "type": ["integer", "null"],
-            "minimum": 0,
-            "maximum": 100
-          },
-          "doubleSided": { "type": ["boolean", "null"] }
-        },
-        "required": [
-          "color",
-          "emission",
-          "specular",
-          "specularIntensity",
-          "doubleSided"
-        ]
-      },
-      "equationSource": {
-        "type": ["string", "null"],
-        "maxLength": 20000,
-        "description": "LibreOffice Math source for an observed embedded equation only; arbitrary OLE objects remain excluded."
+        "required": ["preset"]
       },
       "x": { "type": ["number", "null"] },
       "y": { "type": ["number", "null"] },
@@ -1708,8 +1728,14 @@
       "top": { "type": ["number", "null"] },
       "right": { "type": ["number", "null"] },
       "bottom": { "type": ["number", "null"] },
-      "size": { "type": ["number", "null"] },
-      "degrees": { "type": ["number", "null"] },
+      "size": {
+        "type": ["number", "null"],
+        "description": "font_size in points; line_width in millimetres."
+      },
+      "degrees": {
+        "type": ["number", "null"],
+        "description": "Clockwise rotation in degrees."
+      },
       "bold": { "type": ["boolean", "null"] },
       "italic": { "type": ["boolean", "null"] },
       "underline": { "type": ["boolean", "null"] },
@@ -1717,12 +1743,27 @@
       "shadow": { "type": ["boolean", "null"] },
       "family": { "type": ["string", "null"] },
       "color": { "type": ["number", "null"] },
-      "opacity": { "type": ["number", "null"] },
+      "opacity": {
+        "type": ["number", "null"],
+        "description": "Opacity percentage from 0 to 100."
+      },
       "autofit": { "type": ["boolean", "null"] },
-      "marginLeft": { "type": ["number", "null"] },
-      "marginRight": { "type": ["number", "null"] },
-      "marginTop": { "type": ["number", "null"] },
-      "marginBottom": { "type": ["number", "null"] },
+      "marginLeft": {
+        "type": ["number", "null"],
+        "description": "Text inset in 1/100 mm."
+      },
+      "marginRight": {
+        "type": ["number", "null"],
+        "description": "Text inset in 1/100 mm."
+      },
+      "marginTop": {
+        "type": ["number", "null"],
+        "description": "Text inset in 1/100 mm."
+      },
+      "marginBottom": {
+        "type": ["number", "null"],
+        "description": "Text inset in 1/100 mm."
+      },
       "autoGrowHeight": { "type": ["boolean", "null"] },
       "autoGrowWidth": { "type": ["boolean", "null"] },
       "wordWrap": { "type": ["boolean", "null"] },
@@ -1743,9 +1784,18 @@
         "type": ["string", "null"],
         "enum": ["none", "uppercase", "lowercase", "title", "small_caps", null]
       },
-      "shadowOffsetX": { "type": ["number", "null"] },
-      "shadowOffsetY": { "type": ["number", "null"] },
-      "shadowBlur": { "type": ["number", "null"] },
+      "shadowOffsetX": {
+        "type": ["number", "null"],
+        "description": "Shadow offset in 1/100 mm."
+      },
+      "shadowOffsetY": {
+        "type": ["number", "null"],
+        "description": "Shadow offset in 1/100 mm."
+      },
+      "shadowBlur": {
+        "type": ["number", "null"],
+        "description": "Shadow blur radius in 1/100 mm."
+      },
       "lockPosition": { "type": ["boolean", "null"] },
       "lockSize": { "type": ["boolean", "null"] },
       "printable": { "type": ["boolean", "null"] },
@@ -2617,16 +2667,6 @@
       "op": "set_fontwork",
       "minimumVerifiedPatch": 24,
       "reason": "Fontwork geometry changes require native attribute Undo and PPTX round-trip support."
-    },
-    {
-      "op": "set_3d_material",
-      "minimumVerifiedPatch": 24,
-      "reason": "3D material changes require native attribute Undo and PPTX round-trip support."
-    },
-    {
-      "op": "set_equation_source",
-      "minimumVerifiedPatch": 24,
-      "reason": "Equation source changes require an embedded Math model snapshot and one native Undo action."
     },
     {
       "op": "set_reading_order",

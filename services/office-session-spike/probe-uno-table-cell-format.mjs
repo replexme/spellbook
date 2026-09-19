@@ -243,7 +243,11 @@ try {
     underline: format.underline ? 1 : 0,
     strikethrough: format.strikethrough ? 1 : 0,
     textShadow: format.textShadow,
-    characterSpacing: Math.round(format.characterSpacing * 20) / 20,
+    // Impress stores character spacing in 1/100 mm and reports it in points.
+    characterSpacing:
+      Math.round(
+        (Math.round((format.characterSpacing * 2540) / 72) * 7200) / 2540,
+      ) / 100,
     paragraphAlignment: alignment === "center" ? 3 : 1,
     textMargins: {
       left: Math.round(format.marginLeft),

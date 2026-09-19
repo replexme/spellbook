@@ -53,6 +53,7 @@ const [capabilities, conformance, candidateRuntime] = await Promise.all([
 ]);
 const plan = buildConformancePlan(capabilities, conformance, {
   enginePatchLevel: conformance.enginePatchLevel,
+  runtime: "browser",
 });
 if (!plan.summary.complete)
   throw new Error(
@@ -112,7 +113,10 @@ const report = {
     .filter(
       (operation) =>
         capabilities.mutationModel.operations[operation].availability !==
-        "format_excluded",
+          "format_excluded" &&
+        !(
+          capabilities.mutationModel.operations[operation].unavailableIn ?? []
+        ).includes("browser"),
     )
     .sort(),
   scenarios: [],

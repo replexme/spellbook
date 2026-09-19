@@ -5,6 +5,7 @@ import test from "node:test";
 import { createCandidatePromotion } from "./candidate-promotion.mjs";
 import { upstreamManifest } from "./libreoffice/upstream.mjs";
 import { browserRuntimeBuildInputPaths } from "./repository-identity.mjs";
+import { buildConformancePlan } from "../../scripts/native-mutation-conformance.mjs";
 
 const operations = [
   "replace_text",
@@ -40,9 +41,12 @@ const conformance = JSON.parse(
     "utf8",
   ),
 );
-const nativeOperations = Object.entries(capabilities.mutationModel.operations)
-  .filter(([, operation]) => operation.availability !== "format_excluded")
-  .map(([operation]) => operation)
+const browserPlan = buildConformancePlan(capabilities, conformance, {
+  enginePatchLevel: conformance.enginePatchLevel,
+  runtime: "browser",
+});
+const nativeOperations = Object.values(browserPlan.families)
+  .flatMap((family) => family.operations)
   .sort();
 const receiptSha256 = "a".repeat(64);
 const savedSha256 = "b".repeat(64);
@@ -94,7 +98,7 @@ const nativeConformanceReport = {
   expectedOperations: nativeOperations,
   executedOperations: nativeOperations,
   missingOperations: [],
-  scenarios: conformance.executionOrder.map((scenario) => ({
+  scenarios: Object.keys(browserPlan.scenarios).map((scenario) => ({
     scenario,
     status: "passed",
     baseline: { sha256: "b".repeat(64), reopened: true },

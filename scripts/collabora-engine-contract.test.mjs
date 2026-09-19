@@ -157,7 +157,7 @@ test("runtime mutation contracts are generated from the public capability model"
   assert.equal(operations.set_object_interaction.minEnginePatch, 18);
   assert.equal(operations.set_object_interaction.family, "object_interaction");
   const exposedOperations = capabilities.toolInputSchema.properties.op.enum;
-  assert.equal(exposedOperations.length, 97);
+  assert.equal(exposedOperations.length, 95);
   assert.equal(new Set(exposedOperations).size, exposedOperations.length);
   assert.deepEqual(
     exposedOperations.slice().sort(),
@@ -210,4 +210,24 @@ test("the checked-in native conformance fixture is reproducible", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("runtime limitations name every operation a runtime cannot execute", () => {
+  const capabilities = JSON.parse(
+    readFileSync("contracts/native-edit-capabilities.json", "utf8"),
+  );
+  const operations = capabilities.mutationModel.operations;
+  const marked = Object.entries(operations).flatMap(([operation, contract]) =>
+    (contract.unavailableIn ?? []).map((runtime) => `${runtime}:${operation}`),
+  );
+  const explained = Object.entries(capabilities.runtimeLimitations).flatMap(
+    ([runtime, limitations]) =>
+      limitations.map(({ op, reason }) => {
+        assert.ok(operations[op], `${op} is not a contract operation`);
+        assert.notEqual(operations[op].availability, "format_excluded");
+        assert.ok(reason.length > 40, `${runtime}:${op} needs a reason`);
+        return `${runtime}:${op}`;
+      }),
+  );
+  assert.deepEqual(marked.sort(), explained.sort());
 });
