@@ -1,0 +1,154 @@
+diff --git a/oox/source/ppt/presentationfragmenthandler.cxx b/oox/source/ppt/presentationfragmenthandler.cxx
+--- a/oox/source/ppt/presentationfragmenthandler.cxx
++++ b/oox/source/ppt/presentationfragmenthandler.cxx
+@@ -20,12 +20,14 @@
+ #include <sal/config.h>
+ 
+ #include <unordered_set>
++#include <vector>
+ 
+ #include <comphelper/anytostring.hxx>
+ #include <comphelper/propertyvalue.hxx>
+ #include <comphelper/sequence.hxx>
+ #include <comphelper/sequenceashashmap.hxx>
+ #include <o3tl/string_view.hxx>
++#include <o3tl/unit_conversion.hxx>
+ #include <sal/log.hxx>
+ #include <tools/multisel.hxx>
+ #include <comphelper/diagnose_ex.hxx>
+@@ -75,6 +77,7 @@
+ 
+ #include <com/sun/star/office/XAnnotation.hpp>
+ #include <com/sun/star/office/XAnnotationAccess.hpp>
++#include <com/sun/star/office/XAnnotationEnumeration.hpp>
+ #include <ooxresid.hxx>
+ #include <strings.hrc>
+ 
+@@ -772,6 +775,7 @@ void PresentationFragmentHandler::importSlide(sal_uInt32 nSlide, sal_Int32 nPage
+                 }
+             }
+ 
++            bool bModernCommentsInserted = false;
+             OUString aModernCommentPath = xSlideFragmentHandler->getFragmentPathFromFirstType(
+                 getRelationship(Relationship::MODERNCOMMENTS));
+             // A file can carry both parts, so that a reader which predates the newer one still
+@@ -799,7 +803,7 @@ void PresentationFragmentHandler::importSlide(sal_uInt32 nSlide, sal_Int32 nPage
+                 {
+                     lcl_insertModernComments(xModernCommentsHandler->getComments(),
+                                              maModernAuthorList, xSlide);
+-                    aCommentFragmentPath.clear();
++                    bModernCommentsInserted = true;
+                 }
+             }
+ 
+@@ -858,19 +862,53 @@ void PresentationFragmentHandler::importSlide(sal_uInt32 nSlide, sal_Int32 nPage
+                 }
+                 pCommentsPersistPtr->getCommentAuthors().setValues(maAuthorList);
+ 
++                // The newer part holds the comments but no position; the older part written
++                // beside it has one for each, found by its author and text.
++                if (bModernCommentsInserted)
++                {
++                    std::vector<bool> aUsed(pCommentsPersistPtr->getCommentsList().getSize());
++                    uno::Reference<office::XAnnotationAccess> xAnnotationAccess(xSlide,
++                                                                                UNO_QUERY_THROW);
++                    uno::Reference<office::XAnnotationEnumeration> xAnnotations(
++                        xAnnotationAccess->createAnnotationEnumeration());
++                    while (xAnnotations->hasMoreElements())
++                    {
++                        uno::Reference<office::XAnnotation> xAnnotation(
++                            xAnnotations->nextElement());
++                        const OUString aText = xAnnotation->getTextRange()->getString();
++                        for (int i = 0; i < pCommentsPersistPtr->getCommentsList().getSize(); i++)
++                        {
++                            Comment aComment
++                                = pCommentsPersistPtr->getCommentsList().getCommentAtIndex(i);
++                            if (aUsed[i] || aComment.get_text() != aText
++                                || aComment.getAuthor(maAuthorList) != xAnnotation->getAuthor())
++                                continue;
++                            aUsed[i] = true;
++                            xAnnotation->setPosition(geometry::RealPoint2D(
++                                o3tl::convert<double>(aComment.getIntX(), o3tl::Length::master,
++                                                      o3tl::Length::mm),
++                                o3tl::convert<double>(aComment.getIntY(), o3tl::Length::master,
++                                                      o3tl::Length::mm)));
++                            break;
++                        }
++                    }
++                }
+                 //insert all comments from commentsList
+-                for(int i=0; i<pCommentsPersistPtr->getCommentsList().getSize(); i++)
++                for (int i = 0; !bModernCommentsInserted
++                                && i < pCommentsPersistPtr->getCommentsList().getSize();
++                     i++)
+                 {
+                     try {
+                         Comment aComment = pCommentsPersistPtr->getCommentsList().getCommentAtIndex(i);
+                         uno::Reference< office::XAnnotationAccess > xAnnotationAccess( xSlide, UNO_QUERY_THROW );
+                         uno::Reference< office::XAnnotation > xAnnotation( xAnnotationAccess->createAndInsertAnnotation() );
+-                        int nPosX = aComment.getIntX();
+-                        int nPosY = aComment.getIntY();
+-                        xAnnotation->setPosition(
+-                            geometry::RealPoint2D(
+-                                ::oox::drawingml::convertEmuToHmm( nPosX ) * 15.87,
+-                                ::oox::drawingml::convertEmuToHmm( nPosY ) * 15.87 ) );
++                        // p:pos is in master units (1/576 inch), as export writes it.
++                        // Converting through whole 1/100 mm first moved every comment.
++                        xAnnotation->setPosition(geometry::RealPoint2D(
++                            o3tl::convert<double>(aComment.getIntX(), o3tl::Length::master,
++                                                  o3tl::Length::mm),
++                            o3tl::convert<double>(aComment.getIntY(), o3tl::Length::master,
++                                                  o3tl::Length::mm)));
+                         xAnnotation->setAuthor( aComment.getAuthor(maAuthorList) );
+                         xAnnotation->setInitials( aComment.getInitials(maAuthorList) );
+                         xAnnotation->setDateTime( aComment.getDateTime() );
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -48,6 +48,10 @@
+ #include <com/sun/star/presentation/EffectNodeType.hpp>
+ #include <com/sun/star/uno/Reference.hxx>
+ #include <com/sun/star/drawing/ConnectorType.hpp>
++#include <com/sun/star/geometry/RealPoint2D.hpp>
++#include <com/sun/star/office/XAnnotation.hpp>
++#include <com/sun/star/office/XAnnotationAccess.hpp>
++#include <com/sun/star/office/XAnnotationEnumeration.hpp>
+ #include <com/sun/star/drawing/LineStyle.hpp>
+ #include <com/sun/star/drawing/PolyPolygonBezierCoords.hpp>
+ #include <com/sun/star/drawing/FillStyle.hpp>
+@@ -1645,6 +1649,35 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testFreeformIsPptxCustomGeometry)
+     CPPUNIT_FAIL("freeform not found");
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testPptxCommentKeepsItsPosition)
++{
++    createSdImpressDoc();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<office::XAnnotationAccess> xAccess(
++        xPagesSupplier->getDrawPages()->getByIndex(0), uno::UNO_QUERY_THROW);
++    uno::Reference<office::XAnnotation> xAnnotation(xAccess->createAndInsertAnnotation());
++    xAnnotation->setAuthor(u"Spellbook AI"_ustr);
++    xAnnotation->setInitials(u"AI"_ustr);
++    xAnnotation->setPosition(geometry::RealPoint2D(8.0, 8.0));
++    xAnnotation->getTextRange()->setString(u"Spellbook comment"_ustr);
++
++    // The threaded comment part, read in preference to the older one, keeps
++    // no position, and reading the older one rounded it to 15.87 mm steps.
++    saveAndReload(TestFilter::PPTX);
++    uno::Reference<drawing::XDrawPagesSupplier> xReloaded(mxComponent, uno::UNO_QUERY_THROW);
++    xAccess.set(xReloaded->getDrawPages()->getByIndex(0), uno::UNO_QUERY_THROW);
++    uno::Reference<office::XAnnotationEnumeration> xAnnotations(
++        xAccess->createAnnotationEnumeration());
++    CPPUNIT_ASSERT(xAnnotations->hasMoreElements());
++    xAnnotation = xAnnotations->nextElement();
++    CPPUNIT_ASSERT_EQUAL(u"AI"_ustr, xAnnotation->getInitials());
++    // One PPTX master unit is 1/576 inch, 0.044 mm.
++    CPPUNIT_ASSERT_DOUBLES_EQUAL(8.0, xAnnotation->getPosition().X, 0.05);
++    CPPUNIT_ASSERT_DOUBLES_EQUAL(8.0, xAnnotation->getPosition().Y, 0.05);
++    CPPUNIT_ASSERT(!xAnnotations->hasMoreElements());
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testAutoAdvanceKeepsTransitionEffectOnReload)
+ {
+     createSdImpressDoc();

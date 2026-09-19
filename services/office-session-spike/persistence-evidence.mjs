@@ -436,12 +436,13 @@ export function historyStateEquivalent(expected, actual) {
   if (undoDocumentStateEquivalent(expected, actual)) return true;
   if (actual?.engine?.engineImage !== "browser-wasm") return false;
   const target = persistenceStateFromObservation(expected);
-  return !firstPersistenceDifference(
+  return !formatCanonicalDifferences(
     normalizeDocumentPersistenceState(target),
     normalizeDocumentPersistenceState(persistenceStateFromObservation(actual), {
       authoredBy: target,
     }),
-  );
+    { limit: 1 },
+  ).length;
 }
 
 export function firstPersistenceDifference(expected, observed, path = "$") {
@@ -536,6 +537,11 @@ function isFormatCanonicalEquivalent(expected, observed, path) {
     return quantizedGeometryEquivalent(expected, observed);
   if (/(?:^|\.)(?:characterSpacing|spacing)$/.test(path))
     return characterSpacingEquivalent(expected, observed);
+  // PPTX stores a comment's position in master units (1/576 inch, 4.4
+  // hundredths of a millimetre): the nearest one lies within half of that,
+  // and the observation rounds to whole hundredths.
+  if (/\.comments\[\d+\]\.(?:x|y)$/.test(path))
+    return Math.abs(expected - observed) <= 3;
   return (
     isAnimationTreeTime(path) &&
     Object.is(ooxmlAnimationTime(expected), observed)

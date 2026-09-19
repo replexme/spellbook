@@ -12,7 +12,7 @@
   "patchLevel": "undo-v31",
   "sourcePatchSeriesReady": true,
   "sourceCandidateReady": false,
-  "patchSeriesSha256": "6fd96c61d199eaaa21ac22108de4a3323d4d88de4eba0a2fc975bf3647419a96",
+  "patchSeriesSha256": "c7ed217df77c1a6b9d108bede0917695f3b3ddddef29ea2499ce7ee7e5e5c0ed",
   "engineImageTag": "26.04.4.1-spellbook-undo-v31-r1-candidate",
   "impressUiUnoCommandCount": 725,
   "impressUiUnoCommandsSha256": "ddfe8aeb5f798b6656b22276d219311bd30e9ce5c26cdf8ffe3d321f2c2f3fbb",
@@ -77,7 +77,8 @@
     "patches/0060-pptx-paragraph-formatting-is-written.patch",
     "patches/0061-pptx-empty-text-keeps-alignment.patch",
     "patches/0062-pptx-connector-keeps-its-end-points.patch",
-    "patches/0063-freeform-is-pptx-custom-geometry.patch"
+    "patches/0063-freeform-is-pptx-custom-geometry.patch",
+    "patches/0064-pptx-comments-keep-their-position.patch"
   ],
   "requiredCppunitTargets": [
     "CppunitTest_sd_uiimpress",
@@ -125,6 +126,7 @@
     "CppunitTest_sd_uiimpress:testPptxParagraphRightMarginDoesNotCarryOver",
     "CppunitTest_sd_uiimpress:testPptxEmptyTextKeepsShapeAlignment",
     "CppunitTest_sd_uiimpress:testPptxConnectorKeepsItsEndPoints",
-    "CppunitTest_sd_uiimpress:testFreeformIsPptxCustomGeometry"
+    "CppunitTest_sd_uiimpress:testFreeformIsPptxCustomGeometry",
+    "CppunitTest_sd_uiimpress:testPptxCommentKeepsItsPosition"
   ]
 }

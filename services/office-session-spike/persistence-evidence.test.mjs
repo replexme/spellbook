@@ -8,6 +8,7 @@ import {
   documentPersistenceDeltaDifferences,
   firstPersistenceDeltaDifference,
   firstPersistenceDifference,
+  formatCanonicalDifferences,
   historyStateEquivalent,
   intendedDocumentMutationDifferences,
   normalizeDocumentPersistenceState,
@@ -1024,5 +1025,18 @@ test("a browser history step matches its target as persisted state, any other ex
       observation("office", "Arial", 0xffffff, "b"),
     ),
     false,
+  );
+});
+
+test("a comment position is compared at the precision PPTX stores it", () => {
+  const state = (x, y) => ({ slides: [{ comments: [{ x, y }] }] });
+  // 8 mm is 181.4 master units of 1/576 inch; 181 reopen at 7.98 mm.
+  assert.deepEqual(
+    formatCanonicalDifferences(state(800, 800), state(798, 798)),
+    [],
+  );
+  assert.equal(
+    formatCanonicalDifferences(state(800, 800), state(790, 800)).length,
+    1,
   );
 });
