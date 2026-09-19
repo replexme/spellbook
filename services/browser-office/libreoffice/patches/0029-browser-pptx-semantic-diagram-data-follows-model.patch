@@ -42,7 +42,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
  #include <svx/svdoashp.hxx>
  #include <svx/svdomedia.hxx>
  #include <svx/svdtrans.hxx>
-@@ -6306,6 +6317,413 @@ OString DrawingML::WriteWdpPicture( const OUString& rFileId, const Sequence< sal
+@@ -6306,6 +6317,357 @@ OString DrawingML::WriteWdpPicture( const OUString& rFileId, const Sequence< sal
      return OUStringToOString(aId, RTL_TEXTENCODING_UTF8);
  }
  
@@ -105,8 +105,8 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
 +    }
 +}
 +
-+// Model data the engine adds has no ids for connections or transition
-+// points. Derive stable GUIDs so every save of the same diagram is identical.
++// A connection the engine adds has no id. Derive a stable GUID from its
++// endpoints so every save of the same diagram is identical.
 +OUString lcl_spellbookDerivedDiagramId(const OUString& rKey)
 +{
 +    const OString aKey = OUStringToOString(rKey, RTL_TEXTENCODING_UTF8);
@@ -134,32 +134,6 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
 +                          + rConnection.msSourceId + "|" + rConnection.msDestId + "|"
 +                          + OUString::number(rConnection.mnSourceOrder);
 +    return lcl_spellbookDerivedDiagramId(aKey);
-+}
-+
-+// The imported model keeps a node's text as the first run of its first
-+// paragraph (oox::drawingml::TextBody::toString).
-+OUString lcl_spellbookDiagramPointText(const uno::Reference<xml::dom::XElement>& xPoint)
-+{
-+    const auto xText
-+        = lcl_spellbookDiagramChild(xPoint, gaSpellbookDiagramNamespace, u"t"_ustr);
-+    if (!xText.is())
-+        return OUString();
-+    const auto xParagraph
-+        = lcl_spellbookDiagramChild(xText, gaSpellbookDrawingNamespace, u"p"_ustr);
-+    if (!xParagraph.is())
-+        return OUString();
-+    const auto xRun = lcl_spellbookDiagramChild(xParagraph, gaSpellbookDrawingNamespace, u"r"_ustr);
-+    if (!xRun.is())
-+        return OUString();
-+    const auto xRunText = lcl_spellbookDiagramChild(xRun, gaSpellbookDrawingNamespace, u"t"_ustr);
-+    if (!xRunText.is())
-+        return OUString();
-+    OUStringBuffer aText;
-+    for (uno::Reference<xml::dom::XNode> xChild = xRunText->getFirstChild(); xChild.is();
-+         xChild = xChild->getNextSibling())
-+        if (xChild->getNodeType() == xml::dom::NodeType_TEXT_NODE)
-+            aText.append(xChild->getNodeValue());
-+    return aText.makeStringAndClear();
 +}
 +
 +// A node's text in the model is one run. Keep the first paragraph's and first
@@ -272,28 +246,10 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
 +    xPointList->appendChild(xPoint);
 +}
 +
-+// PowerPoint gives every parent-child connection its own transition points;
-+// a node the engine added has none.
-+OUString lcl_appendSpellbookDiagramTransition(
-+    const uno::Reference<xml::dom::XDocument>& xDocument,
-+    const uno::Reference<xml::dom::XElement>& xPointList, const OUString& rConnectionId,
-+    const OUString& rType)
-+{
-+    const OUString aId = lcl_spellbookDerivedDiagramId(rConnectionId + "|" + rType);
-+    const uno::Reference<xml::dom::XElement> xPoint
-+        = lcl_createSpellbookDiagramPoint(xDocument, aId, rType, rConnectionId);
-+    xPoint->appendChild(
-+        xDocument->createElementNS(gaSpellbookDiagramNamespace, u"dgm:prSet"_ustr));
-+    xPoint->appendChild(
-+        xDocument->createElementNS(gaSpellbookDiagramNamespace, u"dgm:spPr"_ustr));
-+    lcl_setSpellbookDiagramPointText(xDocument, xPoint, OUString());
-+    xPointList->appendChild(xPoint);
-+    return aId;
-+}
-+
++// Writes exactly the model's connection, so a reopened diagram lays out the
++// same shapes the editor showed.
 +void lcl_appendSpellbookDiagramConnection(
 +    const uno::Reference<xml::dom::XDocument>& xDocument,
-+    const uno::Reference<xml::dom::XElement>& xPointList,
 +    const uno::Reference<xml::dom::XElement>& xConnectionList,
 +    const svx::diagram::Connection& rConnection, const OUString& rId)
 +{
@@ -307,21 +263,10 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
 +    xConnection->setAttribute(u"destId"_ustr, rConnection.msDestId);
 +    xConnection->setAttribute(u"srcOrd"_ustr, OUString::number(rConnection.mnSourceOrder));
 +    xConnection->setAttribute(u"destOrd"_ustr, OUString::number(rConnection.mnDestOrder));
-+    OUString aParentTransition = rConnection.msParTransId;
-+    OUString aSiblingTransition = rConnection.msSibTransId;
-+    if (rConnection.mnXMLType == svx::diagram::TypeConstant::XML_parOf)
-+    {
-+        if (aParentTransition.isEmpty())
-+            aParentTransition = lcl_appendSpellbookDiagramTransition(xDocument, xPointList, rId,
-+                                                                      u"parTrans"_ustr);
-+        if (aSiblingTransition.isEmpty())
-+            aSiblingTransition = lcl_appendSpellbookDiagramTransition(xDocument, xPointList, rId,
-+                                                                       u"sibTrans"_ustr);
-+    }
-+    if (!aParentTransition.isEmpty())
-+        xConnection->setAttribute(u"parTransId"_ustr, aParentTransition);
-+    if (!aSiblingTransition.isEmpty())
-+        xConnection->setAttribute(u"sibTransId"_ustr, aSiblingTransition);
++    if (!rConnection.msParTransId.isEmpty())
++        xConnection->setAttribute(u"parTransId"_ustr, rConnection.msParTransId);
++    if (!rConnection.msSibTransId.isEmpty())
++        xConnection->setAttribute(u"sibTransId"_ustr, rConnection.msSibTransId);
 +    if (!rConnection.msPresId.isEmpty())
 +        xConnection->setAttribute(u"presId"_ustr, rConnection.msPresId);
 +    xConnectionList->appendChild(xConnection);
@@ -414,8 +359,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
 +            aCurrentConnections.insert(aId);
 +            if (aBaselineConnections.contains(aId) || aConnectionElements.contains(aId))
 +                continue;
-+            lcl_appendSpellbookDiagramConnection(xDocument, xPointList, xConnectionList,
-+                                                 rConnection, aId);
++            lcl_appendSpellbookDiagramConnection(xDocument, xConnectionList, rConnection, aId);
 +            bChanged = true;
 +        }
 +        for (const OUString& rId : aBaselineConnections)
@@ -456,7 +400,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
  void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rXShape, int nDiagramId)
  {
      uno::Reference<beans::XPropertySet> xPropSet(rXShape, uno::UNO_QUERY);
-@@ -6317,6 +6735,8 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+@@ -6317,6 +6679,8 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
      uno::Reference<xml::dom::XDocument> drawingDom;
      uno::Sequence<uno::Sequence<uno::Any>> xDataRelSeq;
      uno::Sequence<uno::Any> diagramDrawing;
@@ -465,7 +409,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
  
      // retrieve the doms from the GrabBag
      uno::Sequence<beans::PropertyValue> propList;
-@@ -6340,6 +6760,10 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+@@ -6340,6 +6704,10 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
          }
          else if (propName == "OOXDiagramDataRels")
              rProp.Value >>= xDataRelSeq;
@@ -476,7 +420,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
      }
  
      // check that we have the 4 mandatory XDocuments
-@@ -6347,6 +6771,26 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+@@ -6347,6 +6715,26 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
      if (!dataDom.is() || !layoutDom.is() || !styleDom.is() || !colorDom.is())
          return;
  

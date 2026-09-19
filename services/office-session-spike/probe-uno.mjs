@@ -4,9 +4,9 @@ import { requestNativeProbeSave } from "./probe-save.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import {
-  documentStatesEquivalent,
   firstDocumentStateDifference,
   quantizedGeometryEquivalent,
+  undoDocumentStateEquivalent,
 } from "./document-state-evidence.mjs";
 import { persistenceStateFromObservation } from "./persistence-evidence.mjs";
 import { activeTextFontEvidence } from "./text-format-evidence.mjs";
@@ -185,10 +185,13 @@ try {
     let candidate;
     do {
       candidate = await call({ operation: "observe" });
+      // The same Undo rule as every other probe: the exact revision, which
+      // covers authored masters but not their diagnostic shape counts, and
+      // exact slide state.
       if (
-        documentStatesEquivalent(
-          { slides: expected.slides, masters: expected.masters },
-          { slides: candidate.slides, masters: candidate.masters },
+        undoDocumentStateEquivalent(
+          { revision, slides: expected.slides },
+          candidate,
         )
       )
         return candidate;
