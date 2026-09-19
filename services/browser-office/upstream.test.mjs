@@ -107,7 +107,7 @@ test("browser Office runtime is reproducible and remains unapproved by default",
     "CppunitTest_sd_uiimpress",
     "CppunitTest_sd_misc_tests",
   ]);
-  assert.equal(manifest.sourceCandidate.focusedCppunitTests.length, 32);
+  assert.equal(manifest.sourceCandidate.focusedCppunitTests.length, 33);
   assert.equal(
     new Set(manifest.sourceCandidate.focusedCppunitTests).size,
     manifest.sourceCandidate.focusedCppunitTests.length,
@@ -198,6 +198,7 @@ test("browser LibreOffice patches name their complete source surface", () => {
   assert.deepEqual([...new Set(paths)].sort(), [
     "docmodel/source/theme/Theme.cxx",
     "include/oox/drawingml/shape.hxx",
+    "include/oox/drawingml/shapepropertymap.hxx",
     "include/oox/export/drawingml.hxx",
     "include/oox/export/shapes.hxx",
     "include/oox/ppt/comments.hxx",
@@ -207,6 +208,7 @@ test("browser LibreOffice patches name their complete source surface", () => {
     "oox/inc/drawingml/textcharacterproperties.hxx",
     "oox/source/drawingml/connectorshapecontext.cxx",
     "oox/source/drawingml/graphicshapecontext.cxx",
+    "oox/source/drawingml/lineproperties.cxx",
     "oox/source/drawingml/shape.cxx",
     "oox/source/drawingml/shapecontext.cxx",
     "oox/source/drawingml/shapegroupcontext.cxx",

@@ -125,6 +125,14 @@ paragraph with an indent: inserting a paragraph copied the previous
 paragraph's attributes, so a right-to-left direction and tab stops carried
 over on import, and the indent rule replaced a paragraph's own tab stops with
 one at zero.
+Patch `0043` adds the shape properties `SpellbookLineDash`,
+`SpellbookLineStartArrow` and `SpellbookLineEndArrow`: setting one applies a
+PowerPoint dash or arrowhead through the same code PPTX import uses for
+`a:prstDash`, `a:headEnd` and `a:tailEnd`, as one attribute Undo step, and
+reading one reports what PPTX export writes, through the export's own dash and
+arrowhead detection. Line styles were only addressable by the document's own
+style names, which a deck without dashed lines does not have and which import
+renames.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

@@ -1,0 +1,595 @@
+diff --git a/include/oox/drawingml/shapepropertymap.hxx b/include/oox/drawingml/shapepropertymap.hxx
+--- a/include/oox/drawingml/shapepropertymap.hxx
++++ b/include/oox/drawingml/shapepropertymap.hxx
+@@ -21,6 +21,7 @@
+ #define INCLUDED_OOX_DRAWINGML_SHAPEPROPERTYMAP_HXX
+ 
+ #include <com/sun/star/uno/Any.hxx>
++#include <com/sun/star/uno/Reference.hxx>
+ #include <o3tl/enumarray.hxx>
+ #include <oox/dllapi.h>
+ #include <oox/helper/propertymap.hxx>
+@@ -28,6 +29,10 @@
+ #include <sal/types.h>
+ #include <tools/color.hxx>
+ 
++#include <string_view>
++
++namespace com::sun::star::beans { class XPropertySet; }
++namespace com::sun::star::lang { class XMultiServiceFactory; }
+ namespace oox { class ModelObjectHelper; }
+ 
+ namespace oox::drawingml {
+@@ -160,6 +165,21 @@ private:
+     ShapePropertyInfo   maShapePropInfo;
+ };
+ 
++/** Sets a shape's line to a PowerPoint dash the way PPTX import reads
++    a:prstDash: "solid", "dot", "dash", "dashDot", "lgDash", "lgDashDot",
++    "lgDashDotDot", "sysDot", "sysDash", "sysDashDot" or "sysDashDotDot". */
++OOX_DLLPUBLIC void setPresetLineDash(
++    const css::uno::Reference<css::beans::XPropertySet>& rxShape,
++    const css::uno::Reference<css::lang::XMultiServiceFactory>& rxModelFactory,
++    std::u16string_view rPreset);
++
++/** Sets a shape's line start or end the way PPTX import reads a:headEnd or
++    a:tailEnd: "none", or "<type> <width> <length>" with the type "triangle",
++    "stealth", "diamond", "oval" or "arrow" and the sizes "sm", "med" or "lg". */
++OOX_DLLPUBLIC void setPresetLineArrow(
++    const css::uno::Reference<css::beans::XPropertySet>& rxShape,
++    const css::uno::Reference<css::lang::XMultiServiceFactory>& rxModelFactory,
++    bool bLineEnd, std::u16string_view rPreset);
+ 
+ } // namespace oox::drawingml
+ 
+diff --git a/include/oox/export/drawingml.hxx b/include/oox/export/drawingml.hxx
+--- a/include/oox/export/drawingml.hxx
++++ b/include/oox/export/drawingml.hxx
+@@ -503,6 +503,13 @@ public:
+     static void WriteFromTo(const css::uno::Reference<css::drawing::XShape>& rXShape, const css::awt::Size& aPageSize,
+                             const sax_fastparser::FSHelperPtr& pDrawing);
+ 
++    /** The a:prstDash value PPTX export writes for the shape's line: a preset
++        name, "solid", "custom" for another dash, or empty without a line. */
++    static OUString GetPresetLineDash(const css::uno::Reference<css::beans::XPropertySet>& rXPropSet);
++    /** The line start or end PPTX export writes: "none", or
++        "<type> <width> <length>" as in a:headEnd and a:tailEnd. */
++    static OUString GetPresetLineArrow(const css::uno::Reference<css::beans::XPropertySet>& rXPropSet,
++                                       bool bLineStart);
+     static bool IsGroupShape( const css::uno::Reference< css::drawing::XShape >& rXShape );
+     sal_Int32 getBulletMarginIndentation (const css::uno::Reference< css::beans::XPropertySet >& rXPropSet,sal_Int16 nLevel, std::u16string_view propName);
+ 
+diff --git a/oox/source/drawingml/lineproperties.cxx b/oox/source/drawingml/lineproperties.cxx
+--- a/oox/source/drawingml/lineproperties.cxx
++++ b/oox/source/drawingml/lineproperties.cxx
+@@ -19,19 +19,28 @@
+ 
+ #include <sal/config.h>
+ 
++#include <initializer_list>
++#include <utility>
++
+ #include <comphelper/sequence.hxx>
+ #include <drawingml/lineproperties.hxx>
+ #include <rtl/ustrbuf.hxx>
+ #include <osl/diagnose.h>
+ #include <com/sun/star/beans/NamedValue.hpp>
++#include <com/sun/star/beans/XPropertySet.hpp>
+ #include <com/sun/star/drawing/LineCap.hpp>
+ #include <com/sun/star/drawing/LineDash.hpp>
+ #include <com/sun/star/drawing/LineJoint.hpp>
+ #include <com/sun/star/drawing/LineStyle.hpp>
+ #include <com/sun/star/drawing/PolyPolygonBezierCoords.hpp>
++#include <com/sun/star/lang/IllegalArgumentException.hpp>
++#include <com/sun/star/lang/XMultiServiceFactory.hpp>
+ #include <oox/drawingml/drawingmltypes.hxx>
+ #include <oox/drawingml/shapepropertymap.hxx>
+ #include <oox/helper/graphichelper.hxx>
++#include <oox/helper/modelobjecthelper.hxx>
++#include <oox/helper/propertyset.hxx>
++#include <o3tl/string_view.hxx>
+ #include <oox/token/tokens.hxx>
+ #include <oox/token/properties.hxx>
+ #include <docmodel/uno/UnoComplexColor.hxx>
+@@ -183,6 +192,24 @@ void lclRecoverStandardDashStyles(LineDash& orLineDash, sal_Int32 nLineWidth)
+     }
+ }
+ 
++/** In MS Office (2020) for preset dash style line caps round and square are included in dash length.
++    For custom dash style round line cap is included, square line cap is added. In ODF line caps are
++    always added to dash length. Tweak the length accordingly. */
++void lclIncludeLineCapInDash(LineDash& rLineDash, LineCap eLineCap, bool bPresetDash)
++{
++    if (eLineCap == LineCap_ROUND || (eLineCap == LineCap_SQUARE && bPresetDash))
++    {
++        // Cannot use -100 because that results in 0 length in some cases and
++        // LibreOffice interprets 0 length as 100%.
++        if (rLineDash.DotLen >= 100 || rLineDash.DashLen >= 100)
++            rLineDash.Distance += 99;
++        if (rLineDash.DotLen >= 100)
++            rLineDash.DotLen -= 99;
++        if (rLineDash.DashLen >= 100)
++            rLineDash.DashLen -= 99;
++    }
++}
++
+ DashStyle lclGetDashStyle( sal_Int32 nToken )
+ {
+     OSL_ASSERT((nToken & sal_Int32(0xFFFF0000))==0);
+@@ -408,8 +435,89 @@ void lclPushMarkerProperties( ShapePropertyMap& rPropMap,
+     }
+ }
+ 
++sal_Int32 lclGetPresetToken(std::u16string_view rName,
++                            std::initializer_list<std::pair<std::u16string_view, sal_Int32>> aTokens)
++{
++    for (const auto& [rTokenName, nToken] : aTokens)
++        if (rTokenName == rName)
++            return nToken;
++    throw lang::IllegalArgumentException(u"Unknown PowerPoint line preset"_ustr, nullptr, 0);
++}
++
+ } // namespace
+ 
++void setPresetLineDash(const uno::Reference<XPropertySet>& rxShape,
++                       const uno::Reference<lang::XMultiServiceFactory>& rxModelFactory,
++                       std::u16string_view rPreset)
++{
++    PropertySet aShape(rxShape);
++    if (rPreset == u"solid")
++    {
++        aShape.setProperty(PROP_LineStyle, LineStyle_SOLID);
++        return;
++    }
++    const sal_Int32 nPresetDash = lclGetPresetToken(
++        rPreset, { { u"dot", XML_dot },
++                   { u"dash", XML_dash },
++                   { u"dashDot", XML_dashDot },
++                   { u"lgDash", XML_lgDash },
++                   { u"lgDashDot", XML_lgDashDot },
++                   { u"lgDashDotDot", XML_lgDashDotDot },
++                   { u"sysDot", XML_sysDot },
++                   { u"sysDash", XML_sysDash },
++                   { u"sysDashDot", XML_sysDashDot },
++                   { u"sysDashDotDot", XML_sysDashDotDot } });
++    // The dash follows the line's cap as import reads a:ln/@cap.
++    LineCap eLineCap = LineCap_BUTT;
++    aShape.getProperty(eLineCap, PROP_LineCap);
++    LineDash aLineDash;
++    aLineDash.Style = lclGetDashStyle(eLineCap == LineCap_ROUND    ? XML_rnd
++                                      : eLineCap == LineCap_SQUARE ? XML_sq
++                                                                   : XML_flat);
++    lclConvertPresetDash(aLineDash, nPresetDash);
++    lclIncludeLineCapInDash(aLineDash, eLineCap, true);
++    ModelObjectHelper aModelObjectHelper(rxModelFactory);
++    ShapePropertyMap aPropMap(aModelObjectHelper);
++    aPropMap.setProperty(ShapeProperty::LineDash, aLineDash);
++    aPropMap.setProperty(ShapeProperty::LineStyle, LineStyle_DASH);
++    aShape.setProperties(aPropMap);
++}
++
++void setPresetLineArrow(const uno::Reference<XPropertySet>& rxShape,
++                        const uno::Reference<lang::XMultiServiceFactory>& rxModelFactory,
++                        bool bLineEnd, std::u16string_view rPreset)
++{
++    if (rPreset == u"none")
++    {
++        rxShape->setPropertyValue(bLineEnd ? u"LineEnd"_ustr : u"LineStart"_ustr,
++                                  uno::Any(PolyPolygonBezierCoords()));
++        return;
++    }
++    sal_Int32 nIndex = 0;
++    const std::u16string_view aType = o3tl::getToken(rPreset, 0, ' ', nIndex);
++    const std::u16string_view aWidth = o3tl::getToken(rPreset, 0, ' ', nIndex);
++    const std::u16string_view aLength = o3tl::getToken(rPreset, 0, ' ', nIndex);
++    if (nIndex != -1)
++        throw lang::IllegalArgumentException(u"Unknown PowerPoint line preset"_ustr, nullptr, 0);
++    LineArrowProperties aArrow;
++    aArrow.moArrowType = lclGetPresetToken(aType, { { u"triangle", XML_triangle },
++                                                    { u"stealth", XML_stealth },
++                                                    { u"diamond", XML_diamond },
++                                                    { u"oval", XML_oval },
++                                                    { u"arrow", XML_arrow } });
++    const std::initializer_list<std::pair<std::u16string_view, sal_Int32>> aSizes
++        = { { u"sm", XML_sm }, { u"med", XML_med }, { u"lg", XML_lg } };
++    aArrow.moArrowWidth = lclGetPresetToken(aWidth, aSizes);
++    aArrow.moArrowLength = lclGetPresetToken(aLength, aSizes);
++    PropertySet aShape(rxShape);
++    sal_Int32 nLineWidth = 0;
++    aShape.getProperty(nLineWidth, PROP_LineWidth);
++    ModelObjectHelper aModelObjectHelper(rxModelFactory);
++    ShapePropertyMap aPropMap(aModelObjectHelper);
++    lclPushMarkerProperties(aPropMap, aArrow, nLineWidth, bLineEnd);
++    aShape.setProperties(aPropMap);
++}
++
+ void LineArrowProperties::assignUsed( const LineArrowProperties& rSourceProps )
+ {
+     assignIfUsed( moArrowType, rSourceProps.moArrowType );
+@@ -465,20 +573,7 @@ void LineProperties::pushToPropMap( ShapePropertyMap& rPropMap,
+             lclRecoverStandardDashStyles(aLineDash, nLineWidth);
+         }
+ 
+-        // In MS Office (2020) for preset dash style line caps round and square are included in dash length.
+-        // For custom dash style round line cap is included, square line cap is added. In ODF line caps are
+-        // always added to dash length. Tweak the length accordingly.
+-        if (eLineCap == LineCap_ROUND || (eLineCap == LineCap_SQUARE && maCustomDash.empty()))
+-        {
+-            // Cannot use -100 because that results in 0 length in some cases and
+-            // LibreOffice interprets 0 length as 100%.
+-            if (aLineDash.DotLen >= 100 || aLineDash.DashLen >= 100)
+-                aLineDash.Distance += 99;
+-            if (aLineDash.DotLen >= 100)
+-                aLineDash.DotLen -= 99;
+-            if (aLineDash.DashLen >= 100)
+-                aLineDash.DashLen -= 99;
+-        }
++        lclIncludeLineCapInDash(aLineDash, eLineCap, maCustomDash.empty());
+ 
+         if( rPropMap.setProperty( ShapeProperty::LineDash, aLineDash ) )
+             eLineStyle = drawing::LineStyle_DASH;
+diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
+--- a/oox/source/export/drawingml.cxx
++++ b/oox/source/export/drawingml.cxx
+@@ -875,15 +875,19 @@ void DrawingML::WriteGradientFill(
+     }
+ }
+ 
+-void DrawingML::WriteLineArrow( const Reference< XPropertySet >& rXPropSet, bool bLineStart )
++namespace
+ {
+-    ESCHER_LineEnd eLineEnd;
+-    sal_Int32 nArrowLength;
+-    sal_Int32 nArrowWidth;
+-
+-    if ( !EscherPropertyContainer::GetLineArrow( bLineStart, rXPropSet, eLineEnd, nArrowLength, nArrowWidth ) )
+-        return;
++struct LineArrowTokens
++{
++    const char* pType;
++    const char* pWidth;
++    const char* pLength;
++};
+ 
++/// The a:headEnd or a:tailEnd attributes for a line end.
++LineArrowTokens lcl_GetLineArrowTokens(ESCHER_LineEnd eLineEnd, sal_Int32 nArrowLength,
++                                       sal_Int32 nArrowWidth)
++{
+     const char* len;
+     const char* type;
+     const char* width;
+@@ -939,6 +943,99 @@ void DrawingML::WriteLineArrow( const Reference< XPropertySet >& rXPropSet, bool
+             break;
+     }
+ 
++    return { type, width, len };
++}
++
++/** The a:prstDash value of a relative MS Office dash, or null. Import tweaks
++    the lengths of a preset dash for the line cap; this reverts that. */
++const char* lcl_GetPresetDash(const LineDash& rLineDash, LineCap eLineCap)
++{
++    const bool bIsRelative(rLineDash.Style == DashStyle_RECTRELATIVE
++                           || rLineDash.Style == DashStyle_ROUNDRELATIVE);
++    if (!bIsRelative || rLineDash.Dots != 1)
++        return nullptr;
++    sal_uInt32 nDotLen = rLineDash.DotLen;
++    sal_uInt32 nDashLen = rLineDash.DashLen;
++    sal_uInt32 nDistance = rLineDash.Distance;
++    if (eLineCap != LineCap_BUTT && nDistance >= 99)
++    {
++        nDistance -= 99;
++        nDotLen += 99;
++        if (nDashLen > 0)
++            nDashLen += 99;
++    }
++    // LO uses length 0 for 100%, if the attribute is missing in ODF.
++    // Other applications might write 100%. Make is unique for the conditions.
++    if (nDotLen == 0)
++        nDotLen = 100;
++    if (nDashLen == 0 && rLineDash.Dashes > 0)
++        nDashLen = 100;
++    if (nDotLen == 100 && rLineDash.Dashes == 0 && nDashLen == 0 && nDistance == 300)
++        return "dot";
++    if (nDotLen == 400 && rLineDash.Dashes == 0 && nDashLen == 0 && nDistance == 300)
++        return "dash";
++    if (nDotLen == 400 && rLineDash.Dashes == 1 && nDashLen == 100 && nDistance == 300)
++        return "dashDot";
++    if (nDotLen == 800 && rLineDash.Dashes == 0 && nDashLen == 0 && nDistance == 300)
++        return "lgDash";
++    if (nDotLen == 800 && rLineDash.Dashes == 1 && nDashLen == 100 && nDistance == 300)
++        return "lgDashDot";
++    if (nDotLen == 800 && rLineDash.Dashes == 2 && nDashLen == 100 && nDistance == 300)
++        return "lgDashDotDot";
++    if (nDotLen == 100 && rLineDash.Dashes == 0 && nDashLen == 0 && nDistance == 100)
++        return "sysDot";
++    if (nDotLen == 300 && rLineDash.Dashes == 0 && nDashLen == 0 && nDistance == 100)
++        return "sysDash";
++    if (nDotLen == 300 && rLineDash.Dashes == 1 && nDashLen == 100 && nDistance == 100)
++        return "sysDashDot";
++    if (nDotLen == 300 && rLineDash.Dashes == 2 && nDashLen == 100 && nDistance == 100)
++        return "sysDashDotDot";
++    return nullptr;
++}
++}
++
++OUString DrawingML::GetPresetLineDash(const Reference<XPropertySet>& rXPropSet)
++{
++    drawing::LineStyle eLineStyle = drawing::LineStyle_NONE;
++    rXPropSet->getPropertyValue(u"LineStyle"_ustr) >>= eLineStyle;
++    if (eLineStyle == drawing::LineStyle_NONE)
++        return OUString();
++    if (eLineStyle != drawing::LineStyle_DASH)
++        return u"solid"_ustr;
++    LineDash aLineDash;
++    rXPropSet->getPropertyValue(u"LineDash"_ustr) >>= aLineDash;
++    LineCap eLineCap = LineCap_BUTT;
++    rXPropSet->getPropertyValue(u"LineCap"_ustr) >>= eLineCap;
++    const char* pPresetDash = lcl_GetPresetDash(aLineDash, eLineCap);
++    return pPresetDash ? OUString::createFromAscii(pPresetDash) : u"custom"_ustr;
++}
++
++OUString DrawingML::GetPresetLineArrow(const Reference<XPropertySet>& rXPropSet, bool bLineStart)
++{
++    ESCHER_LineEnd eLineEnd;
++    sal_Int32 nArrowLength;
++    sal_Int32 nArrowWidth;
++    if (!EscherPropertyContainer::GetLineArrow(bLineStart, rXPropSet, eLineEnd, nArrowLength,
++                                               nArrowWidth)
++        || eLineEnd == ESCHER_LineNoEnd)
++        return u"none"_ustr;
++    const LineArrowTokens aTokens = lcl_GetLineArrowTokens(eLineEnd, nArrowLength, nArrowWidth);
++    return OUString::createFromAscii(aTokens.pType) + " "
++           + OUString::createFromAscii(aTokens.pWidth) + " "
++           + OUString::createFromAscii(aTokens.pLength);
++}
++
++void DrawingML::WriteLineArrow( const Reference< XPropertySet >& rXPropSet, bool bLineStart )
++{
++    ESCHER_LineEnd eLineEnd;
++    sal_Int32 nArrowLength;
++    sal_Int32 nArrowWidth;
++
++    if ( !EscherPropertyContainer::GetLineArrow( bLineStart, rXPropSet, eLineEnd, nArrowLength, nArrowWidth ) )
++        return;
++
++    const auto [type, width, len] = lcl_GetLineArrowTokens(eLineEnd, nArrowLength, nArrowWidth);
++
+     mpFS->singleElementNS( XML_a, bLineStart ? XML_headEnd : XML_tailEnd,
+                            XML_len, len,
+                            XML_type, type,
+@@ -1108,71 +1205,10 @@ void DrawingML::WriteOutline( const Reference<XPropertySet>& rXPropSet, Referenc
+         // "dot" is always the first dash and "dash" the second one. All OOXML presets linestyles
+         // start with the longer one. Definitions are in OOXML part 1, 20.1.10.49
+         // The tests are strict, for to not catch styles from standard.sod (as of Aug 2019).
+-        bool bIsConverted = false;
+-
+-        bool bIsRelative(aLineDash.Style == DashStyle_RECTRELATIVE || aLineDash.Style == DashStyle_ROUNDRELATIVE);
+-        if ( bIsRelative && aLineDash.Dots == 1)
+-        {   // The length were tweaked on import in case of prstDash. Revert it here.
+-            sal_uInt32 nDotLen = aLineDash.DotLen;
+-            sal_uInt32 nDashLen = aLineDash.DashLen;
+-            sal_uInt32 nDistance = aLineDash.Distance;
+-            if (aLineCap != LineCap_BUTT && nDistance >= 99)
+-            {
+-                nDistance -= 99;
+-                nDotLen += 99;
+-                if (nDashLen > 0)
+-                    nDashLen += 99;
+-            }
+-            // LO uses length 0 for 100%, if the attribute is missing in ODF.
+-            // Other applications might write 100%. Make is unique for the conditions.
+-            if (nDotLen == 0)
+-                nDotLen = 100;
+-            if (nDashLen == 0 && aLineDash.Dashes > 0)
+-                nDashLen = 100;
+-            bIsConverted = true;
+-            if (nDotLen == 100 && aLineDash.Dashes == 0 && nDashLen == 0 && nDistance == 300)
+-            {
+-                mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, "dot");
+-            }
+-            else if (nDotLen == 400 && aLineDash.Dashes == 0 && nDashLen == 0 && nDistance == 300)
+-            {
+-                mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, "dash");
+-            }
+-            else if (nDotLen == 400 && aLineDash.Dashes == 1 && nDashLen == 100 && nDistance == 300)
+-            {
+-                mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, "dashDot");
+-            }
+-            else if (nDotLen == 800 && aLineDash.Dashes == 0 && nDashLen == 0 && nDistance == 300)
+-            {
+-                mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, "lgDash");
+-            }
+-            else if (nDotLen == 800 && aLineDash.Dashes == 1 && nDashLen == 100 && nDistance == 300)
+-            {
+-                mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, "lgDashDot");
+-            }
+-            else if (nDotLen == 800 && aLineDash.Dashes == 2 && nDashLen == 100 && nDistance == 300)
+-            {
+-                mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, "lgDashDotDot");
+-            }
+-            else if (nDotLen == 100 && aLineDash.Dashes == 0 && nDashLen == 0 && nDistance == 100)
+-            {
+-                mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, "sysDot");
+-            }
+-            else if (nDotLen == 300 && aLineDash.Dashes == 0 && nDashLen == 0 && nDistance == 100)
+-            {
+-                mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, "sysDash");
+-            }
+-            else if (nDotLen == 300 && aLineDash.Dashes == 1 && nDashLen == 100 && nDistance == 100)
+-            {
+-                mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, "sysDashDot");
+-            }
+-            else if (nDotLen == 300 && aLineDash.Dashes == 2 && nDashLen == 100 && nDistance == 100)
+-            {
+-                mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, "sysDashDotDot");
+-            }
+-            else
+-                bIsConverted = false;
+-        }
++        const char* pPresetDash = lcl_GetPresetDash(aLineDash, aLineCap);
++        if (pPresetDash)
++            mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, pPresetDash);
++        const bool bIsConverted = pPresetDash != nullptr;
+         // Do not map our own line styles to OOXML prstDash values, because custDash gives better results.
+         if (!bIsConverted)
+         {
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2985,6 +2985,70 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxConnectorKeepsItsEndPoint
+     CPPUNIT_FAIL("connector not found");
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookLinePresetsArePptxLineStyles)
++{
++    createSdImpressDocModelOnly();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShape> xShape(
++        xFactory->createInstance("com.sun.star.drawing.LineShape"), uno::UNO_QUERY_THROW);
++    xShape->setPosition(awt::Point(2000, 2000));
++    xShape->setSize(awt::Size(8000, 3000));
++    xShapes->add(xShape);
++    uno::Reference<beans::XPropertySet> xLine(xShape, uno::UNO_QUERY_THROW);
++    xLine->setPropertyValue("Name", uno::Any(u"Styled"_ustr));
++    xLine->setPropertyValue("LineWidth", uno::Any(sal_Int32(106)));
++    xLine->setPropertyValue("SpellbookLineDash", uno::Any(u"lgDashDot"_ustr));
++    xLine->setPropertyValue("SpellbookLineStartArrow", uno::Any(u"triangle med lg"_ustr));
++    xLine->setPropertyValue("SpellbookLineEndArrow", uno::Any(u"oval sm sm"_ustr));
++    const auto presets = [](const uno::Reference<beans::XPropertySet>& xProperties) -> OUString {
++        return xProperties->getPropertyValue("SpellbookLineDash").get<OUString>() + "|"
++               + xProperties->getPropertyValue("SpellbookLineStartArrow").get<OUString>()
++               + "|" + xProperties->getPropertyValue("SpellbookLineEndArrow").get<OUString>();
++    };
++    CPPUNIT_ASSERT_EQUAL(u"lgDashDot|triangle med lg|oval sm sm"_ustr, presets(xLine));
++
++    // The presets are the PowerPoint dash and line ends PPTX writes and reads.
++    saveAndReloadSdImpressDocModelOnly(u"Impress Office Open XML"_ustr);
++    xmlDocUniquePtr pSlideXml = parseExport("ppt/slides/slide1.xml");
++    assertXPath(pSlideXml, "//*[*/p:cNvPr/@name='Styled']/p:spPr/a:ln/a:prstDash", "val",
++                u"lgDashDot"_ustr);
++    assertXPath(pSlideXml, "//*[*/p:cNvPr/@name='Styled']/p:spPr/a:ln/a:headEnd", "type",
++                u"triangle"_ustr);
++    assertXPath(pSlideXml, "//*[*/p:cNvPr/@name='Styled']/p:spPr/a:ln/a:headEnd", "w",
++                u"med"_ustr);
++    assertXPath(pSlideXml, "//*[*/p:cNvPr/@name='Styled']/p:spPr/a:ln/a:headEnd", "len",
++                u"lg"_ustr);
++    assertXPath(pSlideXml, "//*[*/p:cNvPr/@name='Styled']/p:spPr/a:ln/a:tailEnd", "type",
++                u"oval"_ustr);
++    assertXPath(pSlideXml, "//*[*/p:cNvPr/@name='Styled']/p:spPr/a:ln/a:tailEnd", "w",
++                u"sm"_ustr);
++    assertXPath(pSlideXml, "//*[*/p:cNvPr/@name='Styled']/p:spPr/a:ln/a:tailEnd", "len",
++                u"sm"_ustr);
++    uno::Reference<container::XIndexAccess> xPage(
++        uno::Reference<drawing::XDrawPagesSupplier>(mxComponent, uno::UNO_QUERY_THROW)
++            ->getDrawPages()
++            ->getByIndex(0),
++        uno::UNO_QUERY_THROW);
++    for (sal_Int32 nShape = 0; nShape < xPage->getCount(); ++nShape)
++    {
++        uno::Reference<beans::XPropertySet> xStyled(xPage->getByIndex(nShape),
++                                                    uno::UNO_QUERY_THROW);
++        if (xStyled->getPropertyValue("Name").get<OUString>() != u"Styled"_ustr)
++            continue;
++        CPPUNIT_ASSERT_EQUAL(u"lgDashDot|triangle med lg|oval sm sm"_ustr, presets(xStyled));
++        // A solid line and no line end clear them.
++        xStyled->setPropertyValue("SpellbookLineDash", uno::Any(u"solid"_ustr));
++        xStyled->setPropertyValue("SpellbookLineStartArrow", uno::Any(u"none"_ustr));
++        CPPUNIT_ASSERT_EQUAL(u"solid|none|oval sm sm"_ustr, presets(xStyled));
++        return;
++    }
++    CPPUNIT_FAIL("styled line not found");
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookFreeformIsPptxCustomGeometry)
+ {
+     createSdImpressDocModelOnly();
+diff --git a/sd/source/ui/unoidl/unoobj.cxx b/sd/source/ui/unoidl/unoobj.cxx
+--- a/sd/source/ui/unoidl/unoobj.cxx
++++ b/sd/source/ui/unoidl/unoobj.cxx
+@@ -35,6 +35,7 @@
+ #include <com/sun/star/awt/Rectangle.hpp>
+ #include <com/sun/star/awt/Size.hpp>
+ #include <com/sun/star/beans/XPropertySet.hpp>
++#include <com/sun/star/lang/XMultiServiceFactory.hpp>
+ #include <com/sun/star/drawing/EnhancedCustomShapeParameterPair.hpp>
+ #include <com/sun/star/drawing/EnhancedCustomShapeParameterType.hpp>
+ #include <com/sun/star/drawing/EnhancedCustomShapeSegment.hpp>
+@@ -64,6 +65,8 @@
+ #include <svx/svdomedia.hxx>
+ #include <svx/ImageMapInfo.hxx>
+ #include <filter/msfilter/msdffimp.hxx>
++#include <oox/drawingml/shapepropertymap.hxx>
++#include <oox/export/drawingml.hxx>
+ #include <svl/instrm.hxx>
+ #include <editeng/outlobj.hxx>
+ #include <Outliner.hxx>
+@@ -659,6 +662,33 @@ void applySpellbookObjectDuplication(SdrObject* pObject, SdDrawDocument* pDocume
+ // Gives a custom shape the geometry PPTX import creates for a freeform
+ // (a:custGeom): one path through the points, which lie in the shape's own box,
+ // closed or open. The browser bridge cannot write CustomShapeGeometry itself.
++// A PowerPoint dash or line end, set the way PPTX import reads a:prstDash,
++// a:headEnd and a:tailEnd, as one attribute Undo step. The browser bridge
++// cannot build the dash or marker structures itself.
++void applySpellbookLinePreset(SvxShape& rShape, SdXImpressDocument* pModel,
++                              std::u16string_view rPropertyName, const uno::Any& rValue)
++{
++    OUString aPreset;
++    SdrObject* pObject = rShape.GetSdrObject();
++    SdDrawDocument* pDocument = pModel ? pModel->GetDoc() : nullptr;
++    if (!pObject || !pDocument || !(rValue >>= aPreset))
++        throw lang::IllegalArgumentException(u"Invalid line preset"_ustr, nullptr, 0);
++    // The Undo action records the attributes before the change; it is added
++    // only once the preset applied.
++    std::unique_ptr<SdrUndoAction> pUndo;
++    if (pDocument->IsUndoEnabled())
++        pUndo = pDocument->GetSdrUndoFactory().CreateUndoAttrObject(*pObject);
++    const uno::Reference<beans::XPropertySet> xShape(&rShape);
++    const uno::Reference<lang::XMultiServiceFactory> xModelFactory(pModel);
++    if (rPropertyName == u"SpellbookLineDash")
++        oox::drawingml::setPresetLineDash(xShape, xModelFactory, aPreset);
++    else
++        oox::drawingml::setPresetLineArrow(xShape, xModelFactory,
++                                           rPropertyName == u"SpellbookLineEndArrow", aPreset);
++    if (pUndo)
++        pDocument->AddUndo(std::move(pUndo));
++}
++
+ void applySpellbookFreeform(SvxShape& rShape, bool bClosed, const uno::Any& rValue)
+ {
+     uno::Sequence<uno::Sequence<awt::Point>> aPolygons;
+@@ -1041,6 +1071,14 @@ void SAL_CALL SdXShape::setPropertyValue( const OUString& aPropertyName, const c
+             mpModel->SetModified();
+         return;
+     }
++    if (aPropertyName == u"SpellbookLineDash"_ustr
++        || aPropertyName == u"SpellbookLineStartArrow"_ustr
++        || aPropertyName == u"SpellbookLineEndArrow"_ustr)
++    {
++        applySpellbookLinePreset(*mpShape, mpModel, aPropertyName, aValue);
++        mpModel->SetModified();
++        return;
++    }
+ 
+     const SfxItemPropertyMapEntry* pEntry = mpPropSet->getPropertyMapEntry(aPropertyName);
+ 
+@@ -1416,6 +1454,15 @@ css::uno::Any SAL_CALL SdXShape::getPropertyValue( const OUString& PropertyName
+ 
+     uno::Any aRet;
+ 
++    // The dash and line ends PPTX export writes, as PowerPoint presets.
++    if (PropertyName == u"SpellbookLineDash"_ustr)
++        return uno::Any(oox::DrawingML::GetPresetLineDash(uno::Reference<beans::XPropertySet>(mpShape)));
++    if (PropertyName == u"SpellbookLineStartArrow"_ustr
++        || PropertyName == u"SpellbookLineEndArrow"_ustr)
++        return uno::Any(oox::DrawingML::GetPresetLineArrow(
++            uno::Reference<beans::XPropertySet>(mpShape),
++            PropertyName == u"SpellbookLineStartArrow"_ustr));
++
+     if (PropertyName == u"SpellbookFontworkShapeType"_ustr
+         || PropertyName == u"SpellbookCustomShapeType"_ustr)
+     {
