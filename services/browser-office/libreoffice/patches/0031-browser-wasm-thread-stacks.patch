@@ -1,0 +1,18 @@
+diff --git a/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk b/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk
+--- a/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk
++++ b/solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk
+@@ -21,8 +21,12 @@ ifeq ($(ENABLE_EMSCRIPTEN_PROXY_TO_PTHREAD),)
+ gb_EMSCRIPTEN_LDFLAGS += -sPTHREAD_POOL_SIZE=6
+ endif
+ 
+-# Double the main thread stack size, but keep the default value for other threads:
+-gb_EMSCRIPTEN_LDFLAGS += -sSTACK_SIZE=131072 -sDEFAULT_PTHREAD_STACK_SIZE=65536
++# UNO scripts run on the proxied main thread, which gets STACK_SIZE. Loading,
++# exporting and observing documents from those scripts overflowed 128 KiB and
++# silently corrupted the thread-local data below the stack, aborting the
++# runtime after about a dozen edits. Give the main thread the 8 MiB a native
++# main thread has, and other threads 1 MiB:
++gb_EMSCRIPTEN_LDFLAGS += -sSTACK_SIZE=8388608 -sDEFAULT_PTHREAD_STACK_SIZE=1048576
+ 
+ # To keep the link time (and memory) down, prevent all rewriting options from wasm-emscripten-finalize
+ # See emscripten.py, finalize_wasm, modify_wasm = True

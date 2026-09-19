@@ -14,7 +14,7 @@
     "patchSeriesReady": true,
     "buildReady": false,
     "nativeSlideStructureReady": false,
-    "patchSeriesSha256": "455e80d17a58eee5b33abf8535a0c0de488805dd35dd78aa915d32172710cadb",
+    "patchSeriesSha256": "5bcfd1b6705a05de3af8f2e24969bcbe9b1dffca9fd1242321e8292a280d2cfb",
     "patches": [
       "libreoffice/patches/0001-core-undo-identity.patch",
       "libreoffice/patches/0002-generic-pptx-edit-invariants.patch",
@@ -45,7 +45,8 @@
       "libreoffice/patches/0027-browser-animation-timing-command.patch",
       "libreoffice/patches/0028-browser-attribute-undo-restores-object-text-items.patch",
       "libreoffice/patches/0029-browser-pptx-semantic-diagram-data-follows-model.patch",
-      "libreoffice/patches/0030-browser-fontwork-shape-type-property.patch"
+      "libreoffice/patches/0030-browser-fontwork-shape-type-property.patch",
+      "libreoffice/patches/0031-browser-wasm-thread-stacks.patch"
     ],
     "invariants": [
       "table-cell-native-undo",

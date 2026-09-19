@@ -78,8 +78,14 @@ captured at import, so node text, added nodes and removed nodes were lost on
 reload. Only changes made since the first edit are applied, an unedited or
 fully undone diagram is written as imported, and the stale cached drawing is
 not written. Patch `0030` exposes the WordArt shape type as a read-only shape
-property because the browser bridge cannot read custom-shape geometry. This
-series has not been compiled or run yet.
+property because the browser bridge cannot read custom-shape geometry. Patch
+`0031` raises the WASM main-thread stack from 128 KiB to 8 MiB and other
+thread stacks from 64 KiB to 1 MiB: UNO scripts run on the proxied main
+thread, and loading, exporting and observing documents there overflowed the
+stack into its thread-local data, so a session aborted after about a dozen
+native edits. The first v30 build passed 21 of 22 focused native tests; the
+SmartArt test exposed a unoxml clone that belongs to no document, fixed by
+moving the node instead.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

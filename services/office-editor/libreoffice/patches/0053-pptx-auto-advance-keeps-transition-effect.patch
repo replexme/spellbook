@@ -44,31 +44,32 @@ diff --git a/oox/source/ppt/slidetransitioncontext.cxx b/oox/source/ppt/slidetra
 diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
 --- a/sd/qa/unit/uiimpress.cxx
 +++ b/sd/qa/unit/uiimpress.cxx
-@@ -1366,6 +1366,36 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testDocumentStructureMetadataLineAndParagr
+@@ -1366,6 +1366,37 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testDocumentStructureMetadataLineAndParagr
      assertChanged(true);
  }
  
 +CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testAutoAdvanceKeepsTransitionEffectOnReload)
 +{
 +    createSdImpressDoc();
++    const auto pageProperties = [this]() {
++        uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                                   uno::UNO_QUERY_THROW);
++        return uno::Reference<beans::XPropertySet>(
++            xPagesSupplier->getDrawPages()->getByIndex(0), uno::UNO_QUERY_THROW);
++    };
++    uno::Reference<beans::XPropertySet> xPageProperties = pageProperties();
++    xPageProperties->setPropertyValue(u"TransitionType"_ustr, cpo::uno::Any(sal_Int16(37)));
++    xPageProperties->setPropertyValue(u"TransitionSubtype"_ustr, cpo::uno::Any(sal_Int16(101)));
++    xPageProperties->setPropertyValue(u"HighResDuration"_ustr, cpo::uno::Any(5.0));
++    xPageProperties->setPropertyValue(u"Change"_ustr, cpo::uno::Any(sal_Int32(1)));
++
++    // advTm and the visual effect share one p:transition; reloading must keep both.
++    saveAndReload(TestFilter::PPTX);
 +    auto pImpressDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
 +    CPPUNIT_ASSERT(pImpressDocument);
 +    SdPage* pPage = pImpressDocument->GetDoc()->GetSdPage(0, PageKind::Standard);
 +    CPPUNIT_ASSERT(pPage);
-+    uno::Reference<beans::XPropertySet> xPageProperties(pPage->getUnoPage(),
-+                                                        uno::UNO_QUERY_THROW);
-+    xPageProperties->setPropertyValue(u"TransitionType"_ustr, uno::Any(sal_Int16(37)));
-+    xPageProperties->setPropertyValue(u"TransitionSubtype"_ustr, uno::Any(sal_Int16(101)));
-+    xPageProperties->setPropertyValue(u"HighResDuration"_ustr, uno::Any(5.0));
-+    xPageProperties->setPropertyValue(u"Change"_ustr, uno::Any(sal_Int32(1)));
-+
-+    // advTm and the visual effect share one p:transition; reloading must keep both.
-+    saveAndReload(TestFilter::PPTX);
-+    pImpressDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
-+    CPPUNIT_ASSERT(pImpressDocument);
-+    pPage = pImpressDocument->GetDoc()->GetSdPage(0, PageKind::Standard);
-+    CPPUNIT_ASSERT(pPage);
-+    xPageProperties.set(pPage->getUnoPage(), uno::UNO_QUERY_THROW);
++    xPageProperties = pageProperties();
 +    sal_Int16 nValue = 0;
 +    CPPUNIT_ASSERT(xPageProperties->getPropertyValue(u"TransitionType"_ustr) >>= nValue);
 +    CPPUNIT_ASSERT_EQUAL(sal_Int16(37), nValue);

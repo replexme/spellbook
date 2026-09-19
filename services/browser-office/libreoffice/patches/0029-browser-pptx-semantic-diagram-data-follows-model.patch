@@ -42,7 +42,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
  #include <svx/svdoashp.hxx>
  #include <svx/svdomedia.hxx>
  #include <svx/svdtrans.hxx>
-@@ -6306,6 +6317,357 @@ OString DrawingML::WriteWdpPicture( const OUString& rFileId, const Sequence< sal
+@@ -6306,6 +6317,359 @@ OString DrawingML::WriteWdpPicture( const OUString& rFileId, const Sequence< sal
      return OUStringToOString(aId, RTL_TEXTENCODING_UTF8);
  }
  
@@ -150,19 +150,21 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
 +    {
 +        const auto aParagraphs
 +            = lcl_spellbookDiagramChildren(xText, gaSpellbookDrawingNamespace, u"p"_ustr);
++        // Move the properties rather than clone them: a unoxml clone belongs to
++        // no document, and appending it would throw WRONG_DOCUMENT_ERR.
 +        if (!aParagraphs.empty())
 +        {
 +            if (const auto xProperties = lcl_spellbookDiagramChild(
 +                    aParagraphs.front(), gaSpellbookDrawingNamespace, u"pPr"_ustr);
 +                xProperties.is())
-+                xParagraphProperties = xProperties->cloneNode(true);
++                xParagraphProperties = aParagraphs.front()->removeChild(xProperties);
 +            if (const auto xRun = lcl_spellbookDiagramChild(
 +                    aParagraphs.front(), gaSpellbookDrawingNamespace, u"r"_ustr);
 +                xRun.is())
 +                if (const auto xProperties = lcl_spellbookDiagramChild(
 +                        xRun, gaSpellbookDrawingNamespace, u"rPr"_ustr);
 +                    xProperties.is())
-+                    xRunProperties = xProperties->cloneNode(true);
++                    xRunProperties = xRun->removeChild(xProperties);
 +        }
 +        for (const auto& xParagraph : aParagraphs)
 +            xText->removeChild(xParagraph);
@@ -400,7 +402,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
  void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rXShape, int nDiagramId)
  {
      uno::Reference<beans::XPropertySet> xPropSet(rXShape, uno::UNO_QUERY);
-@@ -6317,6 +6679,8 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+@@ -6317,6 +6681,8 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
      uno::Reference<xml::dom::XDocument> drawingDom;
      uno::Sequence<uno::Sequence<uno::Any>> xDataRelSeq;
      uno::Sequence<uno::Any> diagramDrawing;
@@ -409,7 +411,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
  
      // retrieve the doms from the GrabBag
      uno::Sequence<beans::PropertyValue> propList;
-@@ -6340,6 +6704,10 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+@@ -6340,6 +6706,10 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
          }
          else if (propName == "OOXDiagramDataRels")
              rProp.Value >>= xDataRelSeq;
@@ -420,7 +422,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
      }
  
      // check that we have the 4 mandatory XDocuments
-@@ -6347,6 +6715,26 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+@@ -6347,6 +6717,26 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
      if (!dataDom.is() || !layoutDom.is() || !styleDom.is() || !colorDom.is())
          return;
  

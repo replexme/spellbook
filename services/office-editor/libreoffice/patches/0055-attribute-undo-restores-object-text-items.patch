@@ -29,18 +29,17 @@ diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
  #include <svx/svdpagv.hxx>
  #include <svx/svdorect.hxx>
  #include <svx/svdhdl.hxx>
-@@ -1395,6 +1399,51 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testAutoAdvanceKeepsTransitionEffectOnRelo
+@@ -1396,6 +1400,50 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testAutoAdvanceKeepsTransitionEffectOnRelo
      CPPUNIT_ASSERT(pPage->GetPresChange() == PresChange::Auto);
  }
  
 +CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testObjectTextAttributeUndoRestoresObjectItems)
 +{
 +    createSdImpressDoc();
-+    auto pImpressDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
-+    CPPUNIT_ASSERT(pImpressDocument);
-+    SdPage* pPage = pImpressDocument->GetDoc()->GetSdPage(0, PageKind::Standard);
-+    CPPUNIT_ASSERT(pPage);
-+    uno::Reference<drawing::XShapes> xShapes(pPage->getUnoPage(), uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
 +    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
 +    uno::Reference<drawing::XShape> xShape(
 +        xFactory->createInstance(u"com.sun.star.drawing.CustomShape"_ustr),
