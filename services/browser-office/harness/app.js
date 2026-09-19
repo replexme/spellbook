@@ -462,7 +462,37 @@ function inspectPackage(bytes) {
   });
 }
 
-function preserveNativeSnapshot(original, noEdit, edited, sourceOperations) {
+// The top-level shapes the commands name, by slide and authored name, so the
+// preservation merge can keep every other shape as the author wrote it. Null
+// when a command names no element or a target cannot be identified.
+function nativeSnapshotTargets(observation, commands) {
+  const targets = [];
+  for (const command of commands) {
+    const elementIds = [
+      ...(typeof command?.elementId === "string" ? [command.elementId] : []),
+      ...(Array.isArray(command?.elementIds) ? command.elementIds : []),
+    ];
+    if (!elementIds.length) return null;
+    for (const elementId of elementIds) {
+      const [slide, shape] = String(elementId).split("/");
+      const slideIndex = Number(slide);
+      const element = observation?.slides?.[slideIndex]?.elements?.find(
+        (candidate) => candidate.elementId === `${slide}/${shape}`,
+      );
+      if (!Number.isSafeInteger(slideIndex) || !element?.name) return null;
+      targets.push({ slideIndex, name: element.name });
+    }
+  }
+  return targets;
+}
+
+function preserveNativeSnapshot(
+  original,
+  noEdit,
+  edited,
+  sourceOperations,
+  sourceTargets = null,
+) {
   const requestId = `ooxml-preserve-${++requestSequence}`;
   const source = original.slice();
   const baseline = noEdit.slice();
@@ -477,6 +507,7 @@ function preserveNativeSnapshot(original, noEdit, edited, sourceOperations) {
         noEditBytes: baseline.buffer,
         editedBytes: candidate.buffer,
         sourceOperations,
+        sourceTargets,
       },
       [source.buffer, baseline.buffer, candidate.buffer],
     );
@@ -580,6 +611,7 @@ async function preserveAndInspectNativeDocument(
   originalBytes,
   detailSlideIndex,
   sourceOperations,
+  sourceTargets = null,
 ) {
   markBrowserProbePhase("snapshot:serialize");
   const serialized = await serializeNativeDocument();
@@ -596,6 +628,7 @@ async function preserveAndInspectNativeDocument(
     noEdit,
     serialized,
     sourceOperations,
+    sourceTargets,
   );
   const bytes = new Uint8Array(preserved.bytes);
   if (browserProbeMode && query.get("nativeRaw") === "1")
@@ -1075,11 +1108,12 @@ async function prepareProductPackageMutation(nativeRequest) {
           ].includes(nativeRequest.mediaType))
     )
       throw new Error("invalid_asset");
+    const beforeObservation = await observeNativeDocument();
     return {
       persistence: "native_snapshot",
       beforeBytes: currentBytes.slice(),
       beforeRevision: reconciledModelRevision,
-      beforeObservation: await observeNativeDocument(),
+      beforeObservation,
       beforeSlides: expectedSlides,
       nativeRequest: structuredClone(nativeRequest),
       persistedNativeRequest: {
@@ -1091,6 +1125,9 @@ async function prepareProductPackageMutation(nativeRequest) {
         permission: structuredClone(nativeRequest.permission),
       },
       sourceOperations: [nativeRequest.operation],
+      sourceTargets: nativeSnapshotTargets(beforeObservation, [
+        { elementId: nativeRequest.elementId ?? null },
+      ]),
     };
   }
   const nativeCommands =
@@ -1137,11 +1174,12 @@ async function prepareProductPackageMutation(nativeRequest) {
   if (!localized) {
     if (!patchedBrowserRuntimeAdmitted())
       throw new Error("browser_native_runtime_patch_required");
+    const beforeObservation = await observeNativeDocument();
     return {
       persistence: "native_snapshot",
       beforeBytes: currentBytes.slice(),
       beforeRevision: reconciledModelRevision,
-      beforeObservation: await observeNativeDocument(),
+      beforeObservation,
       beforeSlides: expectedSlides,
       nativeRequest: {
         operation: nativeRequest.operation,
@@ -1152,6 +1190,7 @@ async function prepareProductPackageMutation(nativeRequest) {
         suppressCapture: true,
       },
       sourceOperations: nativeCommands.map(({ op }) => op),
+      sourceTargets: nativeSnapshotTargets(beforeObservation, nativeCommands),
     };
   }
   if (productSlideOperations.has(command.op) && !nativeSlideStructureAdmitted())
@@ -1455,6 +1494,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
         prepared.beforeBytes,
         nativeValue.textDetails?.slideIndex,
         prepared.sourceOperations,
+        prepared.sourceTargets ?? null,
       );
       afterBytes = preserved.bytes;
       preservationReport = preserved.report;

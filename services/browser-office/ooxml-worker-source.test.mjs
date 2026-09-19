@@ -2023,3 +2023,123 @@ test("native snapshot rebinds a kept slide to renumbered engine relationships", 
   );
   assert.ok(result.report.semanticPatchedParts.includes(slidePath));
 });
+
+// An engine save that renumbers shape ids, rewrites the target's text and,
+// as LibreOffice's live-document export does, drops the empty rectangle's
+// paragraph alignment although the command never touched it.
+function withEngineSave(entries, { shadow, keepRectangleAlignment }) {
+  const slidePath = "ppt/slides/slide1.xml";
+  const slide = strFromU8(entries[slidePath])
+    .replace('id="2" name="TextBox 1"', 'id="67" name="TextBox 1"')
+    .replace('id="3" name="Rectangle 2"', 'id="68" name="Rectangle 2"')
+    .replace(
+      '<a:latin typeface="Liberation Sans"/>',
+      `${shadow ? '<a:effectLst><a:outerShdw dist="12700" dir="2700000"><a:srgbClr val="000000"/></a:outerShdw></a:effectLst>' : ""}<a:latin typeface="Arial"/>`,
+    )
+    .replace(
+      '<a:p><a:pPr algn="ctr"/></a:p>',
+      keepRectangleAlignment
+        ? '<a:p><a:pPr marR="0" algn="ctr"/><a:endParaRPr sz="1800"/></a:p>'
+        : '<a:p><a:endParaRPr sz="1800"/></a:p>',
+    );
+  return { ...entries, [slidePath]: strToU8(slide) };
+}
+
+test("native snapshot keeps the authored XML of shapes a command did not name", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const noEdit = withEngineSave(original, {
+    shadow: false,
+    keepRectangleAlignment: true,
+  });
+  const edited = withEngineSave(original, {
+    shadow: true,
+    keepRectangleAlignment: false,
+  });
+  const preserve = (sourceTargets) =>
+    strFromU8(
+      unzipSync(
+        preserveOriginalPptxParts(
+          zipSync(original),
+          zipSync(noEdit),
+          zipSync(edited),
+          ["text_shadow"],
+          sourceTargets,
+        ).bytes,
+      )["ppt/slides/slide1.xml"],
+    );
+  const targeted = preserve([{ slideIndex: 0, name: "TextBox 1" }]);
+  assert.match(
+    targeted,
+    /<p:cNvPr id="3" name="Rectangle 2"\/>[\s\S]*<a:p><a:pPr algn="ctr"\/><\/a:p>/u,
+  );
+  assert.match(targeted, /id="67" name="TextBox 1"[\s\S]*outerShdw/u);
+  // Without the command's targets the rectangle looks changed by the edit,
+  // so the merge cannot tell the engine's rewrite from an intended change.
+  const untargeted = preserve(null);
+  assert.doesNotMatch(untargeted, /<a:pPr algn="ctr"\/>/u);
+});
+
+test("native snapshot ignores targets for commands that restructure the shape tree", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const noEdit = withEngineSave(original, {
+    shadow: false,
+    keepRectangleAlignment: true,
+  });
+  const edited = withEngineSave(original, {
+    shadow: true,
+    keepRectangleAlignment: false,
+  });
+  const merged = strFromU8(
+    unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(original),
+        zipSync(noEdit),
+        zipSync(edited),
+        ["z_order"],
+        [{ slideIndex: 0, name: "TextBox 1" }],
+      ).bytes,
+    )["ppt/slides/slide1.xml"],
+  );
+  assert.doesNotMatch(merged, /<a:pPr algn="ctr"\/>/u);
+});
+
+test("native snapshot keeps slides a confined command did not target as authored", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "duplicate_slide",
+      slideIndex: 0,
+      insertIndex: 1,
+    }).bytes,
+  );
+  const [firstSlide, secondSlide] = slidePaths(original);
+  const engineSave = (entries, shadow) => {
+    const next = { ...entries };
+    for (const part of [firstSlide, secondSlide])
+      next[part] = strToU8(
+        strFromU8(entries[part]).replace(
+          '<a:latin typeface="Liberation Sans"/>',
+          `${part === firstSlide && shadow ? '<a:effectLst><a:outerShdw dist="12700"/></a:effectLst>' : ""}<a:latin typeface="Arial"/>`,
+        ),
+      );
+    // The engine's export of the untouched slide also differs between saves.
+    next[secondSlide] = strToU8(
+      strFromU8(next[secondSlide]).replace(
+        "</p:sld>",
+        shadow ? "<!-- later save --></p:sld>" : "</p:sld>",
+      ),
+    );
+    return next;
+  };
+  const result = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(engineSave(original, false)),
+    zipSync(engineSave(original, true)),
+    ["text_shadow"],
+    [{ slideIndex: 0, name: "TextBox 1" }],
+  );
+  const merged = unzipSync(result.bytes);
+  assert.match(strFromU8(merged[firstSlide]), /outerShdw/u);
+  assert.deepEqual(merged[secondSlide], original[secondSlide]);
+  assert.ok(!result.report.changedParts.includes(secondSlide));
+});

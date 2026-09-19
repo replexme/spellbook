@@ -6,6 +6,7 @@ import {
   classifyNativePackagePart,
   nativePreservationBudget,
   humanEditPreservationBudget,
+  operationsConfinedToTargets,
 } from "./native-preservation-policy.mjs";
 
 const presentationNamespace =
@@ -130,6 +131,7 @@ function preserveUnaffectedSlideShapes(
   noEditBytes,
   editedBytes,
   sourceOperations,
+  targetNames = null,
 ) {
   if (
     !/^ppt\/slides\/slide[^/]+\.xml$/u.test(part) ||
@@ -206,6 +208,13 @@ function preserveUnaffectedSlideShapes(
     sourceOperations.every((operation) =>
       additiveShapeOperations.has(operation),
     );
+  // A shape the command did not name keeps its authored XML even when the
+  // engine's save rewrote it (for example dropping an empty paragraph's
+  // alignment): the contract confines the command to its targets.
+  const untargeted = (source) =>
+    targetNames !== null &&
+    Boolean(identity(source)?.name) &&
+    !targetNames.has(identity(source).name);
   const replacements = [];
   for (let index = 0; index < authored.length; index += 1) {
     const source = authored[index];
@@ -224,7 +233,9 @@ function preserveUnaffectedSlideShapes(
     if (
       !editedShape ||
       editedShape.localName !== baseline.localName ||
+      identity(editedShape)?.name !== baselineIdentity.name ||
       (!additiveOnly &&
+        !untargeted(source) &&
         !samePartBytes(serializeXml(editedShape), serializeXml(baseline)))
     )
       continue;
@@ -641,6 +652,54 @@ function assertChangedReferencesResolve(merged, changedParts) {
           );
       }
   }
+}
+
+function orderedSlidePaths(entries) {
+  if (!entries[presentationPath] || !entries[presentationRelationshipsPath])
+    return [];
+  const relationships = new Map(
+    relationshipElements(parseXml(entries, presentationRelationshipsPath)).map(
+      (relationship) => [relationship.getAttribute("Id"), relationship],
+    ),
+  );
+  return [
+    ...parseXml(entries, presentationPath).getElementsByTagNameNS(
+      presentationNamespace,
+      "sldId",
+    ),
+  ].map((slideId) => {
+    const relationship = relationships.get(
+      slideId.getAttributeNS(relationshipAttributeNamespace, "id"),
+    );
+    return relationship &&
+      relationship.getAttribute("TargetMode") !== "External"
+      ? resolvePart(presentationPath, relationship.getAttribute("Target"))
+      : null;
+  });
+}
+
+// The author's names of the shapes the commands target, per slide part.
+// Null unless every operation is confined to the shapes it names and every
+// target was identified, in which case the merge keeps nothing else from
+// the engine's save.
+function shapeTargetsBySlide(original, sourceOperations, sourceTargets) {
+  if (
+    !Array.isArray(sourceTargets) ||
+    sourceTargets.length === 0 ||
+    !operationsConfinedToTargets(sourceOperations)
+  )
+    return null;
+  const slidePaths = orderedSlidePaths(original);
+  const targets = new Map();
+  for (const target of sourceTargets) {
+    const part = Number.isSafeInteger(target?.slideIndex)
+      ? slidePaths[target.slideIndex]
+      : null;
+    if (!part || typeof target.name !== "string" || !target.name) return null;
+    if (!targets.has(part)) targets.set(part, new Set());
+    targets.get(part).add(target.name);
+  }
+  return targets;
 }
 
 function changedPackageParts(original, merged) {
@@ -1323,6 +1382,7 @@ export function preserveOriginalPptxParts(
   noEditBytes,
   editedBytes,
   sourceOperations,
+  sourceTargets = null,
 ) {
   // null marks a direct human edit; every AI edit names its operations.
   const humanEdit = sourceOperations === null;
@@ -1352,6 +1412,9 @@ export function preserveOriginalPptxParts(
       "Native snapshot comparison exceeds the browser memory limit.",
     );
 
+  const targetNamesBySlide = humanEdit
+    ? null
+    : shapeTargetsBySlide(original, sourceOperations, sourceTargets);
   const merged = {};
   const editedSlides = [];
   const semanticPatchedParts = [];
@@ -1380,11 +1443,17 @@ export function preserveOriginalPptxParts(
       budget.allowedCategories.has(classifyNativePackagePart(part)) &&
       (budget.allowPartCreationOrDeletion ||
         Boolean(original[part]) === Boolean(edited[part]));
+    // A command confined to named shapes leaves every other slide as authored.
+    const untargetedSlide =
+      targetNamesBySlide !== null &&
+      /^ppt\/slides\/(?:_rels\/)?slide[^/]+\.xml(?:\.rels)?$/u.test(part) &&
+      !targetNamesBySlide.has(part.replace(/_rels\/([^/]+)\.rels$/u, "$1"));
     const changedByEngine =
       !semanticMasterThemePatch &&
       part !== "docProps/core.xml" &&
       engineChanged &&
-      withinBudget;
+      withinBudget &&
+      !untargetedSlide;
     // The author's copy of an unchanged part is kept, but its .rels may be the
     // engine's renumbered copy by now (.rels sort before their part). Rebind
     // the kept part's r:* references to the same relationships; when one no
@@ -1442,6 +1511,7 @@ export function preserveOriginalPptxParts(
           noEdit[part],
           semanticTableInsetPatch ?? edited[part],
           sourceOperations,
+          targetNamesBySlide?.get(part) ?? null,
         )
       : null;
     let relationshipRemap = null;
@@ -3503,6 +3573,7 @@ if (typeof self !== "undefined")
       noEditBytes,
       editedBytes,
       sourceOperations,
+      sourceTargets,
     } = event.data;
     try {
       if (operation === "inspect") {
@@ -3516,6 +3587,7 @@ if (typeof self !== "undefined")
           new Uint8Array(noEditBytes),
           new Uint8Array(editedBytes),
           sourceOperations,
+          sourceTargets ?? null,
         );
         self.postMessage(
           { requestId, bytes: result.bytes.buffer, report: result.report },

@@ -5,6 +5,7 @@ import {
   classifyNativePackagePart,
   humanEditPreservationBudget,
   nativePreservationBudget,
+  operationsConfinedToTargets,
 } from "./native-preservation-policy.mjs";
 
 test("browser package category mapping covers every native budget category", () => {
@@ -72,4 +73,19 @@ test("human edits keep macros and unknown parts out of the saved candidate", () 
     assert.ok(human.allowedCategories.has(category), category);
   for (const category of ["macros", "unknown"])
     assert.equal(human.allowedCategories.has(category), false, category);
+});
+
+test("only commands confined to the shapes they name let the merge keep other shapes", () => {
+  assert.equal(operationsConfinedToTargets(["text_shadow"]), true);
+  assert.equal(operationsConfinedToTargets(["align", "move"]), true);
+  assert.equal(operationsConfinedToTargets(["set_table_cell_format"]), true);
+  // Reordering or regrouping changes the shape tree itself.
+  assert.equal(operationsConfinedToTargets(["z_order"]), false);
+  assert.equal(operationsConfinedToTargets(["group"]), false);
+  // Slide, document and animation commands do not name shapes.
+  assert.equal(operationsConfinedToTargets(["set_background"]), false);
+  assert.equal(operationsConfinedToTargets(["move", "set_slide_size"]), false);
+  assert.equal(operationsConfinedToTargets(["add_animation_effect"]), true);
+  assert.equal(operationsConfinedToTargets([]), false);
+  assert.equal(operationsConfinedToTargets(null), false);
 });

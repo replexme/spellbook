@@ -81,6 +81,33 @@ export function humanEditPreservationBudget() {
   };
 }
 
+// Operations whose effect the contract confines to the elements they name.
+// Anything else the engine rewrote while saving them is export noise that the
+// merge may replace with the author's XML. Reordering and regrouping change
+// the shape tree itself, so they are excluded.
+const elementScopedTargets = new Set([
+  "element",
+  "elements",
+  "table_cell",
+  "table_range",
+]);
+const shapeTreeIdentityEffects = new Set(["reorder", "reparent"]);
+
+export function operationsConfinedToTargets(operations) {
+  return (
+    Array.isArray(operations) &&
+    operations.length > 0 &&
+    operations.every((operation) => {
+      const contract = capabilities.mutationModel.operations[operation];
+      return (
+        contract !== undefined &&
+        elementScopedTargets.has(contract.target) &&
+        !shapeTreeIdentityEffects.has(contract.identityEffect)
+      );
+    })
+  );
+}
+
 export function nativePreservationBudget(operations) {
   if (
     !Array.isArray(operations) ||
