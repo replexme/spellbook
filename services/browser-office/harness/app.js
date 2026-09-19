@@ -943,6 +943,19 @@ function normalizedFontSize(value, name) {
   return Math.round(requiredObservedNumber(value, name) * 20) * 5;
 }
 
+const fillStyleMembers = ["NONE", "SOLID", "GRADIENT", "HATCH", "BITMAP"];
+const lineStyleMembers = ["NONE", "SOLID", "DASH"];
+
+// Observed UNO enumerators arrive as a member name, a qualified name or an
+// ordinal; resolve them to the member name.
+function observedEnumMember(value, members) {
+  const token = String(value ?? "")
+    .split(/[.:]/u)
+    .at(-1)
+    .toUpperCase();
+  return /^\d+$/u.test(token) ? (members[Number(token)] ?? token) : token;
+}
+
 function observedItalic(value) {
   const normalized = String(value ?? "").toUpperCase();
   if (normalized.includes("NONE")) return false;
@@ -1346,12 +1359,18 @@ function productPackageCommand(command, expectedElement) {
       return {
         ...base,
         expectedColor: expectedElement.fill,
+        expectedSolid: !["NONE", "GRADIENT", "HATCH", "BITMAP"].includes(
+          observedEnumMember(expectedElement.fillStyle, fillStyleMembers),
+        ),
         color: Math.round(command.color),
       };
     case "line_color":
       return {
         ...base,
         expectedColor: expectedElement.lineColor,
+        expectedSolid:
+          observedEnumMember(expectedElement.lineStyle, lineStyleMembers) !==
+          "NONE",
         color: Math.round(command.color),
       };
     case "line_width":

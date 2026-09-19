@@ -1103,6 +1103,57 @@ test("browser OOXML worker writes local shape appearance without touching theme 
   );
 });
 
+test("a colour command adds no opacity and draws a fill or line that was not drawn", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const shapeProperties = (bytes, index) => {
+    const slide = strFromU8(unzipSync(bytes)["ppt/slides/slide1.xml"]);
+    return [...slide.matchAll(/<p:spPr>[\s\S]*?<\/p:spPr>/gu)][index][0];
+  };
+
+  // The rectangle's fill has no opacity of its own; recolouring it must not
+  // invent one (it was written as val="undefined", read back as 0%).
+  const recolored = applyOoxmlCommand(source, {
+    op: "fill_color",
+    elementId: "0/1",
+    expectedColor: 0x2563eb,
+    expectedSolid: true,
+    color: 0x112233,
+  });
+  assert.match(
+    shapeProperties(recolored.bytes, 1),
+    /<a:solidFill><a:srgbClr val="112233"\/><\/a:solidFill>/u,
+  );
+  assert.doesNotMatch(shapeProperties(recolored.bytes, 1), /<a:alpha/u);
+
+  // The text box draws neither a fill nor a line. Their hidden colours
+  // already equal the requested ones, which must still become visible.
+  const fillCommand = {
+    op: "fill_color",
+    elementId: "0/0",
+    expectedColor: 0x729fcf,
+    expectedSolid: false,
+    color: 0x729fcf,
+  };
+  const filled = applyOoxmlCommand(source, fillCommand);
+  assert.deepEqual(filled.report.changedParts, ["ppt/slides/slide1.xml"]);
+  assert.doesNotThrow(() =>
+    verifyPersistedElementMutation(source, filled.bytes, fillCommand),
+  );
+  const outlined = applyOoxmlCommand(filled.bytes, {
+    op: "line_color",
+    elementId: "0/0",
+    expectedColor: 0x3465a4,
+    expectedSolid: false,
+    color: 0x3465a4,
+  });
+  const textBox = shapeProperties(outlined.bytes, 0);
+  assert.doesNotMatch(textBox, /<a:noFill\/>/u);
+  assert.match(
+    textBox,
+    /<a:solidFill><a:srgbClr val="729FCF"\/><\/a:solidFill><a:ln><a:solidFill><a:srgbClr val="3465A4"\/><\/a:solidFill><\/a:ln>/u,
+  );
+});
+
 test("browser OOXML worker writes local text appearance without touching theme parts", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const original = unzipSync(source);
@@ -2228,6 +2279,107 @@ test("native snapshot takes the engine's element where the command changed its s
     merged,
     /<p:cNvPr id="2" name="TextBox 1"\/>[\s\S]*<a:bodyPr wrap="none"><a:spAutoFit\/><\/a:bodyPr><a:lstStyle\/><a:p><a:r><a:rPr sz="2400">[\s\S]*<a:t>First<\/a:t>[\s\S]*<a:t>Second<\/a:t>/u,
   );
+});
+
+// The fixture slide with a connector from the text box to the rectangle and
+// an entrance animation on the rectangle, as the author wrote them.
+const connectorXml = (id, from, to) =>
+  `<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="${id}" name="Connector 3"/><p:cNvCxnSpPr><a:stCxn id="${from}" idx="2"/><a:endCxn id="${to}" idx="0"/></p:cNvCxnSpPr><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm><a:off x="3429000" y="1737360"/><a:ext cx="0" cy="274320"/></a:xfrm><a:prstGeom prst="straightConnector1"><a:avLst/></a:prstGeom></p:spPr></p:cxnSp>`;
+const timingXml = (spid, duration, extra = "") =>
+  `<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"><p:childTnLst><p:par><p:cTn id="3" fill="hold"><p:stCondLst><p:cond delay="indefinite"/></p:stCondLst><p:childTnLst><p:par><p:cTn id="4" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst><p:par><p:cTn id="5" presetID="10" presetClass="entr" presetSubtype="0" fill="hold"${extra} nodeType="clickEffect"><p:stCondLst><p:cond delay="0"/></p:stCondLst><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="6" dur="${duration}"/><p:tgtEl><p:spTgt spid="${spid}"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn></p:par></p:childTnLst></p:cTn><p:prevCondLst><p:cond evt="onPrev" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:prevCondLst><p:nextCondLst><p:cond evt="onNext" delay="0"><p:tgtEl><p:sldTgt/></p:tgtEl></p:cond></p:nextCondLst></p:seq></p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>`;
+function withConnectorAndAnimation(entries, { ids, timing }) {
+  const slidePath = "ppt/slides/slide1.xml";
+  const [textBox, rectangle, connector] = ids;
+  const slide = strFromU8(entries[slidePath])
+    .replace('id="2" name="TextBox 1"', `id="${textBox}" name="TextBox 1"`)
+    .replace(
+      'id="3" name="Rectangle 2"',
+      `id="${rectangle}" name="Rectangle 2"`,
+    )
+    .replace(
+      "</p:spTree>",
+      `${connectorXml(connector, textBox, rectangle)}</p:spTree>`,
+    )
+    .replace("</p:clrMapOvr>", `</p:clrMapOvr>${timing ?? ""}`);
+  return { ...entries, [slidePath]: strToU8(slide) };
+}
+
+test("native snapshot keeps the author's connector and animation on a slide it edits", async () => {
+  const fixture = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const slidePath = "ppt/slides/slide1.xml";
+  const original = withConnectorAndAnimation(fixture, {
+    ids: [2, 3, 4],
+    timing: timingXml(3, 500),
+  });
+  // The engine renumbers every shape, writes its own animation XML and, on
+  // the edited save, the rectangle's new fill.
+  const engineSave = (fill, duration) =>
+    withConnectorAndAnimation(withEngineRectangle(fixture, fill), {
+      ids: [67, 68, 69],
+      timing: timingXml(68, duration, ' grpId="0"'),
+    });
+  const preserve = (edited) =>
+    strFromU8(
+      unzipSync(
+        preserveOriginalPptxParts(
+          zipSync(original),
+          zipSync(engineSave("2563eb", 500)),
+          zipSync(edited),
+          ["fill_color"],
+          [{ slideIndex: 0, name: "Rectangle 2" }],
+        ).bytes,
+      )[slidePath],
+    );
+  const authored = strFromU8(original[slidePath]);
+
+  // The command changed only the rectangle's fill: the connector and the
+  // animation stay exactly as the author wrote them, naming the author's ids.
+  assert.equal(
+    preserve(engineSave("4f46e5", 500)),
+    authored.replace('<a:srgbClr val="2563EB"/>', '<a:srgbClr val="4f46e5"/>'),
+  );
+
+  // When the engine's animation changed as well, the slide takes it, but
+  // pointed at the rectangle under the author's id.
+  const retimed = preserve(engineSave("4f46e5", 1000));
+  assert.match(
+    retimed,
+    /<p:cTn id="6" dur="1000"\/><p:tgtEl><p:spTgt spid="3"\/>/u,
+  );
+  assert.match(retimed, /grpId="0"/u);
+  assert.match(
+    retimed,
+    /<a:stCxn id="2" idx="2"\/><a:endCxn id="3" idx="0"\/>/u,
+  );
+  assert.doesNotMatch(retimed, /spid="68"|id="6[789]"/u);
+});
+
+test("native snapshot takes the engine's slide when a shape reference cannot follow its shape", async () => {
+  const fixture = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const slidePath = "ppt/slides/slide1.xml";
+  // The author's animation names a shape the slide does not have.
+  const original = withConnectorAndAnimation(fixture, {
+    ids: [2, 3, 4],
+    timing: timingXml(99, 500),
+  });
+  const engineSave = (fill) =>
+    withConnectorAndAnimation(withEngineRectangle(fixture, fill), {
+      ids: [67, 68, 69],
+      timing: timingXml(68, 500),
+    });
+  const edited = engineSave("4f46e5");
+  const merged = strFromU8(
+    unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(original),
+        zipSync(engineSave("2563eb")),
+        zipSync(edited),
+        ["fill_color"],
+        [{ slideIndex: 0, name: "Rectangle 2" }],
+      ).bytes,
+    )[slidePath],
+  );
+  assert.equal(merged, strFromU8(edited[slidePath]));
 });
 
 test("native snapshot ignores targets for commands that restructure the shape tree", async () => {

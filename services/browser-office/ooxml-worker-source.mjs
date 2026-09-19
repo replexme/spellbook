@@ -327,15 +327,6 @@ function preserveUnaffectedSlideShapes(
   const documents = [originalBytes, noEditBytes, editedBytes].map((bytes) =>
     parseXml({ [part]: bytes }, part),
   );
-  if (
-    documents.some((document) =>
-      ["timing", "cxnSp", "spTgt"].some(
-        (name) =>
-          document.getElementsByTagNameNS(presentationNamespace, name).length,
-      ),
-    )
-  )
-    return null;
   const shapeChildren = (document) => {
     const commonSlide = directXmlChild(
       document.documentElement,
@@ -399,6 +390,9 @@ function preserveUnaffectedSlideShapes(
     Boolean(identity(source)?.name) &&
     !targetNames.has(identity(source).name);
   const replacements = [];
+  // Every author shape matched to its engine counterpart, replaced or not;
+  // the ids of both saves are mapped through these pairs.
+  const pairs = [];
   for (let index = 0; index < authored.length; index += 1) {
     const source = authored[index];
     const baseline = normalized[index];
@@ -408,8 +402,7 @@ function preserveUnaffectedSlideShapes(
       !sourceIdentity?.id ||
       !baselineIdentity?.id ||
       source.localName !== baseline.localName ||
-      sourceIdentity.name !== baselineIdentity.name ||
-      hasRelationshipReference(source)
+      sourceIdentity.name !== baselineIdentity.name
     )
       continue;
     const editedShape = editedById.get(baselineIdentity.id);
@@ -419,14 +412,23 @@ function preserveUnaffectedSlideShapes(
       identity(editedShape)?.name !== baselineIdentity.name
     )
       continue;
+    const pair = {
+      sourceId: sourceIdentity.id,
+      baselineId: baselineIdentity.id,
+      editedId: identity(editedShape).id,
+      finalId: identity(editedShape).id,
+    };
+    pairs.push(pair);
+    if (hasRelationshipReference(source)) continue;
     if (
       additiveOnly ||
       untargeted(source) ||
       samePartBytes(serializeXml(editedShape), serializeXml(baseline))
     ) {
       replacements.push({
-        source,
+        pair,
         editedShape,
+        restored: true,
         node: documents[2].importNode(source, true),
       });
       continue;
@@ -439,20 +441,170 @@ function preserveUnaffectedSlideShapes(
       baseline,
       editedShape,
     );
-    if (merged) replacements.push({ source, editedShape, node: merged });
+    if (merged)
+      replacements.push({ pair, editedShape, restored: false, node: merged });
   }
   if (!replacements.length) return null;
+  // A merged shape mixes both saves, so the space of any shape id it names
+  // is unknown.
+  if (
+    replacements.some(
+      ({ restored, node }) => !restored && shapeReferences(node).length,
+    )
+  )
+    return null;
+  for (const replacement of replacements)
+    replacement.pair.finalId = identity(replacement.node).id;
   const replacing = new Set(replacements.map(({ editedShape }) => editedShape));
   const remainingIds = new Set(
     changed
       .filter((node) => !replacing.has(node))
       .map((node) => identity(node)?.id),
   );
-  if (replacements.some(({ source }) => remainingIds.has(identity(source).id)))
+  if (replacements.some(({ pair }) => remainingIds.has(pair.finalId)))
     return null;
+
+  // The slide's animations keep the author's XML when the engine's saves
+  // before and after the command animate the same shapes the same way.
+  const [authoredTiming, baselineTiming, editedTiming] =
+    documents.map(slideTimingNode);
+  const inAuthorIds = (node, ids) => {
+    if (!node) return "";
+    const copy = node.cloneNode(true);
+    for (const { element, attribute } of shapeReferences(copy)) {
+      const id = ids.get(element.getAttribute(attribute));
+      if (id === undefined) return null;
+      element.setAttribute(attribute, id);
+    }
+    return new XMLSerializer().serializeToString(copy);
+  };
+  const baselineAnimations = inAuthorIds(
+    baselineTiming,
+    new Map(pairs.map((pair) => [pair.baselineId, pair.sourceId])),
+  );
+  const restoreTiming =
+    authoredTiming !== null &&
+    !hasRelationshipReference(authoredTiming) &&
+    baselineAnimations !== null &&
+    baselineAnimations ===
+      inAuthorIds(
+        editedTiming,
+        new Map(pairs.map((pair) => [pair.editedId, pair.sourceId])),
+      );
+
+  const descendantIds = (node) =>
+    [...node.getElementsByTagNameNS(presentationNamespace, "cNvPr")]
+      .slice(1)
+      .map((properties) => properties.getAttribute("id"));
+  const replacedEngineIds = new Set(
+    replacements.flatMap(({ editedShape }) => descendantIds(editedShape)),
+  );
+  const restoredAuthorIds = new Set(
+    replacements.flatMap(({ node }) => descendantIds(node)),
+  );
+  const authorOrigin = new Set(
+    replacements.filter(({ restored }) => restored).map(({ node }) => node),
+  );
   for (const { editedShape, node } of replacements)
     editedShape.parentNode.replaceChild(node, editedShape);
+  if (restoreTiming) {
+    const timing = documents[2].importNode(authoredTiming, true);
+    if (editedTiming)
+      editedTiming.parentNode.replaceChild(timing, editedTiming);
+    else insertSlideTiming(documents[2], timing);
+    authorOrigin.add(timing);
+  }
+
+  // Shape ids named by animations and connectors follow the shapes: an
+  // author reference to a shape the engine kept takes the engine's id, an
+  // engine reference to a restored shape the author's.
+  const engineToFinal = new Map(
+    pairs.map((pair) => [pair.editedId, pair.finalId]),
+  );
+  const authorToFinal = new Map(
+    pairs.map((pair) => [pair.sourceId, pair.finalId]),
+  );
+  const fromAuthor = (element) => {
+    for (let node = element; node; node = node.parentNode)
+      if (authorOrigin.has(node)) return true;
+    return false;
+  };
+  for (const { element, attribute } of shapeReferences(documents[2])) {
+    const id = element.getAttribute(attribute);
+    if (fromAuthor(element)) {
+      if (authorToFinal.has(id))
+        element.setAttribute(attribute, authorToFinal.get(id));
+      else if (!restoredAuthorIds.has(id)) return null;
+    } else if (engineToFinal.has(id))
+      element.setAttribute(attribute, engineToFinal.get(id));
+    else if (replacedEngineIds.has(id)) return null;
+  }
+  const finalIds = [
+    ...documents[2].getElementsByTagNameNS(presentationNamespace, "cNvPr"),
+  ].map((properties) => properties.getAttribute("id"));
+  const knownIds = new Set(finalIds);
+  if (
+    knownIds.size !== finalIds.length ||
+    shapeReferences(documents[2]).some(
+      ({ element, attribute }) =>
+        !knownIds.has(element.getAttribute(attribute)),
+    )
+  )
+    return null;
   return serializeXml(documents[2]);
+}
+
+// Attributes through which a slide names its shapes by id: animation and
+// build targets, and the shapes a connector joins.
+const shapeReferenceAttributes = [
+  [presentationNamespace, "spTgt", "spid"],
+  [presentationNamespace, "inkTgt", "spid"],
+  [presentationNamespace, "bldP", "spid"],
+  [presentationNamespace, "bldDgm", "spid"],
+  [presentationNamespace, "bldOleChart", "spid"],
+  [presentationNamespace, "bldGraphic", "spid"],
+  [drawingNamespace, "stCxn", "id"],
+  [drawingNamespace, "endCxn", "id"],
+];
+
+function shapeReferences(root) {
+  return shapeReferenceAttributes.flatMap(([namespace, name, attribute]) =>
+    [...root.getElementsByTagNameNS(namespace, name)]
+      .filter((element) => element.hasAttribute(attribute))
+      .map((element) => ({ element, attribute })),
+  );
+}
+
+// A slide's animations sit directly under p:sld, either as p:timing or
+// wrapped in mc:AlternateContent.
+function slideTimingNode(document) {
+  for (const child of [...document.documentElement.childNodes]) {
+    if (child.nodeType !== 1) continue;
+    if (
+      child.namespaceURI === presentationNamespace &&
+      child.localName === "timing"
+    )
+      return child;
+    if (
+      child.namespaceURI === markupCompatibilityNamespace &&
+      child.localName === "AlternateContent" &&
+      child.getElementsByTagNameNS(presentationNamespace, "timing").length
+    )
+      return child;
+  }
+  return null;
+}
+
+function insertSlideTiming(document, node) {
+  const root = document.documentElement;
+  const following = [...root.childNodes].find(
+    (child) =>
+      child.nodeType === 1 &&
+      child.namespaceURI === presentationNamespace &&
+      child.localName === "extLst",
+  );
+  if (following) root.insertBefore(node, following);
+  else root.appendChild(node);
 }
 
 // A slide transition sits directly under p:sld, either as p:transition or
@@ -2562,7 +2714,15 @@ function updateShapeAppearance(shape, command) {
       "expectedColor",
     );
     const color = colorInteger(command.color, "color");
-    if (expectedColor !== color) {
+    // A fill or line that is not drawn becomes a solid one in the new colour,
+    // even when its hidden colour already matches.
+    if (
+      command.expectedSolid !== undefined &&
+      typeof command.expectedSolid !== "boolean"
+    )
+      throw new Error("Browser color command is invalid.");
+    const changed = expectedColor !== color || command.expectedSolid === false;
+    if (changed) {
       const container =
         command.op === "fill_color" ? properties : ensureShapeLine(properties);
       setSolidColor(container, color, {
@@ -2584,7 +2744,7 @@ function updateShapeAppearance(shape, command) {
     return {
       previous: expectedColor,
       value: color,
-      changed: expectedColor !== color,
+      changed,
     };
   }
   if (command.op === "line_width") {
@@ -2887,7 +3047,7 @@ function ensureShapeLine(properties) {
 function setSolidColor(container, color, { laterNames }) {
   const existingFill = directDrawingFill(container);
   const previousAlpha = existingFill
-    ? directColorTransform(existingFill, "alpha")?.getAttribute("val")
+    ? (directColorTransform(existingFill, "alpha")?.getAttribute("val") ?? null)
     : null;
   const solidFill = container.ownerDocument.createElementNS(
     drawingNamespace,
