@@ -1537,3 +1537,489 @@ function withOwnedDependencyGraph(source) {
   entries["[Content_Types].xml"] = strToU8(contentTypes);
   return zipSync(entries, { level: 6 });
 }
+
+function withAuthoredTransitionSound(source) {
+  const entries = unzipSync(source);
+  const slidePath = "ppt/slides/slide1.xml";
+  const relationshipsPath = "ppt/slides/_rels/slide1.xml.rels";
+  entries["ppt/media/transition.wav"] = strToU8("RIFF");
+  entries[relationshipsPath] = strToU8(
+    strFromU8(entries[relationshipsPath]).replace(
+      "</Relationships>",
+      '<Relationship Id="rIdTransitionSound" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio" Target="../media/transition.wav"/></Relationships>',
+    ),
+  );
+  const authored =
+    '<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" Requires="p14"><p:transition spd="slow" advTm="5000" p14:dur="2000"><p:sndAc><p:stSnd><p:snd r:embed="rIdTransitionSound" name="transition.wav"/></p:stSnd></p:sndAc></p:transition></mc:Choice><mc:Fallback><p:transition spd="slow" advTm="5000"><p:sndAc><p:stSnd><p:snd r:embed="rIdTransitionSound" name="transition.wav"/></p:stSnd></p:sndAc></p:transition></mc:Fallback></mc:AlternateContent>';
+  const slide = strFromU8(entries[slidePath]);
+  const withTransition = slide.replace(/<\/p:sld>\s*$/u, `${authored}</p:sld>`);
+  assert.notEqual(withTransition, slide);
+  entries[slidePath] = strToU8(withTransition);
+  return { entries, slidePath };
+}
+
+function withEngineTransition(entries, slidePath, transition) {
+  const slide = strFromU8(entries[slidePath]).replace(
+    /<mc:AlternateContent[\s\S]*<\/mc:AlternateContent>/u,
+    transition,
+  );
+  return { ...entries, [slidePath]: strToU8(slide) };
+}
+
+test("native snapshot keeps the author's transition when the edit did not change it", async () => {
+  const fixture = new Uint8Array(await readFile(fixtureUrl));
+  const { entries, slidePath } = withAuthoredTransitionSound(fixture);
+  const source = zipSync(entries);
+  const engineTransition = '<p:transition spd="slow" advTm="5000"/>';
+  const noEdit = withEngineTransition(entries, slidePath, engineTransition);
+  const edited = {
+    ...noEdit,
+    [slidePath]: strToU8(
+      strFromU8(noEdit[slidePath]).replace(
+        "Spellbook 검증 العربية",
+        "Transition untouched",
+      ),
+    ),
+  };
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    ["replace_text"],
+  );
+  const merged = strFromU8(unzipSync(result.bytes)[slidePath]);
+  assert.match(merged, /Transition untouched/u);
+  assert.match(merged, /p14:dur="2000"/u);
+  assert.equal((merged.match(/rIdTransitionSound/gu) ?? []).length, 2);
+});
+
+test("native snapshot carries the author's transition sound into an edited transition", async () => {
+  const fixture = new Uint8Array(await readFile(fixtureUrl));
+  const { entries, slidePath } = withAuthoredTransitionSound(fixture);
+  const source = zipSync(entries);
+  const noEdit = withEngineTransition(
+    entries,
+    slidePath,
+    '<p:transition spd="slow" advTm="5000"/>',
+  );
+  const edited = withEngineTransition(
+    entries,
+    slidePath,
+    '<p:transition spd="med" advTm="5000"><p:fade/></p:transition>',
+  );
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    ["set_slide_transition"],
+  );
+  const merged = strFromU8(unzipSync(result.bytes)[slidePath]);
+  assert.match(
+    merged,
+    /<p:transition spd="med" advTm="5000"><p:fade\/><p:sndAc><p:stSnd><p:snd r:embed="rIdTransitionSound" name="transition.wav"\/><\/p:stSnd><\/p:sndAc><\/p:transition>/u,
+  );
+  assert.ok(result.report.semanticPatchedParts.includes(slidePath));
+});
+
+test("native snapshot accepts a direct human edit without an operation list", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const noEdit = unzipSync(source);
+  const edited = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "replace_text",
+      elementId: "0/0",
+      expectedText: "Spellbook 검증 العربية",
+      text: "Typed by a person",
+    }).bytes,
+  );
+  edited["ppt/vbaProject.bin"] = strToU8("macro");
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    null,
+  );
+  const merged = unzipSync(result.bytes);
+  assert.match(
+    strFromU8(merged["ppt/slides/slide1.xml"]),
+    /Typed by a person/u,
+  );
+  assert.equal(merged["ppt/vbaProject.bin"], undefined);
+  assert.deepEqual(result.report.changedParts, ["ppt/slides/slide1.xml"]);
+});
+
+function withSmartArtGraph(entries, { ids, drawing, data }) {
+  const slidePath = "ppt/slides/slide1.xml";
+  const relationshipsPath = "ppt/slides/_rels/slide1.xml.rels";
+  const type = (name) =>
+    name === "diagramDrawing"
+      ? "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing"
+      : `http://schemas.openxmlformats.org/officeDocument/2006/relationships/${name}`;
+  const next = { ...entries };
+  const relationships = strFromU8(next[relationshipsPath]).replace(
+    /<Relationship [^>]*diagram[^>]*\/>/gu,
+    "",
+  );
+  const added = [
+    ["dm", "diagramData", "../diagrams/data1.xml"],
+    ["lo", "diagramLayout", "../diagrams/layout1.xml"],
+    ["qs", "diagramQuickStyle", "../diagrams/quickStyle1.xml"],
+    ["cs", "diagramColors", "../diagrams/colors1.xml"],
+    ...(drawing ? [["dr", "diagramDrawing", "../diagrams/drawing1.xml"]] : []),
+  ]
+    .map(
+      ([role, name, target]) =>
+        `<Relationship Id="${ids[role]}" Type="${type(name)}" Target="${target}"/>`,
+    )
+    .join("");
+  next[relationshipsPath] = strToU8(
+    relationships.replace("</Relationships>", `${added}</Relationships>`),
+  );
+  const frame = `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="90" name="Diagram 90"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="100" cy="100"/></p:xfrm><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/diagram"><dgm:relIds xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" r:dm="${ids.dm}" r:lo="${ids.lo}" r:qs="${ids.qs}" r:cs="${ids.cs}"/></a:graphicData></a:graphic></p:graphicFrame>`;
+  next[slidePath] = strToU8(
+    strFromU8(next[slidePath])
+      .replace(
+        /<p:graphicFrame>[\s\S]*?Diagram 90[\s\S]*?<\/p:graphicFrame>/u,
+        "",
+      )
+      .replace("</p:spTree>", `${frame}</p:spTree>`),
+  );
+  for (const name of ["layout1", "quickStyle1", "colors1"])
+    next[`ppt/diagrams/${name}.xml`] = strToU8(`<${name}/>`);
+  next["ppt/diagrams/data1.xml"] = strToU8(`<dataModel>${data}</dataModel>`);
+  const contentTypes = strFromU8(next["[Content_Types].xml"]).replace(
+    /<Override PartName="\/ppt\/diagrams\/drawing1.xml"[^>]*\/>/u,
+    "",
+  );
+  if (drawing) {
+    next["ppt/diagrams/drawing1.xml"] = strToU8("<cachedDrawing/>");
+    next["[Content_Types].xml"] = strToU8(
+      contentTypes.replace(
+        "</Types>",
+        '<Override PartName="/ppt/diagrams/drawing1.xml" ContentType="application/vnd.ms-office.drawingml.diagramDrawing+xml"/></Types>',
+      ),
+    );
+  } else {
+    delete next["ppt/diagrams/drawing1.xml"];
+    next["[Content_Types].xml"] = strToU8(contentTypes);
+  }
+  return next;
+}
+
+test("native snapshot maps renumbered relationships back and drops a stale SmartArt drawing", async () => {
+  const fixture = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const authorIds = {
+    dm: "rId12",
+    lo: "rId13",
+    qs: "rId14",
+    cs: "rId15",
+    dr: "rId16",
+  };
+  const engineIds = { dm: "rId21", lo: "rId22", qs: "rId23", cs: "rId24" };
+  const original = withSmartArtGraph(fixture, {
+    ids: authorIds,
+    drawing: true,
+    data: "Before",
+  });
+  const noEdit = withSmartArtGraph(fixture, {
+    ids: engineIds,
+    drawing: false,
+    data: "Before",
+  });
+  const edited = withSmartArtGraph(fixture, {
+    ids: engineIds,
+    drawing: false,
+    data: "After",
+  });
+  const result = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(noEdit),
+    zipSync(edited),
+    ["set_smartart_node"],
+  );
+  const merged = unzipSync(result.bytes);
+  const slide = strFromU8(merged["ppt/slides/slide1.xml"]);
+  const relationships = strFromU8(merged["ppt/slides/_rels/slide1.xml.rels"]);
+  assert.match(slide, /r:dm="rId12" r:lo="rId13" r:qs="rId14" r:cs="rId15"/u);
+  assert.match(strFromU8(merged["ppt/diagrams/data1.xml"]), /After/u);
+  assert.equal(merged["ppt/diagrams/drawing1.xml"], undefined);
+  assert.doesNotMatch(relationships, /diagramDrawing/u);
+  assert.doesNotMatch(
+    strFromU8(merged["[Content_Types].xml"]),
+    /diagrams\/drawing1\.xml/u,
+  );
+  assert.match(relationships, /Id="rId12"[^>]*diagramData/u);
+});
+
+test("native snapshot rebinds a restored transition sound to its own relationship", async () => {
+  const fixture = new Uint8Array(await readFile(fixtureUrl));
+  const { entries, slidePath } = withAuthoredTransitionSound(fixture);
+  const relationshipsPath = "ppt/slides/_rels/slide1.xml.rels";
+  const engineRelationships = (extra) =>
+    strToU8(
+      strFromU8(entries[relationshipsPath])
+        .replace(/<Relationship Id="rIdTransitionSound"[^>]*\/>/u, "")
+        .replace("</Relationships>", `${extra}</Relationships>`),
+    );
+  // The engine drops the sound and later reuses its id for a new hyperlink.
+  const noEdit = withEngineTransition(
+    entries,
+    slidePath,
+    '<p:transition spd="slow" advTm="5000"/>',
+  );
+  delete noEdit["ppt/media/transition.wav"];
+  noEdit[relationshipsPath] = engineRelationships("");
+  const edited = {
+    ...noEdit,
+    [relationshipsPath]: engineRelationships(
+      '<Relationship Id="rIdTransitionSound" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slide1.xml"/>',
+    ),
+  };
+  const result = preserveOriginalPptxParts(
+    zipSync(entries),
+    zipSync(noEdit),
+    zipSync(edited),
+    ["set_object_interaction"],
+  );
+  const merged = unzipSync(result.bytes);
+  const slide = strFromU8(merged[slidePath]);
+  const relationships = strFromU8(merged[relationshipsPath]);
+  const soundIds = [...slide.matchAll(/<p:snd r:embed="([^"]+)"/gu)].map(
+    (match) => match[1],
+  );
+  assert.equal(soundIds.length, 2);
+  assert.equal(new Set(soundIds).size, 1);
+  assert.notEqual(soundIds[0], "rIdTransitionSound");
+  assert.match(
+    relationships,
+    new RegExp(
+      `<Relationship Id="${soundIds[0]}" Type="[^"]*/audio" Target="../media/transition.wav"/>`,
+      "u",
+    ),
+  );
+  assert.match(
+    relationships,
+    /<Relationship Id="rIdTransitionSound" Type="[^"]*\/slide" Target="slide1.xml"\/>/u,
+  );
+  assert.ok(merged["ppt/media/transition.wav"]);
+  assert.ok(result.report.semanticPatchedParts.includes(relationshipsPath));
+});
+
+test("native snapshot declares content types for author parts the engine dropped", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const printerSettings = "ppt/printerSettings/printerSettings1.bin";
+  const sound = "ppt/media/Cortázar.wav";
+  original[sound] = strToU8("RIFF");
+  original["[Content_Types].xml"] = strToU8(
+    strFromU8(original["[Content_Types].xml"]).replace(
+      "</Types>",
+      '<Override PartName="/ppt/media/Cort%C3%A1zar.wav" ContentType="audio/wav"/></Types>',
+    ),
+  );
+  // Like LibreOffice: no printer settings, no unreferenced sound, and a
+  // manifest that no longer declares either.
+  const noEdit = { ...original };
+  delete noEdit[printerSettings];
+  delete noEdit[sound];
+  noEdit["[Content_Types].xml"] = strToU8(
+    strFromU8(original["[Content_Types].xml"])
+      .replace(/<Default Extension="bin"[^>]*\/>/u, "")
+      .replace(/<Override PartName="\/ppt\/media\/Cort[^>]*\/>/u, ""),
+  );
+  const edited = {
+    ...noEdit,
+    "ppt/media/image-new.png": strToU8("PNG"),
+    "[Content_Types].xml": strToU8(
+      strFromU8(noEdit["[Content_Types].xml"]).replace(
+        "<Default ",
+        '<Default Extension="png" ContentType="image/png"/><Default ',
+      ),
+    ),
+  };
+  const result = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(noEdit),
+    zipSync(edited),
+    ["insert_image"],
+  );
+  const merged = unzipSync(result.bytes);
+  const contentTypes = strFromU8(merged["[Content_Types].xml"]);
+  assert.ok(merged[printerSettings]);
+  assert.ok(merged[sound]);
+  assert.ok(merged["ppt/media/image-new.png"]);
+  assert.match(
+    contentTypes,
+    /<Default Extension="bin" ContentType="application\/vnd.openxmlformats-officedocument.presentationml.printerSettings"\/>/u,
+  );
+  assert.match(
+    contentTypes,
+    /<Default Extension="png" ContentType="image\/png"\/>/u,
+  );
+  assert.match(
+    contentTypes,
+    /<Override PartName="\/ppt\/media\/Cort%C3%A1zar.wav" ContentType="audio\/wav"\/>/u,
+  );
+  assert.ok(result.report.semanticPatchedParts.includes("[Content_Types].xml"));
+});
+
+test("native snapshot removes the data part's pointer to a dropped SmartArt drawing", async () => {
+  const fixture = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const authorIds = {
+    dm: "rId12",
+    lo: "rId13",
+    qs: "rId14",
+    cs: "rId15",
+    dr: "rId16",
+  };
+  const engineIds = { dm: "rId21", lo: "rId22", qs: "rId23", cs: "rId24" };
+  // LibreOffice writes the imported data model back with the author's
+  // drawing pointer even when it does not write the drawing itself.
+  const data = (text) =>
+    `${text}<dgm:extLst xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram"><a:ext xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" relId="rId16" minVer="http://schemas.openxmlformats.org/drawingml/2006/diagram"/></a:ext></dgm:extLst>`;
+  const result = preserveOriginalPptxParts(
+    zipSync(
+      withSmartArtGraph(fixture, {
+        ids: authorIds,
+        drawing: true,
+        data: data("Before"),
+      }),
+    ),
+    zipSync(
+      withSmartArtGraph(fixture, {
+        ids: engineIds,
+        drawing: false,
+        data: data("Before"),
+      }),
+    ),
+    zipSync(
+      withSmartArtGraph(fixture, {
+        ids: engineIds,
+        drawing: false,
+        data: data("After"),
+      }),
+    ),
+    ["set_smartart_node"],
+  );
+  const merged = unzipSync(result.bytes);
+  const dataModel = strFromU8(merged["ppt/diagrams/data1.xml"]);
+  assert.match(dataModel, /After/u);
+  assert.doesNotMatch(dataModel, /dataModelExt|extLst/u);
+  assert.equal(merged["ppt/diagrams/drawing1.xml"], undefined);
+  assert.ok(
+    result.report.semanticPatchedParts.includes("ppt/diagrams/data1.xml"),
+  );
+});
+
+test("native snapshot restores the transition sound on a slide the edit changed", async () => {
+  const fixture = new Uint8Array(await readFile(fixtureUrl));
+  const { entries, slidePath } = withAuthoredTransitionSound(fixture);
+  const relationshipsPath = "ppt/slides/_rels/slide1.xml.rels";
+  const engineTransition = '<p:transition spd="slow" advTm="5000"/>';
+  const noEdit = withEngineTransition(entries, slidePath, engineTransition);
+  delete noEdit["ppt/media/transition.wav"];
+  noEdit[relationshipsPath] = strToU8(
+    strFromU8(entries[relationshipsPath]).replace(
+      /<Relationship Id="rIdTransitionSound"[^>]*\/>/u,
+      "",
+    ),
+  );
+  // The edit adds a hyperlink relationship under the id the author's sound
+  // used, and changes the slide XML itself.
+  const edited = {
+    ...noEdit,
+    [slidePath]: strToU8(
+      strFromU8(noEdit[slidePath]).replace(
+        "Spellbook 검증 العربية",
+        "Linked text",
+      ),
+    ),
+    [relationshipsPath]: strToU8(
+      strFromU8(noEdit[relationshipsPath]).replace(
+        "</Relationships>",
+        '<Relationship Id="rIdTransitionSound" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slide1.xml"/></Relationships>',
+      ),
+    ),
+  };
+  const result = preserveOriginalPptxParts(
+    zipSync(entries),
+    zipSync(noEdit),
+    zipSync(edited),
+    ["set_object_interaction"],
+  );
+  const merged = unzipSync(result.bytes);
+  const slide = strFromU8(merged[slidePath]);
+  const relationships = strFromU8(merged[relationshipsPath]);
+  assert.match(slide, /Linked text/u);
+  assert.match(slide, /p14:dur="2000"/u);
+  const soundId = slide.match(/<p:snd r:embed="([^"]+)"/u)?.[1];
+  assert.ok(soundId && soundId !== "rIdTransitionSound");
+  assert.match(
+    relationships,
+    new RegExp(
+      `<Relationship Id="${soundId}" Type="[^"]*/audio" Target="../media/transition.wav"/>`,
+      "u",
+    ),
+  );
+});
+
+test("native snapshot rebinds a kept slide to renumbered engine relationships", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const slidePath = "ppt/slides/slide1.xml";
+  const relationshipsPath = "ppt/slides/_rels/slide1.xml.rels";
+  const image = (id) =>
+    `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/picture.jpeg"/>`;
+  const layout =
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout7.xml"/>';
+  const hyperlink = (target) =>
+    `<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${target}" TargetMode="External"/>`;
+  const relationships = (...items) =>
+    strToU8(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${items.join("")}</Relationships>`,
+    );
+  original["ppt/media/picture.jpeg"] = strToU8("JPEG");
+  original[relationshipsPath] = relationships(
+    layout,
+    image("rIdAuthorPicture"),
+  );
+  original[slidePath] = strToU8(
+    strFromU8(original[slidePath]).replace(
+      "</p:spTree>",
+      '<p:pic><p:nvPicPr><p:cNvPr id="77" name="Picture 77"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rIdAuthorPicture"/></p:blipFill><p:spPr/></p:pic></p:spTree>',
+    ),
+  );
+  // The engine renumbers the picture and the edit only retargets a link in
+  // the .rels, so the slide XML of both engine saves is identical.
+  const engineSlide = strToU8(
+    strFromU8(original[slidePath]).replace("rIdAuthorPicture", "rId2"),
+  );
+  const noEdit = {
+    ...original,
+    [slidePath]: engineSlide,
+    [relationshipsPath]: relationships(
+      layout,
+      image("rId2"),
+      hyperlink("https://before.example/"),
+    ),
+  };
+  const edited = {
+    ...noEdit,
+    [relationshipsPath]: relationships(
+      layout,
+      image("rId2"),
+      hyperlink("https://after.example/"),
+    ),
+  };
+  const result = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(noEdit),
+    zipSync(edited),
+    ["set_object_interaction"],
+  );
+  const merged = unzipSync(result.bytes);
+  assert.match(strFromU8(merged[slidePath]), /<a:blip r:embed="rId2"\/>/u);
+  assert.match(
+    strFromU8(merged[relationshipsPath]),
+    /https:\/\/after\.example\//u,
+  );
+  assert.ok(result.report.semanticPatchedParts.includes(slidePath));
+});

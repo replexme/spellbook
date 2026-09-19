@@ -5,6 +5,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
   classifyNativePackagePart,
   nativePreservationBudget,
+  humanEditPreservationBudget,
 } from "./native-preservation-policy.mjs";
 
 const presentationNamespace =
@@ -19,6 +20,10 @@ const packageRelationshipNamespace =
   "http://schemas.openxmlformats.org/package/2006/relationships";
 const contentTypeNamespace =
   "http://schemas.openxmlformats.org/package/2006/content-types";
+const markupCompatibilityNamespace =
+  "http://schemas.openxmlformats.org/markup-compatibility/2006";
+const diagramDrawingNamespace =
+  "http://schemas.microsoft.com/office/drawing/2008/diagram";
 const slideContentType =
   "application/vnd.openxmlformats-officedocument.presentationml.slide+xml";
 const maximumInputBytes = 64 * 1024 * 1024;
@@ -55,6 +60,11 @@ const textAppearanceOperations = new Set([
   "font_color",
   "paragraph_alignment",
 ]);
+// Operations that only add a shape or swap the content of one picture/media
+// object. The engine can still rewrite untouched shapes while exporting (for
+// example dropping an empty text box's paragraph alignment), so every other
+// relationship-free shape is restored from the author's original XML. The
+// replaced object keeps its r:embed/r:link reference and is never restored.
 const additiveShapeOperations = new Set([
   "add_shape",
   "add_text_box",
@@ -64,6 +74,8 @@ const additiveShapeOperations = new Set([
   "duplicate_element",
   "insert_image",
   "insert_media",
+  "replace_image",
+  "replace_media",
 ]);
 const elementOperations = new Set([
   "replace_text",
@@ -235,6 +247,179 @@ function preserveUnaffectedSlideShapes(
   return serializeXml(documents[2]);
 }
 
+// A slide transition sits directly under p:sld, either as p:transition or
+// wrapped in mc:AlternateContent for PowerPoint 2010 attributes.
+function slideTransitionNode(document) {
+  for (const child of [...document.documentElement.childNodes]) {
+    if (child.nodeType !== 1) continue;
+    if (
+      child.namespaceURI === presentationNamespace &&
+      child.localName === "transition"
+    )
+      return child;
+    if (
+      child.namespaceURI === markupCompatibilityNamespace &&
+      child.localName === "AlternateContent" &&
+      child.getElementsByTagNameNS(presentationNamespace, "transition").length
+    )
+      return child;
+  }
+  return null;
+}
+
+function transitionElements(node) {
+  if (!node) return [];
+  return node.namespaceURI === presentationNamespace &&
+    node.localName === "transition"
+    ? [node]
+    : [...node.getElementsByTagNameNS(presentationNamespace, "transition")];
+}
+
+function relationshipIdentity(sourcePart, relationship) {
+  return `${relationship.getAttribute("Type")}\u0000${
+    relationship.getAttribute("TargetMode") === "External"
+      ? `external:${relationship.getAttribute("Target")}`
+      : resolvePart(sourcePart, relationship.getAttribute("Target"))
+  }`;
+}
+
+// An author's node copied into a part whose .rels came from the engine still
+// names the author's relationship ids, which the engine may have renumbered or
+// dropped. Rewrite each r:* reference to the merged relationship with the same
+// type and target, adding the author's relationship when it is missing. A
+// reference whose internal target is not in the merged package is refused.
+function relationshipAdopter(part, original, merged) {
+  const relationshipPath = relationshipsPath(part);
+  const document = merged[relationshipPath]
+    ? parseXml(merged, relationshipPath)
+    : null;
+  const authored = new Map(
+    original[relationshipPath]
+      ? relationshipElements(parseXml(original, relationshipPath)).map(
+          (relationship) => [relationship.getAttribute("Id"), relationship],
+        )
+      : [],
+  );
+  const merge = new Map(
+    document
+      ? relationshipElements(document).map((relationship) => [
+          relationshipIdentity(part, relationship),
+          relationship.getAttribute("Id"),
+        ])
+      : [],
+  );
+  let changed = false;
+  return {
+    adopt(node) {
+      for (const element of [node, ...node.getElementsByTagName("*")])
+        for (let index = 0; index < element.attributes.length; index += 1) {
+          const attribute = element.attributes.item(index);
+          if (attribute.namespaceURI !== relationshipAttributeNamespace)
+            continue;
+          const relationship = authored.get(attribute.value);
+          if (!relationship || !document) return false;
+          if (
+            relationship.getAttribute("TargetMode") !== "External" &&
+            !merged[resolvePart(part, relationship.getAttribute("Target"))]
+          )
+            return false;
+          const identity = relationshipIdentity(part, relationship);
+          let id = merge.get(identity);
+          if (!id) {
+            const copy = document.importNode(relationship, true);
+            id = nextRelationshipId(document);
+            copy.setAttribute("Id", id);
+            document.documentElement.appendChild(copy);
+            merge.set(identity, id);
+            changed = true;
+          }
+          attribute.value = id;
+        }
+      return true;
+    },
+    relationships: () => (changed ? serializeXml(document) : null),
+  };
+}
+
+function insertSlideTransition(document, node) {
+  const root = document.documentElement;
+  const following = [...root.childNodes].find(
+    (child) =>
+      child.nodeType === 1 &&
+      child.namespaceURI === presentationNamespace &&
+      ["timing", "extLst"].includes(child.localName),
+  );
+  if (following) root.insertBefore(node, following);
+  else root.appendChild(node);
+}
+
+// LibreOffice rewrites the slide transition on every export: even an unedited
+// save drops the transition sound and PowerPoint 2010 attributes. Apply the
+// same three-way rule as other parts: when the no-edit and edited exports
+// agree, the author's original transition stays; when the edit changed it,
+// keep the edit but carry the author's sound over if the engine dropped it.
+// Runs after every part is merged so the sound's media part and the slide's
+// final relationships are known.
+function mergeSlideTransition(part, original, noEdit, merged) {
+  if (
+    !/^ppt\/slides\/slide[^/]+\.xml$/u.test(part) ||
+    !original[part] ||
+    !noEdit[part] ||
+    !merged[part]
+  )
+    return null;
+  const authored = slideTransitionNode(parseXml(original, part));
+  if (!authored) return null;
+  const baseline = slideTransitionNode(parseXml(noEdit, part));
+  const selected = parseXml(merged, part);
+  const edited = slideTransitionNode(selected);
+  const serialized = (node) =>
+    node ? new XMLSerializer().serializeToString(node) : null;
+  const adopter = relationshipAdopter(part, original, merged);
+  if (serialized(baseline) === serialized(edited)) {
+    if (serialized(edited) === serialized(authored)) return null;
+    const restored = selected.importNode(authored, true);
+    if (!adopter.adopt(restored)) return null;
+    if (edited) selected.documentElement.replaceChild(restored, edited);
+    else insertSlideTransition(selected, restored);
+    return {
+      slide: serializeXml(selected),
+      relationships: adopter.relationships(),
+    };
+  }
+  const sound = authored.getElementsByTagNameNS(
+    presentationNamespace,
+    "sndAc",
+  )[0];
+  const targets = transitionElements(edited);
+  if (
+    !sound ||
+    !targets.length ||
+    targets.some(
+      (transition) =>
+        transition.getElementsByTagNameNS(presentationNamespace, "sndAc")
+          .length,
+    )
+  )
+    return null;
+  for (const transition of targets) {
+    const extension = [...transition.childNodes].find(
+      (child) =>
+        child.nodeType === 1 &&
+        child.namespaceURI === presentationNamespace &&
+        child.localName === "extLst",
+    );
+    const copy = selected.importNode(sound, true);
+    if (!adopter.adopt(copy)) return null;
+    if (extension) transition.insertBefore(copy, extension);
+    else transition.appendChild(copy);
+  }
+  return {
+    slide: serializeXml(selected),
+    relationships: adopter.relationships(),
+  };
+}
+
 function repairChangedTableCellInsets(
   part,
   originalBytes,
@@ -302,6 +487,285 @@ function repairChangedTableCellInsets(
     }
   }
   return changed ? serializeXml(edited) : null;
+}
+
+// LibreOffice renumbers a part's relationship ids on export even when their
+// targets are unchanged. When the edited part keeps the engine's .rels but the
+// author's .rels are retained, rewrite each r:* reference to the author's id
+// with the same relationship type and resolved target. Returns null when a
+// reference has no unique counterpart, so the caller refuses the candidate.
+function remapPartRelationshipIds(part, bytes, originalRels, engineRels) {
+  if (!bytes || !originalRels || !engineRels || !part.endsWith(".xml"))
+    return null;
+  const relationshipPath = relationshipsPath(part);
+  const keyed = (relsBytes) =>
+    relationshipElements(
+      parseXml({ [relationshipPath]: relsBytes }, relationshipPath),
+    ).map((relationship) => ({
+      id: relationship.getAttribute("Id"),
+      key: relationshipIdentity(part, relationship),
+    }));
+  const engineById = new Map(keyed(engineRels).map(({ id, key }) => [id, key]));
+  const originalByKey = new Map();
+  for (const { id, key } of keyed(originalRels))
+    originalByKey.set(key, originalByKey.has(key) ? null : id);
+  const document = parseXml({ [part]: bytes }, part);
+  let changed = false;
+  for (const element of [
+    document.documentElement,
+    ...document.getElementsByTagName("*"),
+  ])
+    for (let index = 0; index < element.attributes.length; index += 1) {
+      const attribute = element.attributes.item(index);
+      if (attribute.namespaceURI !== relationshipAttributeNamespace) continue;
+      const key = engineById.get(attribute.value);
+      const originalId = key ? originalByKey.get(key) : undefined;
+      if (!originalId) return null;
+      if (originalId !== attribute.value) {
+        attribute.value = originalId;
+        changed = true;
+      }
+    }
+  return changed ? serializeXml(document) : bytes;
+}
+
+// A SmartArt drawing part is PowerPoint's cached rendering of the diagram
+// data, which PowerPoint shows instead of laying the diagram out again. When an
+// edit replaced a slide's diagram data and the engine's own export carries no
+// drawing, the author's cached drawing would keep showing the old content, so
+// it is removed with its relationship and the data part's pointer to it.
+function dropStaleDiagramDrawings(merged, edited, changedParts) {
+  const patched = [];
+  for (const relationshipsPart of Object.keys(merged)) {
+    if (!/^ppt\/slides\/_rels\/slide[^/]+\.xml\.rels$/u.test(relationshipsPart))
+      continue;
+    const sourcePart = relationshipsPart.replace(
+      /\/_rels\/([^/]+)\.rels$/u,
+      "/$1",
+    );
+    const document = parseXml(merged, relationshipsPart);
+    const relationships = relationshipElements(document);
+    const target = (relationship) =>
+      resolvePart(sourcePart, relationship.getAttribute("Target"));
+    const changedData = relationships
+      .filter(
+        (relationship) =>
+          relationship.getAttribute("Type")?.endsWith("/diagramData") &&
+          changedParts.includes(target(relationship)),
+      )
+      .map(target);
+    if (!changedData.length) continue;
+    const removedIds = [];
+    for (const relationship of relationships) {
+      if (!relationship.getAttribute("Type")?.endsWith("/diagramDrawing"))
+        continue;
+      const drawing = target(relationship);
+      if (edited[drawing]) continue;
+      relationship.parentNode.removeChild(relationship);
+      delete merged[drawing];
+      removedIds.push(relationship.getAttribute("Id"));
+    }
+    if (!removedIds.length) continue;
+    merged[relationshipsPart] = serializeXml(document);
+    patched.push(relationshipsPart);
+    for (const dataPart of changedData) {
+      const bytes = merged[dataPart]
+        ? withoutDiagramDrawingReferences(merged, dataPart, removedIds)
+        : null;
+      if (!bytes) continue;
+      merged[dataPart] = bytes;
+      patched.push(dataPart);
+    }
+  }
+  return patched;
+}
+
+// dsp:dataModelExt names the slide relationship of the cached drawing. Once
+// that relationship is gone the pointer would dangle, or name an unrelated
+// relationship that later reuses the id.
+function withoutDiagramDrawingReferences(entries, part, relationshipIds) {
+  const document = parseXml(entries, part);
+  let changed = false;
+  for (const reference of [
+    ...document.getElementsByTagNameNS(diagramDrawingNamespace, "dataModelExt"),
+  ]) {
+    if (!relationshipIds.includes(reference.getAttribute("relId"))) continue;
+    let node = reference;
+    // Remove the emptied a:ext and dgm:extLst wrappers with the pointer.
+    while (
+      node.parentNode?.nodeType === 1 &&
+      node.parentNode !== document.documentElement &&
+      [...node.parentNode.childNodes].filter((child) => child.nodeType === 1)
+        .length === 1
+    )
+      node = node.parentNode;
+    node.parentNode.removeChild(node);
+    changed = true;
+  }
+  return changed ? serializeXml(document) : null;
+}
+
+// Every r:* reference in a changed part, or in a part whose .rels changed,
+// must still name a relationship. PowerPoint repairs or refuses a package
+// with a dangling reference. An empty r:id is PowerPoint's own spelling for
+// an action with no target, such as "next slide".
+function assertChangedReferencesResolve(merged, changedParts) {
+  const parts = new Set(
+    changedParts
+      .map((part) =>
+        part.endsWith(".rels")
+          ? part.replace(/_rels\/([^/]*)\.rels$/u, "$1")
+          : part,
+      )
+      .filter((part) => part.endsWith(".xml") && merged[part]),
+  );
+  for (const part of parts) {
+    const relationshipPath = relationshipsPath(part);
+    const identifiers = new Set(
+      merged[relationshipPath]
+        ? relationshipElements(parseXml(merged, relationshipPath)).map(
+            (relationship) => relationship.getAttribute("Id"),
+          )
+        : [],
+    );
+    for (const element of parseXml(merged, part).getElementsByTagName("*"))
+      for (let index = 0; index < element.attributes.length; index += 1) {
+        const attribute = element.attributes.item(index);
+        if (
+          attribute.namespaceURI === relationshipAttributeNamespace &&
+          attribute.value &&
+          !identifiers.has(attribute.value)
+        )
+          throw new Error(
+            `Preserved native snapshot has a dangling relationship reference in ${part}: ${attribute.value}.`,
+          );
+      }
+  }
+}
+
+function changedPackageParts(original, merged) {
+  return [...new Set([...Object.keys(original), ...Object.keys(merged)])]
+    .filter((part) => !samePartBytes(original[part], merged[part]))
+    .sort();
+}
+
+function contentTypePartKey(partName) {
+  const part = (partName ?? "").replace(/^\//u, "");
+  try {
+    return decodeURIComponent(part).toLowerCase();
+  } catch {
+    return part.toLowerCase();
+  }
+}
+
+function partExtension(part) {
+  const name = part.slice(part.lastIndexOf("/") + 1);
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+// OPC resolves a part's content type from an Override for the part name
+// (percent-encoded, ASCII case-insensitive) before a Default for its
+// extension.
+function contentTypeDeclarations(document) {
+  const overrides = new Map();
+  const defaults = new Map();
+  for (const element of document.getElementsByTagNameNS(
+    contentTypeNamespace,
+    "Override",
+  ))
+    overrides.set(
+      contentTypePartKey(element.getAttribute("PartName")),
+      element,
+    );
+  for (const element of document.getElementsByTagNameNS(
+    contentTypeNamespace,
+    "Default",
+  ))
+    defaults.set(
+      (element.getAttribute("Extension") ?? "").toLowerCase(),
+      element,
+    );
+  return { overrides, defaults };
+}
+
+function declaredContentType({ overrides, defaults }, part) {
+  return (
+    (
+      overrides.get(part.toLowerCase()) ?? defaults.get(partExtension(part))
+    )?.getAttribute("ContentType") || null
+  );
+}
+
+// Every package part needs a declared content type. The merge can keep an
+// author's part that the engine dropped (printer settings, a transition
+// sound) while taking the engine's [Content_Types].xml, or keep the author's
+// manifest while adding an engine-created part. Declare each undeclared part
+// the way the package it came from declared it, and drop overrides for parts
+// the merge left out. Returns null when the manifest is already complete.
+function reconcileContentTypes(merged, original, edited) {
+  if (!merged[contentTypesPath]) return null;
+  const document = parseXml(merged, contentTypesPath);
+  const declared = contentTypeDeclarations(document);
+  const [authoredTypes, engineTypes] = [original, edited].map((entries) =>
+    entries[contentTypesPath]
+      ? contentTypeDeclarations(parseXml(entries, contentTypesPath))
+      : null,
+  );
+  const present = new Set(
+    Object.keys(merged).map((part) => part.toLowerCase()),
+  );
+  const known = new Set(
+    [...Object.keys(original), ...Object.keys(edited)].map((part) =>
+      part.toLowerCase(),
+    ),
+  );
+  let changed = false;
+  for (const [key, override] of [...declared.overrides])
+    if (!present.has(key) && known.has(key)) {
+      override.parentNode.removeChild(override);
+      declared.overrides.delete(key);
+      changed = true;
+    }
+  for (const part of Object.keys(merged).sort()) {
+    if (part === contentTypesPath || declaredContentType(declared, part))
+      continue;
+    const sources = samePartBytes(merged[part], original[part])
+      ? [authoredTypes, engineTypes]
+      : [engineTypes, authoredTypes];
+    const source = sources.find(
+      (candidate) => candidate && declaredContentType(candidate, part),
+    );
+    if (!source) continue;
+    const contentType = declaredContentType(source, part);
+    const sourceOverride = source.overrides.get(part.toLowerCase());
+    const extension = partExtension(part);
+    if (!sourceOverride && extension && !declared.defaults.has(extension)) {
+      const element = document.createElementNS(contentTypeNamespace, "Default");
+      element.setAttribute("Extension", extension);
+      element.setAttribute("ContentType", contentType);
+      const firstOverride = [...document.documentElement.childNodes].find(
+        (child) => child.nodeType === 1 && child.localName === "Override",
+      );
+      document.documentElement.insertBefore(element, firstOverride ?? null);
+      declared.defaults.set(extension, element);
+    } else {
+      const element = document.createElementNS(
+        contentTypeNamespace,
+        "Override",
+      );
+      element.setAttribute(
+        "PartName",
+        sourceOverride?.getAttribute("PartName") ??
+          `/${part.split("/").map(encodeURIComponent).join("/")}`,
+      );
+      element.setAttribute("ContentType", contentType);
+      document.documentElement.appendChild(element);
+      declared.overrides.set(part.toLowerCase(), element);
+    }
+    changed = true;
+  }
+  return changed ? serializeXml(document) : null;
 }
 
 function referencedRelationshipsStillMatch(
@@ -860,7 +1324,12 @@ export function preserveOriginalPptxParts(
   editedBytes,
   sourceOperations,
 ) {
-  const budget = nativePreservationBudget(sourceOperations);
+  // null marks a direct human edit; every AI edit names its operations.
+  const humanEdit = sourceOperations === null;
+  const budget = humanEdit
+    ? humanEditPreservationBudget()
+    : nativePreservationBudget(sourceOperations);
+  sourceOperations = humanEdit ? [] : sourceOperations;
   for (const bytes of [originalBytes, noEditBytes, editedBytes]) {
     if (!(bytes instanceof Uint8Array) || bytes.byteLength > maximumInputBytes)
       throw new TypeError("Native snapshot inputs must be bounded PPTX bytes.");
@@ -884,7 +1353,7 @@ export function preserveOriginalPptxParts(
     );
 
   const merged = {};
-  const changedParts = [];
+  const editedSlides = [];
   const semanticPatchedParts = [];
   const suppressedNoopParts = [];
   const suppressedOutOfBudgetParts = [];
@@ -911,11 +1380,47 @@ export function preserveOriginalPptxParts(
       budget.allowedCategories.has(classifyNativePackagePart(part)) &&
       (budget.allowPartCreationOrDeletion ||
         Boolean(original[part]) === Boolean(edited[part]));
-    const authoredChange =
+    const changedByEngine =
       !semanticMasterThemePatch &&
       part !== "docProps/core.xml" &&
       engineChanged &&
       withinBudget;
+    // The author's copy of an unchanged part is kept, but its .rels may be the
+    // engine's renumbered copy by now (.rels sort before their part). Rebind
+    // the kept part's r:* references to the same relationships; when one no
+    // longer exists because the edit retargeted it, take the engine's copy of
+    // the part, which matches the engine's .rels.
+    const related = relationshipsPath(part);
+    const staleAuthorReferences =
+      !changedByEngine &&
+      part.endsWith(".xml") &&
+      Boolean(original[part]) &&
+      Boolean(merged[related]) &&
+      !samePartBytes(merged[related], original[related]) &&
+      !referencedRelationshipsStillMatch(
+        part,
+        original[part],
+        original[related],
+        merged[related],
+      );
+    const reboundReferences = staleAuthorReferences
+      ? remapPartRelationshipIds(
+          part,
+          original[part],
+          merged[related],
+          original[related],
+        )
+      : null;
+    if (
+      staleAuthorReferences &&
+      !reboundReferences &&
+      !(withinBudget && edited[part])
+    )
+      throw new Error(
+        `Native snapshot cannot keep ${part} consistent with its relationships.`,
+      );
+    const authoredChange =
+      changedByEngine || (staleAuthorReferences && !reboundReferences);
     const semanticSlideSizePatch =
       authoredChange &&
       part === presentationPath &&
@@ -939,8 +1444,8 @@ export function preserveOriginalPptxParts(
           sourceOperations,
         )
       : null;
+    let relationshipRemap = null;
     if (authoredChange && !part.endsWith(".rels") && !semanticSlideSizePatch) {
-      const related = relationshipsPath(part);
       if (
         samePartBytes(noEdit[related], edited[related]) &&
         !samePartBytes(original[related], noEdit[related]) &&
@@ -950,10 +1455,18 @@ export function preserveOriginalPptxParts(
           original[related],
           noEdit[related],
         )
-      )
-        throw new Error(
-          `Native snapshot needs relationship remapping before preserving ${part}.`,
+      ) {
+        relationshipRemap = remapPartRelationshipIds(
+          part,
+          semanticShapePatch ?? semanticTableInsetPatch ?? edited[part],
+          original[related],
+          noEdit[related],
         );
+        if (!relationshipRemap)
+          throw new Error(
+            `Native snapshot needs relationship remapping before preserving ${part}.`,
+          );
+      }
     }
     const selected =
       semanticMasterThemePatch && Object.hasOwn(semanticMasterThemePatch, part)
@@ -969,10 +1482,18 @@ export function preserveOriginalPptxParts(
                   noEdit,
                   sourceOperations,
                 )
-              : (semanticShapePatch ?? semanticTableInsetPatch ?? edited[part])
-          : original[part];
+              : (relationshipRemap ??
+                semanticShapePatch ??
+                semanticTableInsetPatch ??
+                edited[part])
+          : (reboundReferences ?? original[part]);
     if (semanticSlideSizePatch) semanticPatchedParts.push(part);
-    if (semanticShapePatch || semanticTableInsetPatch)
+    if (
+      semanticShapePatch ||
+      semanticTableInsetPatch ||
+      relationshipRemap ||
+      (reboundReferences && reboundReferences !== original[part])
+    )
       semanticPatchedParts.push(part);
     if (
       semanticMasterThemePatch &&
@@ -980,11 +1501,39 @@ export function preserveOriginalPptxParts(
     )
       semanticPatchedParts.push(part);
     if (selected) merged[part] = selected;
-    if (!samePartBytes(original[part], selected)) changedParts.push(part);
+    if (authoredChange && /^ppt\/slides\/slide[^/]+\.xml$/u.test(part))
+      editedSlides.push(part);
     if (!authoredChange && !samePartBytes(original[part], noEdit[part]))
       suppressedNoopParts.push(part);
     if (engineChanged && !withinBudget) suppressedOutOfBudgetParts.push(part);
   }
+  // These repairs depend on the complete merged package: a restored
+  // transition sound needs its media part, and every kept part needs a
+  // declared content type.
+  for (const part of editedSlides) {
+    const transition = mergeSlideTransition(part, original, noEdit, merged);
+    if (!transition) continue;
+    merged[part] = transition.slide;
+    semanticPatchedParts.push(part);
+    if (transition.relationships) {
+      merged[relationshipsPath(part)] = transition.relationships;
+      semanticPatchedParts.push(relationshipsPath(part));
+    }
+  }
+  semanticPatchedParts.push(
+    ...dropStaleDiagramDrawings(
+      merged,
+      edited,
+      changedPackageParts(original, merged),
+    ),
+  );
+  const contentTypes = reconcileContentTypes(merged, original, edited);
+  if (contentTypes) {
+    merged[contentTypesPath] = contentTypes;
+    semanticPatchedParts.push(contentTypesPath);
+  }
+  const changedParts = changedPackageParts(original, merged);
+  assertChangedReferencesResolve(merged, changedParts);
   const bytes = zipSync(merged, {
     level: 6,
     mtime: deterministicZipModifiedAt,
@@ -1003,7 +1552,7 @@ export function preserveOriginalPptxParts(
     bytes,
     report: {
       changedParts,
-      semanticPatchedParts,
+      semanticPatchedParts: [...new Set(semanticPatchedParts)],
       suppressedNoopParts,
       suppressedOutOfBudgetParts,
     },
