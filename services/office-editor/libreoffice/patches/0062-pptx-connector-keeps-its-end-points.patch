@@ -1,0 +1,113 @@
+diff --git a/oox/source/export/shapes.cxx b/oox/source/export/shapes.cxx
+--- a/oox/source/export/shapes.cxx
++++ b/oox/source/export/shapes.cxx
+@@ -1950,20 +1950,20 @@ ShapeExport& ShapeExport::WriteConnectorShape( const Reference< XShape >& xShape
+         }
+     }
+ 
+-    tools::Rectangle aRect( Point( aStartPoint.X, aStartPoint.Y ), Point( aEndPoint.X, aEndPoint.Y ) );
+-    if( aRect.getOpenWidth() < 0 ) {
+-        aRect.SetLeft(aEndPoint.X);
+-        aRect.setWidth( aStartPoint.X - aEndPoint.X );
+-        if (eConnectorType == ConnectorType_LINE)
+-            bFlipH = true;
+-    }
+-
+-    if( aRect.getOpenHeight() < 0 ) {
+-        aRect.SetTop(aEndPoint.Y);
+-        aRect.setHeight( aStartPoint.Y - aEndPoint.Y );
+-        if (eConnectorType == ConnectorType_LINE)
+-            bFlipV = true;
+-    }
++    // The connector's box spans its end points. Build it from its size: the
++    // closed rectangle between the two points counts both of them, and the
++    // connector grew by one unit on every save.
++    const bool bEndLeft = aEndPoint.X < aStartPoint.X;
++    const bool bEndAbove = aEndPoint.Y < aStartPoint.Y;
++    const Point aTopLeft(bEndLeft ? aEndPoint.X : aStartPoint.X,
++                         bEndAbove ? aEndPoint.Y : aStartPoint.Y);
++    tools::Rectangle aRect(aTopLeft,
++                           Size((bEndLeft ? aStartPoint.X : aEndPoint.X) - aTopLeft.X(),
++                                (bEndAbove ? aStartPoint.Y : aEndPoint.Y) - aTopLeft.Y()));
++    if (bEndLeft && eConnectorType == ConnectorType_LINE)
++        bFlipH = true;
++    if (bEndAbove && eConnectorType == ConnectorType_LINE)
++        bFlipV = true;
+ 
+     // tdf#99810 connector shape (cxnSp) is not valid with namespace 'wps'
+     const auto nShapeNode = (mnXmlNamespace == XML_wps ? XML_wsp : XML_cxnSp);
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -47,6 +47,7 @@
+ #include <com/sun/star/presentation/ClickAction.hpp>
+ #include <com/sun/star/presentation/EffectNodeType.hpp>
+ #include <com/sun/star/uno/Reference.hxx>
++#include <com/sun/star/drawing/ConnectorType.hpp>
+ #include <com/sun/star/drawing/LineStyle.hpp>
+ #include <com/sun/star/drawing/PolyPolygonBezierCoords.hpp>
+ #include <com/sun/star/drawing/FillStyle.hpp>
+@@ -1518,6 +1519,63 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testPptxEmptyTextKeepsShapeAlignment)
+     CPPUNIT_ASSERT_EQUAL(sal_Int16(style::ParagraphAdjust_RIGHT), alignment(u"Right"_ustr));
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testPptxConnectorKeepsItsEndPoints)
++{
++    createSdImpressDoc();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    const auto addConnector = [&](const OUString& rName, drawing::ConnectorType eType,
++                                  const awt::Point& rStart, const awt::Point& rEnd) {
++        uno::Reference<drawing::XShape> xShape(
++            xFactory->createInstance(u"com.sun.star.drawing.ConnectorShape"_ustr),
++            uno::UNO_QUERY_THROW);
++        xShapes->add(xShape);
++        uno::Reference<beans::XPropertySet> xProperties(xShape, uno::UNO_QUERY_THROW);
++        xProperties->setPropertyValue(u"Name"_ustr, cpo::uno::Any(rName));
++        xProperties->setPropertyValue(u"EdgeKind"_ustr, cpo::uno::Any(eType));
++        xProperties->setPropertyValue(u"StartPosition"_ustr, cpo::uno::Any(rStart));
++        xProperties->setPropertyValue(u"EndPosition"_ustr, cpo::uno::Any(rEnd));
++    };
++    addConnector(u"Standard"_ustr, drawing::ConnectorType_STANDARD, awt::Point(9000, 7600),
++                 awt::Point(14500, 8800));
++    addConnector(u"Straight back"_ustr, drawing::ConnectorType_LINE, awt::Point(8000, 3000),
++                 awt::Point(2000, 1000));
++
++    // The box was written from the closed rectangle between the end points,
++    // one unit larger each way on every save.
++    saveAndReload(TestFilter::PPTX);
++    xmlDocUniquePtr pSlideXml = parseExport(u"ppt/slides/slide1.xml"_ustr);
++    assertXPath(pSlideXml,
++                "//p:cxnSp[p:nvCxnSpPr/p:cNvPr/@name='Straight back']/p:spPr/a:xfrm"
++                "[@flipH='1' and @flipV='1']/a:ext[@cx='2160000' and @cy='720000']",
++                1);
++    uno::Reference<drawing::XDrawPagesSupplier> xReloaded(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<container::XIndexAccess> xPage(xReloaded->getDrawPages()->getByIndex(0),
++                                                  uno::UNO_QUERY_THROW);
++    for (sal_Int32 nShape = 0; nShape < xPage->getCount(); ++nShape)
++    {
++        uno::Reference<beans::XPropertySet> xShape(xPage->getByIndex(nShape),
++                                                   uno::UNO_QUERY_THROW);
++        OUString aName;
++        xShape->getPropertyValue(u"Name"_ustr) >>= aName;
++        if (aName != u"Standard"_ustr)
++            continue;
++        awt::Point aStart;
++        awt::Point aEnd;
++        xShape->getPropertyValue(u"StartPosition"_ustr) >>= aStart;
++        xShape->getPropertyValue(u"EndPosition"_ustr) >>= aEnd;
++        CPPUNIT_ASSERT_EQUAL(sal_Int32(9000), aStart.X);
++        CPPUNIT_ASSERT_EQUAL(sal_Int32(7600), aStart.Y);
++        CPPUNIT_ASSERT_EQUAL(sal_Int32(14500), aEnd.X);
++        CPPUNIT_ASSERT_EQUAL(sal_Int32(8800), aEnd.Y);
++        return;
++    }
++    CPPUNIT_FAIL("connector not found");
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testAutoAdvanceKeepsTransitionEffectOnReload)
+ {
+     createSdImpressDoc();

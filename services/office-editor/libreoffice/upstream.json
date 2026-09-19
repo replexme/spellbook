@@ -12,7 +12,7 @@
   "patchLevel": "undo-v31",
   "sourcePatchSeriesReady": true,
   "sourceCandidateReady": false,
-  "patchSeriesSha256": "df825500dd41be8ad0cf4b184ff1ed28b3555fe7577d18cca5d42798518802e7",
+  "patchSeriesSha256": "90264774bb83aa0353b943b84475a19025bd9c64be28db6a5a78e4dcb4554f81",
   "engineImageTag": "26.04.4.1-spellbook-undo-v31-r1-candidate",
   "impressUiUnoCommandCount": 725,
   "impressUiUnoCommandsSha256": "ddfe8aeb5f798b6656b22276d219311bd30e9ce5c26cdf8ffe3d321f2c2f3fbb",
@@ -73,7 +73,10 @@
     "patches/0056-pptx-diagram-frame-keeps-shape-name.patch",
     "patches/0057-pptx-paragraph-right-margin-does-not-carry-over.patch",
     "patches/0058-animation-replace-keeps-timing.patch",
-    "patches/0059-metadata-paragraph-test-edits-placeholder-text.patch"
+    "patches/0059-metadata-paragraph-test-edits-placeholder-text.patch",
+    "patches/0060-pptx-paragraph-formatting-is-written.patch",
+    "patches/0061-pptx-empty-text-keeps-alignment.patch",
+    "patches/0062-pptx-connector-keeps-its-end-points.patch"
   ],
   "requiredCppunitTargets": [
     "CppunitTest_sd_uiimpress",
@@ -118,6 +121,8 @@
     "CppunitTest_sd_uiimpress:testAutoAdvanceKeepsTransitionEffectOnReload",
     "CppunitTest_sd_uiimpress:testObjectTextAttributeUndoRestoresObjectItems",
     "CppunitTest_sd_uiimpress:testPptxDiagramFrameKeepsShapeName",
-    "CppunitTest_sd_uiimpress:testPptxParagraphRightMarginDoesNotCarryOver"
+    "CppunitTest_sd_uiimpress:testPptxParagraphRightMarginDoesNotCarryOver",
+    "CppunitTest_sd_uiimpress:testPptxEmptyTextKeepsShapeAlignment",
+    "CppunitTest_sd_uiimpress:testPptxConnectorKeepsItsEndPoints"
   ]
 }

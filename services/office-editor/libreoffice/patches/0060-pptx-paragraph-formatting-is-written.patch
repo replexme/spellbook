@@ -1,0 +1,53 @@
+diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
+--- a/oox/source/export/drawingml.cxx
++++ b/oox/source/export/drawingml.cxx
+@@ -3692,14 +3692,6 @@ bool DrawingML::WriteParagraphProperties(const Reference<XTextContent>& rParagra
+     sal_Int32 nLeftMargin =  getBulletMarginIndentation ( rXPropSet, nLevel,u"LeftMargin");
+     sal_Int32 nLineIndentation = getBulletMarginIndentation ( rXPropSet, nLevel,u"FirstLineOffset");
+ 
+-    if (bWriteNumbering && !bForceZeroIndent)
+-    {
+-        if (!(nLevel != -1
+-            || nAlignment != style::ParagraphAdjust_LEFT
+-            || bHasLinespacing))
+-            return false;
+-    }
+-
+     sal_Int32 nParaDefaultTabSize = 0;
+     if (GetProperty(rXPropSet, u"ParaTabStopDefaultDistance"_ustr))
+         mAny >>= nParaDefaultTabSize;
+@@ -3716,6 +3708,20 @@ bool DrawingML::WriteParagraphProperties(const Reference<XTextContent>& rParagra
+     const bool bWriteRightMargin = nParaRightMargin >= 0 && nParaRightMargin <= nMaxMarginVal
+         && (nParaRightMargin > 0 || bDirectRightMargin);
+ 
++    // A left-aligned paragraph with default line spacing still has its own
++    // margins, indents, spacing, direction and tab stops to write.
++    const bool bHasTabStops
++        = GetProperty(rXPropSet, u"ParaTabStops"_ustr)
++          && o3tl::doAccess<cpo::uno::Sequence<css::style::TabStop>>(mAny)->getLength() > 0;
++    const bool bHasParagraphFormatting
++        = nParaLeftMargin > 0 || bWriteRightMargin || nParaFirstLineIndent != 0
++          || nParaTopMargin != 0 || nParaBottomMargin != 0 || nLeftMargin > 0
++          || nLineIndentation != 0 || bRtl || bHasTabStops;
++    if (bWriteNumbering && !bForceZeroIndent && nLevel == -1
++        && nAlignment == style::ParagraphAdjust_LEFT && !bHasLinespacing
++        && !bHasParagraphFormatting)
++        return false;
++
+     bool bIsListStyle = (nElement >= XML_lvl1pPr && nElement <= XML_lvl9pPr);
+ 
+     if (nParaLeftMargin || bIsListStyle) // For Paragraph or List-Style elements
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -1450,6 +1450,10 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testPptxParagraphRightMarginDoesNotCarryOv
+     // Import gave the second paragraph, which has no marR, the first
+     // paragraph's right margin.
+     saveAndReload(TestFilter::PPTX);
++    // A left-aligned paragraph whose only formatting is a right margin was
++    // written without paragraph properties.
++    xmlDocUniquePtr pSlideXml = parseExport(u"ppt/slides/slide1.xml"_ustr);
++    assertXPath(pSlideXml, "//a:pPr[@marR='108000']", 1);
+     aParagraphs = paragraphs();
+     CPPUNIT_ASSERT_EQUAL(size_t(2), aParagraphs.size());
+     sal_Int32 nFirst = -1;

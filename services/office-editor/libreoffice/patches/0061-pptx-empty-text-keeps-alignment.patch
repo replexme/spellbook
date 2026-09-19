@@ -1,0 +1,147 @@
+diff --git a/include/oox/export/drawingml.hxx b/include/oox/export/drawingml.hxx
+--- a/include/oox/export/drawingml.hxx
++++ b/include/oox/export/drawingml.hxx
+@@ -521,7 +521,8 @@ public:
+ 
+         @returns true if any paragraph properties were written
+     */
+-    bool WriteParagraphProperties(const css::uno::Reference< css::text::XTextContent >& rParagraph, float fFirstCharHeight, sal_Int32 nElement);
++    bool WriteParagraphProperties(const css::uno::Reference< css::text::XTextContent >& rParagraph, float fFirstCharHeight, sal_Int32 nElement,
++                                  const css::uno::Reference< css::beans::XPropertySet >& rXShapePropSet = {});
+     void WriteParagraphNumbering(const css::uno::Reference< css::beans::XPropertySet >& rXPropSet, float fFirstCharHeight,
+                                   sal_Int16 nLevel );
+     void WriteParagraphTabStops(const css::uno::Reference<css::beans::XPropertySet>& rXPropSet);
+diff --git a/oox/source/drawingml/shape.cxx b/oox/source/drawingml/shape.cxx
+--- a/oox/source/drawingml/shape.cxx
++++ b/oox/source/drawingml/shape.cxx
+@@ -2492,20 +2492,22 @@ Reference< XShape > const & Shape::createAndInsert(
+                 if (!rParagraphs.empty())
+                 {
+                     const std::shared_ptr<TextParagraph>& pParagraph = rParagraphs[0];
++                    const bool bEmptyText = rParagraphs.size() == 1 && pParagraph->getRuns().empty();
+                     if (pParagraph->getProperties().getParaAdjust())
+                     {
+                         style::ParagraphAdjust eAdjust = *pParagraph->getProperties().getParaAdjust();
+-                        if (eAdjust == style::ParagraphAdjust_CENTER)
++                        if (eAdjust == style::ParagraphAdjust_CENTER || bEmptyText)
+                         {
+                             // If the first paragraph is centered, then set the para adjustment of
+-                            // the shape itself to centered as well.
++                            // the shape itself to centered as well. An empty text keeps no
++                            // paragraph of its own, so the shape carries any alignment it has.
+                             aPropertySet.setAnyProperty(PROP_ParaAdjust, cpo::uno::Any(eAdjust));
+                         }
+                     }
+ 
+                     // tdf#144092 For empty textboxes push character styles &
+                     // endParaRPr into the Shape's properties
+-                    if (rParagraphs.size() == 1 && pParagraph->getRuns().empty())
++                    if (bEmptyText)
+                     {
+                         TextCharacterProperties aTextCharacterProps{ pParagraph->getCharacterStyle(
+                             aCharStyleProperties, *mpMasterTextListStyle,
+diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
+--- a/oox/source/export/drawingml.cxx
++++ b/oox/source/export/drawingml.cxx
+@@ -3600,7 +3600,8 @@ void DrawingML::WriteLinespacing(const LineSpacing& rSpacing, float fFirstCharHe
+     }
+ }
+ 
+-bool DrawingML::WriteParagraphProperties(const Reference<XTextContent>& rParagraph, float fFirstCharHeight, sal_Int32 nElement)
++bool DrawingML::WriteParagraphProperties(const Reference<XTextContent>& rParagraph, float fFirstCharHeight, sal_Int32 nElement,
++                                         const Reference<XPropertySet>& rXShapePropSet)
+ {
+     // The data model of a Diagram holds the text only. Attributes come from the layout,
+     // the style and the colours that the Diagram, so do not write here
+@@ -3645,7 +3646,8 @@ bool DrawingML::WriteParagraphProperties(const Reference<XTextContent>& rParagra
+     }
+ 
+     sal_Int16 nTmp = sal_Int16(style::ParagraphAdjust_LEFT);
+-    if (GetProperty(rXPropSet, u"ParaAdjust"_ustr))
++    if ((rXShapePropSet.is() && GetProperty(rXShapePropSet, u"ParaAdjust"_ustr))
++        || GetProperty(rXPropSet, u"ParaAdjust"_ustr))
+         mAny >>= nTmp;
+     style::ParagraphAdjust nAlignment = static_cast<style::ParagraphAdjust>(nTmp);
+ 
+@@ -4611,12 +4613,15 @@ void DrawingML::WriteTextlessParagraph(const Reference<XInterface>& rXIface)
+         return;
+     }
+ 
+-    // tdf#144092: with no run to ask, the run properties come from the shape's propset
++    // tdf#144092: with no run to ask, the run properties come from the shape's propset.
++    // The alignment as well: the paragraph of an empty text does not carry the
++    // shape's own attributes, and import keeps an empty paragraph's alignment
++    // on the shape.
+     auto xShapeProps = rXIface.query<XPropertySet>();
+     assert(xShapeProps);
+ 
+     mpFS->startElementNS(XML_a, XML_p);
+-    WriteParagraphProperties(xParagraph, -1, XML_pPr);
++    WriteParagraphProperties(xParagraph, -1, XML_pPr, xShapeProps);
+     WriteRunInput aInput{ .xShapePropSet = xShapeProps };
+     WriteRunProperties(xShapeProps, XML_endParaRPr, aInput);
+     mpFS->endElementNS(XML_a, XML_p);
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -1464,6 +1464,60 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testPptxParagraphRightMarginDoesNotCarryOv
+     CPPUNIT_ASSERT_EQUAL(sal_Int32(0), nSecond);
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testPptxEmptyTextKeepsShapeAlignment)
++{
++    createSdImpressDoc();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    const auto addShape = [&](const OUString& rName, sal_Int32 nX, sal_Int16 nAdjust) {
++        uno::Reference<drawing::XShape> xShape(
++            xFactory->createInstance(u"com.sun.star.drawing.RectangleShape"_ustr),
++            uno::UNO_QUERY_THROW);
++        xShape->setPosition(awt::Point(nX, 1000));
++        xShape->setSize(awt::Size(4000, 3000));
++        xShapes->add(xShape);
++        uno::Reference<beans::XPropertySet> xProperties(xShape, uno::UNO_QUERY_THROW);
++        xProperties->setPropertyValue(u"Name"_ustr, cpo::uno::Any(rName));
++        xProperties->setPropertyValue(u"ParaAdjust"_ustr, cpo::uno::Any(nAdjust));
++    };
++    addShape(u"Centered"_ustr, 1000, sal_Int16(style::ParagraphAdjust_CENTER));
++    addShape(u"Right"_ustr, 6000, sal_Int16(style::ParagraphAdjust_RIGHT));
++    const auto alignment = [this](const OUString& rName) {
++        uno::Reference<drawing::XDrawPagesSupplier> xSupplier(mxComponent,
++                                                              uno::UNO_QUERY_THROW);
++        uno::Reference<container::XIndexAccess> xPageShapes(
++            xSupplier->getDrawPages()->getByIndex(0), uno::UNO_QUERY_THROW);
++        for (sal_Int32 nShape = 0; nShape < xPageShapes->getCount(); ++nShape)
++        {
++            uno::Reference<beans::XPropertySet> xShape(xPageShapes->getByIndex(nShape),
++                                                       uno::UNO_QUERY_THROW);
++            OUString aName;
++            xShape->getPropertyValue(u"Name"_ustr) >>= aName;
++            if (aName != rName)
++                continue;
++            sal_Int16 nAdjust = -1;
++            xShape->getPropertyValue(u"ParaAdjust"_ustr) >>= nAdjust;
++            return nAdjust;
++        }
++        CPPUNIT_FAIL("shape not found");
++        return sal_Int16(-1);
++    };
++
++    // A shape without text lost its alignment: its empty paragraph was
++    // written without one, and import kept only a centered alignment.
++    saveAndReload(TestFilter::PPTX);
++    xmlDocUniquePtr pSlideXml = parseExport(u"ppt/slides/slide1.xml"_ustr);
++    assertXPath(pSlideXml,
++                "//p:sp[p:nvSpPr/p:cNvPr/@name='Centered']/p:txBody/a:p/a:pPr[@algn='ctr']", 1);
++    assertXPath(pSlideXml,
++                "//p:sp[p:nvSpPr/p:cNvPr/@name='Right']/p:txBody/a:p/a:pPr[@algn='r']", 1);
++    CPPUNIT_ASSERT_EQUAL(sal_Int16(style::ParagraphAdjust_CENTER), alignment(u"Centered"_ustr));
++    CPPUNIT_ASSERT_EQUAL(sal_Int16(style::ParagraphAdjust_RIGHT), alignment(u"Right"_ustr));
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testAutoAdvanceKeepsTransitionEffectOnReload)
+ {
+     createSdImpressDoc();
