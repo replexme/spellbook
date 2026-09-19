@@ -17,6 +17,9 @@ export async function retainNativeReferencePdf(pdfPath, directory) {
   await fs.copyFile(pdfPath, path.join(directory, "reference.pdf"));
 }
 
+// Launch Services opens the deck without activating PowerPoint (-g), so an
+// export never takes input focus from whoever is using the machine; a
+// PowerPoint that the export has to launch also starts hidden (-j).
 const EXPORT_APPLESCRIPT = String.raw`
 on run argv
   set sourcePath to item 1 of argv
@@ -24,9 +27,17 @@ on run argv
   set openedPresentation to missing value
   tell application "Microsoft PowerPoint"
     if (count of presentations) is not 0 then error "PowerPoint has an open presentation. Close it before corpus export."
+  end tell
+  do shell script "/usr/bin/open -g -j -a 'Microsoft PowerPoint' " & quoted form of sourcePath
+  tell application "Microsoft PowerPoint"
     try
-      open (POSIX file sourcePath)
-      set openedPresentation to active presentation
+      set waitedTenths to 0
+      repeat while (count of presentations) is 0
+        if waitedTenths is greater than 1200 then error "PowerPoint did not open the presentation."
+        delay 0.1
+        set waitedTenths to waitedTenths + 1
+      end repeat
+      set openedPresentation to presentation 1
       save openedPresentation in (POSIX file outputPath) as save as PDF
       close openedPresentation saving no
     on error errorMessage number errorNumber
