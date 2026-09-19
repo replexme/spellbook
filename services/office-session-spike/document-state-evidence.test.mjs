@@ -5,6 +5,7 @@ import {
   documentStatesEquivalent,
   firstDocumentStateDifference,
   quantizedGeometryEquivalent,
+  revisionDocumentState,
   undoDocumentStateEquivalent,
 } from "./document-state-evidence.mjs";
 
@@ -93,4 +94,21 @@ test("Undo state ignores diagnostic master shape counts but keeps authored revis
   const slideChange = structuredClone(diagnosticDrift);
   slideChange.slides[0].elements[0].text = "Changed";
   assert.equal(undoDocumentStateEquivalent(expected, slideChange), false);
+});
+
+test("revision state leaves out a master's shape count and live element handles", () => {
+  const state = (shapeCount, stableId, text) => ({
+    slides: [
+      { slideIndex: 0, elements: [{ elementId: "0/0", stableId, text }] },
+    ],
+    masters: [{ masterIndex: 0, name: "Title Slide", shapeCount }],
+  });
+  assert.deepEqual(
+    revisionDocumentState(state(4, "a", "Title")),
+    revisionDocumentState(state(5, "b", "Title")),
+  );
+  assert.notDeepEqual(
+    revisionDocumentState(state(4, "a", "Title")),
+    revisionDocumentState(state(4, "a", "Other")),
+  );
 });

@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
 import { requestNativeProbeSave } from "./probe-save.mjs";
+import { revisionDocumentState } from "./document-state-evidence.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -99,8 +100,8 @@ try {
       current = await call({ operation: "observe" });
       if (current.revision === revision) {
         if (
-          JSON.stringify(current.slides) !== JSON.stringify(expected.slides) ||
-          JSON.stringify(current.masters) !== JSON.stringify(expected.masters)
+          JSON.stringify(revisionDocumentState(current)) !==
+          JSON.stringify(revisionDocumentState(expected))
         )
           throw new Error(`${label} revision matched but structure differed.`);
         return current;
@@ -176,10 +177,8 @@ try {
   const afterRejectedBatch = await call({ operation: "observe" });
   if (
     afterRejectedBatch.revision !== before.revision ||
-    JSON.stringify(afterRejectedBatch.slides) !==
-      JSON.stringify(before.slides) ||
-    JSON.stringify(afterRejectedBatch.masters) !==
-      JSON.stringify(before.masters)
+    JSON.stringify(revisionDocumentState(afterRejectedBatch)) !==
+      JSON.stringify(revisionDocumentState(before))
   )
     throw new Error("Rejected chart batch changed the presentation.");
 

@@ -68,6 +68,22 @@ export function documentStatesEquivalent(expected, actual) {
   return firstDocumentStateDifference(expected, actual) === null;
 }
 
+/**
+ * The observed slides and masters as the native revision covers them. A
+ * master's shape count is diagnostic (import and export may materialize an
+ * empty layout placeholder without changing authored content) and an
+ * element's stableId is a live UNO handle, not authored identity.
+ */
+export function revisionDocumentState({ slides, masters }) {
+  return {
+    slides: slides?.map(({ elements, ...slide }) => ({
+      ...slide,
+      elements: elements?.map(({ stableId: _stableId, ...element }) => element),
+    })),
+    masters: masters?.map(({ shapeCount: _shapeCount, ...master }) => master),
+  };
+}
+
 // The native revision includes authored masters and sections but intentionally
 // excludes the diagnostic master shapeCount and transient UNO object handles.
 // Keep slide state exact for Undo/Redo while using that revision for the rest.

@@ -6,6 +6,7 @@ import path from "node:path";
 import {
   firstDocumentStateDifference,
   quantizedGeometryEquivalent,
+  revisionDocumentState,
 } from "./document-state-evidence.mjs";
 import {
   historyStateDifference,
@@ -834,10 +835,13 @@ try {
     });
   }
   const reusableMastersBeforeStructureEdits = structuredClone(observed.masters);
+  // Masters as the native revision covers them.
+  const authoredMasters = (masters) =>
+    JSON.stringify(revisionDocumentState({ masters }).masters);
   const assertReusableMastersUnchanged = (operation) => {
     if (
-      JSON.stringify(observed.masters) !==
-      JSON.stringify(reusableMastersBeforeStructureEdits)
+      authoredMasters(observed.masters) !==
+      authoredMasters(reusableMastersBeforeStructureEdits)
     )
       throw new Error(
         `${operation} changed reusable masters: ${JSON.stringify({ before: reusableMastersBeforeStructureEdits.map(({ masterIndex, name, shapeCount }) => ({ masterIndex, name, shapeCount })), after: observed.masters.map(({ masterIndex, name, shapeCount }) => ({ masterIndex, name, shapeCount })) })}`,
@@ -899,7 +903,7 @@ try {
       layout: layoutMaster.layout,
     });
     if (
-      JSON.stringify(observed.masters) !== JSON.stringify(mastersBeforeLayout)
+      authoredMasters(observed.masters) !== authoredMasters(mastersBeforeLayout)
     )
       throw new Error(
         `Slide-local layout selection changed reusable masters: ${JSON.stringify({ before: mastersBeforeLayout.map(({ masterIndex, name, shapeCount }) => ({ masterIndex, name, shapeCount })), after: observed.masters.map(({ masterIndex, name, shapeCount }) => ({ masterIndex, name, shapeCount })) })}`,

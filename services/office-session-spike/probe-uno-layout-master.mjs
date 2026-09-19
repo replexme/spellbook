@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
+import { revisionDocumentState } from "./document-state-evidence.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -116,7 +117,10 @@ try {
     permission: { mode: "document", slideIndexes: [], elementIds: [] },
   });
   const historyAfter = await history();
-  if (stable(after.masters) !== stable(before.masters))
+  if (
+    stable(revisionDocumentState(after).masters) !==
+    stable(revisionDocumentState(before).masters)
+  )
     throw new Error(
       "Slide-local layout selection changed the reusable master collection.",
     );
