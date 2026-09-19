@@ -69,11 +69,20 @@ export function Dialog({
             {leading}
             <h2 id={titleId}>{title}</h2>
             {dismissible ? (
-              <IconButton icon="close" label="닫기" size="sm" onClick={onClose} />
+              <IconButton
+                icon="close"
+                label="닫기"
+                size="sm"
+                onClick={onClose}
+              />
             ) : null}
           </header>
-          <div className={`ds-dialog-body ${flush ? "is-flush" : ""}`}>{children}</div>
-          {footer ? <footer className="ds-dialog-footer">{footer}</footer> : null}
+          <div className={`ds-dialog-body ${flush ? "is-flush" : ""}`}>
+            {children}
+          </div>
+          {footer ? (
+            <footer className="ds-dialog-footer">{footer}</footer>
+          ) : null}
         </>
       ) : null}
     </dialog>

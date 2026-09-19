@@ -20,9 +20,15 @@ import {
   type TimelineTurn,
 } from "./turn-timeline";
 
-const at = (hour: number, minute: number) => new Date(2026, 8, 18, hour, minute).toISOString();
+const at = (hour: number, minute: number) =>
+  new Date(2026, 8, 18, hour, minute).toISOString();
 
-function version(id: string, origin: VersionHistoryItem["origin"], createdAt: string, turnId?: string): VersionHistoryItem {
+function version(
+  id: string,
+  origin: VersionHistoryItem["origin"],
+  createdAt: string,
+  turnId?: string,
+): VersionHistoryItem {
   return {
     id,
     parentVersionId: null,
@@ -38,8 +44,20 @@ function version(id: string, origin: VersionHistoryItem["origin"], createdAt: st
 }
 
 const turns: TimelineTurn[] = [
-  { turnId: "a", requestText: "날짜 맞춰 줘", startedAt: at(10, 20), changed: true, undone: false },
-  { turnId: "b", requestText: "제목 줄여 줘", startedAt: at(10, 42), changed: true, undone: false },
+  {
+    turnId: "a",
+    requestText: "날짜 맞춰 줘",
+    startedAt: at(10, 20),
+    changed: true,
+    undone: false,
+  },
+  {
+    turnId: "b",
+    requestText: "제목 줄여 줘",
+    startedAt: at(10, 42),
+    changed: true,
+    undone: false,
+  },
 ];
 
 const versions = [
@@ -63,11 +81,15 @@ describe("manual edit lines", () => {
 
   it("names what going back takes with it", () => {
     const impact = restoreImpact(versions, turns, at(10, 19), "a");
-    expect(impact.aiRequests).toEqual([{ at: at(10, 42), requestText: "제목 줄여 줘" }]);
+    expect(impact.aiRequests).toEqual([
+      { at: at(10, 42), requestText: "제목 줄여 줘" },
+    ]);
     expect(impactSentence(impact)).toBe(
       `그 뒤의 직접 수정(${timeRange(at(10, 31), at(10, 38))})과 AI 요청 1건(${timeRange(at(10, 42), at(10, 42))})도 함께 되돌아가요.`,
     );
-    expect(impactSentence(restoreImpact(versions, turns, at(10, 44)))).toBeNull();
+    expect(
+      impactSentence(restoreImpact(versions, turns, at(10, 44))),
+    ).toBeNull();
   });
 
   it("finds saves after a request other than its own", () => {
@@ -95,7 +117,10 @@ describe("undo action", () => {
   it("undoes the latest untouched request in the editor", () => {
     expect(undoActionFor(base)).toEqual({ kind: "native", label: "되돌리기" });
     expect(
-      undoActionFor({ ...base, summary: { ...summary, changedSlides: [1, 2] } as TurnSummary }),
+      undoActionFor({
+        ...base,
+        summary: { ...summary, changedSlides: [1, 2] } as TurnSummary,
+      }),
     ).toEqual({ kind: "native", label: "모두 되돌리기" });
   });
 
@@ -105,7 +130,12 @@ describe("undo action", () => {
       label: "이 요청 전으로 돌아가기",
     });
     expect(undoActionFor({ ...base, latest: false })?.kind).toBe("restore");
-    expect(undoActionFor({ ...base, summary: { ...summary, undoSteps: 0 } as TurnSummary })?.kind).toBe("restore");
+    expect(
+      undoActionFor({
+        ...base,
+        summary: { ...summary, undoSteps: 0 } as TurnSummary,
+      })?.kind,
+    ).toBe("restore");
   });
 
   it("offers nothing for undone or unchanged requests", () => {
@@ -118,16 +148,29 @@ describe("request scope", () => {
   const selection: EditorSelection = {
     activeSlide: 2,
     slideCount: 12,
-    selected: [{ elementId: "2/0", name: "Title 1", kind: "com.sun.star.presentation.TitleTextShape", text: "하반기 시장" }],
+    selected: [
+      {
+        elementId: "2/0",
+        name: "Title 1",
+        kind: "com.sun.star.presentation.TitleTextShape",
+        text: "하반기 시장",
+      },
+    ],
     editableOperations: ["replace_text"],
   };
 
   it("names the selected element and slide", () => {
     expect(scopeLabel("selection", selection)).toBe("선택 · 제목 (3번)");
     expect(scopeLabel("slides", selection)).toBe("범위 · 3번 슬라이드");
-    expect(scopeLabel("selection", { ...selection, selected: [] })).toBe("선택 · 선택한 것 없음");
-    expect(scopeDescription("selection", selection)).toBe("지금 선택한 제목 1개만 바꿔요");
-    expect(scopeDescription("slides", selection)).toBe("3번 슬라이드 안에서만 바꿔요");
+    expect(scopeLabel("selection", { ...selection, selected: [] })).toBe(
+      "선택 · 선택한 것 없음",
+    );
+    expect(scopeDescription("selection", selection)).toBe(
+      "지금 선택한 제목 1개만 바꿔요",
+    );
+    expect(scopeDescription("slides", selection)).toBe(
+      "3번 슬라이드 안에서만 바꿔요",
+    );
   });
 
   it("suggests only edits the editor can run", () => {
@@ -137,32 +180,70 @@ describe("request scope", () => {
       "이 제목을 한 줄로 줄이기",
       "이 제목을 영어로 바꾸기",
     ]);
-    const patched = suggestionsFor({ ...selection, editableOperations: ["replace_text", "font_size"] });
-    expect(patched[0]!.items.map((item) => item.text)).toContain("다른 슬라이드 제목과 글자 크기 맞추기");
+    const patched = suggestionsFor({
+      ...selection,
+      editableOperations: ["replace_text", "font_size"],
+    });
+    expect(patched[0]!.items.map((item) => item.text)).toContain(
+      "다른 슬라이드 제목과 글자 크기 맞추기",
+    );
   });
 
   it("keeps the always-editable list inside what every engine can run", () => {
-    const operations = capabilities.mutationModel.operations as Record<string, { minEnginePatch: number }>;
-    for (const operation of ALWAYS_EDITABLE) expect(operations[operation]?.minEnginePatch).toBe(0);
+    const operations = capabilities.mutationModel.operations as Record<
+      string,
+      { minEnginePatch: number }
+    >;
+    for (const operation of ALWAYS_EDITABLE)
+      expect(operations[operation]?.minEnginePatch).toBe(0);
   });
 });
 
 describe("running stages", () => {
   it("places the agent's progress labels on four stages", () => {
-    expect(runningStages([], false).map((row) => row.state)).toEqual(["now", "todo", "todo", "todo"]);
-    const rows = runningStages(["현재 슬라이드 확인", "수정 계획 검사", "여러 요소 한 번에 수정"], false);
-    expect(rows.map((row) => row.state)).toEqual(["done", "now", "todo", "todo"]);
-    expect(rows[1]).toMatchObject({ label: "고치기", detail: "여러 요소 한 번에 수정" });
+    expect(runningStages([], false).map((row) => row.state)).toEqual([
+      "now",
+      "todo",
+      "todo",
+      "todo",
+    ]);
+    const rows = runningStages(
+      ["현재 슬라이드 확인", "수정 계획 검사", "여러 요소 한 번에 수정"],
+      false,
+    );
+    expect(rows.map((row) => row.state)).toEqual([
+      "done",
+      "now",
+      "todo",
+      "todo",
+    ]);
+    expect(rows[1]).toMatchObject({
+      label: "고치기",
+      detail: "여러 요소 한 번에 수정",
+    });
     expect(
-      runningStages(["현재 슬라이드 확인", "슬라이드 수정", "현재 슬라이드 확인"], false).map((row) => row.state),
+      runningStages(
+        ["현재 슬라이드 확인", "슬라이드 수정", "현재 슬라이드 확인"],
+        false,
+      ).map((row) => row.state),
     ).toEqual(["done", "done", "now", "todo"]);
     expect(
-      runningStages(["현재 슬라이드 확인", "슬라이드 수정", "현재 슬라이드 확인", "수정 화면 확인 완료"], false).at(-1)!.state,
+      runningStages(
+        [
+          "현재 슬라이드 확인",
+          "슬라이드 수정",
+          "현재 슬라이드 확인",
+          "수정 화면 확인 완료",
+        ],
+        false,
+      ).at(-1)!.state,
     ).toBe("now");
   });
 
   it("uses two stages for a question", () => {
-    expect(runningStages(["현재 슬라이드 확인"], true, true).map((row) => row.state)).toEqual(["done", "now"]);
+    expect(
+      runningStages(["현재 슬라이드 확인"], true, true).map((row) => row.state),
+    ).toEqual(["done", "now"]);
   });
 });
 
@@ -177,6 +258,8 @@ describe("particles and times", () => {
   });
 
   it("shortens a same-day range", () => {
-    expect(timeRange(at(10, 31), at(10, 38))).toMatch(/^\d{2}:\d{2}–\d{2}:\d{2}$|^.+ \d{2}:\d{2}–\d{2}:\d{2}$/);
+    expect(timeRange(at(10, 31), at(10, 38))).toMatch(
+      /^\d{2}:\d{2}–\d{2}:\d{2}$|^.+ \d{2}:\d{2}–\d{2}:\d{2}$/,
+    );
   });
 });

@@ -34,7 +34,10 @@ export async function trackConnectedAt(
     await fs.rm(file, { force: true });
     return null;
   }
-  const stored = await fs.readFile(file, "utf8").then((value) => value.trim(), () => "");
+  const stored = await fs.readFile(file, "utf8").then(
+    (value) => value.trim(),
+    () => "",
+  );
   if (stored && !Number.isNaN(Date.parse(stored))) return stored;
   if (!loginStarted) return null;
   const value = now.toISOString();

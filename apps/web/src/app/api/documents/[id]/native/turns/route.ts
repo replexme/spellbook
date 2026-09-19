@@ -11,7 +11,12 @@ export async function GET(
   try {
     const { id } = await context.params;
     return Response.json(
-      { turns: await listNativeTurns(await requireNativeRequestSession(request, id), id) },
+      {
+        turns: await listNativeTurns(
+          await requireNativeRequestSession(request, id),
+          id,
+        ),
+      },
       { headers: { "cache-control": "private, no-store" } },
     );
   } catch (error) {

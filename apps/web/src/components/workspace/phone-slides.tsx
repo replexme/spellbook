@@ -34,7 +34,8 @@ export function PhoneSlides({
         const start = touchStart.current;
         const end = event.changedTouches[0]?.clientX;
         touchStart.current = null;
-        if (start === null || end === undefined || Math.abs(end - start) < 40) return;
+        if (start === null || end === undefined || Math.abs(end - start) < 40)
+          return;
         go(end < start ? current + 1 : current - 1);
       }}
     >
@@ -44,7 +45,13 @@ export function PhoneSlides({
         loading="eager"
       />
       <div className="ws-phone-bar">
-        <IconButton icon="arrowLeft" label="이전 슬라이드" size="sm" disabled={current <= 0} onClick={() => go(current - 1)} />
+        <IconButton
+          icon="arrowLeft"
+          label="이전 슬라이드"
+          size="sm"
+          disabled={current <= 0}
+          onClick={() => go(current - 1)}
+        />
         <p>
           <span className="ds-tabular">
             {count ? current + 1 : 0} / {count}

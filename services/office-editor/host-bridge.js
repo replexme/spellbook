@@ -46,7 +46,9 @@
       !globalThis.app?.file?.readOnly &&
       typeof map._enterEditMode === "function"
     ) {
-      document.getElementById("mobile-edit-button")?.style.setProperty("display", "none");
+      document
+        .getElementById("mobile-edit-button")
+        ?.style.setProperty("display", "none");
       map._enterEditMode("edit");
     }
     window.parent.postMessage(

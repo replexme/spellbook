@@ -109,7 +109,9 @@ export function Banner({
       className={`ds-banner ${tone === "neutral" ? "" : `is-${tone}`}`}
       role={role}
     >
-      {icon === null ? null : <Icon name={icon ?? bannerIcon[tone]} size={15} />}
+      {icon === null ? null : (
+        <Icon name={icon ?? bannerIcon[tone]} size={15} />
+      )}
       <div>{children}</div>
       {action}
     </div>
@@ -136,7 +138,9 @@ export function Spinner({
 /** Determinate when value is a number (0–1), indeterminate otherwise. */
 export function Progress({ value, label }: { value?: number; label: string }) {
   const determinate = typeof value === "number" && Number.isFinite(value);
-  const percent = determinate ? Math.round(Math.min(1, Math.max(0, value)) * 100) : 0;
+  const percent = determinate
+    ? Math.round(Math.min(1, Math.max(0, value)) * 100)
+    : 0;
   return (
     <div
       className={`ds-progress ${determinate ? "" : "is-indeterminate"}`}

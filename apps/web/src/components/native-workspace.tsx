@@ -23,8 +23,14 @@ import { when, type PermissionMode } from "./copy";
 import { DownloadDialog } from "./workspace/download-dialog";
 import { OpeningView } from "./workspace/opening";
 import { PhoneSlides } from "./workspace/phone-slides";
-import { suggestionsFor, type EditorSelection } from "./workspace/request-scope";
-import { RestoreConfirmDialog, type RestoreTarget } from "./workspace/restore-confirm";
+import {
+  suggestionsFor,
+  type EditorSelection,
+} from "./workspace/request-scope";
+import {
+  RestoreConfirmDialog,
+  type RestoreTarget,
+} from "./workspace/restore-confirm";
 import {
   marksFor,
   outcomeOf,
@@ -78,7 +84,9 @@ export type PendingTurn = {
 const PHONE_QUERY = "(max-width: 760px)";
 
 /** A screenshot from a task result, as an object URL (revoked on unmount). */
-function pngUrl(image: { pngBytes?: unknown; pngBase64?: unknown } | undefined) {
+function pngUrl(
+  image: { pngBytes?: unknown; pngBase64?: unknown } | undefined,
+) {
   if (!image) return null;
   try {
     const raw = image.pngBytes;
@@ -92,7 +100,9 @@ function pngUrl(image: { pngBytes?: unknown; pngBase64?: unknown } | undefined) 
             : raw instanceof ArrayBuffer
               ? new Uint8Array(raw.slice(0))
               : null;
-    return bytes?.length ? URL.createObjectURL(new Blob([bytes], { type: "image/png" })) : null;
+    return bytes?.length
+      ? URL.createObjectURL(new Blob([bytes], { type: "image/png" }))
+      : null;
   } catch {
     return null;
   }
@@ -146,7 +156,9 @@ export function NativeWorkspace({
     editorModified = useRef(false),
     downloadAfterRevision = useRef<number | null>(null),
     browserOpening = useRef(false),
-    browserRevision = useRef(launch.editorKind === "browser" ? launch.revision : ""),
+    browserRevision = useRef(
+      launch.editorKind === "browser" ? launch.revision : "",
+    ),
     pendingBrowserSave = useRef<{
       requestId: string;
       revision: string | null;
@@ -154,12 +166,22 @@ export function NativeWorkspace({
     } | null>(null);
   const dispatchedLocalJobs = useRef(new Set<string>());
   const assetPayloads = useRef(
-    new Map<string, { mediaType: string; bytes: ArrayBuffer; fileName: string }>(),
+    new Map<
+      string,
+      { mediaType: string; bytes: ArrayBuffer; fileName: string }
+    >(),
   );
   const loadingAssets = useRef(new Set<string>());
   /** Calls this page makes to the editor itself (selection, reveal, undo). */
   const hostCalls = useRef(
-    new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>(),
+    new Map<
+      string,
+      {
+        resolve: (value: unknown) => void;
+        reject: (error: Error) => void;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    >(),
   );
   /** Screenshots the AI looked at, kept only in this page ("taskId:index" → object URL). */
   const imageUrls = useRef(new Map<string, string>());
@@ -168,12 +190,15 @@ export function NativeWorkspace({
     [bridgeReady, setBridgeReady] = useState(false),
     [sessionObserved, setSessionObserved] = useState(false);
   const [phone, setPhone] = useState(
-    () => typeof window !== "undefined" && window.matchMedia(PHONE_QUERY).matches,
+    () =>
+      typeof window !== "undefined" && window.matchMedia(PHONE_QUERY).matches,
   );
   // Mounted only in the browser (after the launch request), so the first
   // render can already start with the canvas on narrow screens.
   const [panel, setPanel] = useState(
-      () => typeof window === "undefined" || !window.matchMedia(PHONE_QUERY).matches,
+      () =>
+        typeof window === "undefined" ||
+        !window.matchMedia(PHONE_QUERY).matches,
     ),
     [panelTab, setPanelTab] = useState<"ai" | "versions">("ai"),
     [text, setText] = useState("");
@@ -197,14 +222,20 @@ export function NativeWorkspace({
   saveStateRef.current = saveState;
   const [uploadingAsset, setUploadingAsset] = useState(false),
     [assetNotice, setAssetNotice] = useState("");
-  const [permission, setPermission] = useState<PermissionMode>(initialQueued?.permission ?? "selection");
+  const [permission, setPermission] = useState<PermissionMode>(
+    initialQueued?.permission ?? "selection",
+  );
   const [model, setModel] = useState<ModelSettings>();
-  const [lookingAt, setLookingAt] = useState<{ slideIndex: number; url: string } | null>(null);
+  const [lookingAt, setLookingAt] = useState<{
+    slideIndex: number;
+    url: string;
+  } | null>(null);
   const [history, setHistory] = useState<TurnHistoryItem[]>(initialHistory);
   const [versions, setVersions] = useState<VersionHistoryItem[]>([]),
     [versionsLoading, setVersionsLoading] = useState(false),
     [versionsError, setVersionsError] = useState<string | null>(null);
-  const [documentSummary, setDocumentSummary] = useState<DocumentSummary | null>(null);
+  const [documentSummary, setDocumentSummary] =
+    useState<DocumentSummary | null>(null);
   const [selection, setSelection] = useState<EditorSelection | null>(null);
   const [undone, setUndone] = useState<Map<string, string>>(new Map());
   const [undoing, setUndoing] = useState<string | null>(null);
@@ -212,7 +243,9 @@ export function NativeWorkspace({
   const [phoneSlide, setPhoneSlide] = useState(0);
   const [editModeConfirmed, setEditModeConfirmed] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
-  const [restoreTarget, setRestoreTarget] = useState<RestoreTarget | null>(null);
+  const [restoreTarget, setRestoreTarget] = useState<RestoreTarget | null>(
+    null,
+  );
   const [editorMounted, setEditorMounted] = useState(true);
   const [compare, setCompare] = useState<{
     title: string;
@@ -237,7 +270,9 @@ export function NativeWorkspace({
       const response = await fetch(`${launch.apiBase}/${path}`, {
         method: body === undefined ? "GET" : "POST",
         headers: {
-          ...(launch.accessToken ? { authorization: `Bearer ${launch.accessToken}` } : {}),
+          ...(launch.accessToken
+            ? { authorization: `Bearer ${launch.accessToken}` }
+            : {}),
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -255,7 +290,9 @@ export function NativeWorkspace({
       const response = await fetch(`${documentBase}/${path}`, {
         ...init,
         headers: {
-          ...(launch.accessToken ? { authorization: `Bearer ${launch.accessToken}` } : {}),
+          ...(launch.accessToken
+            ? { authorization: `Bearer ${launch.accessToken}` }
+            : {}),
           ...(init?.body ? { "content-type": "application/json" } : {}),
         },
         cache: "no-store",
@@ -268,7 +305,9 @@ export function NativeWorkspace({
   );
   const loadModels = useCallback(
     (signal: AbortSignal): Promise<{ models: AvailableModel[] }> =>
-      ai.mode === "local" ? ai.localRequest("/v1/models") : api("models", undefined, signal),
+      ai.mode === "local"
+        ? ai.localRequest("/v1/models")
+        : api("models", undefined, signal),
     [ai.localRequest, ai.mode, api],
   );
   const refreshHistory = useCallback(async () => {
@@ -282,11 +321,15 @@ export function NativeWorkspace({
   const refreshVersions = useCallback(async () => {
     setVersionsLoading(true);
     try {
-      const value = (await documentApi("versions")) as { versions: VersionHistoryItem[] };
+      const value = (await documentApi("versions")) as {
+        versions: VersionHistoryItem[];
+      };
       setVersions(value.versions);
       setVersionsError(null);
     } catch (cause) {
-      setVersionsError(cause instanceof Error ? cause.message : "versions_unavailable");
+      setVersionsError(
+        cause instanceof Error ? cause.message : "versions_unavailable",
+      );
     } finally {
       setVersionsLoading(false);
     }
@@ -329,7 +372,9 @@ export function NativeWorkspace({
         turnRequested.current = false;
         setBusy(false);
         setText(pending.draft);
-        setError(cause instanceof Error ? cause.message : "요청을 보내지 못했어요.");
+        setError(
+          cause instanceof Error ? cause.message : "요청을 보내지 못했어요.",
+        );
       }
     },
     [ai.mode, api, dispatchLocalJob],
@@ -337,7 +382,11 @@ export function NativeWorkspace({
   const sendOffice = useCallback(
     (MessageId: string, Values: unknown = {}) => {
       if (launch.editorKind === "browser") {
-        port.current?.postMessage({ type: "command", messageId: MessageId, values: Values });
+        port.current?.postMessage({
+          type: "command",
+          messageId: MessageId,
+          values: Values,
+        });
         return;
       }
       office.current?.contentWindow?.postMessage(
@@ -398,31 +447,58 @@ export function NativeWorkspace({
         slideIndex?: number;
         expectedRevision?: string;
         expectedSlides?: string;
-        permission?: { mode?: string; slideIndexes?: number[]; elementIds?: string[] };
+        permission?: {
+          mode?: string;
+          slideIndexes?: number[];
+          elementIds?: string[];
+        };
       };
     }) => {
       const request = task.request;
       const operation = request?.operation ?? "";
-      const assetOperations = new Set(["insert_image", "replace_image", "insert_media", "replace_media"]);
-      if (!request || !assetOperations.has(operation) || typeof task.id !== "string") {
+      const assetOperations = new Set([
+        "insert_image",
+        "replace_image",
+        "insert_media",
+        "replace_media",
+      ]);
+      if (
+        !request ||
+        !assetOperations.has(operation) ||
+        typeof task.id !== "string"
+      ) {
         port.current?.postMessage(task);
         return;
       }
       const assetId = request.assetId ?? "";
-      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(assetId)) {
-        void api("result", { id: task.id, error: "invalid_document_asset" }).catch((cause) =>
-          setError(cause.message),
-        );
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+          assetId,
+        )
+      ) {
+        void api("result", {
+          id: task.id,
+          error: "invalid_document_asset",
+        }).catch((cause) => setError(cause.message));
         return;
       }
-      const deliver = (payload: { mediaType: string; bytes: ArrayBuffer; fileName: string }) => {
+      const deliver = (payload: {
+        mediaType: string;
+        bytes: ArrayBuffer;
+        fileName: string;
+      }) => {
         // Transfer a fresh copy because MessagePort detaches transferred buffers.
         // Task redelivery is safe: the extension caches the result by task id.
         const bytes = payload.bytes.slice(0);
         port.current?.postMessage(
           {
             id: task.id,
-            request: { ...request, mediaType: payload.mediaType, fileName: payload.fileName, assetBytes: bytes },
+            request: {
+              ...request,
+              mediaType: payload.mediaType,
+              fileName: payload.fileName,
+              assetBytes: bytes,
+            },
           },
           [bytes],
         );
@@ -434,11 +510,16 @@ export function NativeWorkspace({
       }
       if (loadingAssets.current.has(task.id)) return;
       loadingAssets.current.add(task.id);
-      const imageUrl = new URL(`/api/documents/${launch.documentId}/assets/${assetId}`, window.location.origin);
+      const imageUrl = new URL(
+        `/api/documents/${launch.documentId}/assets/${assetId}`,
+        window.location.origin,
+      );
       void fetch(imageUrl, { cache: "no-store" })
         .then(async (response) => {
           if (!response.ok) throw new Error("asset_download_failed");
-          const mediaType = response.headers.get("content-type")?.split(";", 1)[0];
+          const mediaType = response.headers
+            .get("content-type")
+            ?.split(";", 1)[0];
           const allowedTypes = [
             "image/png",
             "image/jpeg",
@@ -449,27 +530,42 @@ export function NativeWorkspace({
             "video/mp4",
             "video/webm",
           ];
-          if (!mediaType || !allowedTypes.includes(mediaType)) throw new Error("invalid_asset_type");
+          if (!mediaType || !allowedTypes.includes(mediaType))
+            throw new Error("invalid_asset_type");
           const bytes = await response.arrayBuffer();
-          const maximumBytes = mediaType.startsWith("image/") ? 5_000_000 : 25_000_000;
-          if (!bytes.byteLength || bytes.byteLength > maximumBytes) throw new Error("invalid_asset_size");
-          const signature = new Uint8Array(bytes, 0, Math.min(16, bytes.byteLength));
+          const maximumBytes = mediaType.startsWith("image/")
+            ? 5_000_000
+            : 25_000_000;
+          if (!bytes.byteLength || bytes.byteLength > maximumBytes)
+            throw new Error("invalid_asset_size");
+          const signature = new Uint8Array(
+            bytes,
+            0,
+            Math.min(16, bytes.byteLength),
+          );
           const png =
             signature.length >= 8 &&
-            [137, 80, 78, 71, 13, 10, 26, 10].every((value, index) => signature[index] === value);
+            [137, 80, 78, 71, 13, 10, 26, 10].every(
+              (value, index) => signature[index] === value,
+            );
           const jpeg = signature[0] === 0xff && signature[1] === 0xd8;
-          const textAt = (start: number, end: number) => String.fromCharCode(...signature.slice(start, end));
+          const textAt = (start: number, end: number) =>
+            String.fromCharCode(...signature.slice(start, end));
           const mediaSignature =
             (mediaType === "audio/mpeg" &&
-              (textAt(0, 3) === "ID3" || (signature[0] === 0xff && (signature[1]! & 0xe0) === 0xe0))) ||
-            (mediaType === "audio/wav" && textAt(0, 4) === "RIFF" && textAt(8, 12) === "WAVE") ||
+              (textAt(0, 3) === "ID3" ||
+                (signature[0] === 0xff && (signature[1]! & 0xe0) === 0xe0))) ||
+            (mediaType === "audio/wav" &&
+              textAt(0, 4) === "RIFF" &&
+              textAt(8, 12) === "WAVE") ||
             (mediaType === "audio/ogg" && textAt(0, 4) === "OggS") ||
             (mediaType === "video/webm" &&
               signature[0] === 0x1a &&
               signature[1] === 0x45 &&
               signature[2] === 0xdf &&
               signature[3] === 0xa3) ||
-            (["audio/mp4", "video/mp4"].includes(mediaType) && textAt(4, 8) === "ftyp");
+            (["audio/mp4", "video/mp4"].includes(mediaType) &&
+              textAt(4, 8) === "ftyp");
           if (
             (mediaType === "image/png" && !png) ||
             (mediaType === "image/jpeg" && !jpeg) ||
@@ -492,18 +588,28 @@ export function NativeWorkspace({
                         : mediaType === "video/webm"
                           ? "webm"
                           : "mp4";
-          const payload = { mediaType, bytes, fileName: `${assetId}.${extension}` };
+          const payload = {
+            mediaType,
+            bytes,
+            fileName: `${assetId}.${extension}`,
+          };
           assetPayloads.current.set(task.id!, payload);
           const cachedBytes = () =>
-            [...assetPayloads.current.values()].reduce((total, candidate) => total + candidate.bytes.byteLength, 0);
+            [...assetPayloads.current.values()].reduce(
+              (total, candidate) => total + candidate.bytes.byteLength,
+              0,
+            );
           while (assetPayloads.current.size > 4 || cachedBytes() > 50_000_000)
-            assetPayloads.current.delete(assetPayloads.current.keys().next().value!);
+            assetPayloads.current.delete(
+              assetPayloads.current.keys().next().value!,
+            );
           deliver(payload);
         })
         .catch((cause) =>
           api("result", {
             id: task.id,
-            error: cause instanceof Error ? cause.message : "asset_download_failed",
+            error:
+              cause instanceof Error ? cause.message : "asset_download_failed",
           }).catch((error) => setError(error.message)),
         )
         .finally(() => loadingAssets.current.delete(task.id!));
@@ -515,17 +621,22 @@ export function NativeWorkspace({
       if (launch.editorKind !== "browser" || browserOpening.current) return;
       browserOpening.current = true;
       try {
-        const response = await fetch(`${launch.contentApiBase}/contents`, { cache: "no-store" });
+        const response = await fetch(`${launch.contentApiBase}/contents`, {
+          cache: "no-store",
+        });
         if (!response.ok) {
           const value = await response.json().catch(() => ({}));
           throw new Error(value.error ?? "browser_document_download_failed");
         }
         const revision = response.headers.get("etag") ?? "";
-        const contentType = response.headers.get("content-type")?.split(";", 1)[0];
+        const contentType = response.headers
+          .get("content-type")
+          ?.split(";", 1)[0];
         const bytes = await response.arrayBuffer();
         if (
           revision !== launch.revision ||
-          contentType !== "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
+          contentType !==
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
           !bytes.byteLength ||
           bytes.byteLength > launch.maxBytes ||
           new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 2))[0] !== 0x50 ||
@@ -547,13 +658,20 @@ export function NativeWorkspace({
         );
       } catch (cause) {
         browserOpening.current = false;
-        setError(cause instanceof Error ? cause.message : "브라우저에서 PPTX를 열지 못했어요.");
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "브라우저에서 PPTX를 열지 못했어요.",
+        );
       }
     },
     [launch],
   );
   const saveBrowserDocument = useCallback(
-    async (channel: MessagePort, message: { requestId?: unknown; revision?: unknown; bytes?: unknown }) => {
+    async (
+      channel: MessagePort,
+      message: { requestId?: unknown; revision?: unknown; bytes?: unknown },
+    ) => {
       if (
         launch.editorKind !== "browser" ||
         typeof message.requestId !== "string" ||
@@ -571,24 +689,32 @@ export function NativeWorkspace({
         });
         return;
       }
-      pendingBrowserSave.current = { requestId: message.requestId, revision: null, acknowledgementSent: false };
+      pendingBrowserSave.current = {
+        requestId: message.requestId,
+        revision: null,
+        acknowledgementSent: false,
+      };
       pendingSaveRevision.current = saveRevision.current + 1;
       try {
         const response = await fetch(`${launch.contentApiBase}/contents`, {
           method: "PUT",
           headers: {
-            "content-type": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "content-type":
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
             "if-match": browserRevision.current,
           },
           body: message.bytes,
           cache: "no-store",
         });
         const value = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(value.error ?? "browser_document_save_failed");
+        if (!response.ok)
+          throw new Error(value.error ?? "browser_document_save_failed");
         const revision = response.headers.get("etag") ?? value.revision ?? "";
-        if (typeof revision !== "string" || !revision) throw new Error("browser_save_revision_missing");
+        if (typeof revision !== "string" || !revision)
+          throw new Error("browser_save_revision_missing");
         const pendingRequest = pendingBrowserSave.current;
-        if (!pendingRequest || pendingRequest.requestId !== message.requestId) return;
+        if (!pendingRequest || pendingRequest.requestId !== message.requestId)
+          return;
         browserRevision.current = revision;
         pendingRequest.revision = revision;
         setSaveState(value.unchanged ? "저장 확인 중…" : "저장 검사 중…");
@@ -598,12 +724,19 @@ export function NativeWorkspace({
           type: "save-result",
           requestId: message.requestId,
           ok: false,
-          error: cause instanceof Error ? cause.message : "browser_document_save_failed",
+          error:
+            cause instanceof Error
+              ? cause.message
+              : "browser_document_save_failed",
         });
         pendingSaveRevision.current = null;
         editorModified.current = true;
         setSaveState("저장 실패");
-        setError(cause instanceof Error ? cause.message : "브라우저에서 PPTX를 저장하지 못했어요.");
+        setError(
+          cause instanceof Error
+            ? cause.message
+            : "브라우저에서 PPTX를 저장하지 못했어요.",
+        );
       }
     },
     [launch],
@@ -635,7 +768,9 @@ export function NativeWorkspace({
         event.data?.protocolVersion === 1 &&
         typeof event.data.bridgeSessionId === "string" &&
         event.data.bridgeSessionId.length > 0;
-      const wopiBridge = launch.editorKind === "wopi" && event.data?.type === "spellbook.extension-ready";
+      const wopiBridge =
+        launch.editorKind === "wopi" &&
+        event.data?.type === "spellbook.extension-ready";
       if ((browserBridge || wopiBridge) && event.source) {
         const sessionId = browserBridge
           ? event.data.bridgeSessionId
@@ -653,15 +788,23 @@ export function NativeWorkspace({
           if (port.current !== channel.port1) return;
           if (result.data?.type === "selection") {
             const value = result.data.value as EditorSelection | undefined;
-            if (value && Number.isInteger(value.activeSlide) && Array.isArray(value.selected)) setSelection(value);
+            if (
+              value &&
+              Number.isInteger(value.activeSlide) &&
+              Array.isArray(value.selected)
+            )
+              setSelection(value);
             return;
           }
           const hostCall =
-            typeof result.data?.id === "string" ? hostCalls.current.get(result.data.id) : undefined;
+            typeof result.data?.id === "string"
+              ? hostCalls.current.get(result.data.id)
+              : undefined;
           if (hostCall) {
             hostCalls.current.delete(result.data.id);
             clearTimeout(hostCall.timer);
-            if (typeof result.data.error === "string") hostCall.reject(new Error(result.data.error));
+            if (typeof result.data.error === "string")
+              hostCall.reject(new Error(result.data.error));
             else hostCall.resolve(result.data.value);
             return;
           }
@@ -674,13 +817,19 @@ export function NativeWorkspace({
               browserOpening.current = false;
               setEngineReady(true);
               setBridgeReady(true);
-              setSaveState(result.data.recovered ? "복구된 변경 사항 있음" : "저장됨");
+              setSaveState(
+                result.data.recovered ? "복구된 변경 사항 있음" : "저장됨",
+              );
               return;
             }
             if (result.data?.type === "modified") {
               editorModified.current = result.data.modified === true;
               setSaveState((current) =>
-                result.data.modified ? "변경 사항 있음" : pendingSaveRevision.current !== null ? current : "저장됨",
+                result.data.modified
+                  ? "변경 사항 있음"
+                  : pendingSaveRevision.current !== null
+                    ? current
+                    : "저장됨",
               );
               return;
             }
@@ -690,7 +839,10 @@ export function NativeWorkspace({
             }
             if (result.data?.type === "save-response") {
               if (!result.data.success) {
-                if (pendingBrowserSave.current?.requestId === result.data.requestId) {
+                if (
+                  pendingBrowserSave.current?.requestId ===
+                  result.data.requestId
+                ) {
                   pendingBrowserSave.current = null;
                   pendingSaveRevision.current = null;
                   downloadAfterRevision.current = null;
@@ -717,7 +869,10 @@ export function NativeWorkspace({
               if (modified && (waiting || downloadWaiting)) {
                 pendingSaveRevision.current = saveRevision.current + 1;
                 setSaveState("추가 변경 사항 저장 중…");
-                sendOffice("Action_Save", { Notify: true, DontSaveIfUnmodified: false });
+                sendOffice("Action_Save", {
+                  Notify: true,
+                  DontSaveIfUnmodified: false,
+                });
               } else if (!modified) {
                 if (waiting) {
                   pendingTurn.current = null;
@@ -726,7 +881,9 @@ export function NativeWorkspace({
                 if (downloadWaiting) {
                   downloadAfterRevision.current = null;
                   setDownload(null);
-                  window.location.assign(`/api/documents/${launch.documentId}/download`);
+                  window.location.assign(
+                    `/api/documents/${launch.documentId}/download`,
+                  );
                 }
               }
               return;
@@ -734,7 +891,9 @@ export function NativeWorkspace({
             if (result.data?.type === "error") {
               browserOpening.current = false;
               setError(
-                typeof result.data.error === "string" ? result.data.error : "브라우저 편집기에서 오류가 생겼어요.",
+                typeof result.data.error === "string"
+                  ? result.data.error
+                  : "브라우저 편집기에서 오류가 생겼어요.",
               );
               return;
             }
@@ -747,15 +906,25 @@ export function NativeWorkspace({
             const list = result.data?.value?.images;
             if (Array.isArray(list) && list.length) {
               const url = rememberImages(result.data.id, list);
-              if (url) setLookingAt({ slideIndex: Number(list[0]?.slideIndex) || 0, url });
+              if (url)
+                setLookingAt({
+                  slideIndex: Number(list[0]?.slideIndex) || 0,
+                  url,
+                });
             }
-            void api("result", compactNativeTaskResultForTransport(result.data)).catch((e) => setError(e.message));
+            void api(
+              "result",
+              compactNativeTaskResultForTransport(result.data),
+            ).catch((e) => setError(e.message));
           }
         };
         (event.source as Window).postMessage(
           browserBridge
             ? { type: "spellbook.browser-office-connect", protocolVersion: 1 }
-            : { type: "spellbook.connect", bridgeSessionId: sessionId === "legacy" ? undefined : sessionId },
+            : {
+                type: "spellbook.connect",
+                bridgeSessionId: sessionId === "legacy" ? undefined : sessionId,
+              },
           origin,
           [channel.port2],
         );
@@ -768,7 +937,8 @@ export function NativeWorkspace({
       }
       let value;
       try {
-        value = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+        value =
+          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
       } catch {
         return;
       }
@@ -794,7 +964,11 @@ export function NativeWorkspace({
       if (value?.MessageId === "Doc_ModifiedStatus") {
         editorModified.current = value.Values?.Modified === true;
         setSaveState((current) =>
-          value.Values?.Modified ? "변경 사항 있음" : pendingSaveRevision.current !== null ? current : "저장됨",
+          value.Values?.Modified
+            ? "변경 사항 있음"
+            : pendingSaveRevision.current !== null
+              ? current
+              : "저장됨",
         );
       }
     };
@@ -823,7 +997,10 @@ export function NativeWorkspace({
       // disabled. Close it through the editor's own message contract so the
       // document canvas, not an upstream product tour, is the first frame.
       sendOffice("welcome-close");
-      office.current?.contentWindow?.postMessage({ type: "spellbook.open-extension" }, origin);
+      office.current?.contentWindow?.postMessage(
+        { type: "spellbook.open-extension" },
+        origin,
+      );
     };
     open();
     const timer = setInterval(open, 500);
@@ -832,8 +1009,18 @@ export function NativeWorkspace({
   // Phones open the editor in its read-only mobile mode; AI edits and the
   // saves around them need edit mode, so ask for it until it is confirmed.
   useEffect(() => {
-    if (!phone || launch.editorKind !== "wopi" || !engineReady || editModeConfirmed) return;
-    const ask = () => office.current?.contentWindow?.postMessage({ type: "spellbook.ensure-edit" }, origin);
+    if (
+      !phone ||
+      launch.editorKind !== "wopi" ||
+      !engineReady ||
+      editModeConfirmed
+    )
+      return;
+    const ask = () =>
+      office.current?.contentWindow?.postMessage(
+        { type: "spellbook.ensure-edit" },
+        origin,
+      );
     ask();
     const timer = setInterval(ask, 1_000);
     return () => clearInterval(timer);
@@ -862,15 +1049,25 @@ export function NativeWorkspace({
     void refreshHistory();
     const poll = async () => {
       try {
-        const response = await api(`poll?after=${lastEvent}`, undefined, abort.signal);
+        const response = await api(
+          `poll?after=${lastEvent}`,
+          undefined,
+          abort.signal,
+        );
         if (stopped) return;
-        if (response.localJob && ai.mode === "local" && aiConnected) await dispatchLocalJob(response.localJob);
-        saveRevision.current = response.session?.saveRevision ?? saveRevision.current;
+        if (response.localJob && ai.mode === "local" && aiConnected)
+          await dispatchLocalJob(response.localJob);
+        saveRevision.current =
+          response.session?.saveRevision ?? saveRevision.current;
         setSessionObserved(true);
-        if (response.session?.status === "validating") setSaveState("저장 검사 중…");
+        if (response.session?.status === "validating")
+          setSaveState("저장 검사 중…");
         else if (response.session?.status === "active") {
           const completedRevision = pendingSaveRevision.current;
-          if (completedRevision !== null && saveRevision.current >= completedRevision) {
+          if (
+            completedRevision !== null &&
+            saveRevision.current >= completedRevision
+          ) {
             const browserSave = pendingBrowserSave.current;
             if (browserSave?.revision) {
               if (!browserSave.acknowledgementSent) {
@@ -897,14 +1094,20 @@ export function NativeWorkspace({
                 if (editorModified.current) {
                   pendingSaveRevision.current = saveRevision.current + 1;
                   setSaveState("AI 작업 전 저장 중…");
-                  sendOffice("Action_Save", { Notify: true, DontSaveIfUnmodified: false });
+                  sendOffice("Action_Save", {
+                    Notify: true,
+                    DontSaveIfUnmodified: false,
+                  });
                 } else {
                   pendingTurn.current = null;
                   void dispatchTurn(waiting);
                 }
               }
             }
-          } else if (pendingSaveRevision.current === null && !editorModified.current) {
+          } else if (
+            pendingSaveRevision.current === null &&
+            !editorModified.current
+          ) {
             setSaveState("저장됨");
           }
           if (
@@ -916,7 +1119,9 @@ export function NativeWorkspace({
           ) {
             downloadAfterRevision.current = null;
             setDownload(null);
-            window.location.assign(`/api/documents/${launch.documentId}/download`);
+            window.location.assign(
+              `/api/documents/${launch.documentId}/download`,
+            );
           }
         } else if (response.session?.status === "failed") {
           const waiting = pendingTurn.current;
@@ -928,13 +1133,16 @@ export function NativeWorkspace({
               type: "save-result",
               requestId: browserSave.requestId,
               ok: false,
-              error: response.session.error ?? "browser_document_validation_failed",
+              error:
+                response.session.error ?? "browser_document_validation_failed",
             });
           }
           pendingTurn.current = null;
           pendingSaveRevision.current = null;
           setSaveState("저장 실패");
-          setError(response.session.error ?? "저장한 파일을 검사하지 못했어요.");
+          setError(
+            response.session.error ?? "저장한 파일을 검사하지 못했어요.",
+          );
           if (waiting) {
             setBusy(false);
             setText(waiting.draft);
@@ -958,8 +1166,16 @@ export function NativeWorkspace({
                 at: event.at,
               };
               // The request this page just sent gets its turn id.
-              if (pending?.role === "user" && !pending.turnId && pending.text === event.text)
-                return [...items.slice(0, -1), { ...pending, turnId: event.turnId, at: event.at }, assistant];
+              if (
+                pending?.role === "user" &&
+                !pending.turnId &&
+                pending.text === event.text
+              )
+                return [
+                  ...items.slice(0, -1),
+                  { ...pending, turnId: event.turnId, at: event.at },
+                  assistant,
+                ];
               return [
                 ...items,
                 {
@@ -987,7 +1203,13 @@ export function NativeWorkspace({
               if (index < 0) return items;
               return items.map((m, i) =>
                 i === index
-                  ? { ...m, status: "error", error: event.error, summary: event.summary ?? m.summary, finishedAt: event.at }
+                  ? {
+                      ...m,
+                      status: "error",
+                      error: event.error,
+                      summary: event.summary ?? m.summary,
+                      finishedAt: event.at,
+                    }
                   : m,
               );
             });
@@ -1003,20 +1225,29 @@ export function NativeWorkspace({
                 at: event.at,
               },
             ]);
-          } else if (event.type === "undone" && typeof event.turnId === "string") {
-            setUndone((current) => new Map(current).set(event.turnId, event.at));
+          } else if (
+            event.type === "undone" &&
+            typeof event.turnId === "string"
+          ) {
+            setUndone((current) =>
+              new Map(current).set(event.turnId, event.at),
+            );
           } else if (["delta", "tool", "done"].includes(event.type)) {
             if (event.type === "done") {
               finishedTurn = true;
               setBusy(false);
               if (event.changed && turnRequested.current) {
                 setSaveState("저장 중…");
-                sendOffice("Action_Save", { Notify: true, DontSaveIfUnmodified: false });
+                sendOffice("Action_Save", {
+                  Notify: true,
+                  DontSaveIfUnmodified: false,
+                });
               }
               if (turnRequested.current && typeof event.turnId === "string")
                 setFreshTurns((current) => new Set(current).add(event.turnId));
               const firstChanged = event.summary?.changedSlides?.[0];
-              if (turnRequested.current && Number.isInteger(firstChanged)) setPhoneSlide(firstChanged);
+              if (turnRequested.current && Number.isInteger(firstChanged))
+                setPhoneSlide(firstChanged);
               turnRequested.current = false;
             }
             setMessages((items) => {
@@ -1032,7 +1263,8 @@ export function NativeWorkspace({
                       : {
                           ...m,
                           text: event.text || m.text,
-                          status: event.status === "needs_review" ? "review" : "done",
+                          status:
+                            event.status === "needs_review" ? "review" : "done",
                           summary: event.summary ?? m.summary,
                           changed: event.changed,
                           reviewed: event.reviewed,
@@ -1048,7 +1280,8 @@ export function NativeWorkspace({
           void refreshVersions();
         }
       } catch (e) {
-        if (!stopped) setError(e instanceof Error ? e.message : "연결을 확인하세요.");
+        if (!stopped)
+          setError(e instanceof Error ? e.message : "연결을 확인하세요.");
       }
       if (!stopped) timer = setTimeout(poll, 250);
     };
@@ -1088,7 +1321,9 @@ export function NativeWorkspace({
     if (panel && panelTab === "versions") void refreshVersions();
   }, [panel, panelTab, refreshVersions]);
   const editorAccepts =
-    bridgeReady && sessionObserved && (!phone || launch.editorKind !== "wopi" || editModeConfirmed);
+    bridgeReady &&
+    sessionObserved &&
+    (!phone || launch.editorKind !== "wopi" || editModeConfirmed);
 
   /* Sending: save unsaved edits first so the request starts from a version. */
   const startTurn = useCallback(
@@ -1182,10 +1417,16 @@ export function NativeWorkspace({
         ? await uploadImageAsset(launch.documentId, file)
         : await uploadMediaAsset(launch.documentId, file);
       setAssetNotice(`${uploaded.fileName} 올림`);
-      setText((current) => (current.trim() ? current : `올린 ${uploaded.fileName} 파일을 지금 슬라이드에 넣어 줘`));
+      setText((current) =>
+        current.trim()
+          ? current
+          : `올린 ${uploaded.fileName} 파일을 지금 슬라이드에 넣어 줘`,
+      );
       input.current?.focus();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "파일을 올리지 못했어요.");
+      setError(
+        cause instanceof Error ? cause.message : "파일을 올리지 못했어요.",
+      );
     } finally {
       setUploadingAsset(false);
       if (assetInput.current) assetInput.current.value = "";
@@ -1203,7 +1444,9 @@ export function NativeWorkspace({
         const deadline = Date.now() + 60_000;
         while (saveStateRef.current !== "저장됨") {
           if (saveStateRef.current === "저장 실패" || Date.now() > deadline)
-            throw new Error("되돌리기 전에 지금 편집 내용을 저장하지 못했어요.");
+            throw new Error(
+              "되돌리기 전에 지금 편집 내용을 저장하지 못했어요.",
+            );
           await new Promise((resolve) => setTimeout(resolve, 300));
         }
       }
@@ -1220,13 +1463,20 @@ export function NativeWorkspace({
           await new Promise((resolve) => setTimeout(resolve, 700));
         }
       }
-      await documentApi(`versions/${versionId}/restore`, { method: "POST", body: "{}" });
+      await documentApi(`versions/${versionId}/restore`, {
+        method: "POST",
+        body: "{}",
+      });
       if (onReload) onReload();
       else window.location.reload();
     } catch (cause) {
       setRestoring(null);
       setEditorMounted(true);
-      setError(cause instanceof Error ? cause.message : "이전 버전으로 돌아가지 못했어요.");
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "이전 버전으로 돌아가지 못했어요.",
+      );
     }
   }
 
@@ -1234,9 +1484,13 @@ export function NativeWorkspace({
     setDownload({ summary: null, loading: true, busy: false });
     try {
       const summary = (await documentApi("summary")) as DocumentSummary;
-      setDownload((current) => (current ? { ...current, summary, loading: false } : current));
+      setDownload((current) =>
+        current ? { ...current, summary, loading: false } : current,
+      );
     } catch {
-      setDownload((current) => (current ? { ...current, loading: false } : current));
+      setDownload((current) =>
+        current ? { ...current, loading: false } : current,
+      );
     }
   }
   function startDownload() {
@@ -1255,7 +1509,10 @@ export function NativeWorkspace({
   }
 
   /* ── Conversation ───────────────────────────────────────────────── */
-  const historyById = useMemo(() => new Map(history.map((turn) => [turn.id, turn])), [history]);
+  const historyById = useMemo(
+    () => new Map(history.map((turn) => [turn.id, turn])),
+    [history],
+  );
   const liveMessages = useMemo<Message[]>(
     () =>
       queued
@@ -1280,7 +1537,9 @@ export function NativeWorkspace({
         turnId: turn.id,
         requestText: turn.requestText,
         startedAt: turn.createdAt,
-        changed: turn.summary?.outcome === "changed" || turn.summary?.outcome === "unverified",
+        changed:
+          turn.summary?.outcome === "changed" ||
+          turn.summary?.outcome === "unverified",
         undone: Boolean(turn.undoneAt ?? undone.get(turn.id)),
       })),
     [history, undone],
@@ -1308,7 +1567,10 @@ export function NativeWorkspace({
     (turn: CardTurn): EvidencePair[] => {
       const summary = turn.summary;
       if (!summary) return [];
-      const saved = (turn.turnId ? historyById.get(turn.turnId)?.savedPreviews : undefined) ?? [];
+      const saved =
+        (turn.turnId
+          ? historyById.get(turn.turnId)?.savedPreviews
+          : undefined) ?? [];
       return summary.evidence.map((item) => {
         const before = item.before ? (images.get(item.before) ?? null) : null;
         const after = item.after ? (images.get(item.after) ?? null) : null;
@@ -1321,7 +1583,9 @@ export function NativeWorkspace({
             framing: item.framing ?? "slide",
             ...(item.stale ? { stale: true } : {}),
           };
-        const preview = saved.find((candidate) => candidate.slideIndex === item.slideIndex);
+        const preview = saved.find(
+          (candidate) => candidate.slideIndex === item.slideIndex,
+        );
         return {
           slideIndex: item.slideIndex,
           before: preview?.before ?? null,
@@ -1334,10 +1598,18 @@ export function NativeWorkspace({
     [historyById, images],
   );
 
-  const dirty = ["변경 사항 있음", "복구된 변경 사항 있음", "저장 실패"].includes(saveState);
+  const dirty = [
+    "변경 사항 있음",
+    "복구된 변경 사항 있음",
+    "저장 실패",
+  ].includes(saveState);
   const editorLive = engineReady && bridgeReady && !restoring;
   const running =
-    busy || Boolean(queued) || messages.some((message) => message.role === "assistant" && message.status === "running");
+    busy ||
+    Boolean(queued) ||
+    messages.some(
+      (message) => message.role === "assistant" && message.status === "running",
+    );
   const undoFor = (turn: CardTurn, key: string): UndoAction | null =>
     running
       ? null
@@ -1350,14 +1622,18 @@ export function NativeWorkspace({
           editorLive,
           changedSince:
             dirty ||
-            (turn.turnId ? savedAfter(versions, turn.turnId, turn.finishedAt) : true),
+            (turn.turnId
+              ? savedAfter(versions, turn.turnId, turn.finishedAt)
+              : true),
         });
 
   /* ── Going back ─────────────────────────────────────────────────── */
   function openTurnRestore(turn: CardTurn, fallback = false) {
     const versionId = turn.beforeVersionId;
     if (!versionId) {
-      setError("이 요청 전에 저장한 버전을 찾지 못했어요. 버전 기록에서 골라 주세요.");
+      setError(
+        "이 요청 전에 저장한 버전을 찾지 못했어요. 버전 기록에서 골라 주세요.",
+      );
       return;
     }
     const at =
@@ -1374,17 +1650,24 @@ export function NativeWorkspace({
     });
   }
   function openVersionRestore(entry: VersionEntry, mode: "this" | "before") {
-    const versionId = mode === "before" ? entry.parentVersionId : entry.versionId;
+    const versionId =
+      mode === "before" ? entry.parentVersionId : entry.versionId;
     if (!versionId) return;
     const at =
       mode === "before"
-        ? (versions.find((version) => version.id === versionId)?.createdAt ?? entry.at)
+        ? (versions.find((version) => version.id === versionId)?.createdAt ??
+          entry.at)
         : entry.at;
     setRestoreTarget({
       versionId,
       at,
       lead: restoreLead(entry, mode),
-      impact: restoreImpact(versions, timelineTurns, at, mode === "before" ? entry.members[0]?.turn?.id : null),
+      impact: restoreImpact(
+        versions,
+        timelineTurns,
+        at,
+        mode === "before" ? entry.members[0]?.turn?.id : null,
+      ),
       unsaved: dirty,
     });
   }
@@ -1412,11 +1695,15 @@ export function NativeWorkspace({
       openTurnRestore(turn, true);
       return;
     }
-    setUndone((current) => new Map(current).set(turn.turnId!, new Date().toISOString()));
+    setUndone((current) =>
+      new Map(current).set(turn.turnId!, new Date().toISOString()),
+    );
     try {
       await api("undo", { turnId: turn.turnId });
     } catch {
-      setError("되돌렸지만 버전 기록에 ‘되돌림’으로 남기지 못했어요. 문서는 요청 전 상태예요.");
+      setError(
+        "되돌렸지만 버전 기록에 ‘되돌림’으로 남기지 못했어요. 문서는 요청 전 상태예요.",
+      );
     }
     requestSave("되돌린 내용 저장 중…");
     setUndoing(null);
@@ -1442,7 +1729,8 @@ export function NativeWorkspace({
         return;
       }
       const target = event.target instanceof HTMLElement ? event.target : null;
-      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      if (target?.closest("input, textarea, select, [contenteditable='true']"))
+        return;
       if (!engineReady || phone) return;
       if (key === "z" && !event.shiftKey) {
         event.preventDefault();
@@ -1480,7 +1768,9 @@ export function NativeWorkspace({
     });
   }
   function openVersionCompare(entry: VersionEntry) {
-    const parent = versions.find((version) => version.id === entry.parentVersionId);
+    const parent = versions.find(
+      (version) => version.id === entry.parentVersionId,
+    );
     const count = Math.max(entry.previews.length, parent?.previews.length ?? 0);
     setCompare({
       title: "이전 버전과 비교",
@@ -1521,10 +1811,16 @@ export function NativeWorkspace({
 
   const save = saveView(saveState, engineReady, savedAt);
   const panelOpen = phone || panel;
-  const phonePreviews = documentSummary?.previews.length ? documentSummary.previews : openingPreviews;
-  const compareUndo = compare?.turn ? undoFor(compare.turn, `t:${compare.turn.turnId}`) : null;
+  const phonePreviews = documentSummary?.previews.length
+    ? documentSummary.previews
+    : openingPreviews;
+  const compareUndo = compare?.turn
+    ? undoFor(compare.turn, `t:${compare.turn.turnId}`)
+    : null;
   return (
-    <main className={`ws ${panelOpen ? "has-panel" : ""} ${phone ? "is-phone" : ""}`}>
+    <main
+      className={`ws ${panelOpen ? "has-panel" : ""} ${phone ? "is-phone" : ""}`}
+    >
       <WorkspaceTopBar
         fileName={launch.fileName}
         save={save}
@@ -1555,14 +1851,38 @@ export function NativeWorkspace({
           }
         }}
       />
-      {phone ? <PhoneSlides previews={phonePreviews} index={phoneSlide} onIndex={setPhoneSlide} /> : null}
-      <section className="ws-editor" aria-label="프레젠테이션 편집" aria-hidden={phone || undefined}>
+      {phone ? (
+        <PhoneSlides
+          previews={phonePreviews}
+          index={phoneSlide}
+          onIndex={setPhoneSlide}
+        />
+      ) : null}
+      <section
+        className="ws-editor"
+        aria-label="프레젠테이션 편집"
+        aria-hidden={phone || undefined}
+      >
         {launch.editorKind === "wopi" ? (
-          <form ref={form} target="spellbook-office" method="post" action={launch.editorUrl} hidden>
+          <form
+            ref={form}
+            target="spellbook-office"
+            method="post"
+            action={launch.editorUrl}
+            hidden
+          >
             <input name="access_token" value={launch.accessToken} readOnly />
             <input name="access_token_ttl" value={launch.expiresAt} readOnly />
-            <input name="css_variables" value={collaboraCssVariables()} readOnly />
-            <input name="ui_defaults" value="UIMode=tabbed;PresentationSidebar=false;" readOnly />
+            <input
+              name="css_variables"
+              value={collaboraCssVariables()}
+              readOnly
+            />
+            <input
+              name="ui_defaults"
+              value="UIMode=tabbed;PresentationSidebar=false;"
+              readOnly
+            />
           </form>
         ) : null}
         {editorMounted ? (
@@ -1579,7 +1899,11 @@ export function NativeWorkspace({
           <OpeningView
             preview={restoring ? null : openingPreview}
             previews={restoring ? [] : openingPreviews}
-            message={restoring ? "이전 버전을 불러오고 있어요" : "편집기 준비 중 · 처음 열 때는 1분쯤 걸려요"}
+            message={
+              restoring
+                ? "이전 버전을 불러오고 있어요"
+                : "편집기 준비 중 · 처음 열 때는 1분쯤 걸려요"
+            }
           />
         ) : null}
       </section>
@@ -1596,10 +1920,22 @@ export function NativeWorkspace({
                 { value: "versions", label: "버전 기록", icon: "clock" },
               ]}
             />
-            {phone ? null : <IconButton icon="close" label="패널 닫기" size="sm" onClick={() => setPanel(false)} />}
+            {phone ? null : (
+              <IconButton
+                icon="close"
+                label="패널 닫기"
+                size="sm"
+                onClick={() => setPanel(false)}
+              />
+            )}
           </header>
           {panelTab === "versions" ? (
-            <div className="ws-panel-body" id="ws-panel-panel-versions" role="tabpanel" aria-labelledby="ws-panel-tab-versions">
+            <div
+              className="ws-panel-body"
+              id="ws-panel-panel-versions"
+              role="tabpanel"
+              aria-labelledby="ws-panel-tab-versions"
+            >
               <VersionPanel
                 versions={versions}
                 loading={versionsLoading}
@@ -1623,19 +1959,29 @@ export function NativeWorkspace({
                     {ai.status === "ready" ? (
                       <div>
                         <h2>AI를 연결해 주세요</h2>
-                        <p>연결하면 AI가 이 화면을 보고 고친 뒤, 다시 보고 확인해요.</p>
+                        <p>
+                          연결하면 AI가 이 화면을 보고 고친 뒤, 다시 보고
+                          확인해요.
+                        </p>
                       </div>
                     ) : null}
                     <ConnectSteps ai={ai} />
                   </div>
                 ) : null}
                 {conversation.length ? (
-                  <ConversationLog items={conversation} renderTurn={renderTurn} onCancelQueued={cancelQueued} />
+                  <ConversationLog
+                    items={conversation}
+                    renderTurn={renderTurn}
+                    onCancelQueued={cancelQueued}
+                  />
                 ) : aiConnected ? (
                   <div className="ai-empty">
                     <div>
                       <h2>무엇을 바꿀까요?</h2>
-                      <p>AI는 고친 뒤 화면을 다시 보고 확인해요. 요청마다 되돌리기가 있어요.</p>
+                      <p>
+                        AI는 고친 뒤 화면을 다시 보고 확인해요. 요청마다
+                        되돌리기가 있어요.
+                      </p>
                     </div>
                     {suggestionsFor(selection).map((group) => (
                       <div key={group.title} className="ai-suggestions">
@@ -1669,7 +2015,14 @@ export function NativeWorkspace({
                   <Banner
                     tone="danger"
                     role="alert"
-                    action={<IconButton icon="close" label="알림 닫기" size="sm" onClick={() => setError("")} />}
+                    action={
+                      <IconButton
+                        icon="close"
+                        label="알림 닫기"
+                        size="sm"
+                        onClick={() => setError("")}
+                      />
+                    }
                   >
                     {error}
                   </Banner>
@@ -1681,7 +2034,8 @@ export function NativeWorkspace({
                 ) : null}
                 {aiConnected && engineReady && !bridgeReady ? (
                   <p className="composer-hint" role="status">
-                    편집기와 AI를 잇는 중이에요. 요청을 먼저 적어 두면 연결되는 대로 보낼게요.
+                    편집기와 AI를 잇는 중이에요. 요청을 먼저 적어 두면 연결되는
+                    대로 보낼게요.
                   </p>
                 ) : null}
                 {aiConnected ? (
@@ -1717,7 +2071,9 @@ export function NativeWorkspace({
                     />
                   </>
                 ) : (
-                  <p className="composer-hint">AI 연결 전에도 편집기에서 직접 고칠 수 있어요.</p>
+                  <p className="composer-hint">
+                    AI 연결 전에도 편집기에서 직접 고칠 수 있어요.
+                  </p>
                 )}
               </footer>
             </>
@@ -1747,7 +2103,13 @@ export function NativeWorkspace({
                 }
               : undefined
         }
-        restoreLabel={compare?.turn ? (compareUndo?.kind === "native" ? "이 요청 되돌리기" : "이 요청 전으로 돌아가기") : "이 저장 전으로 돌아가기"}
+        restoreLabel={
+          compare?.turn
+            ? compareUndo?.kind === "native"
+              ? "이 요청 되돌리기"
+              : "이 요청 전으로 돌아가기"
+            : "이 저장 전으로 돌아가기"
+        }
       />
       <RestoreConfirmDialog
         target={restoreTarget}

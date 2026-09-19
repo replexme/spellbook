@@ -3,10 +3,17 @@ import { aiEditLimits, engineSupports } from "./ai-edit-limits";
 
 const slides = [
   { slideIndex: 0, elements: [{ graphicKind: "table" }] },
-  { slideIndex: 1, elements: [{ graphicKind: "diagram" }, { graphicKind: "ole" }] },
+  {
+    slideIndex: 1,
+    elements: [{ graphicKind: "diagram" }, { graphicKind: "ole" }],
+  },
   {
     slideIndex: 2,
-    elements: [{ graphicKind: "chart", externalData: true }, { graphicKind: "chart" }, {}],
+    elements: [
+      { graphicKind: "chart", externalData: true },
+      { graphicKind: "chart" },
+      {},
+    ],
   },
   { slideIndex: 3, elements: [{ graphicKind: "diagram" }] },
 ];
@@ -38,7 +45,10 @@ describe("aiEditLimits", () => {
   });
 
   it("trusts operations a browser runtime reports it supports", () => {
-    const browser = { patchLevel: "browser-stock", supportedOperations: ["set_table_cell"] };
+    const browser = {
+      patchLevel: "browser-stock",
+      supportedOperations: ["set_table_cell"],
+    };
     expect(engineSupports(browser, "set_table_cell")).toBe(true);
     expect(engineSupports(browser, "set_smartart_node")).toBe(false);
     expect(engineSupports(browser, "replace_text")).toBe(true);

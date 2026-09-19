@@ -46,7 +46,11 @@ export function useDismiss(
   }, [open, refs, onDismiss]);
 }
 
-export type MenuPlacement = "above-start" | "above-end" | "below-start" | "below-end";
+export type MenuPlacement =
+  | "above-start"
+  | "above-end"
+  | "below-start"
+  | "below-end";
 
 /**
  * A trigger plus a floating menu. The render prop receives `close` so any

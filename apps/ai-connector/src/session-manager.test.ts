@@ -71,11 +71,15 @@ describe("local AI subscription identity", () => {
 
 describe("trackConnectedAt", () => {
   it("records the date only for a login started through the service", async () => {
-    const home = await fs.mkdtemp(path.join(os.tmpdir(), "spellbook-connected-"));
+    const home = await fs.mkdtemp(
+      path.join(os.tmpdir(), "spellbook-connected-"),
+    );
     try {
       expect(await trackConnectedAt(home, true, false)).toBeNull();
       const at = new Date("2026-09-18T01:00:00.000Z");
-      expect(await trackConnectedAt(home, true, true, at)).toBe(at.toISOString());
+      expect(await trackConnectedAt(home, true, true, at)).toBe(
+        at.toISOString(),
+      );
       expect(await trackConnectedAt(home, true, false)).toBe(at.toISOString());
       expect(await trackConnectedAt(home, false, false)).toBeNull();
       expect(await trackConnectedAt(home, true, false)).toBeNull();

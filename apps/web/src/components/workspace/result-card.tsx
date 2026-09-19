@@ -86,7 +86,12 @@ export function marksFor(
 ): SlideMark[] {
   if (framing === "window") return [];
   return (summary?.changes ?? [])
-    .filter((change) => change.slideIndex === slideIndex && change.box && change.kind !== "removed")
+    .filter(
+      (change) =>
+        change.slideIndex === slideIndex &&
+        change.box &&
+        change.kind !== "removed",
+    )
     .map((change) => ({ ...change.box!, label: change.target }));
 }
 
@@ -94,23 +99,53 @@ export function marksFor(
 export function checksFor(summary: TurnSummary, outcome: Outcome): CheckItem[] {
   const items: CheckItem[] = [];
   if (outcome === "changed")
-    items.push({ tone: "ok", label: "바뀐 화면을 AI가 다시 보고 검토함", evidence: "turn.reviewed" });
+    items.push({
+      tone: "ok",
+      label: "바뀐 화면을 AI가 다시 보고 검토함",
+      evidence: "turn.reviewed",
+    });
   else if (outcome === "unverified")
-    items.push({ tone: "warn", label: "바뀐 화면을 AI가 다시 확인하지 못함", evidence: "turn.reviewed=false" });
+    items.push({
+      tone: "warn",
+      label: "바뀐 화면을 AI가 다시 확인하지 못함",
+      evidence: "turn.reviewed=false",
+    });
   const issues = summary.introducedIssues;
   if (issues) {
     items.push(
       issues.overlap
-        ? { tone: "warn", label: `새로 생긴 겹침 ${issues.overlap}곳`, evidence: "edit.layoutAudit.introducedIssues possible_element_overlap" }
-        : { tone: "ok", label: "새로 생긴 겹침 없음", evidence: "edit.layoutAudit.introducedIssues possible_element_overlap" },
+        ? {
+            tone: "warn",
+            label: `새로 생긴 겹침 ${issues.overlap}곳`,
+            evidence:
+              "edit.layoutAudit.introducedIssues possible_element_overlap",
+          }
+        : {
+            tone: "ok",
+            label: "새로 생긴 겹침 없음",
+            evidence:
+              "edit.layoutAudit.introducedIssues possible_element_overlap",
+          },
     );
     items.push(
       issues.outOfBounds
-        ? { tone: "warn", label: `슬라이드 밖으로 나간 요소 ${issues.outOfBounds}개`, evidence: "edit.layoutAudit.introducedIssues out_of_slide_bounds" }
-        : { tone: "ok", label: "슬라이드 밖으로 나간 요소 없음", evidence: "edit.layoutAudit.introducedIssues out_of_slide_bounds" },
+        ? {
+            tone: "warn",
+            label: `슬라이드 밖으로 나간 요소 ${issues.outOfBounds}개`,
+            evidence: "edit.layoutAudit.introducedIssues out_of_slide_bounds",
+          }
+        : {
+            tone: "ok",
+            label: "슬라이드 밖으로 나간 요소 없음",
+            evidence: "edit.layoutAudit.introducedIssues out_of_slide_bounds",
+          },
     );
     if (issues.invalidSize)
-      items.push({ tone: "warn", label: `크기가 잘못된 요소 ${issues.invalidSize}개`, evidence: "edit.layoutAudit.introducedIssues invalid_size" });
+      items.push({
+        tone: "warn",
+        label: `크기가 잘못된 요소 ${issues.invalidSize}개`,
+        evidence: "edit.layoutAudit.introducedIssues invalid_size",
+      });
   }
   const total = summary.slideCount.after;
   const changed = summary.changedSlides.length;
@@ -123,7 +158,10 @@ export function checksFor(summary: TurnSummary, outcome: Outcome): CheckItem[] {
   )
     items.push({
       tone: "ok",
-      label: changed === 1 ? "다른 슬라이드는 바뀌지 않음" : `나머지 ${summary.unchangedSlides}장은 바뀌지 않음`,
+      label:
+        changed === 1
+          ? "다른 슬라이드는 바뀌지 않음"
+          : `나머지 ${summary.unchangedSlides}장은 바뀌지 않음`,
       evidence: "editor before/after states compared slide by slide",
     });
   return items;
@@ -194,15 +232,25 @@ function BeforeAfter({
   return (
     <div className="rc-ba">
       <figure>
-        <SlideImage src={pair.before} alt={`${pair.slideIndex + 1}번 슬라이드 수정 전`} />
-        <figcaption>{pair.source === "saved" ? "전 · 저장본 미리보기" : "전"}</figcaption>
+        <SlideImage
+          src={pair.before}
+          alt={`${pair.slideIndex + 1}번 슬라이드 수정 전`}
+        />
+        <figcaption>
+          {pair.source === "saved" ? "전 · 저장본 미리보기" : "전"}
+        </figcaption>
       </figure>
       <Icon name="arrowRight" size={14} />
-      <figure className={`rc-ba-after ${stage === "revealed" ? "is-revealed" : ""}`} data-playing={playing || undefined}>
+      <figure
+        className={`rc-ba-after ${stage === "revealed" ? "is-revealed" : ""}`}
+        data-playing={playing || undefined}
+      >
         <SlideImage
           src={playing ? pair.before : pair.after}
           alt={`${pair.slideIndex + 1}번 슬라이드 수정 후`}
-          marks={playing ? [] : marksFor(summary, pair.slideIndex, pair.framing)}
+          marks={
+            playing ? [] : marksFor(summary, pair.slideIndex, pair.framing)
+          }
         />
         <figcaption>{afterCaption(pair, outcome)}</figcaption>
       </figure>
@@ -210,7 +258,13 @@ function BeforeAfter({
   );
 }
 
-function ChangeList({ summary, multi }: { summary: TurnSummary; multi: boolean }) {
+function ChangeList({
+  summary,
+  multi,
+}: {
+  summary: TurnSummary;
+  multi: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const changes = summary.changes;
   const groups = summary.slideGroups ?? [];
@@ -229,7 +283,9 @@ function ChangeList({ summary, multi }: { summary: TurnSummary; multi: boolean }
           <span>{change.details.join(" · ")}</span>
         </li>
       ))}
-      {summary.omittedChanges ? <li className="rc-more-count">외 {summary.omittedChanges}곳</li> : null}
+      {summary.omittedChanges ? (
+        <li className="rc-more-count">외 {summary.omittedChanges}곳</li>
+      ) : null}
     </ul>
   );
   if (!multi || !groups.length)
@@ -242,7 +298,9 @@ function ChangeList({ summary, multi }: { summary: TurnSummary; multi: boolean }
   return (
     <div className="rc-section">
       <h4>바꾼 것 {total}곳</h4>
-      {summary.sharedDetail ? <p className="rc-quote">모두 {summary.sharedDetail}</p> : null}
+      {summary.sharedDetail ? (
+        <p className="rc-quote">모두 {summary.sharedDetail}</p>
+      ) : null}
       {expanded ? (
         detailed
       ) : (
@@ -251,13 +309,24 @@ function ChangeList({ summary, multi }: { summary: TurnSummary; multi: boolean }
             <li key={group.slideIndex}>
               <strong>{group.slideIndex + 1}번</strong>
               <span>
-                {group.count}곳 · {group.targets.map((target) => (target.count > 1 ? `${target.label} ${target.count}` : target.label)).join(", ")}
+                {group.count}곳 ·{" "}
+                {group.targets
+                  .map((target) =>
+                    target.count > 1
+                      ? `${target.label} ${target.count}`
+                      : target.label,
+                  )
+                  .join(", ")}
               </span>
             </li>
           ))}
         </ul>
       )}
-      <Button size="sm" variant="quiet" onClick={() => setExpanded((value) => !value)}>
+      <Button
+        size="sm"
+        variant="quiet"
+        onClick={() => setExpanded((value) => !value)}
+      >
         {expanded ? "슬라이드별로 보기" : "하나씩 보기"}
       </Button>
     </div>
@@ -306,16 +375,24 @@ export function ResultCard({
 
   const wider = summary?.scopeRejected ? widerScope(turn.permission) : null;
   const widenButton = wider ? (
-    <Button size="sm" variant="primary" onClick={() => onRetry(turn.requestText, wider)}>
+    <Button
+      size="sm"
+      variant="primary"
+      onClick={() => onRetry(turn.requestText, wider)}
+    >
       ‘{scopeTitle(wider)}’로 넓혀 다시 요청
     </Button>
   ) : null;
 
   if (outcome === "failed" || outcome === "cancelled") {
     const message =
-      summary?.failure?.message ?? turn.error ?? "AI가 요청을 끝내지 못했어요. 다시 요청해 주세요.";
+      summary?.failure?.message ??
+      turn.error ??
+      "AI가 요청을 끝내지 못했어요. 다시 요청해 주세요.";
     return (
-      <article className={`rc ${outcome === "failed" ? "is-failed" : "is-cancelled"}`}>
+      <article
+        className={`rc ${outcome === "failed" ? "is-failed" : "is-cancelled"}`}
+      >
         <CardHead
           tone={outcome}
           icon={outcome === "failed" ? "close" : "stop"}
@@ -323,22 +400,30 @@ export function ResultCard({
           time={time}
         />
         <div className="rc-section">
-          <Banner tone={outcome === "failed" ? "danger" : "neutral"}>{message}</Banner>
+          <Banner tone={outcome === "failed" ? "danger" : "neutral"}>
+            {message}
+          </Banner>
           {summary?.scopeRejected ? (
             <p className="rc-quote">
-              지금 범위는 ‘{scopeTitle(turn.permission)}’예요. 범위 밖의 요소가 필요하면 범위를 넓혀 다시 요청해 주세요.
+              지금 범위는 ‘{scopeTitle(turn.permission)}’예요. 범위 밖의 요소가
+              필요하면 범위를 넓혀 다시 요청해 주세요.
             </p>
           ) : null}
           {summary?.changedSlides.length ? (
             <p className="rc-quote">
               중단 전에 {slideList(summary.changedSlides)}
-              {subjectParticle(slideList(summary.changedSlides))} 바뀌었어요. 버전 기록에서 확인할 수 있어요.
+              {subjectParticle(slideList(summary.changedSlides))} 바뀌었어요.
+              버전 기록에서 확인할 수 있어요.
             </p>
           ) : null}
         </div>
         <footer className="rc-foot">
           {widenButton}
-          <Button size="sm" icon="refresh" onClick={() => onRetry(turn.requestText)}>
+          <Button
+            size="sm"
+            icon="refresh"
+            onClick={() => onRetry(turn.requestText)}
+          >
             {wider ? "요청 고치기" : "다시 요청"}
           </Button>
         </footer>
@@ -350,12 +435,22 @@ export function ResultCard({
     if (summary?.scopeRejected)
       return (
         <article className="rc is-failed">
-          <CardHead tone="failed" icon="close" title="고치지 못함" time={time} />
+          <CardHead
+            tone="failed"
+            icon="close"
+            title="고치지 못함"
+            time={time}
+          />
           <div className="rc-section">
-            <Banner tone="danger">이 요청에는 범위 밖의 요소가 필요해요.</Banner>
+            <Banner tone="danger">
+              이 요청에는 범위 밖의 요소가 필요해요.
+            </Banner>
             <p className="rc-quote">
               지금 범위는 ‘{scopeTitle(turn.permission)}’예요.
-              {wider ? ` ‘${scopeTitle(wider)}’로 넓히면 고칠 수 있어요.` : ""} 이번 요청으로 바뀐 것은 없어요.
+              {wider
+                ? ` ‘${scopeTitle(wider)}’로 넓히면 고칠 수 있어요.`
+                : ""}{" "}
+              이번 요청으로 바뀐 것은 없어요.
             </p>
             {turn.text.trim() ? (
               <details className="rc-more">
@@ -366,7 +461,11 @@ export function ResultCard({
           </div>
           <footer className="rc-foot">
             {widenButton}
-            <Button size="sm" icon="edit" onClick={() => onRetry(turn.requestText)}>
+            <Button
+              size="sm"
+              icon="edit"
+              onClick={() => onRetry(turn.requestText)}
+            >
               요청 고치기
             </Button>
           </footer>
@@ -374,7 +473,12 @@ export function ResultCard({
       );
     return (
       <article className="rc is-unchanged">
-        <CardHead tone="unchanged" icon="dash" title="바뀐 것 없음" time={time} />
+        <CardHead
+          tone="unchanged"
+          icon="dash"
+          title="바뀐 것 없음"
+          time={time}
+        />
         <div className="rc-section">
           <Banner>편집기 기록으로는 문서가 바뀌지 않았어요.</Banner>
           {turn.text.trim() ? (
@@ -385,11 +489,21 @@ export function ResultCard({
           ) : null}
         </div>
         <footer className="rc-foot">
-          <Button size="sm" icon="refresh" onClick={() => onRetry(turn.requestText)}>
+          <Button
+            size="sm"
+            icon="refresh"
+            onClick={() => onRetry(turn.requestText)}
+          >
             다시 요청
           </Button>
           {widerScope(turn.permission) ? (
-            <Button size="sm" variant="quiet" onClick={() => onRetry(turn.requestText, widerScope(turn.permission)!)}>
+            <Button
+              size="sm"
+              variant="quiet"
+              onClick={() =>
+                onRetry(turn.requestText, widerScope(turn.permission)!)
+              }
+            >
               범위 바꾸기
             </Button>
           ) : null}
@@ -403,13 +517,16 @@ export function ResultCard({
   const multi = changedSlides.length > 1;
   const single = !multi && pairs.length === 1 ? pairs[0]! : null;
   const checks = summary ? checksFor(summary, outcome) : [];
-  const firstChange = summary?.changes.find((change) => change.elementId) ?? summary?.changes[0];
+  const firstChange =
+    summary?.changes.find((change) => change.elementId) ?? summary?.changes[0];
   const title =
     outcome === "unverified"
       ? "바뀜 · 확인 못 함"
       : `바뀜${changedSlides.length ? ` · ${slideList(changedSlides)}` : ""}`;
   return (
-    <article className={`rc ${outcome === "unverified" ? "is-unverified" : "is-changed"} ${turn.undoneAt ? "is-undone" : ""}`}>
+    <article
+      className={`rc ${outcome === "unverified" ? "is-unverified" : "is-changed"} ${turn.undoneAt ? "is-undone" : ""}`}
+    >
       <CardHead
         tone={outcome}
         icon={outcome === "unverified" ? "warning" : "sparkles"}
@@ -418,29 +535,45 @@ export function ResultCard({
       />
       {turn.undoneAt ? (
         <div className="rc-section">
-          <Banner icon="restore">{when(turn.undoneAt)}에 되돌렸어요. 버전 기록에 남아 있어요.</Banner>
+          <Banner icon="restore">
+            {when(turn.undoneAt)}에 되돌렸어요. 버전 기록에 남아 있어요.
+          </Banner>
         </div>
       ) : null}
       {outcome === "unverified" ? (
         <div className="rc-section">
-          <Banner tone="warn">AI가 바뀐 화면을 다시 보지 못했어요. 직접 확인해 주세요.</Banner>
+          <Banner tone="warn">
+            AI가 바뀐 화면을 다시 보지 못했어요. 직접 확인해 주세요.
+          </Banner>
         </div>
       ) : null}
       {single && (single.before || single.after) ? (
         <div className="rc-section">
-          <BeforeAfter pair={single} summary={summary} outcome={outcome} fresh={fresh} />
+          <BeforeAfter
+            pair={single}
+            summary={summary}
+            outcome={outcome}
+            fresh={fresh}
+          />
         </div>
       ) : pairs.length > 1 ? (
         <div className="rc-section">
           <ul className="rc-slides">
             {pairs.slice(0, 5).map((item) => {
               const count =
-                summary?.slideGroups?.find((group) => group.slideIndex === item.slideIndex)?.count ??
-                summary?.changes.filter((change) => change.slideIndex === item.slideIndex).length ??
+                summary?.slideGroups?.find(
+                  (group) => group.slideIndex === item.slideIndex,
+                )?.count ??
+                summary?.changes.filter(
+                  (change) => change.slideIndex === item.slideIndex,
+                ).length ??
                 0;
               return (
                 <li key={item.slideIndex}>
-                  <SlideImage src={item.after} alt={`${item.slideIndex + 1}번 슬라이드 수정 후`} />
+                  <SlideImage
+                    src={item.after}
+                    alt={`${item.slideIndex + 1}번 슬라이드 수정 후`}
+                  />
                   <span>
                     <strong>{item.slideIndex + 1}번</strong>
                     {count ? ` · ${count}곳` : ""}
@@ -468,12 +601,23 @@ export function ResultCard({
       ) : null}
       <footer className="rc-foot">
         {undo ? (
-          <Button size="sm" icon="restore" loading={undoBusy} disabled={undoBusy} onClick={() => onUndo(turn, undo)}>
+          <Button
+            size="sm"
+            icon="restore"
+            loading={undoBusy}
+            disabled={undoBusy}
+            onClick={() => onUndo(turn, undo)}
+          >
             {undo.label}
           </Button>
         ) : null}
         {onCompare && pairs.length && turn.turnId ? (
-          <Button size="sm" variant="quiet" icon="compare" onClick={() => onCompare(turn)}>
+          <Button
+            size="sm"
+            variant="quiet"
+            icon="compare"
+            onClick={() => onCompare(turn)}
+          >
             비교
           </Button>
         ) : null}
@@ -482,7 +626,9 @@ export function ResultCard({
             size="sm"
             variant="quiet"
             icon="eye"
-            onClick={() => onReveal(firstChange.slideIndex, firstChange.elementId ?? null)}
+            onClick={() =>
+              onReveal(firstChange.slideIndex, firstChange.elementId ?? null)
+            }
           >
             슬라이드에서 보기
           </Button>
@@ -508,7 +654,11 @@ export function RunningCard({
     return () => clearInterval(timer);
   }, []);
   const started = turn.startedAt ? new Date(turn.startedAt).getTime() : now;
-  const stages = runningStages(turn.tools, turn.permission === "read_only", Boolean(turn.text.trim()));
+  const stages = runningStages(
+    turn.tools,
+    turn.permission === "read_only",
+    Boolean(turn.text.trim()),
+  );
   return (
     <section className="run" aria-live="polite" aria-label="AI 작업 중">
       <header className="run-head">
@@ -531,14 +681,17 @@ export function RunningCard({
       ) : null}
       <StepList
         steps={stages.map((stage) => ({
-          label: stage.detail ? `${stage.label} · ${stage.detail}` : stage.label,
+          label: stage.detail
+            ? `${stage.label} · ${stage.detail}`
+            : stage.label,
           state: stage.state,
         }))}
         label="진행 단계"
       />
       {turn.text.trim() ? <Answer text={turn.text} /> : null}
       <p className="run-hint">
-        작업 중에 문서를 직접 고치면 AI가 바뀐 문서를 다시 확인해야 해서 늦어지거나 멈출 수 있어요.
+        작업 중에 문서를 직접 고치면 AI가 바뀐 문서를 다시 확인해야 해서
+        늦어지거나 멈출 수 있어요.
       </p>
       <div>
         <Button size="sm" icon="stop" onClick={onStop}>

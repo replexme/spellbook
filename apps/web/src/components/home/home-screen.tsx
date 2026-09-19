@@ -21,7 +21,12 @@ import { failureShort, megabytes } from "@/lib/upload-reasons";
 import { useAiAccount } from "@/lib/use-ai-account";
 import { AppTop } from "../app-top";
 import { relative, subjectParticle } from "../copy";
-import { DeleteDialog, documentHref, FileMenu, RenameDialog } from "./file-actions";
+import {
+  DeleteDialog,
+  documentHref,
+  FileMenu,
+  RenameDialog,
+} from "./file-actions";
 import { ImportDialog } from "./import-dialog";
 
 type Sort = "updated" | "name" | "created";
@@ -39,8 +44,10 @@ const PPTX_ACCEPT =
 
 function sorted(documents: LibraryDocument[], sort: Sort) {
   const list = [...documents];
-  if (sort === "name") list.sort((a, b) => a.fileName.localeCompare(b.fileName, "ko"));
-  else if (sort === "created") list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  if (sort === "name")
+    list.sort((a, b) => a.fileName.localeCompare(b.fileName, "ko"));
+  else if (sort === "created")
+    list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   else list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return list;
 }
@@ -65,7 +72,10 @@ function StatusBadge({ document }: { document: LibraryDocument }) {
 function meta(document: LibraryDocument) {
   if (document.status === "processing") return "방금 가져옴";
   if (document.status === "failed") return failureShort(document.failureCode);
-  return [relative(document.updatedAt), document.slideCount ? `${document.slideCount}장` : null]
+  return [
+    relative(document.updatedAt),
+    document.slideCount ? `${document.slideCount}장` : null,
+  ]
     .filter(Boolean)
     .join(" · ");
 }
@@ -124,7 +134,9 @@ export function HomeScreen({
 
   const warmEditor = useCallback(() => {
     // Opening a document keeps its own retry path if prewarming fails.
-    void fetch("/api/office/warm", { method: "POST", keepalive: true }).catch(() => undefined);
+    void fetch("/api/office/warm", { method: "POST", keepalive: true }).catch(
+      () => undefined,
+    );
   }, []);
 
   useEffect(() => {
@@ -139,7 +151,9 @@ export function HomeScreen({
   }, [load, warmEditor]);
 
   // Keep "checking" cards current while the server works on them.
-  const checking = documents.some((document) => document.status === "processing");
+  const checking = documents.some(
+    (document) => document.status === "processing",
+  );
   useEffect(() => {
     if (!checking) return;
     const timer = setInterval(() => void load(), 3_000);
@@ -156,7 +170,8 @@ export function HomeScreen({
 
   // Drop a PPTX anywhere on the page.
   useEffect(() => {
-    const hasFiles = (event: DragEvent) => event.dataTransfer?.types.includes("Files") ?? false;
+    const hasFiles = (event: DragEvent) =>
+      event.dataTransfer?.types.includes("Files") ?? false;
     const onEnter = (event: DragEvent) => {
       if (!hasFiles(event)) return;
       event.preventDefault();
@@ -191,7 +206,9 @@ export function HomeScreen({
     const needle = query.trim().toLowerCase();
     return sorted(
       needle
-        ? documents.filter((document) => document.fileName.toLowerCase().includes(needle))
+        ? documents.filter((document) =>
+            document.fileName.toLowerCase().includes(needle),
+          )
         : documents,
       sort,
     );
@@ -212,7 +229,12 @@ export function HomeScreen({
     <>
       <AppTop email={email} ai={ai}>
         {documents.length ? (
-          <SearchField label="파일 이름으로 찾기" placeholder="파일 이름으로 찾기" value={query} onChange={setQuery} />
+          <SearchField
+            label="파일 이름으로 찾기"
+            placeholder="파일 이름으로 찾기"
+            value={query}
+            onChange={setQuery}
+          />
         ) : null}
       </AppTop>
       <main className="app-main">
@@ -244,7 +266,8 @@ export function HomeScreen({
                   파일 선택
                 </Button>
                 <small>
-                  .pptx · {limit}까지 · 옛 형식(.ppt)은 PowerPoint에서 .pptx로 저장한 뒤 가져오세요
+                  .pptx · {limit}까지 · 옛 형식(.ppt)은 PowerPoint에서 .pptx로
+                  저장한 뒤 가져오세요
                 </small>
               </div>
               <ol className="how-steps" aria-label="쓰는 순서">
@@ -284,7 +307,9 @@ export function HomeScreen({
                       연결하기
                     </ButtonLink>
                   </div>
-                  <small className="dialog-note">연결 전에도 직접 편집은 할 수 있어요.</small>
+                  <small className="dialog-note">
+                    연결 전에도 직접 편집은 할 수 있어요.
+                  </small>
                 </>
               )}
             </aside>
@@ -337,8 +362,18 @@ export function HomeScreen({
                   value={view}
                   onChange={changeView}
                   options={[
-                    { value: "grid", label: null, icon: "grid", ariaLabel: "격자로 보기" },
-                    { value: "list", label: null, icon: "list", ariaLabel: "목록으로 보기" },
+                    {
+                      value: "grid",
+                      label: null,
+                      icon: "grid",
+                      ariaLabel: "격자로 보기",
+                    },
+                    {
+                      value: "list",
+                      label: null,
+                      icon: "list",
+                      ariaLabel: "목록으로 보기",
+                    },
                   ]}
                 />
                 <Button variant="primary" icon="upload" onClick={pickFile}>
@@ -348,7 +383,8 @@ export function HomeScreen({
             </div>
             {!visible.length ? (
               <EmptyState icon="search" title="찾는 파일이 없어요">
-                ‘{query.trim()}’{subjectParticle(query)} 들어간 파일 이름이 없어요.
+                ‘{query.trim()}’{subjectParticle(query)} 들어간 파일 이름이
+                없어요.
               </EmptyState>
             ) : view === "grid" ? (
               <ul className="file-grid" aria-label="파일">
@@ -356,15 +392,24 @@ export function HomeScreen({
                   <li key={document.id} className="file-card">
                     <a href={documentHref(document)}>
                       <Cover document={document} />
-                      <span className="file-card-name" title={document.fileName}>
+                      <span
+                        className="file-card-name"
+                        title={document.fileName}
+                      >
                         {document.fileName}
                       </span>
-                      <span className={`file-card-meta ${document.status === "failed" ? "is-danger" : ""}`}>
+                      <span
+                        className={`file-card-meta ${document.status === "failed" ? "is-danger" : ""}`}
+                      >
                         {meta(document)}
                       </span>
                     </a>
                     <StatusBadge document={document} />
-                    <FileMenu document={document} onRename={setRenaming} onDelete={setDeleting} />
+                    <FileMenu
+                      document={document}
+                      onRename={setRenaming}
+                      onDelete={setDeleting}
+                    />
                   </li>
                 ))}
               </ul>
@@ -375,21 +420,32 @@ export function HomeScreen({
                     <a href={documentHref(document)}>
                       <Cover document={document} />
                       <span className="file-row-text">
-                        <span className="file-card-name" title={document.fileName}>
+                        <span
+                          className="file-card-name"
+                          title={document.fileName}
+                        >
                           {document.fileName}
                         </span>
-                        <span className={`file-card-meta ${document.status === "failed" ? "is-danger" : ""}`}>
+                        <span
+                          className={`file-card-meta ${document.status === "failed" ? "is-danger" : ""}`}
+                        >
                           {meta(document)}
                         </span>
                       </span>
                     </a>
                     <StatusBadge document={document} />
-                    <FileMenu document={document} onRename={setRenaming} onDelete={setDeleting} />
+                    <FileMenu
+                      document={document}
+                      onRename={setRenaming}
+                      onDelete={setDeleting}
+                    />
                   </li>
                 ))}
               </ul>
             )}
-            <p className="home-note">PPTX 파일을 이 화면 아무 곳에나 끌어 놓아도 가져올 수 있어요.</p>
+            <p className="home-note">
+              PPTX 파일을 이 화면 아무 곳에나 끌어 놓아도 가져올 수 있어요.
+            </p>
           </>
         )}
       </main>
@@ -421,8 +477,16 @@ export function HomeScreen({
           pickFile();
         }}
       />
-      <RenameDialog document={renaming} onClose={() => setRenaming(null)} onRenamed={() => void load()} />
-      <DeleteDialog document={deleting} onClose={() => setDeleting(null)} onDeleted={() => void load()} />
+      <RenameDialog
+        document={renaming}
+        onClose={() => setRenaming(null)}
+        onRenamed={() => void load()}
+      />
+      <DeleteDialog
+        document={deleting}
+        onClose={() => setDeleting(null)}
+        onDeleted={() => void load()}
+      />
     </>
   );
 }

@@ -8,14 +8,20 @@ export type SaveView = {
 };
 
 /** Maps the editor bridge's save state to the one visible save indicator. */
-export function saveView(state: string, engineReady: boolean, savedAt: string | null): SaveView {
+export function saveView(
+  state: string,
+  engineReady: boolean,
+  savedAt: string | null,
+): SaveView {
   if (!engineReady) return { kind: "opening", label: "여는 중…" };
   if (state === "저장됨")
     return { kind: "saved", label: savedAt ? `저장됨 · ${savedAt}` : "저장됨" };
-  if (state === "변경 사항 있음") return { kind: "dirty", label: "저장 안 됨 · 지금 저장" };
+  if (state === "변경 사항 있음")
+    return { kind: "dirty", label: "저장 안 됨 · 지금 저장" };
   if (state === "복구된 변경 사항 있음")
     return { kind: "dirty", label: "복구한 변경 있음 · 지금 저장" };
-  if (state === "저장 실패") return { kind: "error", label: "저장하지 못함 · 다시 시도" };
+  if (state === "저장 실패")
+    return { kind: "error", label: "저장하지 못함 · 다시 시도" };
   return { kind: "busy", label: state };
 }
 
@@ -84,8 +90,20 @@ export function WorkspaceTopBar({
         )}
       </div>
       <div className="ws-actions">
-        <IconButton icon="undo" label="실행 취소" className="ws-hide-phone" disabled={!editorReady} onClick={onUndo} />
-        <IconButton icon="redo" label="다시 실행" className="ws-hide-phone" disabled={!editorReady} onClick={onRedo} />
+        <IconButton
+          icon="undo"
+          label="실행 취소"
+          className="ws-hide-phone"
+          disabled={!editorReady}
+          onClick={onUndo}
+        />
+        <IconButton
+          icon="redo"
+          label="다시 실행"
+          className="ws-hide-phone"
+          disabled={!editorReady}
+          onClick={onRedo}
+        />
         <span className="ws-divider ws-hide-narrow" aria-hidden="true" />
         <Button
           variant="quiet"

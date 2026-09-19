@@ -41,12 +41,24 @@ export function VersionPanel({
     );
   if (error)
     return (
-      <Banner tone="danger" role="alert" action={<Button size="sm" onClick={onReload}>다시 불러오기</Button>}>
+      <Banner
+        tone="danger"
+        role="alert"
+        action={
+          <Button size="sm" onClick={onReload}>
+            다시 불러오기
+          </Button>
+        }
+      >
         버전 기록을 불러오지 못했어요.
       </Banner>
     );
   if (!entries.length)
-    return <EmptyState icon="clock" title="아직 저장된 버전이 없어요">저장할 때마다 여기에 버전이 쌓여요.</EmptyState>;
+    return (
+      <EmptyState icon="clock" title="아직 저장된 버전이 없어요">
+        저장할 때마다 여기에 버전이 쌓여요.
+      </EmptyState>
+    );
   let lastDay = "";
   return (
     <>
@@ -84,13 +96,21 @@ export function VersionPanel({
                     {entry.previews.some(Boolean) ? (
                       <div className="vl-previews">
                         {entry.previews.slice(0, 2).map((url, index) => (
-                          <SlideImage key={index} src={url} alt={`${index + 1}번 슬라이드 미리보기`} />
+                          <SlideImage
+                            key={index}
+                            src={url}
+                            alt={`${index + 1}번 슬라이드 미리보기`}
+                          />
                         ))}
                       </div>
                     ) : null}
                     <div className="vl-actions">
                       {entry.parentVersionId ? (
-                        <Button size="sm" icon="compare" onClick={() => onCompare(entry)}>
+                        <Button
+                          size="sm"
+                          icon="compare"
+                          onClick={() => onCompare(entry)}
+                        >
                           이전 버전과 비교
                         </Button>
                       ) : null}
@@ -125,7 +145,6 @@ export function VersionPanel({
         <Icon name="info" size={14} />
         돌아가도 지금 파일은 지워지지 않고 이 목록에 남아요.
       </p>
-
     </>
   );
 }

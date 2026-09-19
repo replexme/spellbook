@@ -41,10 +41,7 @@ test("document state treats two edge-quantization units as the same element outl
     null,
   );
   assert.deepEqual(
-    firstDocumentStateDifference(
-      [{ width: 33_967 }],
-      [{ width: 33_970 }],
-    ),
+    firstDocumentStateDifference([{ width: 33_967 }], [{ width: 33_970 }]),
     { path: "slides[0].width", expected: 33_967, actual: 33_970 },
   );
 });

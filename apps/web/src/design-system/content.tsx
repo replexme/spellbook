@@ -56,7 +56,13 @@ const checkIcon: Record<CheckItem["tone"], IconName> = {
   info: "info",
 };
 
-export function CheckList({ items, label }: { items: CheckItem[]; label?: string }) {
+export function CheckList({
+  items,
+  label,
+}: {
+  items: CheckItem[];
+  label?: string;
+}) {
   if (!items.length) return null;
   return (
     <ul className="ds-checks" aria-label={label}>
@@ -106,7 +112,10 @@ export function StepList({
 /** PowerPoint file mark for lists and dialogs. */
 export function FileMark({ muted = false }: { muted?: boolean }) {
   return (
-    <span className={`ds-file-mark ${muted ? "is-muted" : ""}`} aria-hidden="true">
+    <span
+      className={`ds-file-mark ${muted ? "is-muted" : ""}`}
+      aria-hidden="true"
+    >
       P
     </span>
   );

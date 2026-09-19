@@ -70,7 +70,11 @@ export type TurnSummary = {
   omittedChanges: number;
   reviewed: boolean;
   /** Issues the edits introduced; null when no edit evidence exists. */
-  introducedIssues: { overlap: number; outOfBounds: number; invalidSize: number } | null;
+  introducedIssues: {
+    overlap: number;
+    outOfBounds: number;
+    invalidSize: number;
+  } | null;
   /** True when every applied edit passed the editor's own scope check. */
   scopeEnforced: boolean;
   scopeRejected: boolean;
@@ -151,12 +155,14 @@ const failureRules: Array<{ test: RegExp; code: string; message: string }> = [
   {
     test: /native_agent_interrupted|연결이 중단/,
     code: "interrupted",
-    message: "AI 작업 연결이 끊겼어요. 슬라이드를 확인한 뒤 다시 요청해 주세요.",
+    message:
+      "AI 작업 연결이 끊겼어요. 슬라이드를 확인한 뒤 다시 요청해 주세요.",
   },
   {
     test: /selected_model_unavailable|model[^.]{0,40}(not found|unavailable|unsupported|does not exist)/i,
     code: "model_unavailable",
-    message: "선택한 AI 모델을 지금 쓸 수 없어요. 모델을 바꿔 다시 요청해 주세요.",
+    message:
+      "선택한 AI 모델을 지금 쓸 수 없어요. 모델을 바꿔 다시 요청해 주세요.",
   },
   {
     test: /rate[ _-]?limit|quota|usage limit|\b429\b|사용 한도/i,
@@ -166,22 +172,26 @@ const failureRules: Array<{ test: RegExp; code: string; message: string }> = [
   {
     test: /unauthori[sz]ed|\b401\b|not logged in|login required|auth(entication)? (failed|required|expired)|ai_account_not_connected/i,
     code: "ai_not_connected",
-    message: "AI 구독 연결을 다시 확인해야 해요. 설정에서 연결 상태를 확인해 주세요.",
+    message:
+      "AI 구독 연결을 다시 확인해야 해요. 설정에서 연결 상태를 확인해 주세요.",
   },
   {
     test: /document_changed|observe_again/i,
     code: "document_changed",
-    message: "작업 중에 문서가 바뀌어서 멈췄어요. 다시 요청하면 바뀐 문서를 보고 이어서 해요.",
+    message:
+      "작업 중에 문서가 바뀌어서 멈췄어요. 다시 요청하면 바뀐 문서를 보고 이어서 해요.",
   },
   {
     test: /native_session_not_active|native_save_validation_in_progress/,
     code: "save_in_progress",
-    message: "문서를 저장하는 중에 요청이 시작돼 멈췄어요. 저장이 끝난 뒤 다시 요청해 주세요.",
+    message:
+      "문서를 저장하는 중에 요청이 시작돼 멈췄어요. 저장이 끝난 뒤 다시 요청해 주세요.",
   },
   {
     test: /timeout|timed out|ETIMEDOUT|deadline/i,
     code: "timeout",
-    message: "AI 응답이 너무 오래 걸려 멈췄어요. 요청을 조금 나눠서 다시 보내 주세요.",
+    message:
+      "AI 응답이 너무 오래 걸려 멈췄어요. 요청을 조금 나눠서 다시 보내 주세요.",
   },
   {
     test: /dispatch_failed|native_ai_unavailable|ECONNREFUSED|fetch failed|unavailable/i,
@@ -190,29 +200,36 @@ const failureRules: Array<{ test: RegExp; code: string; message: string }> = [
   },
 ];
 
-export function nativeFailureReason(error: string | null | undefined): TurnFailure {
+export function nativeFailureReason(
+  error: string | null | undefined,
+): TurnFailure {
   const text = error ?? "";
   for (const rule of failureRules)
     if (rule.test.test(text)) return { code: rule.code, message: rule.message };
   return {
     code: "unknown",
-    message: "AI가 요청을 끝내지 못했어요. 문서는 요청 전 상태를 유지하고 있어요.",
+    message:
+      "AI가 요청을 끝내지 못했어요. 문서는 요청 전 상태를 유지하고 있어요.",
   };
 }
 
 /* ── Element diff ─────────────────────────────────────────────────── */
 function quote(text: unknown, limit = 36) {
-  const value = String(text ?? "").replace(/\s+/g, " ").trim();
+  const value = String(text ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
   return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
 }
 
 function hex(value: unknown) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+    return null;
   return `#${Math.round(value).toString(16).padStart(6, "0").toUpperCase()}`;
 }
 
 function sameNumber(left: unknown, right: unknown, tolerance: number) {
-  if (typeof left !== "number" || typeof right !== "number") return left === right;
+  if (typeof left !== "number" || typeof right !== "number")
+    return left === right;
   return Math.abs(left - right) <= tolerance;
 }
 
@@ -230,13 +247,16 @@ export function describeElementChange(before: Json, after: Json): string[] {
     else lines.push(`문구 “${quote(before.text)}” → “${quote(after.text)}”`);
   }
   if (!sameNumber(before.fontSize, after.fontSize, 0.05))
-    lines.push(`글자 크기 ${round(before.fontSize)}pt → ${round(after.fontSize)}pt`);
+    lines.push(
+      `글자 크기 ${round(before.fontSize)}pt → ${round(after.fontSize)}pt`,
+    );
   if (before.fontFamily !== after.fontFamily && after.fontFamily)
     lines.push(`글꼴 ${before.fontFamily ?? "기본"} → ${after.fontFamily}`);
   const bold = (value: unknown) => typeof value === "number" && value >= 140;
   if (bold(before.fontWeight) !== bold(after.fontWeight))
     lines.push(bold(after.fontWeight) ? "굵게" : "굵게 해제");
-  const italic = (value: unknown) => /ITALIC|OBLIQUE/i.test(String(value ?? ""));
+  const italic = (value: unknown) =>
+    /ITALIC|OBLIQUE/i.test(String(value ?? ""));
   if (italic(before.fontStyle) !== italic(after.fontStyle))
     lines.push(italic(after.fontStyle) ? "기울임" : "기울임 해제");
   const underline = (value: unknown) => typeof value === "number" && value > 0;
@@ -249,34 +269,51 @@ export function describeElementChange(before: Json, after: Json): string[] {
   else if (before.fill !== after.fill && hex(after.fill))
     lines.push(`채우기 색 ${hex(before.fill) ?? "없음"} → ${hex(after.fill)}`);
   if (before.lineColor !== after.lineColor && hex(after.lineColor))
-    lines.push(`선 색 ${hex(before.lineColor) ?? "없음"} → ${hex(after.lineColor)}`);
+    lines.push(
+      `선 색 ${hex(before.lineColor) ?? "없음"} → ${hex(after.lineColor)}`,
+    );
   if (!sameNumber(before.lineWidth, after.lineWidth, 1))
-    lines.push(`선 굵기 ${round(Number(before.lineWidth) / 35.28, 1)}pt → ${round(Number(after.lineWidth) / 35.28, 1)}pt`);
+    lines.push(
+      `선 굵기 ${round(Number(before.lineWidth) / 35.28, 1)}pt → ${round(Number(after.lineWidth) / 35.28, 1)}pt`,
+    );
   if (!sameNumber(before.rotation, after.rotation, 1))
-    lines.push(`회전 ${round(Number(before.rotation ?? 0) / 100, 0)}° → ${round(Number(after.rotation ?? 0) / 100, 0)}°`);
+    lines.push(
+      `회전 ${round(Number(before.rotation ?? 0) / 100, 0)}° → ${round(Number(after.rotation ?? 0) / 100, 0)}°`,
+    );
   const shadowOn = (value: Json) => value?.shadow?.enabled === true;
   if (shadowOn(before) !== shadowOn(after))
     lines.push(shadowOn(after) ? "그림자 추가" : "그림자 해제");
-  else if (JSON.stringify(before.shadow ?? null) !== JSON.stringify(after.shadow ?? null))
+  else if (
+    JSON.stringify(before.shadow ?? null) !==
+    JSON.stringify(after.shadow ?? null)
+  )
     lines.push("그림자 바꿈");
-  if ((before.hyperlink ?? "") !== (after.hyperlink ?? "")) lines.push("링크 바꿈");
+  if ((before.hyperlink ?? "") !== (after.hyperlink ?? ""))
+    lines.push("링크 바꿈");
   if (
     (before.description ?? "") !== (after.description ?? "") ||
     (before.title ?? "") !== (after.title ?? "")
   )
     lines.push("대체 텍스트 바꿈");
-  if (JSON.stringify(before.chart ?? null) !== JSON.stringify(after.chart ?? null))
+  if (
+    JSON.stringify(before.chart ?? null) !== JSON.stringify(after.chart ?? null)
+  )
     lines.push("차트 바꿈");
   if (
     JSON.stringify(before.table ?? before.cells ?? null) !==
     JSON.stringify(after.table ?? after.cells ?? null)
   )
     lines.push("표 내용 바꿈");
-  if (before.paragraphAlignment !== after.paragraphAlignment && after.paragraphAlignment != null)
+  if (
+    before.paragraphAlignment !== after.paragraphAlignment &&
+    after.paragraphAlignment != null
+  )
     lines.push("문단 정렬 바꿈");
-  const moved = !sameNumber(before.x, after.x, 50) || !sameNumber(before.y, after.y, 50);
+  const moved =
+    !sameNumber(before.x, after.x, 50) || !sameNumber(before.y, after.y, 50);
   const resized =
-    !sameNumber(before.width, after.width, 50) || !sameNumber(before.height, after.height, 50);
+    !sameNumber(before.width, after.width, 50) ||
+    !sameNumber(before.height, after.height, 50);
   if (resized)
     lines.push(
       `크기 ${round(Number(before.width) / 1000)}×${round(Number(before.height) / 1000)}cm → ${round(Number(after.width) / 1000)}×${round(Number(after.height) / 1000)}cm`,
@@ -310,26 +347,54 @@ function topLevel(elements: unknown) {
   ) as Json[];
 }
 
-export function diffSlides(beforeSlides: Json[], afterSlides: Json[], slideIndexes: number[]) {
+export function diffSlides(
+  beforeSlides: Json[],
+  afterSlides: Json[],
+  slideIndexes: number[],
+) {
   const changes: TurnChange[] = [];
   for (const slideIndex of slideIndexes) {
-    const before = beforeSlides.find((slide) => slide?.slideIndex === slideIndex);
+    const before = beforeSlides.find(
+      (slide) => slide?.slideIndex === slideIndex,
+    );
     const after = afterSlides.find((slide) => slide?.slideIndex === slideIndex);
     if (!before && after) {
-      changes.push({ slideIndex, target: "슬라이드", kind: "added", details: ["새 슬라이드"], box: null });
+      changes.push({
+        slideIndex,
+        target: "슬라이드",
+        kind: "added",
+        details: ["새 슬라이드"],
+        box: null,
+      });
       continue;
     }
     if (before && !after) {
-      changes.push({ slideIndex, target: "슬라이드", kind: "removed", details: ["슬라이드 삭제"], box: null });
+      changes.push({
+        slideIndex,
+        target: "슬라이드",
+        kind: "removed",
+        details: ["슬라이드 삭제"],
+        box: null,
+      });
       continue;
     }
     if (!before || !after) continue;
     const changesBefore = changes.length;
     const slideLines = describeSlideChange(before, after);
     if (slideLines.length)
-      changes.push({ slideIndex, target: "슬라이드", kind: "modified", details: slideLines, box: null });
-    const beforeElements = new Map(topLevel(before.elements).map((e) => [elementKey(e), e]));
-    const afterElements = new Map(topLevel(after.elements).map((e) => [elementKey(e), e]));
+      changes.push({
+        slideIndex,
+        target: "슬라이드",
+        kind: "modified",
+        details: slideLines,
+        box: null,
+      });
+    const beforeElements = new Map(
+      topLevel(before.elements).map((e) => [elementKey(e), e]),
+    );
+    const afterElements = new Map(
+      topLevel(after.elements).map((e) => [elementKey(e), e]),
+    );
     for (const [key, element] of afterElements) {
       const previous = beforeElements.get(key);
       if (!previous) {
@@ -337,14 +402,20 @@ export function diffSlides(beforeSlides: Json[], afterSlides: Json[], slideIndex
           slideIndex,
           target: elementLabel(element),
           kind: "added",
-          details: element.text ? [`새로 추가 “${quote(element.text)}”`] : ["새로 추가"],
+          details: element.text
+            ? [`새로 추가 “${quote(element.text)}”`]
+            : ["새로 추가"],
           box: relativeBox(element, after),
-          elementId: typeof element.elementId === "string" ? element.elementId : null,
+          elementId:
+            typeof element.elementId === "string" ? element.elementId : null,
         });
         continue;
       }
       const details = describeElementChange(previous, element);
-      if (!details.length && JSON.stringify(previous) !== JSON.stringify(element))
+      if (
+        !details.length &&
+        JSON.stringify(previous) !== JSON.stringify(element)
+      )
         details.push("서식 바꿈");
       if (details.length)
         changes.push({
@@ -353,7 +424,8 @@ export function diffSlides(beforeSlides: Json[], afterSlides: Json[], slideIndex
           kind: "modified",
           details,
           box: relativeBox(element, after),
-          elementId: typeof element.elementId === "string" ? element.elementId : null,
+          elementId:
+            typeof element.elementId === "string" ? element.elementId : null,
         });
     }
     for (const [key, element] of beforeElements)
@@ -366,8 +438,17 @@ export function diffSlides(beforeSlides: Json[], afterSlides: Json[], slideIndex
           box: relativeBox(element, before),
           elementId: null,
         });
-    if (changes.length === changesBefore && comparableSlide(before) !== comparableSlide(after))
-      changes.push({ slideIndex, target: "슬라이드", kind: "modified", details: ["슬라이드 서식 바꿈"], box: null });
+    if (
+      changes.length === changesBefore &&
+      comparableSlide(before) !== comparableSlide(after)
+    )
+      changes.push({
+        slideIndex,
+        target: "슬라이드",
+        kind: "modified",
+        details: ["슬라이드 서식 바꿈"],
+        box: null,
+      });
   }
   return changes;
 }
@@ -389,8 +470,13 @@ function comparableSlide(slide: Json) {
   return JSON.stringify({
     ...rest,
     elements: (Array.isArray(elements) ? elements : []).map(
-      ({ stableId: _stable, elementId: _id, parentElementId: _parent, childElementIds: _children, ...element }: Json) =>
-        element,
+      ({
+        stableId: _stable,
+        elementId: _id,
+        parentElementId: _parent,
+        childElementIds: _children,
+        ...element
+      }: Json) => element,
     ),
   });
 }
@@ -398,7 +484,9 @@ function comparableSlide(slide: Json) {
 /** Masters without the diagnostic shape count the editor itself excludes. */
 function comparableMasters(masters: unknown) {
   return JSON.stringify(
-    (Array.isArray(masters) ? masters : []).map(({ shapeCount: _count, ...master }: Json) => master),
+    (Array.isArray(masters) ? masters : []).map(
+      ({ shapeCount: _count, ...master }: Json) => master,
+    ),
   );
 }
 
@@ -406,7 +494,9 @@ function comparableMasters(masters: unknown) {
 export function differingSlides(beforeSlides: Json[], afterSlides: Json[]) {
   return beforeSlides
     .map((slide, index) =>
-      comparableSlide(slide) === comparableSlide(afterSlides[index]) ? -1 : index,
+      comparableSlide(slide) === comparableSlide(afterSlides[index])
+        ? -1
+        : index,
     )
     .filter((index) => index >= 0);
 }
@@ -427,10 +517,15 @@ function structureChanges(tasks: TurnTaskRecord[]) {
   const labels = new Set<string>();
   for (const task of tasks) {
     const commands =
-      task.request?.operation === "edit_batch" ? task.request.commands : [task.request?.command];
+      task.request?.operation === "edit_batch"
+        ? task.request.commands
+        : [task.request?.command];
     for (const command of Array.isArray(commands) ? commands : []) {
       const op = String(command?.op ?? "");
-      if (mutationOperations[op]?.family === "slide_structure" && structureLabels[op])
+      if (
+        mutationOperations[op]?.family === "slide_structure" &&
+        structureLabels[op]
+      )
         labels.add(structureLabels[op]);
     }
   }
@@ -440,10 +535,12 @@ function structureChanges(tasks: TurnTaskRecord[]) {
 export function describeSlideChange(before: Json, after: Json): string[] {
   const lines: string[] = [];
   const differs = (key: string) =>
-    JSON.stringify(before?.[key] ?? null) !== JSON.stringify(after?.[key] ?? null);
+    JSON.stringify(before?.[key] ?? null) !==
+    JSON.stringify(after?.[key] ?? null);
   if (differs("backgroundColor")) lines.push("배경 바꿈");
   if (differs("layout") || differs("masterName")) lines.push("레이아웃 바꿈");
-  if (differs("hidden")) lines.push(after?.hidden ? "슬라이드 숨김" : "슬라이드 표시");
+  if (differs("hidden"))
+    lines.push(after?.hidden ? "슬라이드 숨김" : "슬라이드 표시");
   if (differs("transition")) lines.push("전환 효과 바꿈");
   if (differs("animations")) lines.push("애니메이션 바꿈");
   if (differs("speakerNotes")) lines.push("발표자 노트 바꿈");
@@ -461,10 +558,18 @@ function imagesOf(task: TurnTaskRecord) {
 function imageAt(tasks: TurnTaskRecord[], reference: EvidenceRef | null) {
   if (!reference) return null;
   const [taskId, index] = reference.split(":");
-  return imagesOf(tasks.find((task) => task.id === taskId) ?? ({} as TurnTaskRecord))[Number(index)] ?? null;
+  return (
+    imagesOf(
+      tasks.find((task) => task.id === taskId) ?? ({} as TurnTaskRecord),
+    )[Number(index)] ?? null
+  );
 }
 
-function findImage(tasks: TurnTaskRecord[], slideIndex: number, fromEnd: boolean) {
+function findImage(
+  tasks: TurnTaskRecord[],
+  slideIndex: number,
+  fromEnd: boolean,
+) {
   const ordered = fromEnd ? [...tasks].reverse() : tasks;
   for (const task of ordered) {
     if (task.status !== "completed") continue;
@@ -475,8 +580,13 @@ function findImage(tasks: TurnTaskRecord[], slideIndex: number, fromEnd: boolean
   return null;
 }
 
-function framingOf(tasks: TurnTaskRecord[], reference: EvidenceRef | null): "slide" | "window" {
-  return imageAt(tasks, reference)?.source === "browser_canvas" ? "window" : "slide";
+function framingOf(
+  tasks: TurnTaskRecord[],
+  reference: EvidenceRef | null,
+): "slide" | "window" {
+  return imageAt(tasks, reference)?.source === "browser_canvas"
+    ? "window"
+    : "slide";
 }
 
 function issueCounts(issues: Json[]) {
@@ -515,17 +625,26 @@ function slideGroups(changes: TurnChange[]): TurnSlideGroup[] {
 function sharedDetail(changes: TurnChange[]) {
   if (changes.length < 2) return null;
   const first = changes[0]!.details.join(" · ");
-  return first && changes.every((change) => change.details.join(" · ") === first) ? first : null;
+  return first &&
+    changes.every((change) => change.details.join(" · ") === first)
+    ? first
+    : null;
 }
 
-export function summarizeTurn(turn: TurnRecord, tasks: TurnTaskRecord[]): TurnSummary {
+export function summarizeTurn(
+  turn: TurnRecord,
+  tasks: TurnTaskRecord[],
+): TurnSummary {
   const mutations = tasks.filter(isMutation);
   const appliedMutations = mutations.filter(applied);
   // Measure from the first edit that took effect: an earlier edit that was
   // refused (for example because the person edited meanwhile) left the
   // document as the person made it, not as the AI first saw it.
-  const firstApplied = tasks.findIndex((task) => isMutation(task) && applied(task));
-  const firstMutation = firstApplied >= 0 ? firstApplied : tasks.findIndex(isMutation);
+  const firstApplied = tasks.findIndex(
+    (task) => isMutation(task) && applied(task),
+  );
+  const firstMutation =
+    firstApplied >= 0 ? firstApplied : tasks.findIndex(isMutation);
   const beforeTasks = firstMutation < 0 ? tasks : tasks.slice(0, firstMutation);
   const hasSlides = (task: TurnTaskRecord) =>
     task.status === "completed" && Array.isArray(task.result?.slides);
@@ -533,13 +652,16 @@ export function summarizeTurn(turn: TurnRecord, tasks: TurnTaskRecord[]): TurnSu
   // The last applied edit's own result is the document as the AI left it; a
   // later observation could already include the person's own edits.
   const afterState =
-    [...appliedMutations].reverse().find(hasSlides) ?? [...tasks].reverse().find(hasSlides);
+    [...appliedMutations].reverse().find(hasSlides) ??
+    [...tasks].reverse().find(hasSlides);
   const reportedSlides = [
     ...new Set(
-      appliedMutations.flatMap((task) =>
-        (task.result?.changedSlideIndexes as unknown[] | undefined)?.filter(
-          (value): value is number => Number.isSafeInteger(value) && Number(value) >= 0,
-        ) ?? [],
+      appliedMutations.flatMap(
+        (task) =>
+          (task.result?.changedSlideIndexes as unknown[] | undefined)?.filter(
+            (value): value is number =>
+              Number.isSafeInteger(value) && Number(value) >= 0,
+          ) ?? [],
       ),
     ),
   ].sort((left, right) => left - right);
@@ -567,7 +689,9 @@ export function summarizeTurn(turn: TurnRecord, tasks: TurnTaskRecord[]): TurnSu
       // per-element details.
       if (beforeSlides.length === afterSlides.length) {
         const differing = differingSlides(beforeSlides, afterSlides);
-        unchangedSlides = mastersChanged ? null : beforeSlides.length - differing.length;
+        unchangedSlides = mastersChanged
+          ? null
+          : beforeSlides.length - differing.length;
         if (differing.length) changedSlides = differing;
       }
       const details = [
@@ -576,17 +700,24 @@ export function summarizeTurn(turn: TurnRecord, tasks: TurnTaskRecord[]): TurnSu
           ? [`슬라이드 ${beforeSlides.length}장 → ${afterSlides.length}장`]
           : []),
       ];
-      if (changedSlides.length) allChanges = [documentChange(changedSlides[0]!, details.join(" · "))];
+      if (changedSlides.length)
+        allChanges = [documentChange(changedSlides[0]!, details.join(" · "))];
     } else {
       // Same slides in the same places: compare every slide, so the card can
       // say which slides changed and that the rest did not.
       const differing = differingSlides(beforeSlides, afterSlides);
-      unchangedSlides = mastersChanged ? null : beforeSlides.length - differing.length;
-      allChanges = diffSlides(beforeSlides, afterSlides, differing.length ? differing : reportedSlides);
+      unchangedSlides = mastersChanged
+        ? null
+        : beforeSlides.length - differing.length;
+      allChanges = diffSlides(
+        beforeSlides,
+        afterSlides,
+        differing.length ? differing : reportedSlides,
+      );
       if (allChanges.length)
-        changedSlides = [...new Set(allChanges.map((change) => change.slideIndex))].sort(
-          (left, right) => left - right,
-        );
+        changedSlides = [
+          ...new Set(allChanges.map((change) => change.slideIndex)),
+        ].sort((left, right) => left - right);
       else if (reportedSlides.length)
         // The edit changed something outside slide content (master, theme).
         allChanges = [documentChange(reportedSlides[0]!, "문서 서식 바꿈")];
@@ -598,11 +729,16 @@ export function summarizeTurn(turn: TurnRecord, tasks: TurnTaskRecord[]): TurnSu
       : [],
   );
   const lastMutationIndex = tasks.map(isMutation).lastIndexOf(true);
-  const afterTasks = lastMutationIndex < 0 ? [] : tasks.slice(lastMutationIndex);
+  const afterTasks =
+    lastMutationIndex < 0 ? [] : tasks.slice(lastMutationIndex);
   const evidence = changedSlides.map((slideIndex) => {
-    const before = findImage(beforeTasks, slideIndex, true) ?? findImage(beforeTasks, slideIndex, false);
+    const before =
+      findImage(beforeTasks, slideIndex, true) ??
+      findImage(beforeTasks, slideIndex, false);
     const after = findImage(afterTasks, slideIndex, true);
-    const window = [before, after].some((reference) => framingOf(tasks, reference) === "window");
+    const window = [before, after].some(
+      (reference) => framingOf(tasks, reference) === "window",
+    );
     return {
       slideIndex,
       before,
@@ -616,11 +752,13 @@ export function summarizeTurn(turn: TurnRecord, tasks: TurnTaskRecord[]): TurnSu
   );
   const changed = turn.changed || appliedMutations.length > 0;
   let outcome: TurnOutcome;
-  if (turn.status === "queued" || turn.status === "running") outcome = "running";
+  if (turn.status === "queued" || turn.status === "running")
+    outcome = "running";
   else if (turn.status === "cancelled") outcome = "cancelled";
   else if (turn.status === "failed") outcome = "failed";
   else if (changed) outcome = turn.reviewed ? "changed" : "unverified";
-  else if (turn.permissionMode === "read_only" || mutations.length === 0) outcome = "answered";
+  else if (turn.permissionMode === "read_only" || mutations.length === 0)
+    outcome = "answered";
   else outcome = "unchanged";
   const failure =
     outcome === "failed" || outcome === "cancelled"
@@ -630,15 +768,21 @@ export function summarizeTurn(turn: TurnRecord, tasks: TurnTaskRecord[]): TurnSu
     // A single edit records exactly one undo action (the editor refuses it
     // otherwise); transactions and asset edits report their own count.
     const added = task.result?.transaction?.undoActionsAdded;
-    return total + (Number.isSafeInteger(added) && added >= 0 ? Number(added) : 1);
+    return (
+      total + (Number.isSafeInteger(added) && added >= 0 ? Number(added) : 1)
+    );
   }, 0);
   return {
     version: 1,
     outcome,
     changedSlides,
     slideCount: {
-      before: Array.isArray(beforeState?.result?.slides) ? beforeState!.result!.slides.length : null,
-      after: Array.isArray(afterState?.result?.slides) ? afterState!.result!.slides.length : null,
+      before: Array.isArray(beforeState?.result?.slides)
+        ? beforeState!.result!.slides.length
+        : null,
+      after: Array.isArray(afterState?.result?.slides)
+        ? afterState!.result!.slides.length
+        : null,
     },
     changes: allChanges.slice(0, MAX_CHANGES),
     omittedChanges: Math.max(0, allChanges.length - MAX_CHANGES),
@@ -651,8 +795,14 @@ export function summarizeTurn(turn: TurnRecord, tasks: TurnTaskRecord[]): TurnSu
     unchangedSlides,
     undoSteps,
     revisions: {
-      before: typeof beforeState?.result?.revision === "string" ? beforeState.result.revision : null,
-      after: typeof afterState?.result?.revision === "string" ? afterState.result.revision : null,
+      before:
+        typeof beforeState?.result?.revision === "string"
+          ? beforeState.result.revision
+          : null,
+      after:
+        typeof afterState?.result?.revision === "string"
+          ? afterState.result.revision
+          : null,
     },
     slideGroups: slideGroups(allChanges),
     sharedDetail: sharedDetail(allChanges),
@@ -660,9 +810,15 @@ export function summarizeTurn(turn: TurnRecord, tasks: TurnTaskRecord[]): TurnSu
 }
 
 /* ── DB loader ────────────────────────────────────────────────────── */
-type Sql = (strings: TemplateStringsArray, ...values: unknown[]) => Promise<any[]>;
+type Sql = (
+  strings: TemplateStringsArray,
+  ...values: unknown[]
+) => Promise<any[]>;
 
-export async function loadTurnSummary(sql: Sql, turnId: string): Promise<TurnSummary | null> {
+export async function loadTurnSummary(
+  sql: Sql,
+  turnId: string,
+): Promise<TurnSummary | null> {
   const [turn] = await sql`
     select status, permission_mode, changed, reviewed, last_error
     from spellbook_native_turns where id=${turnId}

@@ -82,8 +82,7 @@ try {
     let observed;
     do {
       observed = await call({ operation: "observe" });
-      if (undoDocumentStateEquivalent(expected, observed))
-        return observed;
+      if (undoDocumentStateEquivalent(expected, observed)) return observed;
       await page.waitForTimeout(100);
     } while (Date.now() < stop);
     throw new Error(`${label} did not restore the exact document.`);

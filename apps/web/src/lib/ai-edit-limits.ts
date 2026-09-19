@@ -50,7 +50,10 @@ export function aiEditLimits(
   slides: GraphSlide[],
   engine: EditorEngineFacts | null,
 ): AiEditLimit[] {
-  const found = new Map<AiEditLimitKind, { count: number; slides: Set<number> }>();
+  const found = new Map<
+    AiEditLimitKind,
+    { count: number; slides: Set<number> }
+  >();
   const add = (kind: AiEditLimitKind, slideIndex: number) => {
     const entry = found.get(kind) ?? { count: 0, slides: new Set<number>() };
     entry.count += 1;
@@ -65,9 +68,17 @@ export function aiEditLimits(
       // Chart data edits refuse charts whose data lives in another file.
       else if (kind === "chart" && element.externalData === true)
         add("linked_chart", slide.slideIndex);
-      else if (kind === "diagram" && engine && !engineSupports(engine, "set_smartart_node"))
+      else if (
+        kind === "diagram" &&
+        engine &&
+        !engineSupports(engine, "set_smartart_node")
+      )
         add("diagram", slide.slideIndex);
-      else if (kind === "table" && engine && !engineSupports(engine, "set_table_cell"))
+      else if (
+        kind === "table" &&
+        engine &&
+        !engineSupports(engine, "set_table_cell")
+      )
         add("table", slide.slideIndex);
     }
   const order: AiEditLimitKind[] = ["diagram", "table", "linked_chart", "ole"];

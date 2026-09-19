@@ -58,7 +58,8 @@ export function uploadFailure(
     case "processing_failed":
     case "document_processing_failed":
       return {
-        reason: "파일을 여는 중에 문제가 생겼어요. 파일이 손상됐거나 아직 읽지 못하는 내용이 있을 수 있어요.",
+        reason:
+          "파일을 여는 중에 문제가 생겼어요. 파일이 손상됐거나 아직 읽지 못하는 내용이 있을 수 있어요.",
         fix: "PowerPoint에서 열어 다시 저장한 뒤 가져와 보세요. 올린 원본은 파일 목록에 남아 있어요.",
       };
     case "storage_capacity_exhausted":

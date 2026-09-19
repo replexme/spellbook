@@ -14,7 +14,11 @@ export type TurnHistoryItem = {
   beforeVersionId: string | null;
   afterVersionId: string | null;
   /** Saved-version previews of each changed slide, before and after the request. */
-  savedPreviews: Array<{ slideIndex: number; before: string | null; after: string | null }>;
+  savedPreviews: Array<{
+    slideIndex: number;
+    before: string | null;
+    after: string | null;
+  }>;
   /** When the request was undone in the editor; null if it was not. */
   undoneAt: string | null;
 };
@@ -24,7 +28,13 @@ export type TurnHistoryItem = {
  * editing). Same content as its parent; kept for lineage, not listed.
  * `undone`: the save right after an AI request was undone in the editor.
  */
-export type VersionOrigin = "original" | "ai" | "manual" | "restored" | "undone" | "system";
+export type VersionOrigin =
+  | "original"
+  | "ai"
+  | "manual"
+  | "restored"
+  | "undone"
+  | "system";
 
 export type VersionHistoryItem = {
   id: string;

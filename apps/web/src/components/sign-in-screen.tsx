@@ -38,13 +38,20 @@ export function SignInScreen({
               계정으로 계속
             </ButtonLink>
             <p className="signin-note">
-              연결된 계정으로 로그인해요. 문서와 작업 기록은 계정마다 따로 보관해요.
+              연결된 계정으로 로그인해요. 문서와 작업 기록은 계정마다 따로
+              보관해요.
             </p>
           </div>
         ) : (
           <form className="signin-form" action="/auth/login" method="post">
             <input type="hidden" name="redirect" value={destination} />
-            <TextField label="이메일" name="email" type="email" autoComplete="username" required />
+            <TextField
+              label="이메일"
+              name="email"
+              type="email"
+              autoComplete="username"
+              required
+            />
             <TextField
               label="비밀번호"
               name="password"
@@ -57,7 +64,8 @@ export function SignInScreen({
               로그인
             </Button>
             <p className="signin-note">
-              설치할 때 만든 관리자 계정으로 로그인해요. 계정 값은 서버의 .env에서 관리해요.
+              설치할 때 만든 관리자 계정으로 로그인해요. 계정 값은 서버의
+              .env에서 관리해요.
             </p>
           </form>
         )}

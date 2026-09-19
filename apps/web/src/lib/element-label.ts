@@ -42,6 +42,7 @@ export function elementLabel(element: Named): string {
     if (pattern.test(name)) return label;
   if (name && /[가-힣]/.test(name)) return name;
   const kind = String(element.kind ?? "");
-  for (const [pattern, label] of kindLabels) if (pattern.test(kind)) return label;
+  for (const [pattern, label] of kindLabels)
+    if (pattern.test(kind)) return label;
   return name || "요소";
 }

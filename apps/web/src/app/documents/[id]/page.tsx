@@ -16,5 +16,11 @@ export default async function DocumentPage({
   const { id } = await params;
   if (configuredEditorMode() === "browser")
     redirect(`/browser-documents/${encodeURIComponent(id)}`);
-  return <NativeDocument documentId={id} launchMode="wopi" aiConnector={aiConnectorConfig()} />;
+  return (
+    <NativeDocument
+      documentId={id}
+      launchMode="wopi"
+      aiConnector={aiConnectorConfig()}
+    />
+  );
 }

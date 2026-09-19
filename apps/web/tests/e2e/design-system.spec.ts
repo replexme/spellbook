@@ -9,7 +9,10 @@ import path from "node:path";
  * same events it would from Collabora.
  */
 
-const screenshotDir = path.resolve(process.cwd(), "../../.tmp-runtime-validation/redesign");
+const screenshotDir = path.resolve(
+  process.cwd(),
+  "../../.tmp-runtime-validation/redesign",
+);
 const viewports = {
   desktop: { width: 1440, height: 900 },
   laptop: { width: 1280, height: 800 },
@@ -18,8 +21,15 @@ const viewports = {
 } as const;
 
 const connectedAi = {
-  account: { account: { type: "chatgpt", email: "owner@example.test", planType: "plus" } },
-  runtime: { provider: "codex", displayName: "Codex", runtime: "codex", version: "e2e" },
+  account: {
+    account: { type: "chatgpt", email: "owner@example.test", planType: "plus" },
+  },
+  runtime: {
+    provider: "codex",
+    displayName: "Codex",
+    runtime: "codex",
+    version: "e2e",
+  },
   connectedAt: "2026-09-14T03:00:00.000Z",
 };
 
@@ -41,7 +51,8 @@ const models = {
 };
 
 const now = new Date("2026-09-18T01:30:00.000Z");
-const minutesAgo = (minutes: number) => new Date(now.getTime() - minutes * 60_000).toISOString();
+const minutesAgo = (minutes: number) =>
+  new Date(now.getTime() - minutes * 60_000).toISOString();
 
 const library = [
   {
@@ -93,12 +104,19 @@ const library = [
 
 async function shot(page: Page, name: string, fullPage = false) {
   await fs.mkdir(screenshotDir, { recursive: true });
-  await page.screenshot({ path: path.join(screenshotDir, `${name}.png`), fullPage });
+  await page.screenshot({
+    path: path.join(screenshotDir, `${name}.png`),
+    fullPage,
+  });
 }
 
 async function expectNoHorizontalOverflow(page: Page) {
   await expect
-    .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+    .poll(() =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    )
     .toBe(true);
 }
 
@@ -178,9 +196,12 @@ test.describe("file home", () => {
     );
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
-      if (url.pathname === "/api/documents") return route.fulfill({ json: { documents: library } });
-      if (url.pathname === "/api/ai/account/status") return route.fulfill({ json: connectedAi });
-      if (url.pathname === "/api/office/warm") return route.fulfill({ status: 204 });
+      if (url.pathname === "/api/documents")
+        return route.fulfill({ json: { documents: library } });
+      if (url.pathname === "/api/ai/account/status")
+        return route.fulfill({ json: connectedAi });
+      if (url.pathname === "/api/office/warm")
+        return route.fulfill({ status: 204 });
       return route.fulfill({ status: 404, json: {} });
     });
   });
@@ -192,20 +213,30 @@ test.describe("file home", () => {
     await page.goto("/");
     await expect(page.getByRole("heading", { name: "파일" })).toBeVisible();
     await expect(page.getByText("4개")).toBeVisible();
-    await expect(page.getByRole("link", { name: /AI 연결됨 · Codex/ })).toHaveAttribute("href", "/settings");
+    await expect(
+      page.getByRole("link", { name: /AI 연결됨 · Codex/ }),
+    ).toHaveAttribute("href", "/settings");
     await expect(page.getByText("확인 중…")).toBeVisible();
     await expect(page.getByText("열 수 없음")).toBeVisible();
-    await expect(page.getByText("암호가 걸렸거나 옛 형식인 파일이에요")).toBeVisible();
+    await expect(
+      page.getByText("암호가 걸렸거나 옛 형식인 파일이에요"),
+    ).toBeVisible();
     await expect(page.getByText("준비됨")).toHaveCount(0);
     await expect(page.getByText("1분 전 · 12장")).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await shot(page, "home-desktop");
 
-    await page.getByRole("searchbox", { name: "파일 이름으로 찾기" }).fill("영업");
+    await page
+      .getByRole("searchbox", { name: "파일 이름으로 찾기" })
+      .fill("영업");
     await expect(page.getByText("3분기 영업 실적 보고.pptx")).toBeVisible();
     await expect(page.getByText("2026 하반기 사업계획.pptx")).toHaveCount(0);
-    await page.getByRole("searchbox", { name: "파일 이름으로 찾기" }).fill("없는 이름");
-    await expect(page.getByRole("heading", { name: "찾는 파일이 없어요" })).toBeVisible();
+    await page
+      .getByRole("searchbox", { name: "파일 이름으로 찾기" })
+      .fill("없는 이름");
+    await expect(
+      page.getByRole("heading", { name: "찾는 파일이 없어요" }),
+    ).toBeVisible();
     await page.getByRole("searchbox", { name: "파일 이름으로 찾기" }).fill("");
 
     await page.getByRole("button", { name: "최근 수정 순" }).click();
@@ -215,8 +246,12 @@ test.describe("file home", () => {
     await expect(page.locator(".file-list")).toBeVisible();
     await shot(page, "home-list-desktop");
 
-    await page.getByRole("button", { name: "2026 하반기 사업계획.pptx 메뉴" }).click();
-    await expect(page.getByRole("menuitem", { name: "이름 바꾸기" })).toBeVisible();
+    await page
+      .getByRole("button", { name: "2026 하반기 사업계획.pptx 메뉴" })
+      .click();
+    await expect(
+      page.getByRole("menuitem", { name: "이름 바꾸기" }),
+    ).toBeVisible();
     await expect(page.getByRole("menuitem", { name: "삭제" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(page.getByRole("menuitem", { name: "삭제" })).toHaveCount(0);
@@ -234,17 +269,32 @@ test.describe("file home", () => {
     await shot(page, "home-phone", true);
   });
 
-  test("a first visit explains the three steps and where to connect AI", async ({ page }) => {
-    await page.route("**/api/documents", (route) => route.fulfill({ json: { documents: [] } }));
+  test("a first visit explains the three steps and where to connect AI", async ({
+    page,
+  }) => {
+    await page.route("**/api/documents", (route) =>
+      route.fulfill({ json: { documents: [] } }),
+    );
     await page.route("**/api/ai/account/status", (route) =>
       route.fulfill({ json: { account: { account: null } } }),
     );
     await page.goto("/");
-    await expect(page.getByText("PowerPoint 파일을 끌어 놓거나 선택하세요")).toBeVisible();
-    await expect(page.getByText(".pptx · 50MB까지", { exact: false })).toBeVisible();
-    await expect(page.getByRole("list", { name: "쓰는 순서" }).getByRole("listitem")).toHaveCount(3);
-    await expect(page.getByRole("link", { name: "연결하기" })).toHaveAttribute("href", "/settings");
-    await expect(page.getByRole("link", { name: /AI 연결 필요/ })).toBeVisible();
+    await expect(
+      page.getByText("PowerPoint 파일을 끌어 놓거나 선택하세요"),
+    ).toBeVisible();
+    await expect(
+      page.getByText(".pptx · 50MB까지", { exact: false }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("list", { name: "쓰는 순서" }).getByRole("listitem"),
+    ).toHaveCount(3);
+    await expect(page.getByRole("link", { name: "연결하기" })).toHaveAttribute(
+      "href",
+      "/settings",
+    );
+    await expect(
+      page.getByRole("link", { name: /AI 연결 필요/ }),
+    ).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await shot(page, "home-first-desktop");
     await page.setViewportSize(viewports.phone);
@@ -280,8 +330,15 @@ test.describe("file home", () => {
                   origin: null,
                   changeCheck: null,
                 },
-          previews: checks < 2 ? [] : Array.from({ length: 12 }, () => "/e2e/preview.png"),
-          fonts: { inventoryAvailable: true, missing: ["나눔스퀘어", "에스코어 드림"], substitutions: [] },
+          previews:
+            checks < 2
+              ? []
+              : Array.from({ length: 12 }, () => "/e2e/preview.png"),
+          fonts: {
+            inventoryAvailable: true,
+            missing: ["나눔스퀘어", "에스코어 드림"],
+            substitutions: [],
+          },
           aiLimits: [{ kind: "diagram", count: 1, slides: [5] }],
           aiEngineKnown: true,
         },
@@ -293,17 +350,35 @@ test.describe("file home", () => {
     await page.goto("/");
     await page.locator('input[type="file"]').setInputFiles({
       name: "2026 하반기 사업계획.pptx",
-      mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       buffer: Buffer.from("PK e2e"),
     });
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("heading", { name: "가져왔어요" })).toBeVisible({ timeout: 15_000 });
+    await expect(
+      dialog.getByRole("heading", { name: "가져왔어요" }),
+    ).toBeVisible({ timeout: 15_000 });
     await expect(dialog.getByText(/^12장 · /)).toBeVisible();
-    await expect(dialog.getByText("서버에서 파일을 다시 열어 12장을 모두 그려 봤어요")).toBeVisible();
-    await expect(dialog.getByText("서버에 없어 비슷한 글꼴로 그린 글꼴 2개", { exact: false })).toBeVisible();
-    await expect(dialog.getByText("글자 문구와 도형의 위치·크기·색은 편집기에서 직접, 또는 AI로 고칠 수 있어요")).toBeVisible();
-    await expect(dialog.getByText("6번 슬라이드의 SmartArt 1개는 AI가 고치지 못해요")).toBeVisible();
-    await expect(dialog.getByRole("link", { name: "열기" })).toHaveAttribute("href", `/documents/${id}`);
+    await expect(
+      dialog.getByText("서버에서 파일을 다시 열어 12장을 모두 그려 봤어요"),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText("서버에 없어 비슷한 글꼴로 그린 글꼴 2개", {
+        exact: false,
+      }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText(
+        "글자 문구와 도형의 위치·크기·색은 편집기에서 직접, 또는 AI로 고칠 수 있어요",
+      ),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText("6번 슬라이드의 SmartArt 1개는 AI가 고치지 못해요"),
+    ).toBeVisible();
+    await expect(dialog.getByRole("link", { name: "열기" })).toHaveAttribute(
+      "href",
+      `/documents/${id}`,
+    );
     await shot(page, "import-summary");
     await dialog.getByRole("button", { name: "파일 목록" }).click();
 
@@ -312,9 +387,15 @@ test.describe("file home", () => {
       mimeType: "application/vnd.ms-powerpoint",
       buffer: Buffer.from("legacy"),
     });
-    await expect(dialog.getByRole("heading", { name: "가져오지 못했어요" })).toBeVisible();
-    await expect(dialog.getByText("옛 PowerPoint 형식(.ppt)이에요.")).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "다른 파일 선택" })).toBeVisible();
+    await expect(
+      dialog.getByRole("heading", { name: "가져오지 못했어요" }),
+    ).toBeVisible();
+    await expect(
+      dialog.getByText("옛 PowerPoint 형식(.ppt)이에요."),
+    ).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: "다른 파일 선택" }),
+    ).toBeVisible();
     await shot(page, "import-failed");
   });
 });
@@ -343,12 +424,18 @@ test.describe("workspace", () => {
     introducedIssues: { overlap: 0, outOfBounds: 0, invalidSize: 0 },
     scopeEnforced: true,
     scopeRejected: false,
-    evidence: [{ slideIndex: 2, before: `${taskBefore}:0`, after: `${taskAfter}:0` }],
+    evidence: [
+      { slideIndex: 2, before: `${taskBefore}:0`, after: `${taskAfter}:0` },
+    ],
     failure: null,
     unchangedSlides: 11,
   };
   /** A summary stored with the editor's undo data: the card can undo in the editor. */
-  const undoable = { ...summary, undoSteps: 1, revisions: { before: "r-before", after: "r-after" } };
+  const undoable = {
+    ...summary,
+    undoSteps: 1,
+    revisions: { before: "r-before", after: "r-after" },
+  };
   const events = [
     {
       id: 1,
@@ -374,7 +461,10 @@ test.describe("workspace", () => {
 
   async function mockWorkspace(
     page: Page,
-    options: { restored?: () => boolean; summary?: typeof summary | typeof undoable } = {},
+    options: {
+      restored?: () => boolean;
+      summary?: typeof summary | typeof undoable;
+    } = {},
   ) {
     const before = await slidePng(page, "하반기 시장 현황", false);
     const after = await slidePng(page, "하반기 시장 현황", true);
@@ -388,7 +478,8 @@ test.describe("workspace", () => {
       const url = new URL(route.request().url());
       const pathname = url.pathname;
       const base = `/api/documents/${id}`;
-      if (pathname === "/api/ai/account/status") return route.fulfill({ json: connectedAi });
+      if (pathname === "/api/ai/account/status")
+        return route.fulfill({ json: connectedAi });
       if (pathname === `${base}/native/launch`)
         return route.fulfill({
           json: {
@@ -418,23 +509,46 @@ test.describe("workspace", () => {
               changeCheck: true,
               bytes: 16_987_000,
             },
-            previews: Array.from({ length: 12 }, (_, index) => (index === 0 ? "/e2e/after.png" : null)),
+            previews: Array.from({ length: 12 }, (_, index) =>
+              index === 0 ? "/e2e/after.png" : null,
+            ),
             fonts: { inventoryAvailable: true, missing: [], substitutions: [] },
           },
         });
       if (pathname === `${base}/native/poll`) {
         const first = url.searchParams.get("after") === "0";
         const restoredEvent = options.restored?.()
-          ? [{ id: 4, type: "restored", versionId: "v-restored", restoredFrom: "v-before", at: now.toISOString() }]
+          ? [
+              {
+                id: 4,
+                type: "restored",
+                versionId: "v-restored",
+                restoredFrom: "v-before",
+                at: now.toISOString(),
+              },
+            ]
           : [];
         return route.fulfill({
           json: {
             task: null,
             localJob: null,
             events: first
-              ? [...events.map((event) => (event.type === "done" ? { ...event, summary: turnSummary } : event)), ...restoredEvent]
+              ? [
+                  ...events.map((event) =>
+                    event.type === "done"
+                      ? { ...event, summary: turnSummary }
+                      : event,
+                  ),
+                  ...restoredEvent,
+                ]
               : [],
-            session: { status: "active", saveRevision: ++saveRevision, error: null, workingVersionId: "v-after", editorLocked: false },
+            session: {
+              status: "active",
+              saveRevision: ++saveRevision,
+              error: null,
+              workingVersionId: "v-after",
+              editorLocked: false,
+            },
           },
         });
       }
@@ -453,7 +567,13 @@ test.describe("workspace", () => {
                 summary: turnSummary,
                 beforeVersionId: "v-before",
                 afterVersionId: "v-after",
-                savedPreviews: [{ slideIndex: 2, before: "/e2e/before.png", after: "/e2e/after.png" }],
+                savedPreviews: [
+                  {
+                    slideIndex: 2,
+                    before: "/e2e/before.png",
+                    after: "/e2e/after.png",
+                  },
+                ],
                 undoneAt: null,
               },
             ],
@@ -462,18 +582,32 @@ test.describe("workspace", () => {
       if (pathname === `${base}/native/chat`) {
         chatCalls.push({
           body: route.request().postDataJSON(),
-          savesBefore: (await editorCalls(page)).filter((call) => call === "Action_Save").length,
+          savesBefore: (await editorCalls(page)).filter(
+            (call) => call === "Action_Save",
+          ).length,
         });
-        return route.fulfill({ json: { accepted: true, turnId: "e2e-new-turn" } });
+        return route.fulfill({
+          json: { accepted: true, turnId: "e2e-new-turn" },
+        });
       }
       if (pathname === `${base}/native/undo`) {
         const body = route.request().postDataJSON() as { turnId: string };
         undoCalls.push(body.turnId);
-        return route.fulfill({ json: { turnId: body.turnId, undoneAt: now.toISOString() } });
+        return route.fulfill({
+          json: { turnId: body.turnId, undoneAt: now.toISOString() },
+        });
       }
-      if (pathname === `${base}/native/models`) return route.fulfill({ json: models });
+      if (pathname === `${base}/native/models`)
+        return route.fulfill({ json: models });
       if (pathname === `${base}/native/state`)
-        return route.fulfill({ json: { status: "active", saveRevision: 1, workingVersionId: "v-after", editorLocked: false } });
+        return route.fulfill({
+          json: {
+            status: "active",
+            saveRevision: 1,
+            workingVersionId: "v-after",
+            editorLocked: false,
+          },
+        });
       if (pathname === `${base}/versions`)
         return route.fulfill({
           json: {
@@ -518,53 +652,81 @@ test.describe("workspace", () => {
             ],
           },
         });
-      const restore = pathname.match(new RegExp(`^${base}/versions/([^/]+)/restore$`));
+      const restore = pathname.match(
+        new RegExp(`^${base}/versions/([^/]+)/restore$`),
+      );
       if (restore) {
         restoreCalls.push(restore[1]!);
-        return route.fulfill({ json: { versionId: "v-restored", restoredFrom: restore[1] } });
+        return route.fulfill({
+          json: { versionId: "v-restored", restoredFrom: restore[1] },
+        });
       }
       return route.fulfill({ status: 404, json: {} });
     });
     await page.route("**/mock-office", (route) =>
       route.fulfill({ contentType: "text/html", body: editorPage }),
     );
-    await page.route("**/e2e/before.png", (route) => route.fulfill({ contentType: "image/png", body: before }));
-    await page.route("**/e2e/after.png", (route) => route.fulfill({ contentType: "image/png", body: after }));
+    await page.route("**/e2e/before.png", (route) =>
+      route.fulfill({ contentType: "image/png", body: before }),
+    );
+    await page.route("**/e2e/after.png", (route) =>
+      route.fulfill({ contentType: "image/png", body: after }),
+    );
     return { restoreCalls, undoCalls, chatCalls };
   }
 
   const editorCalls = (page: Page) =>
-    page.frame({ name: "spellbook-office" })!.evaluate(() => (window as unknown as { calls: string[] }).calls);
+    page
+      .frame({ name: "spellbook-office" })!
+      .evaluate(() => (window as unknown as { calls: string[] }).calls);
 
   test("an AI request leaves one card: what changed, what was checked, and a way back", async ({
     page,
   }) => {
     let restored = false;
-    const { restoreCalls } = await mockWorkspace(page, { restored: () => restored });
+    const { restoreCalls } = await mockWorkspace(page, {
+      restored: () => restored,
+    });
     await page.setViewportSize(viewports.desktop);
     await page.goto(`/documents/${id}`);
 
-    await expect(page.getByRole("status").filter({ hasText: "저장됨" })).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.getByRole("status").filter({ hasText: "저장됨" }),
+    ).toBeVisible({ timeout: 20_000 });
     const panel = page.getByRole("complementary", { name: "AI와 버전 기록" });
     const card = panel.locator("article.rc");
     await expect(card.getByText("바뀜 · 3번 슬라이드")).toBeVisible();
-    await expect(card.getByText("글자 크기 26 → 34", { exact: false })).toBeVisible();
-    await expect(card.getByText("바뀐 화면을 AI가 다시 보고 검토함")).toBeVisible();
+    await expect(
+      card.getByText("글자 크기 26 → 34", { exact: false }),
+    ).toBeVisible();
+    await expect(
+      card.getByText("바뀐 화면을 AI가 다시 보고 검토함"),
+    ).toBeVisible();
     await expect(card.getByText("새로 생긴 겹침 없음")).toBeVisible();
-    await expect(card.getByText("슬라이드 밖으로 나간 요소 없음")).toBeVisible();
+    await expect(
+      card.getByText("슬라이드 밖으로 나간 요소 없음"),
+    ).toBeVisible();
     await expect(card.getByText("다른 슬라이드는 바뀌지 않음")).toBeVisible();
-    await expect(card.getByRole("img", { name: "3번 슬라이드 수정 후" })).toBeVisible();
+    await expect(
+      card.getByRole("img", { name: "3번 슬라이드 수정 후" }),
+    ).toBeVisible();
     // After a reload the AI's own screenshots are gone; saved previews stand in.
     await expect(card.getByText("후 · 저장본 미리보기")).toBeVisible();
     await expect(panel.getByText("범위 · 이 슬라이드").first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "AI 모델: Codex · 보통" })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "AI 모델: Codex · 보통" }),
+    ).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await shot(page, "workspace-result-desktop");
 
     await card.getByRole("button", { name: "비교" }).click();
     const compare = page.getByRole("dialog", { name: "무엇이 바뀌었나" });
-    await expect(compare.getByRole("img", { name: "3번 슬라이드 수정 전" })).toBeVisible();
-    await expect(compare.getByText("그림: 서버에서 그린 저장본 미리보기")).toBeVisible();
+    await expect(
+      compare.getByRole("img", { name: "3번 슬라이드 수정 전" }),
+    ).toBeVisible();
+    await expect(
+      compare.getByText("그림: 서버에서 그린 저장본 미리보기"),
+    ).toBeVisible();
     await shot(page, "workspace-compare-side");
     await compare.getByRole("radio", { name: "겹쳐 보기" }).click();
     await expect(compare.getByRole("radio", { name: "후" })).toBeVisible();
@@ -573,17 +735,33 @@ test.describe("workspace", () => {
     await expect(compare).toHaveCount(0);
 
     await page.getByRole("tab", { name: "버전 기록" }).click();
-    await expect(panel.getByText("가져온 원본", { exact: false }).first()).toBeVisible();
-    await expect(panel.getByText(events[0]!.text, { exact: false }).first()).toBeVisible();
+    await expect(
+      panel.getByText("가져온 원본", { exact: false }).first(),
+    ).toBeVisible();
+    await expect(
+      panel.getByText(events[0]!.text, { exact: false }).first(),
+    ).toBeVisible();
     await shot(page, "workspace-versions-desktop");
     await page.getByRole("tab", { name: "AI" }).click();
 
     await page.getByRole("button", { name: "PPTX 내려받기" }).click();
     const download = page.getByRole("dialog", { name: "내려받기" });
-    await expect(download.getByText("AI가 허용한 범위 밖을 바꾸지 않았는지 저장 파일에서 다시 검사했어요")).toBeVisible();
-    await expect(download.getByText("PowerPoint에서 직접 열어 보는 확인은 아직 하지 않아요")).toBeVisible();
-    await expect(download.getByText("SmartArt", { exact: false })).toHaveCount(0);
-    await expect(download.getByRole("button", { name: "PPTX 내려받기 · 16.2MB" })).toBeVisible();
+    await expect(
+      download.getByText(
+        "AI가 허용한 범위 밖을 바꾸지 않았는지 저장 파일에서 다시 검사했어요",
+      ),
+    ).toBeVisible();
+    await expect(
+      download.getByText(
+        "PowerPoint에서 직접 열어 보는 확인은 아직 하지 않아요",
+      ),
+    ).toBeVisible();
+    await expect(download.getByText("SmartArt", { exact: false })).toHaveCount(
+      0,
+    );
+    await expect(
+      download.getByRole("button", { name: "PPTX 내려받기 · 16.2MB" }),
+    ).toBeVisible();
     await shot(page, "workspace-download");
     await download.getByRole("button", { name: "취소" }).click();
 
@@ -602,68 +780,116 @@ test.describe("workspace", () => {
     // after saying what else goes back with it.
     await card.getByRole("button", { name: "이 요청 전으로 돌아가기" }).click();
     const confirm = page.getByRole("dialog", { name: /상태로 돌아갈까요\?/ });
-    await expect(confirm.getByText("“3번 슬라이드 제목을 더 눈에 띄게 해 줘” 요청 전 상태로 돌아가요.")).toBeVisible();
-    await expect(confirm.getByText("지금 파일은 버전 기록에 남아서 다시 돌아올 수 있어요.")).toBeVisible();
+    await expect(
+      confirm.getByText(
+        "“3번 슬라이드 제목을 더 눈에 띄게 해 줘” 요청 전 상태로 돌아가요.",
+      ),
+    ).toBeVisible();
+    await expect(
+      confirm.getByText(
+        "지금 파일은 버전 기록에 남아서 다시 돌아올 수 있어요.",
+      ),
+    ).toBeVisible();
     await shot(page, "workspace-restore-confirm");
     await confirm.getByRole("button", { name: "돌아가기" }).click();
     await expect.poll(() => restoreCalls).toEqual(["v-before"]);
-    await expect(page.getByText("이전 버전으로 돌아갔어요", { exact: false })).toBeVisible({ timeout: 20_000 });
+    await expect(
+      page.getByText("이전 버전으로 돌아갔어요", { exact: false }),
+    ).toBeVisible({ timeout: 20_000 });
     await shot(page, "workspace-restored");
   });
 
-  test("the latest request is undone in the editor itself when nothing came after it", async ({ page }) => {
+  test("the latest request is undone in the editor itself when nothing came after it", async ({
+    page,
+  }) => {
     const { undoCalls } = await mockWorkspace(page, { summary: undoable });
     await page.setViewportSize(viewports.desktop);
     await page.goto(`/documents/${id}`);
-    const card = page.getByRole("complementary", { name: "AI와 버전 기록" }).locator("article.rc");
+    const card = page
+      .getByRole("complementary", { name: "AI와 버전 기록" })
+      .locator("article.rc");
     await card.getByRole("button", { name: "되돌리기", exact: true }).click();
     await expect.poll(() => editorCalls(page)).toContain("undo_turn");
     await expect.poll(() => undoCalls).toEqual([turnId]);
     await expect(card.getByText("되돌렸어요", { exact: false })).toBeVisible();
-    await expect(card.getByRole("button", { name: "되돌리기", exact: true })).toHaveCount(0);
+    await expect(
+      card.getByRole("button", { name: "되돌리기", exact: true }),
+    ).toHaveCount(0);
     await expect.poll(() => editorCalls(page)).toContain("Action_Save");
     await shot(page, "workspace-undone");
   });
 
-  test("when the editor cannot undo exactly, going back asks first", async ({ page }) => {
+  test("when the editor cannot undo exactly, going back asks first", async ({
+    page,
+  }) => {
     const { restoreCalls } = await mockWorkspace(page, { summary: undoable });
     await page.goto(`/documents/${id}`);
-    const card = page.getByRole("complementary", { name: "AI와 버전 기록" }).locator("article.rc");
-    await expect(card.getByRole("button", { name: "되돌리기", exact: true })).toBeVisible({ timeout: 20_000 });
+    const card = page
+      .getByRole("complementary", { name: "AI와 버전 기록" })
+      .locator("article.rc");
+    await expect(
+      card.getByRole("button", { name: "되돌리기", exact: true }),
+    ).toBeVisible({ timeout: 20_000 });
     await page.frame({ name: "spellbook-office" })!.evaluate(() => {
       (window as unknown as { failUndo: boolean }).failUndo = true;
     });
     await card.getByRole("button", { name: "되돌리기", exact: true }).click();
     const confirm = page.getByRole("dialog", { name: /상태로 돌아갈까요\?/ });
     await expect(
-      confirm.getByText("편집기에서 바로 되돌릴 수 없어서, 요청 전에 저장해 둔 버전으로 돌아가요."),
+      confirm.getByText(
+        "편집기에서 바로 되돌릴 수 없어서, 요청 전에 저장해 둔 버전으로 돌아가요.",
+      ),
     ).toBeVisible();
     await confirm.getByRole("button", { name: "취소" }).click();
     await expect(confirm).toHaveCount(0);
     expect(restoreCalls).toEqual([]);
   });
 
-  test("the request box names what is selected, and a card shows its change in the editor", async ({ page }) => {
+  test("the request box names what is selected, and a card shows its change in the editor", async ({
+    page,
+  }) => {
     await mockWorkspace(page);
     await page.goto(`/documents/${id}`);
-    await expect(page.getByRole("button", { name: "AI가 바꿀 수 있는 범위: 선택 · 제목 (3번)" })).toBeVisible({
+    await expect(
+      page.getByRole("button", {
+        name: "AI가 바꿀 수 있는 범위: 선택 · 제목 (3번)",
+      }),
+    ).toBeVisible({
       timeout: 20_000,
     });
-    await page.getByRole("button", { name: "AI가 바꿀 수 있는 범위: 선택 · 제목 (3번)" }).click();
-    await expect(page.getByRole("menuitemradio", { name: /지금 선택한 제목 1개만 바꿔요/ })).toBeVisible();
-    await expect(page.getByRole("menuitemradio", { name: /3번 슬라이드 안에서만 바꿔요/ })).toBeVisible();
+    await page
+      .getByRole("button", {
+        name: "AI가 바꿀 수 있는 범위: 선택 · 제목 (3번)",
+      })
+      .click();
+    await expect(
+      page.getByRole("menuitemradio", {
+        name: /지금 선택한 제목 1개만 바꿔요/,
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("menuitemradio", { name: /3번 슬라이드 안에서만 바꿔요/ }),
+    ).toBeVisible();
     await shot(page, "workspace-scope-selection");
     await page.keyboard.press("Escape");
-    const card = page.getByRole("complementary", { name: "AI와 버전 기록" }).locator("article.rc");
+    const card = page
+      .getByRole("complementary", { name: "AI와 버전 기록" })
+      .locator("article.rc");
     await card.getByRole("button", { name: "슬라이드에서 보기" }).click();
     await expect.poll(() => editorCalls(page)).toContain("reveal");
   });
 
-  test("the first request of an editor load saves before the AI starts", async ({ page }) => {
+  test("the first request of an editor load saves before the AI starts", async ({
+    page,
+  }) => {
     const { chatCalls } = await mockWorkspace(page);
     await page.goto(`/documents/${id}`);
     const box = page.getByRole("textbox", { name: "AI에게 요청" });
-    await expect(page.getByRole("button", { name: /^AI가 바꿀 수 있는 범위: 선택 · 제목/ })).toBeVisible({
+    await expect(
+      page.getByRole("button", {
+        name: /^AI가 바꿀 수 있는 범위: 선택 · 제목/,
+      }),
+    ).toBeVisible({
       timeout: 20_000,
     });
     await box.fill("제목을 한 줄로 줄여 줘");
@@ -671,14 +897,22 @@ test.describe("workspace", () => {
     await expect.poll(() => chatCalls.length).toBe(1);
     // The save the AI's edits are checked against happened first, in this editor load.
     expect(chatCalls[0]!.savesBefore).toBe(1);
-    expect(chatCalls[0]!.body).toMatchObject({ text: "제목을 한 줄로 줄여 줘", permission: "selection" });
+    expect(chatCalls[0]!.body).toMatchObject({
+      text: "제목을 한 줄로 줄여 줘",
+      permission: "selection",
+    });
   });
 
-  test("⌘S saves and ⌘Z undoes from anywhere outside a text field", async ({ page }) => {
+  test("⌘S saves and ⌘Z undoes from anywhere outside a text field", async ({
+    page,
+  }) => {
     await mockWorkspace(page);
     await page.goto(`/documents/${id}`);
-    await expect(page.getByRole("status").filter({ hasText: "저장됨" })).toBeVisible({ timeout: 20_000 });
-    const saves = async () => (await editorCalls(page)).filter((call) => call === "Action_Save").length;
+    await expect(
+      page.getByRole("status").filter({ hasText: "저장됨" }),
+    ).toBeVisible({ timeout: 20_000 });
+    const saves = async () =>
+      (await editorCalls(page)).filter((call) => call === "Action_Save").length;
     // Opening the editor does not save by itself; the first AI request of a load does.
     await page.waitForTimeout(1_000);
     expect(await saves()).toBe(0);
@@ -686,7 +920,9 @@ test.describe("workspace", () => {
     await page.keyboard.press("ControlOrMeta+s");
     await expect.poll(saves).toBe(1);
     await page.keyboard.press("ControlOrMeta+z");
-    await expect.poll(() => editorCalls(page)).toContain("Send_UNO_Command .uno:Undo");
+    await expect
+      .poll(() => editorCalls(page))
+      .toContain("Send_UNO_Command .uno:Undo");
     // In the request box the keys stay with the text.
     const calls = (await editorCalls(page)).length;
     await page.getByRole("textbox", { name: "AI에게 요청" }).click();
@@ -694,61 +930,93 @@ test.describe("workspace", () => {
     expect((await editorCalls(page)).length).toBe(calls);
   });
 
-  test("a phone shows saved slides and the AI panel; editing stays on large screens", async ({ page }) => {
+  test("a phone shows saved slides and the AI panel; editing stays on large screens", async ({
+    page,
+  }) => {
     await mockWorkspace(page);
     await page.setViewportSize(viewports.phone);
     await page.goto(`/documents/${id}`);
     const slides = page.getByRole("region", { name: "슬라이드 미리보기" });
-    await expect(slides.getByText("보기만 가능 · 직접 편집은 큰 화면에서", { exact: false })).toBeVisible();
+    await expect(
+      slides.getByText("보기만 가능 · 직접 편집은 큰 화면에서", {
+        exact: false,
+      }),
+    ).toBeVisible();
     await expect(slides.getByText("1 / 12")).toBeVisible();
     const panel = page.getByRole("complementary", { name: "AI와 버전 기록" });
-    await expect(panel.locator("article.rc").getByText("바뀜 · 3번 슬라이드")).toBeVisible();
-    await expect(panel.getByRole("textbox", { name: "AI에게 요청" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "PPTX 내려받기" })).toBeVisible();
+    await expect(
+      panel.locator("article.rc").getByText("바뀜 · 3번 슬라이드"),
+    ).toBeVisible();
+    await expect(
+      panel.getByRole("textbox", { name: "AI에게 요청" }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "PPTX 내려받기" }),
+    ).toBeVisible();
     // The editor keeps running out of sight and is asked into edit mode.
     await expect(page.getByTitle("PPT 편집기")).toBeAttached();
     await expect.poll(() => editorCalls(page)).toContain("ensure-edit");
-    await panel.locator("article.rc").getByRole("button", { name: "슬라이드에서 보기" }).click();
+    await panel
+      .locator("article.rc")
+      .getByRole("button", { name: "슬라이드에서 보기" })
+      .click();
     await expect(slides.getByText("3 / 12")).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await shot(page, "workspace-phone", true);
   });
 
-  test("before AI is connected, the panel shows numbered steps and editing stays open", async ({ page }) => {
+  test("before AI is connected, the panel shows numbered steps and editing stays open", async ({
+    page,
+  }) => {
     await mockWorkspace(page);
     await page.route("**/api/ai/account/status", (route) =>
       route.fulfill({ json: { account: { account: null } } }),
     );
     await page.route("**/api/ai/account/login", (route) =>
       route.fulfill({
-        json: { loginId: "login-1", verificationUrl: "https://auth.openai.com/codex/device", userCode: "PRES-ENT1" },
+        json: {
+          loginId: "login-1",
+          verificationUrl: "https://auth.openai.com/codex/device",
+          userCode: "PRES-ENT1",
+        },
       }),
     );
     await page.goto(`/documents/${id}`);
     const panel = page.getByRole("complementary", { name: "AI와 버전 기록" });
-    await expect(panel.getByRole("heading", { name: "AI를 연결해 주세요" })).toBeVisible();
+    await expect(
+      panel.getByRole("heading", { name: "AI를 연결해 주세요" }),
+    ).toBeVisible();
     await expect(panel.getByLabel("AI에게 요청")).toHaveCount(0);
-    await expect(panel.getByText("AI 연결 전에도 편집기에서 직접 고칠 수 있어요.")).toBeVisible();
+    await expect(
+      panel.getByText("AI 연결 전에도 편집기에서 직접 고칠 수 있어요."),
+    ).toBeVisible();
     await panel.getByRole("button", { name: "연결 코드 받기" }).click();
     await expect(panel.getByText("PRES-ENT1")).toBeVisible();
-    await expect(panel.getByRole("link", { name: "OpenAI 코드 입력 화면 열기" })).toHaveAttribute(
-      "href",
-      "https://auth.openai.com/codex/device",
-    );
+    await expect(
+      panel.getByRole("link", { name: "OpenAI 코드 입력 화면 열기" }),
+    ).toHaveAttribute("href", "https://auth.openai.com/codex/device");
     await shot(page, "workspace-connect");
   });
 });
 
 test.describe("settings", () => {
-  test("AI connection lives in one place with numbered steps", async ({ page }) => {
+  test("AI connection lives in one place with numbered steps", async ({
+    page,
+  }) => {
     let attempts = 0;
     await page.route("**/api/**", async (route) => {
       const url = new URL(route.request().url());
       if (url.pathname === "/api/ai/account/status")
-        return route.fulfill({ json: { account: { account: null, requiresOpenaiAuth: true } } });
+        return route.fulfill({
+          json: { account: { account: null, requiresOpenaiAuth: true } },
+        });
       if (url.pathname === "/api/ai/account/login") {
         attempts += 1;
-        if (attempts === 1) return route.fulfill({ status: 409, json: { error: "device_code_auth_disabled" } });
+        if (attempts === 1)
+          return route.fulfill({
+            status: 409,
+            json: { error: "device_code_auth_disabled" },
+          });
         return route.fulfill({
           json: {
             type: "chatgptDeviceCode",
@@ -762,20 +1030,20 @@ test.describe("settings", () => {
     });
     await page.goto("/settings");
     await expect(page.getByRole("heading", { name: "AI 연결" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "보안 설정 열기" })).toHaveAttribute(
-      "href",
-      "https://chatgpt.com/#settings/Security",
-    );
+    await expect(
+      page.getByRole("link", { name: "보안 설정 열기" }),
+    ).toHaveAttribute("href", "https://chatgpt.com/#settings/Security");
     await page.getByRole("button", { name: "연결 코드 받기" }).click();
     await expect(
-      page.getByRole("alert").filter({ hasText: "‘Codex용 장치 코드 인증’을 켠 뒤 다시 시도해 주세요" }),
+      page.getByRole("alert").filter({
+        hasText: "‘Codex용 장치 코드 인증’을 켠 뒤 다시 시도해 주세요",
+      }),
     ).toBeVisible();
     await page.getByRole("button", { name: "연결 코드 받기" }).click();
     await expect(page.getByText("ABCD-1234")).toBeVisible();
-    await expect(page.getByRole("link", { name: "OpenAI 코드 입력 화면 열기" })).toHaveAttribute(
-      "href",
-      "https://auth.openai.com/codex/device",
-    );
+    await expect(
+      page.getByRole("link", { name: "OpenAI 코드 입력 화면 열기" }),
+    ).toHaveAttribute("href", "https://auth.openai.com/codex/device");
     await expectNoHorizontalOverflow(page);
     await shot(page, "settings-connect");
     await page.getByRole("button", { name: "새 코드 받기" }).click();
@@ -785,10 +1053,16 @@ test.describe("settings", () => {
     await shot(page, "settings-connect-phone", true);
   });
 
-  test("a connected subscription shows the account and a way to disconnect", async ({ page }) => {
-    await page.route("**/api/ai/account/status", (route) => route.fulfill({ json: connectedAi }));
+  test("a connected subscription shows the account and a way to disconnect", async ({
+    page,
+  }) => {
+    await page.route("**/api/ai/account/status", (route) =>
+      route.fulfill({ json: connectedAi }),
+    );
     await page.goto("/settings");
-    await expect(page.getByText("owner@example.test · Plus 플랜 · 9월 14일 연결")).toBeVisible();
+    await expect(
+      page.getByText("owner@example.test · Plus 플랜 · 9월 14일 연결"),
+    ).toBeVisible();
     await expect(page.getByRole("button", { name: "연결 해제" })).toBeVisible();
     await shot(page, "settings-connected");
   });
@@ -797,10 +1071,14 @@ test.describe("settings", () => {
 test.describe("signed out", () => {
   test.use({ storageState: { cookies: [], origins: [] } });
 
-  test("sign-in makes one checkable promise beside a real result card", async ({ page }) => {
+  test("sign-in makes one checkable promise beside a real result card", async ({
+    page,
+  }) => {
     await page.setViewportSize(viewports.desktop);
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: /AI가 화면을 보고 고치고/ })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: /AI가 화면을 보고 고치고/ }),
+    ).toBeVisible();
     await expect(page.getByLabel("이메일")).toBeVisible();
     await expect(page.locator(".signin-visual article.rc")).toBeVisible();
     await expectNoHorizontalOverflow(page);
@@ -812,15 +1090,21 @@ test.describe("signed out", () => {
 
   test("a wrong password says so in the form", async ({ page }) => {
     await page.goto("/login?error=invalid_credentials");
-    await expect(page.locator(".ds-banner")).toHaveText("이메일 또는 비밀번호가 올바르지 않습니다.");
+    await expect(page.locator(".ds-banner")).toHaveText(
+      "이메일 또는 비밀번호가 올바르지 않습니다.",
+    );
     await expect(page.locator(".ds-banner")).toHaveAttribute("role", "alert");
   });
 });
 
-test("the gallery shows every result card state from the system", async ({ page }) => {
+test("the gallery shows every result card state from the system", async ({
+  page,
+}) => {
   await page.setViewportSize(viewports.desktop);
   await page.goto("/design-system");
-  await expect(page.getByRole("heading", { name: "디자인 시스템" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "디자인 시스템" }),
+  ).toBeVisible();
   for (const title of [
     "바뀜 · AI가 다시 보고 검토함",
     "바뀜 · 여러 슬라이드",
@@ -833,7 +1117,9 @@ test("the gallery shows every result card state from the system", async ({ page 
     "고치지 못함",
     "중단됨",
   ])
-    await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
   await expectNoHorizontalOverflow(page);
   await shot(page, "gallery", true);
   await page.setViewportSize(viewports.phone);

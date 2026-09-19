@@ -41,7 +41,8 @@ export function fontCheck(summary: DocumentSummary | null): CheckItem | null {
 
 function slidePhrase(slides: number[]) {
   if (slides.length === 1) return `${slides[0]! + 1}번 슬라이드`;
-  if (slides.length <= 3) return `${slides.map((index) => index + 1).join("·")}번 슬라이드`;
+  if (slides.length <= 3)
+    return `${slides.map((index) => index + 1).join("·")}번 슬라이드`;
   return `슬라이드 ${slides.length}장`;
 }
 
@@ -56,7 +57,8 @@ export function editScopeLines(summary: DocumentSummary | null): CheckItem[] {
   const items: CheckItem[] = [
     {
       tone: "info",
-      label: "글자 문구와 도형의 위치·크기·색은 편집기에서 직접, 또는 AI로 고칠 수 있어요",
+      label:
+        "글자 문구와 도형의 위치·크기·색은 편집기에서 직접, 또는 AI로 고칠 수 있어요",
       evidence: "edit contract operations with minEnginePatch 0",
     },
   ];
@@ -70,7 +72,11 @@ export function editScopeLines(summary: DocumentSummary | null): CheckItem[] {
           : limit.kind === "linked_chart"
             ? `${where}의 차트 ${limit.count}개는 데이터가 다른 파일에 연결돼 있어 AI가 데이터를 고치지 못해요`
             : `${where}의 다른 프로그램 개체 ${limit.count}개는 AI가 고치지 못해요`;
-    items.push({ tone: "info", label, evidence: `element graph graphicKind + editor engine (${limit.kind})` });
+    items.push({
+      tone: "info",
+      label,
+      evidence: `element graph graphicKind + editor engine (${limit.kind})`,
+    });
   }
   return items;
 }

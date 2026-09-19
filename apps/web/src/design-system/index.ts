@@ -22,7 +22,13 @@ export {
   type Tone,
 } from "./feedback";
 export { Segmented, Tabs } from "./choice";
-export { Menu, MenuItem, MenuSeparator, useDismiss, type MenuPlacement } from "./menu";
+export {
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  useDismiss,
+  type MenuPlacement,
+} from "./menu";
 export { Dialog } from "./dialog";
 export {
   Brand,

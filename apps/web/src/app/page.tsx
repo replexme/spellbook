@@ -16,7 +16,9 @@ export default async function HomePage({
     const { error } = await searchParams;
     return (
       <SignInScreen
-        mode={process.env.SPELLBOOK_AUTH_MODE === "external" ? "external" : "local"}
+        mode={
+          process.env.SPELLBOOK_AUTH_MODE === "external" ? "external" : "local"
+        }
         error={error ? `로그인할 수 없습니다: ${error}` : null}
       />
     );

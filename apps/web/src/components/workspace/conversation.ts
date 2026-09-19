@@ -29,7 +29,13 @@ export type LiveMessage = {
 };
 
 export type ConversationItem =
-  | { kind: "user"; key: string; text: string; permission: string; queued: boolean }
+  | {
+      kind: "user";
+      key: string;
+      text: string;
+      permission: string;
+      queued: boolean;
+    }
   | { kind: "system"; key: string; text: string }
   | { kind: "manual"; key: string; run: ManualRun }
   | { kind: "turn"; key: string; turn: CardTurn };
@@ -64,7 +70,11 @@ export function cardFromHistory(turn: TurnHistoryItem): CardTurn {
 
 function withLive(card: CardTurn, message: LiveMessage): CardTurn {
   const status: CardTurn["status"] =
-    message.status === "running" ? "running" : message.status === "error" ? "error" : "done";
+    message.status === "running"
+      ? "running"
+      : message.status === "error"
+        ? "error"
+        : "done";
   return {
     ...card,
     permission: message.permission ?? card.permission,
@@ -73,14 +83,17 @@ function withLive(card: CardTurn, message: LiveMessage): CardTurn {
     tools: message.tools.length ? message.tools : card.tools,
     summary: message.summary ?? card.summary,
     changed: message.changed ?? card.changed,
-    reviewed: message.status === "review" ? false : (message.reviewed ?? card.reviewed),
+    reviewed:
+      message.status === "review" ? false : (message.reviewed ?? card.reviewed),
     startedAt: card.startedAt ?? message.at ?? null,
-    finishedAt: message.finishedAt ?? (status === "running" ? null : card.finishedAt),
+    finishedAt:
+      message.finishedAt ?? (status === "running" ? null : card.finishedAt),
     error: message.error ?? card.error ?? null,
   };
 }
 
-const time = (value: string | null | undefined) => (value ? new Date(value).getTime() : Number.NaN);
+const time = (value: string | null | undefined) =>
+  value ? new Date(value).getTime() : Number.NaN;
 
 export function buildConversation({
   history,
@@ -94,8 +107,15 @@ export function buildConversation({
   /** Requests undone during this page session, by turn id. */
   undone?: Map<string, string>;
 }): ConversationItem[] {
-  const entries: Array<{ sort: number; order: number; item: ConversationItem }> = [];
-  const byTurn = new Map<string, { sort: number; card: CardTurn; user: ConversationItem }>();
+  const entries: Array<{
+    sort: number;
+    order: number;
+    item: ConversationItem;
+  }> = [];
+  const byTurn = new Map<
+    string,
+    { sort: number; card: CardTurn; user: ConversationItem }
+  >();
   let order = 0;
   for (const turn of history) {
     byTurn.set(turn.id, {
@@ -112,7 +132,9 @@ export function buildConversation({
   }
   let lastSort = Number.NEGATIVE_INFINITY;
   for (const message of messages) {
-    const sort = Number.isFinite(time(message.at)) ? time(message.at) : lastSort;
+    const sort = Number.isFinite(time(message.at))
+      ? time(message.at)
+      : lastSort;
     if (message.role === "assistant" && message.turnId) {
       const known = byTurn.get(message.turnId);
       const card = withLive(
@@ -136,7 +158,10 @@ export function buildConversation({
         user: known?.user ?? {
           kind: "user",
           key: `u:${message.turnId}`,
-          text: messages.find((item) => item.role === "user" && item.turnId === message.turnId)?.text ?? card.requestText,
+          text:
+            messages.find(
+              (item) => item.role === "user" && item.turnId === message.turnId,
+            )?.text ?? card.requestText,
           permission: card.permission,
           queued: false,
         },
@@ -148,7 +173,9 @@ export function buildConversation({
       // A user message with a turn id is shown with that turn.
       if (message.turnId) continue;
       entries.push({
-        sort: message.queued ? Number.POSITIVE_INFINITY : Math.max(sort, lastSort) + 0.25,
+        sort: message.queued
+          ? Number.POSITIVE_INFINITY
+          : Math.max(sort, lastSort) + 0.25,
         order: order++,
         item: {
           kind: "user",
@@ -161,24 +188,38 @@ export function buildConversation({
       continue;
     }
     if (message.role === "system")
-      entries.push({ sort, order: order++, item: { kind: "system", key: `s:${message.id}`, text: message.text } });
+      entries.push({
+        sort,
+        order: order++,
+        item: { kind: "system", key: `s:${message.id}`, text: message.text },
+      });
   }
   for (const [turnId, { sort, card, user }] of byTurn) {
-    const requestText = card.requestText || (user.kind === "user" ? user.text : "");
+    const requestText =
+      card.requestText || (user.kind === "user" ? user.text : "");
     const undoneAt = card.undoneAt ?? undone?.get(turnId) ?? null;
     entries.push({ sort, order: order++, item: user });
     entries.push({
       sort,
       order: order++,
-      item: { kind: "turn", key: `t:${turnId}`, turn: { ...card, requestText, undoneAt } },
+      item: {
+        kind: "turn",
+        key: `t:${turnId}`,
+        turn: { ...card, requestText, undoneAt },
+      },
     });
   }
   for (const run of runs)
-    entries.push({ sort: time(run.from), order: order++, item: { kind: "manual", key: `m:${run.from}`, run } });
+    entries.push({
+      sort: time(run.from),
+      order: order++,
+      item: { kind: "manual", key: `m:${run.from}`, run },
+    });
   return entries
     .sort(
       (left, right) =>
-        (left.sort === right.sort ? 0 : left.sort < right.sort ? -1 : 1) || left.order - right.order,
+        (left.sort === right.sort ? 0 : left.sort < right.sort ? -1 : 1) ||
+        left.order - right.order,
     )
     .map((entry) => entry.item);
 }

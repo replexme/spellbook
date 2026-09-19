@@ -19,8 +19,14 @@ const names: Record<Stage, string> = {
 
 export type StageRow = { label: string; detail?: string; state: StepState };
 
-export function runningStages(tools: string[], readOnly: boolean, answering = false): StageRow[] {
-  const order: Stage[] = readOnly ? ["look", "answer"] : ["look", "edit", "recheck", "review"];
+export function runningStages(
+  tools: string[],
+  readOnly: boolean,
+  answering = false,
+): StageRow[] {
+  const order: Stage[] = readOnly
+    ? ["look", "answer"]
+    : ["look", "edit", "recheck", "review"];
   let edited = false;
   let current = 0;
   const details = new Map<Stage, string>();
@@ -39,7 +45,9 @@ export function runningStages(tools: string[], readOnly: boolean, answering = fa
   if (readOnly && answering) current = order.indexOf("answer");
   return order.map((stage, index) => ({
     label: names[stage],
-    ...(details.has(stage) && index === current ? { detail: details.get(stage) } : {}),
+    ...(details.has(stage) && index === current
+      ? { detail: details.get(stage) }
+      : {}),
     state: index < current ? "done" : index === current ? "now" : "todo",
   }));
 }

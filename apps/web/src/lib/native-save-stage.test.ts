@@ -71,7 +71,9 @@ describe("shared native save staging", () => {
       async (parts: TemplateStringsArray, ...values: unknown[]) => {
         const text = parts.join("?");
         statements.push({ text, values });
-        return text.includes("select pending_undo_turn_id") ? [{ pending_undo_turn_id: "turn-7" }] : [];
+        return text.includes("select pending_undo_turn_id")
+          ? [{ pending_undo_turn_id: "turn-7" }]
+          : [];
       },
       { json: (value: unknown) => value },
     ) as unknown as TransactionSql;
@@ -88,7 +90,9 @@ describe("shared native save staging", () => {
       saveRevision: 3,
       bytes: 1234,
     });
-    const insert = statements.find(({ text }) => text.includes("insert into spellbook_versions"));
+    const insert = statements.find(({ text }) =>
+      text.includes("insert into spellbook_versions"),
+    );
     expect(insert?.values.slice(-2)).toEqual([1234, "turn-7"]);
   });
 });

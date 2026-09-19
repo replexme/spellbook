@@ -18,7 +18,11 @@ import {
   scopeTitle,
   type PermissionMode,
 } from "../copy";
-import { scopeDescription, scopeLabel, type EditorSelection } from "./request-scope";
+import {
+  scopeDescription,
+  scopeLabel,
+  type EditorSelection,
+} from "./request-scope";
 
 function providerName(provider: AvailableModel["provider"]) {
   return provider === "claude_code" ? "Claude Code" : "Codex";
@@ -37,7 +41,9 @@ export function ModelMenu({
   loadModels: (signal: AbortSignal) => Promise<{ models: AvailableModel[] }>;
 }) {
   const [models, setModels] = useState<AvailableModel[]>([]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "error">(
+    "loading",
+  );
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
     const abort = new AbortController();
@@ -47,7 +53,8 @@ export function ModelMenu({
         if (!body.models?.length) throw new Error("models_empty");
         setModels(body.models);
         if (!value) {
-          const initial = body.models.find((item) => item.isDefault) ?? body.models[0]!;
+          const initial =
+            body.models.find((item) => item.isDefault) ?? body.models[0]!;
           onChange({
             ...(initial.provider ? { provider: initial.provider } : {}),
             model: initial.model,
@@ -64,7 +71,9 @@ export function ModelMenu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generation, loadModels]);
   const model = models.find(
-    (item) => item.model === value?.model && (!value?.provider || item.provider === value.provider),
+    (item) =>
+      item.model === value?.model &&
+      (!value?.provider || item.provider === value.provider),
   );
   const efforts = model?.supportedReasoningEfforts ?? [];
   const label = value
@@ -75,7 +84,9 @@ export function ModelMenu({
   return (
     <Menu
       label="AI 모델과 생각 깊이"
-      title={model ? `AI 모델 · ${providerName(model.provider)} 구독` : "AI 모델"}
+      title={
+        model ? `AI 모델 · ${providerName(model.provider)} 구독` : "AI 모델"
+      }
       placement="above-start"
       width={300}
       trigger={({ open, toggle, ref, menuId }) => (
@@ -102,8 +113,15 @@ export function ModelMenu({
           </p>
         ) : status === "error" ? (
           <div className="ds-menu-section composer-menu-note">
-            <p>모델 목록을 불러오지 못했어요. AI 연결을 확인한 뒤 다시 시도해 주세요.</p>
-            <button type="button" className="ds-button is-sm" onClick={() => setGeneration((n) => n + 1)}>
+            <p>
+              모델 목록을 불러오지 못했어요. AI 연결을 확인한 뒤 다시 시도해
+              주세요.
+            </p>
+            <button
+              type="button"
+              className="ds-button is-sm"
+              onClick={() => setGeneration((n) => n + 1)}
+            >
               다시 불러오기
             </button>
           </div>
@@ -116,7 +134,11 @@ export function ModelMenu({
                 title={
                   <>
                     {item.displayName}
-                    {item.isDefault ? <span className="ds-badge composer-recommended">추천</span> : null}
+                    {item.isDefault ? (
+                      <span className="ds-badge composer-recommended">
+                        추천
+                      </span>
+                    ) : null}
                   </>
                 }
                 description={providerName(item.provider)}
@@ -148,10 +170,14 @@ export function ModelMenu({
                     })
                   }
                 />
-                <p className="composer-menu-note">{effortDescription(value?.effort)}</p>
+                <p className="composer-menu-note">
+                  {effortDescription(value?.effort)}
+                </p>
               </div>
             ) : null}
-            <p className="ds-menu-section composer-menu-foot">다음 요청부터 적용돼요.</p>
+            <p className="ds-menu-section composer-menu-foot">
+              다음 요청부터 적용돼요.
+            </p>
           </>
         )
       }
@@ -171,7 +197,10 @@ export function ScopeMenu({
   disabled?: boolean;
   selection?: EditorSelection | null;
 }) {
-  const nothingSelected = value === "selection" && selection !== null && selection.selected.length === 0;
+  const nothingSelected =
+    value === "selection" &&
+    selection !== null &&
+    selection.selected.length === 0;
   return (
     <Menu
       label="AI가 바꿀 수 있는 범위"
@@ -260,7 +289,12 @@ export function Composer({
   return (
     <div className="composer">
       <div className="composer-scope">
-        <ScopeMenu value={permission} onChange={onPermission} disabled={busy} selection={selection} />
+        <ScopeMenu
+          value={permission}
+          onChange={onPermission}
+          disabled={busy}
+          selection={selection}
+        />
       </div>
       <textarea
         ref={textarea}
@@ -269,7 +303,11 @@ export function Composer({
         value={text}
         onChange={(event) => onText(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+          if (
+            event.key === "Enter" &&
+            !event.shiftKey &&
+            !event.nativeEvent.isComposing
+          ) {
             event.preventDefault();
             onSubmit();
           }
@@ -283,7 +321,12 @@ export function Composer({
           disabled={busy || attaching}
           onClick={onAttach}
         />
-        <ModelMenu value={model} onChange={onModel} disabled={busy} loadModels={loadModels} />
+        <ModelMenu
+          value={model}
+          onChange={onModel}
+          disabled={busy}
+          loadModels={loadModels}
+        />
         {busy ? (
           <IconButton
             className="composer-send"

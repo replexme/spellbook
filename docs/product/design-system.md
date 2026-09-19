@@ -8,25 +8,25 @@ Spellbook's reason to exist is that the AI looks at the same rendered slide the 
 
 The system has four layers. A layer may only use the layers above it.
 
-| Layer | Where | Contents |
-| --- | --- | --- |
-| Tokens | `design-system/tokens.css` | Primitive palette (`--sb-*`) and semantic roles (`--ds-*`) for colour, type, space, shape, elevation, motion, layering and layout. |
-| Primitives | `design-system/components.css` + `*.tsx` | Icon, Button, IconButton, Badge, Chip, Banner, Spinner, Progress, Segmented, Tabs, Menu, Dialog, fields, EmptyState, SlideImage, CheckList, StepList, FileMark, Brand. |
-| Patterns | `design-system/patterns.css` + `components/workspace/*` | Product compositions: top bar, side panel, result card, running card, conversation log (requests, cards, direct-edit lines, requests waiting for the editor), composer with scope and model menus, restore confirmation, version list, compare view, phone slide viewer, opening view, file card, import and download dialogs, connection steps. |
-| Screens | `app/**`, `components/**` | Layout only. A screen arranges patterns and primitives; it does not introduce new colours, radii, shadows or type sizes. |
+| Layer      | Where                                                   | Contents                                                                                                                                                                                                                                                                                                                                         |
+| ---------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tokens     | `design-system/tokens.css`                              | Primitive palette (`--sb-*`) and semantic roles (`--ds-*`) for colour, type, space, shape, elevation, motion, layering and layout.                                                                                                                                                                                                               |
+| Primitives | `design-system/components.css` + `*.tsx`                | Icon, Button, IconButton, Badge, Chip, Banner, Spinner, Progress, Segmented, Tabs, Menu, Dialog, fields, EmptyState, SlideImage, CheckList, StepList, FileMark, Brand.                                                                                                                                                                           |
+| Patterns   | `design-system/patterns.css` + `components/workspace/*` | Product compositions: top bar, side panel, result card, running card, conversation log (requests, cards, direct-edit lines, requests waiting for the editor), composer with scope and model menus, restore confirmation, version list, compare view, phone slide viewer, opening view, file card, import and download dialogs, connection steps. |
+| Screens    | `app/**`, `components/**`                               | Layout only. A screen arranges patterns and primitives; it does not introduce new colours, radii, shadows or type sizes.                                                                                                                                                                                                                         |
 
 The living catalogue is the `/design-system` route (development builds, or `SPELLBOOK_DESIGN_GALLERY=1`). Review new work there first, then on the screen.
 
 ## Colour means something
 
-| Role | Token | Use it for | Never for |
-| --- | --- | --- | --- |
-| Ink | `--ds-action`, `--ds-text` | Text and the single primary action on a surface (Open, Download, Restore) | Decoration |
-| AI | `--ds-ai*` | Things the AI did or is doing: the AI panel toggle, send, result-card header, AI versions, changed-element outlines | Generic primary buttons, links, selection |
-| OK | `--ds-ok*` | A check that code performed and passed | "Looks good" copy, AI claims |
-| Warn | `--ds-warn*` | Something to look at: missing fonts, result not re-checked | Errors |
-| Danger | `--ds-danger*` | Failure, destructive actions | Warnings |
-| Focus | `--ds-focus` | Keyboard focus rings | Anything else |
+| Role   | Token                      | Use it for                                                                                                          | Never for                                 |
+| ------ | -------------------------- | ------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Ink    | `--ds-action`, `--ds-text` | Text and the single primary action on a surface (Open, Download, Restore)                                           | Decoration                                |
+| AI     | `--ds-ai*`                 | Things the AI did or is doing: the AI panel toggle, send, result-card header, AI versions, changed-element outlines | Generic primary buttons, links, selection |
+| OK     | `--ds-ok*`                 | A check that code performed and passed                                                                              | "Looks good" copy, AI claims              |
+| Warn   | `--ds-warn*`               | Something to look at: missing fonts, result not re-checked                                                          | Errors                                    |
+| Danger | `--ds-danger*`             | Failure, destructive actions                                                                                        | Warnings                                  |
+| Focus  | `--ds-focus`               | Keyboard focus rings                                                                                                | Anything else                             |
 
 The embedded editor's own accent is neutral ink (`design-system/editor-theme.ts`). Its selection and active-tab colours are not AI actions, so they must not look like them.
 
@@ -47,13 +47,14 @@ The embedded editor's own accent is neutral ink (`design-system/editor-theme.ts`
 3. **The screenshots the AI looked at stay only in the page.** The server drops them when a request ends; after a reload the card shows the saved versions' previews and says so ("저장본 미리보기").
 4. **Undo follows fixed rules; the imported original always remains.**
 
-   | Situation | Card button | What happens |
-   | --- | --- | --- |
-   | The latest request, and nothing changed after it | 되돌리기 (모두 되돌리기 when it changed several slides) | The editor undoes exactly that request's undo steps, only if the document is still in the state the request left and only if the result equals the state before it; the next save is recorded as that undo. |
-   | A direct edit or save came after it, or an older request | 이 요청 전으로 돌아가기 | A confirmation names what else goes back ("그 뒤의 직접 수정(10:31–10:38)과 AI 요청 1건(10:42)"), then the version saved just before the request is restored as a new version and the editor reopens. |
-   | The editor cannot undo exactly | (same button) | The same confirmation opens with a line saying a saved version is used instead. |
+   | Situation                                                | Card button                                             | What happens                                                                                                                                                                                                |
+   | -------------------------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | The latest request, and nothing changed after it         | 되돌리기 (모두 되돌리기 when it changed several slides) | The editor undoes exactly that request's undo steps, only if the document is still in the state the request left and only if the result equals the state before it; the next save is recorded as that undo. |
+   | A direct edit or save came after it, or an older request | 이 요청 전으로 돌아가기                                 | A confirmation names what else goes back ("그 뒤의 직접 수정(10:31–10:38)과 AI 요청 1건(10:42)"), then the version saved just before the request is restored as a new version and the editor reopens.       |
+   | The editor cannot undo exactly                           | (same button)                                           | The same confirmation opens with a line saying a saved version is used instead.                                                                                                                             |
 
    Restoring never deletes history. Saves no person changed (the baseline save the editor makes before AI editing, once per editor load) are kept for lineage but not listed. Direct edits appear in the conversation as one line per run ("직접 수정함 · 10:31–10:38").
+
 5. **Scope is visible before sending and follows the editor.** The chip above the request box names what is selected ("선택 · 제목 (3번)") or the slide ("범위 · 3번 슬라이드") from the editor's selection notices; the scope menu describes each option for the current selection. Suggestions are offered only for edits the running editor engine reports it can do.
 6. **Waiting shows the person's own file.** Opening shows the saved slide previews where the slide list and canvas will be, the past requests and cards, and keeps a request written meanwhile ("편집기가 열리는 대로 보낼게요") to send once the editor is ready. A running request shows the slide the AI is looking at and four stages (보기 → 고치기 → 다시 보기 → 검토) placed from the agent's own progress labels. Failing to open states the cause, says the file is safe, and retries on its own with a countdown, or when the network returns.
 7. **Phones view, ask and decide; editing stays on large screens.** On a phone the saved slide previews and the AI panel share the screen; the editor keeps running out of sight (asked into edit mode) so requests, cards, undo and download work.

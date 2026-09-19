@@ -1,6 +1,10 @@
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./http";
-import type { ElementGraph, PackageChangeBudgetReport, Session } from "./models";
+import type {
+  ElementGraph,
+  PackageChangeBudgetReport,
+  Session,
+} from "./models";
 import { deleteDocumentObjects, getJsonObject } from "./storage";
 import { assetUrl, isUuid, previewUrl } from "./document-history";
 import { aiEditLimits, type EditorEngineFacts } from "./ai-edit-limits";
@@ -14,7 +18,9 @@ function requireDocumentId(documentId: string) {
 }
 
 /** Files for the home screen, most recently touched first. */
-export async function listLibrary(session: Session): Promise<LibraryDocument[]> {
+export async function listLibrary(
+  session: Session,
+): Promise<LibraryDocument[]> {
   await ensureSchema();
   const rows = await db()`
     select d.id, d.file_name, d.format_id, d.status, d.last_error, d.failure_code, d.created_at,
@@ -38,15 +44,21 @@ export async function listLibrary(session: Session): Promise<LibraryDocument[]> 
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
     slideCount: row.slide_count ?? null,
-    coverUrl: row.version_status === "ready" ? previewUrl(row.graph_object, 0) : null,
+    coverUrl:
+      row.version_status === "ready" ? previewUrl(row.graph_object, 0) : null,
   }));
 }
 
 const invalidName = /[\\/:*?"<>|\u0000-\u001f]/g;
 
-export async function renameDocument(session: Session, documentId: string, requested: unknown) {
+export async function renameDocument(
+  session: Session,
+  documentId: string,
+  requested: unknown,
+) {
   requireDocumentId(documentId);
-  if (typeof requested !== "string") throw new HttpError(400, "invalid_file_name");
+  if (typeof requested !== "string")
+    throw new HttpError(400, "invalid_file_name");
   let name = requested.replace(invalidName, " ").replace(/\s+/g, " ").trim();
   if (!name) throw new HttpError(400, "invalid_file_name");
   if (!/\.pptx$/i.test(name)) name = `${name}.pptx`;
@@ -81,7 +93,10 @@ export async function deleteDocument(session: Session, documentId: string) {
 }
 
 /** What the import summary, opening preview and download dialog show. */
-export async function documentSummary(session: Session, documentId: string): Promise<DocumentSummary> {
+export async function documentSummary(
+  session: Session,
+  documentId: string,
+): Promise<DocumentSummary> {
   requireDocumentId(documentId);
   await ensureSchema();
   const [row] = await db()`
@@ -105,7 +120,9 @@ export async function documentSummary(session: Session, documentId: string): Pro
     ? await getJsonObject<ElementGraph>(row.graph_object).catch(() => null)
     : null;
   const validation = row.validation_object
-    ? await getJsonObject<PackageChangeBudgetReport>(row.validation_object).catch(() => null)
+    ? await getJsonObject<PackageChangeBudgetReport>(
+        row.validation_object,
+      ).catch(() => null)
     : null;
   const [engineRow] = await db()`
     select patch_level, supported_operations from spellbook_editor_engines
@@ -130,17 +147,28 @@ export async function documentSummary(session: Session, documentId: string): Pro
           id: row.version_id,
           createdAt: new Date(row.version_created_at).toISOString(),
           slideCount: row.slide_count ?? null,
-          rendered: Boolean(graph?.slides.length && graph.slides.every((slide) => slide.previewObject)),
-          origin: row.change_origin === "ai" || row.change_origin === "human" ? row.change_origin : null,
+          rendered: Boolean(
+            graph?.slides.length &&
+              graph.slides.every((slide) => slide.previewObject),
+          ),
+          origin:
+            row.change_origin === "ai" || row.change_origin === "human"
+              ? row.change_origin
+              : null,
           changeCheck: validation ? validation.valid === true : null,
-          bytes: row.document_bytes === null || row.document_bytes === undefined ? null : Number(row.document_bytes),
+          bytes:
+            row.document_bytes === null || row.document_bytes === undefined
+              ? null
+              : Number(row.document_bytes),
         }
       : null,
     // Only slides the server actually rendered get an image.
     previews: [...(graph?.slides ?? [])]
       .sort((a, b) => a.slideIndex - b.slideIndex)
       .slice(0, 200)
-      .map((slide) => (slide.previewObject ? assetUrl(slide.previewObject) : null)),
+      .map((slide) =>
+        slide.previewObject ? assetUrl(slide.previewObject) : null,
+      ),
     fonts: {
       inventoryAvailable: graph?.fontInventoryAvailable ?? null,
       missing: graph?.missingFonts ?? [],
@@ -148,7 +176,10 @@ export async function documentSummary(session: Session, documentId: string): Pro
     },
     // graphicKind/externalData are newer graph fields; older graphs lack them.
     aiLimits: graph
-      ? aiEditLimits(graph.slides as unknown as Parameters<typeof aiEditLimits>[0], engine)
+      ? aiEditLimits(
+          graph.slides as unknown as Parameters<typeof aiEditLimits>[0],
+          engine,
+        )
       : [],
     aiEngineKnown: engine !== null,
   };

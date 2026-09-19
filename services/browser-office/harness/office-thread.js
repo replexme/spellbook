@@ -226,10 +226,9 @@ function mutateAsset(request) {
     undo.enterUndoContext(isImage ? "AI image edit" : "AI media edit");
     contextOpen = true;
     const inputStream = () =>
-      css.io.SequenceInputStream.createStreamFromSequence(
-        context,
-        [...new Int8Array(assetBytes)],
-      );
+      css.io.SequenceInputStream.createStreamFromSequence(context, [
+        ...new Int8Array(assetBytes),
+      ]);
     if (isImage) {
       const provider = css.graphic.GraphicProvider.create(context);
       const graphic = provider.queryGraphic([
@@ -295,15 +294,17 @@ function mutateAsset(request) {
       !otherSlidesUnchanged ||
       !String(inserted[0].kind).endsWith(expectedKind)
     )
-      throw new Error(`asset_insert_readback_failed:${JSON.stringify({
-        operation,
-        expectedKind,
-        insertedKinds: inserted.map((element) => element.kind),
-        beforeCount: before.slides[slideIndex].elements.length,
-        afterCount: insertedState.slides[slideIndex].elements.length,
-        nativeCountAfterObserve: page.getCount(),
-        otherSlidesUnchanged,
-      })}`);
+      throw new Error(
+        `asset_insert_readback_failed:${JSON.stringify({
+          operation,
+          expectedKind,
+          insertedKinds: inserted.map((element) => element.kind),
+          beforeCount: before.slides[slideIndex].elements.length,
+          afterCount: insertedState.slides[slideIndex].elements.length,
+          nativeCountAfterObserve: page.getCount(),
+          otherSlidesUnchanged,
+        })}`,
+      );
     const replacementTarget = operation.startsWith("replace_")
       ? before.slides[slideIndex].elements.find(
           (element) => element.elementId === elementId,

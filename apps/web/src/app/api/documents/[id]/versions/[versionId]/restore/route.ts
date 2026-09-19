@@ -9,7 +9,11 @@ export async function POST(
   try {
     const { id, versionId } = await context.params;
     return Response.json(
-      await restoreVersion(await requireNativeRequestSession(request, id), id, versionId),
+      await restoreVersion(
+        await requireNativeRequestSession(request, id),
+        id,
+        versionId,
+      ),
     );
   } catch (error) {
     return routeError(error);

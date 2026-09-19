@@ -2,15 +2,23 @@ import { describe, expect, it } from "vitest";
 import type { VersionHistoryItem } from "@/lib/history-types";
 import { versionEntries } from "./version-entries";
 
-function version(id: string, origin: VersionHistoryItem["origin"], minutesAgo: number, current = false): VersionHistoryItem {
+function version(
+  id: string,
+  origin: VersionHistoryItem["origin"],
+  minutesAgo: number,
+  current = false,
+): VersionHistoryItem {
   return {
     id,
     parentVersionId: null,
     origin,
-    createdAt: new Date(Date.UTC(2026, 8, 18, 3, 0) - minutesAgo * 60_000).toISOString(),
+    createdAt: new Date(
+      Date.UTC(2026, 8, 18, 3, 0) - minutesAgo * 60_000,
+    ).toISOString(),
     slideCount: 3,
     current,
-    turn: origin === "ai" ? { id: "turn", requestText: "제목을 바꿔 줘" } : null,
+    turn:
+      origin === "ai" ? { id: "turn", requestText: "제목을 바꿔 줘" } : null,
     restoredFrom: null,
     previews: [],
     bytes: null,
@@ -30,7 +38,10 @@ describe("versionEntries", () => {
   });
 
   it("marks the same-content older entry current when a system save is current", () => {
-    const entries = versionEntries([version("system", "system", 1, true), version("original", "original", 2)]);
+    const entries = versionEntries([
+      version("system", "system", 1, true),
+      version("original", "original", 2),
+    ]);
     expect(entries).toHaveLength(1);
     expect(entries[0]!.versionId).toBe("original");
     expect(entries[0]!.current).toBe(true);

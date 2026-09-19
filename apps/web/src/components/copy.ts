@@ -7,14 +7,32 @@ export const scopeOptions: Array<{
   title: string;
   description: string;
 }> = [
-  { value: "selection", title: "선택한 요소", description: "편집기에서 지금 선택한 요소만 바꿔요" },
-  { value: "slides", title: "이 슬라이드", description: "보고 있는 슬라이드 안에서만 바꿔요" },
-  { value: "document", title: "전체 문서", description: "모든 슬라이드를 바꿀 수 있어요" },
-  { value: "read_only", title: "묻기만", description: "문서를 바꾸지 않고 답해요" },
+  {
+    value: "selection",
+    title: "선택한 요소",
+    description: "편집기에서 지금 선택한 요소만 바꿔요",
+  },
+  {
+    value: "slides",
+    title: "이 슬라이드",
+    description: "보고 있는 슬라이드 안에서만 바꿔요",
+  },
+  {
+    value: "document",
+    title: "전체 문서",
+    description: "모든 슬라이드를 바꿀 수 있어요",
+  },
+  {
+    value: "read_only",
+    title: "묻기만",
+    description: "문서를 바꾸지 않고 답해요",
+  },
 ];
 
 export function scopeTitle(mode: string) {
-  return scopeOptions.find((option) => option.value === mode)?.title ?? "선택한 요소";
+  return (
+    scopeOptions.find((option) => option.value === mode)?.title ?? "선택한 요소"
+  );
 }
 
 /** The next wider scope, for "widen and retry". */
@@ -30,11 +48,13 @@ const effortNames: Record<string, { title: string; description: string }> = {
   medium: { title: "보통", description: "대부분의 요청에 알맞아요." },
   high: {
     title: "꼼꼼하게",
-    description: "여러 슬라이드를 고칠 때 알맞아요. 더 오래 걸리고 구독 사용량이 늘어요.",
+    description:
+      "여러 슬라이드를 고칠 때 알맞아요. 더 오래 걸리고 구독 사용량이 늘어요.",
   },
   xhigh: {
     title: "가장 꼼꼼하게",
-    description: "까다로운 요청에만 쓰세요. 가장 오래 걸리고 구독 사용량이 많이 늘어요.",
+    description:
+      "까다로운 요청에만 쓰세요. 가장 오래 걸리고 구독 사용량이 많이 늘어요.",
   },
 };
 
@@ -59,7 +79,11 @@ export function when(value: string | number | Date | null | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
   const time = clock.format(date);
   if (date.getTime() >= startOfToday) return time;
   if (date.getTime() >= startOfToday - 86_400_000) return `어제 ${time}`;
@@ -118,17 +142,25 @@ export function directionParticle(word: string) {
   const last = word.trim().at(-1)!;
   const syllable = last.charCodeAt(0) - 0xac00;
   // 일, 칠, 팔 end in ㄹ too.
-  const rieul = (syllable >= 0 && syllable < 11172 && syllable % 28 === 8) || /[178]/.test(last);
+  const rieul =
+    (syllable >= 0 && syllable < 11172 && syllable % 28 === 8) ||
+    /[178]/.test(last);
   return final && !rieul ? "으로" : "로";
 }
 
 /** "10:31–10:38"; one time when both fall in the same minute. */
-export function timeRange(from: string | number | Date, to: string | number | Date) {
+export function timeRange(
+  from: string | number | Date,
+  to: string | number | Date,
+) {
   const start = when(from);
   const end = when(to);
   if (start === end) return start;
-  const day = (text: string) => (text.includes(" ") ? text.slice(0, text.lastIndexOf(" ")) : "");
-  return day(start) === day(end) ? `${start}–${end.slice(end.lastIndexOf(" ") + 1)}` : `${start}–${end}`;
+  const day = (text: string) =>
+    text.includes(" ") ? text.slice(0, text.lastIndexOf(" ")) : "";
+  return day(start) === day(end)
+    ? `${start}–${end.slice(end.lastIndexOf(" ") + 1)}`
+    : `${start}–${end}`;
 }
 
 /** 이 or 가 after a word, chosen by its last sound; "이(가)" when unknown. */

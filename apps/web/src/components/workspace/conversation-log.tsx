@@ -21,7 +21,10 @@ export function ConversationLog({
     <div className="ws-log" role="log" aria-label="AI 요청과 결과">
       {items.map((item) =>
         item.kind === "user" ? (
-          <div key={item.key} className={`msg-user ${item.queued ? "is-queued" : ""}`}>
+          <div
+            key={item.key}
+            className={`msg-user ${item.queued ? "is-queued" : ""}`}
+          >
             <p>{item.text}</p>
             {item.queued ? (
               <p className="msg-queued" role="status">

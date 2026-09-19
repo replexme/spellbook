@@ -56,15 +56,23 @@ export function CompareDialog({
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLElement && event.target.closest('[role="radiogroup"]')) return;
-      if (event.key === "ArrowRight") setIndex((value) => Math.min(pairs.length - 1, value + 1));
-      if (event.key === "ArrowLeft") setIndex((value) => Math.max(0, value - 1));
+      if (
+        event.target instanceof HTMLElement &&
+        event.target.closest('[role="radiogroup"]')
+      )
+        return;
+      if (event.key === "ArrowRight")
+        setIndex((value) => Math.min(pairs.length - 1, value + 1));
+      if (event.key === "ArrowLeft")
+        setIndex((value) => Math.max(0, value - 1));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, pairs.length]);
   const pair = pairs[Math.min(index, pairs.length - 1)];
-  const slideChanges = pair ? (changes ?? []).filter((change) => change.slideIndex === pair.slideIndex) : [];
+  const slideChanges = pair
+    ? (changes ?? []).filter((change) => change.slideIndex === pair.slideIndex)
+    : [];
   const marks = (pair?.marks ?? []).map((mark, markIndex) => ({
     ...mark,
     focused: focus === markIndex,
@@ -132,13 +140,18 @@ export function CompareDialog({
                 <figcaption>
                   <strong>전</strong> · {pair.slideIndex + 1}번 슬라이드
                 </figcaption>
-                <SlideImage src={pair.before} alt={`${pair.slideIndex + 1}번 슬라이드 수정 전`} loading="eager" />
+                <SlideImage
+                  src={pair.before}
+                  alt={`${pair.slideIndex + 1}번 슬라이드 수정 전`}
+                  loading="eager"
+                />
               </figure>
             ) : null}
             {mode === "side" || showAfter ? (
               <figure>
                 <figcaption>
-                  <strong>후</strong> · 바뀐 곳 {pair.marks.length || slideChanges.length}
+                  <strong>후</strong> · 바뀐 곳{" "}
+                  {pair.marks.length || slideChanges.length}
                 </figcaption>
                 <SlideImage
                   src={pair.after}
@@ -157,12 +170,16 @@ export function CompareDialog({
         <div className="cmp-list">
           {slideChanges.length ? (
             slideChanges.map((change, changeIndex) => {
-              const markIndex = pair?.marks.findIndex((mark) => mark.label === change.target) ?? -1;
+              const markIndex =
+                pair?.marks.findIndex((mark) => mark.label === change.target) ??
+                -1;
               return (
                 <button
                   key={changeIndex}
                   type="button"
-                  onMouseEnter={() => setFocus(markIndex >= 0 ? markIndex : null)}
+                  onMouseEnter={() =>
+                    setFocus(markIndex >= 0 ? markIndex : null)
+                  }
                   onMouseLeave={() => setFocus(null)}
                   onFocus={() => setFocus(markIndex >= 0 ? markIndex : null)}
                   onBlur={() => setFocus(null)}

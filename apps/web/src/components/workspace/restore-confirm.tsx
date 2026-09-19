@@ -37,11 +37,18 @@ export function RestoreConfirmDialog({
   if (target?.fallback)
     items.push({
       tone: "na",
-      label: "편집기에서 바로 되돌릴 수 없어서, 요청 전에 저장해 둔 버전으로 돌아가요.",
-      evidence: "editor undo refused (document changed or undo history missing)",
+      label:
+        "편집기에서 바로 되돌릴 수 없어서, 요청 전에 저장해 둔 버전으로 돌아가요.",
+      evidence:
+        "editor undo refused (document changed or undo history missing)",
     });
   const sentence = target ? impactSentence(target.impact) : null;
-  if (sentence) items.push({ tone: "warn", label: sentence, evidence: "version history and request times" });
+  if (sentence)
+    items.push({
+      tone: "warn",
+      label: sentence,
+      evidence: "version history and request times",
+    });
   if (target?.unsaved)
     items.push({
       tone: "warn",
@@ -53,7 +60,11 @@ export function RestoreConfirmDialog({
     label: "지금 파일은 버전 기록에 남아서 다시 돌아올 수 있어요.",
     evidence: "restore adds a version; nothing is deleted",
   });
-  items.push({ tone: "na", label: "돌아간 뒤 편집기를 다시 불러와요.", evidence: "editor reload after restore" });
+  items.push({
+    tone: "na",
+    label: "돌아간 뒤 편집기를 다시 불러와요.",
+    evidence: "editor reload after restore",
+  });
   return (
     <Dialog
       open={Boolean(target)}
@@ -65,7 +76,12 @@ export function RestoreConfirmDialog({
           <Button onClick={onCancel} disabled={busy}>
             취소
           </Button>
-          <Button variant="primary" icon="restore" loading={busy} onClick={() => target && onConfirm(target)}>
+          <Button
+            variant="primary"
+            icon="restore"
+            loading={busy}
+            onClick={() => target && onConfirm(target)}
+          >
             돌아가기
           </Button>
         </>

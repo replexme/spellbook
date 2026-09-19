@@ -61,7 +61,11 @@ export function OpeningFailure({
 }) {
   return (
     <div className="ws-opening">
-      <section className="ws-opening-card" role="alert" aria-labelledby="ws-opening-title">
+      <section
+        className="ws-opening-card"
+        role="alert"
+        aria-labelledby="ws-opening-title"
+      >
         <h2 id="ws-opening-title">
           <Icon name="warning" size={18} />
           {title}

@@ -7,13 +7,22 @@ import type { AvailableModel, ModelSettings } from "@/lib/ai-models";
 import type { DocumentSummary, TurnHistoryItem } from "@/lib/history-types";
 import { uploadFailure } from "@/lib/upload-reasons";
 import { useAiAccount } from "@/lib/use-ai-account";
-import { NativeWorkspace, type NativeLaunch, type PendingTurn } from "./native-workspace";
+import {
+  NativeWorkspace,
+  type NativeLaunch,
+  type PendingTurn,
+} from "./native-workspace";
 import { Composer } from "./workspace/composer";
 import { buildConversation } from "./workspace/conversation";
 import { ConversationLog } from "./workspace/conversation-log";
 import { OpeningFailure, OpeningView } from "./workspace/opening";
 import { PhoneSlides } from "./workspace/phone-slides";
-import { ResultCard, RunningCard, type CardTurn, type EvidencePair } from "./workspace/result-card";
+import {
+  ResultCard,
+  RunningCard,
+  type CardTurn,
+  type EvidencePair,
+} from "./workspace/result-card";
 import { saveView, WorkspaceTopBar } from "./workspace/top-bar";
 import type { PermissionMode } from "./copy";
 
@@ -62,9 +71,22 @@ const failures: Record<string, Failure> = {
 /** Seconds before opening is tried again on its own. */
 const RETRY_SECONDS = 20;
 
-const ordinals = ["첫", "두", "세", "네", "다섯", "여섯", "일곱", "여덟", "아홉", "열"];
+const ordinals = [
+  "첫",
+  "두",
+  "세",
+  "네",
+  "다섯",
+  "여섯",
+  "일곱",
+  "여덟",
+  "아홉",
+  "열",
+];
 function ordinal(count: number) {
-  return count <= ordinals.length ? `${ordinals[count - 1]} 번째` : `${count}번째`;
+  return count <= ordinals.length
+    ? `${ordinals[count - 1]} 번째`
+    : `${count}번째`;
 }
 
 const noop = () => undefined;
@@ -111,7 +133,10 @@ export default function NativeDocument({
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    void fetch(`/api/documents/${documentId}/summary`, { cache: "no-store", signal: controller.signal })
+    void fetch(`/api/documents/${documentId}/summary`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
       .then((response) => (response.ok ? response.json() : null))
       .then((value: DocumentSummary | null) => {
         if (value) setSummary(value);
@@ -122,7 +147,10 @@ export default function NativeDocument({
   }, [documentId, launched, attempt]);
   useEffect(() => {
     const controller = new AbortController();
-    void fetch(`/api/documents/${documentId}/native/turns`, { cache: "no-store", signal: controller.signal })
+    void fetch(`/api/documents/${documentId}/native/turns`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
       .then((response) => (response.ok ? response.json() : null))
       .then((value: { turns?: TurnHistoryItem[] } | null) => {
         if (value?.turns) setHistory(value.turns);
@@ -140,7 +168,9 @@ export default function NativeDocument({
           signal,
         },
       );
-      const value = (await response.json()) as NativeLaunch & { error?: string };
+      const value = (await response.json()) as NativeLaunch & {
+        error?: string;
+      };
       if (response.ok) {
         setLaunch(value);
         setFailure(null);
@@ -148,7 +178,9 @@ export default function NativeDocument({
       }
       if (
         response.status === 409 &&
-        ["document_processing", "document_not_ready"].includes(value.error ?? "")
+        ["document_processing", "document_not_ready"].includes(
+          value.error ?? "",
+        )
       ) {
         setPhase("checking");
         return "retry" as const;
@@ -158,7 +190,9 @@ export default function NativeDocument({
         return "retry" as const;
       }
       setPhase("failed");
-      setFailure(value.error && failures[value.error] ? value.error : "unknown");
+      setFailure(
+        value.error && failures[value.error] ? value.error : "unknown",
+      );
       return "failed" as const;
     },
     [documentId, launchMode],
@@ -168,12 +202,19 @@ export default function NativeDocument({
     let timer: ReturnType<typeof setTimeout>;
     const check = async () => {
       try {
-        if ((await load(controller.signal)) === "retry" && !controller.signal.aborted)
+        if (
+          (await load(controller.signal)) === "retry" &&
+          !controller.signal.aborted
+        )
           timer = setTimeout(check, 2_000);
       } catch (caught) {
         if (!controller.signal.aborted) {
           setPhase("failed");
-          setFailure(caught instanceof TypeError || !navigator.onLine ? "network" : "unknown");
+          setFailure(
+            caught instanceof TypeError || !navigator.onLine
+              ? "network"
+              : "unknown",
+          );
         }
       }
     };
@@ -241,7 +282,17 @@ export default function NativeDocument({
       buildConversation({
         history,
         messages: queued
-          ? [{ id: -1, role: "user", text: queued.draft, tools: [], status: "done", permission: queued.permission, queued: true }]
+          ? [
+              {
+                id: -1,
+                role: "user",
+                text: queued.draft,
+                tools: [],
+                status: "done",
+                permission: queued.permission,
+                queued: true,
+              },
+            ]
           : [],
         runs: [],
       }),
@@ -250,7 +301,10 @@ export default function NativeDocument({
   const loadModels = useCallback(
     async (signal: AbortSignal): Promise<{ models: AvailableModel[] }> => {
       if (ai.mode === "local") return ai.localRequest("/v1/models");
-      const response = await fetch("/api/ai/models", { cache: "no-store", signal });
+      const response = await fetch("/api/ai/models", {
+        cache: "no-store",
+        signal,
+      });
       if (!response.ok) throw new Error("models_unavailable");
       return response.json();
     },
@@ -309,9 +363,12 @@ export default function NativeDocument({
     </>
   ) : null;
   const pairsFor = (turn: CardTurn): EvidencePair[] => {
-    const saved = history.find((item) => item.id === turn.turnId)?.savedPreviews ?? [];
+    const saved =
+      history.find((item) => item.id === turn.turnId)?.savedPreviews ?? [];
     return (turn.summary?.evidence ?? []).map((item) => {
-      const found = saved.find((candidate) => candidate.slideIndex === item.slideIndex);
+      const found = saved.find(
+        (candidate) => candidate.slideIndex === item.slideIndex,
+      );
       return {
         slideIndex: item.slideIndex,
         before: found?.before ?? null,
@@ -345,7 +402,11 @@ export default function NativeDocument({
               {retryLine ? <> · {retryLine}</> : null}
             </Banner>
           ) : null}
-          <PhoneSlides previews={summary?.previews ?? []} index={phoneSlide} onIndex={setPhoneSlide} />
+          <PhoneSlides
+            previews={summary?.previews ?? []}
+            index={phoneSlide}
+            onIndex={setPhoneSlide}
+          />
           {problem ? (
             <div className="ws-opening-foot">{failureActions}</div>
           ) : (
@@ -356,7 +417,11 @@ export default function NativeDocument({
           )}
         </div>
       ) : null}
-      <section className="ws-editor" aria-label="프레젠테이션 편집" aria-hidden={phone || undefined}>
+      <section
+        className="ws-editor"
+        aria-label="프레젠테이션 편집"
+        aria-hidden={phone || undefined}
+      >
         {problem ? (
           <OpeningFailure title={problem.title} actions={failureActions}>
             {reason ? `${reason} ` : ""}
@@ -372,7 +437,11 @@ export default function NativeDocument({
           <OpeningView
             preview={preview}
             previews={summary?.previews ?? []}
-            message={elapsedSeconds >= 10 && !offline ? `${message} · ${elapsedSeconds}초` : message}
+            message={
+              elapsedSeconds >= 10 && !offline
+                ? `${message} · ${elapsedSeconds}초`
+                : message
+            }
             action={
               slow ? (
                 <Button size="sm" icon="refresh" onClick={retryAgain}>
@@ -393,7 +462,12 @@ export default function NativeDocument({
             options={[{ value: "ai", label: "AI", icon: "sparkles" }]}
           />
         </header>
-        <div className="ws-panel-body" id="ws-panel-panel-ai" role="tabpanel" aria-labelledby="ws-panel-tab-ai">
+        <div
+          className="ws-panel-body"
+          id="ws-panel-panel-ai"
+          role="tabpanel"
+          aria-labelledby="ws-panel-tab-ai"
+        >
           {conversation.length ? (
             <ConversationLog
               items={conversation}
@@ -424,7 +498,10 @@ export default function NativeDocument({
             <div className="ai-empty">
               <div>
                 <h2>무엇을 바꿀까요?</h2>
-                <p>편집기가 열리는 동안 요청을 먼저 적어 둘 수 있어요. 열리는 대로 보낼게요.</p>
+                <p>
+                  편집기가 열리는 동안 요청을 먼저 적어 둘 수 있어요. 열리는
+                  대로 보낼게요.
+                </p>
               </div>
             </div>
           )}
@@ -456,7 +533,9 @@ export default function NativeDocument({
               inputRef={input}
             />
           ) : (
-            <p className="composer-hint">AI 연결 전에도 편집기에서 직접 고칠 수 있어요.</p>
+            <p className="composer-hint">
+              AI 연결 전에도 편집기에서 직접 고칠 수 있어요.
+            </p>
           )}
         </footer>
       </aside>

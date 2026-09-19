@@ -15,7 +15,11 @@ import {
 } from "@/design-system";
 import type { DocumentSummary } from "@/lib/history-types";
 import { UploadError, uploadDocumentFile } from "@/lib/upload-document";
-import { precheckUpload, uploadFailure, type UploadFailure } from "@/lib/upload-reasons";
+import {
+  precheckUpload,
+  uploadFailure,
+  type UploadFailure,
+} from "@/lib/upload-reasons";
 import { fileSize } from "../copy";
 import { editScopeLines, fontCheck, renderCheck } from "../document-checks";
 
@@ -53,7 +57,10 @@ export function ImportDialog({
     }
     const rejected = precheckUpload(file, maxBytes);
     if (rejected) {
-      setStep({ kind: "failed", failure: uploadFailure(rejected, file.name, maxBytes) });
+      setStep({
+        kind: "failed",
+        failure: uploadFailure(rejected, file.name, maxBytes),
+      });
       return;
     }
     let active = true;
@@ -71,7 +78,9 @@ export function ImportDialog({
         setStep({ kind: "checking", id });
         const poll = async () => {
           try {
-            const response = await fetch(`/api/documents/${id}/summary`, { cache: "no-store" });
+            const response = await fetch(`/api/documents/${id}/summary`, {
+              cache: "no-store",
+            });
             if (response.ok) {
               const summary = (await response.json()) as DocumentSummary;
               if (!active) return;
@@ -79,7 +88,11 @@ export function ImportDialog({
                 changed.current();
                 setStep({
                   kind: "failed",
-                  failure: uploadFailure(summary.failureCode ?? "document_processing_failed", file.name, maxBytes),
+                  failure: uploadFailure(
+                    summary.failureCode ?? "document_processing_failed",
+                    file.name,
+                    maxBytes,
+                  ),
                 });
                 return;
               }
@@ -99,8 +112,12 @@ export function ImportDialog({
       .catch((error: unknown) => {
         uploading = false;
         if (!active) return;
-        const code = error instanceof UploadError ? error.message : "unexpected_error";
-        setStep({ kind: "failed", failure: uploadFailure(code, file.name, maxBytes) });
+        const code =
+          error instanceof UploadError ? error.message : "unexpected_error";
+        setStep({
+          kind: "failed",
+          failure: uploadFailure(code, file.name, maxBytes),
+        });
       });
     return () => {
       active = false;
@@ -111,12 +128,22 @@ export function ImportDialog({
     };
   }, [file, maxBytes]);
 
-  if (!file || !step) return <Dialog open={false} title="" onClose={onClose}>{null}</Dialog>;
+  if (!file || !step)
+    return (
+      <Dialog open={false} title="" onClose={onClose}>
+        {null}
+      </Dialog>
+    );
 
   if (step.kind === "uploading") {
     const ratio = step.total ? step.loaded / step.total : 0;
     return (
-      <Dialog open title="PowerPoint 가져오기" onClose={onClose} footer={<Button onClick={onClose}>취소</Button>}>
+      <Dialog
+        open
+        title="PowerPoint 가져오기"
+        onClose={onClose}
+        footer={<Button onClick={onClose}>취소</Button>}
+      >
         <div className="file-line">
           <FileMark />
           <div>
@@ -135,7 +162,12 @@ export function ImportDialog({
 
   if (step.kind === "checking")
     return (
-      <Dialog open title="PowerPoint 가져오기" onClose={onClose} footer={<Button onClick={onClose}>닫기</Button>}>
+      <Dialog
+        open
+        title="PowerPoint 가져오기"
+        onClose={onClose}
+        footer={<Button onClick={onClose}>닫기</Button>}
+      >
         <div className="file-line">
           <FileMark />
           <div>
@@ -148,9 +180,12 @@ export function ImportDialog({
         </div>
         <Progress label="파일 확인 중" />
         <p className="dialog-lead" role="status">
-          파일 확인 중. 서버에서 슬라이드를 모두 그려 보고, 글꼴을 살피고 있어요.
+          파일 확인 중. 서버에서 슬라이드를 모두 그려 보고, 글꼴을 살피고
+          있어요.
         </p>
-        <p className="dialog-note">처음 여는 파일은 1분쯤 걸릴 수 있어요. 이 창을 닫아도 확인은 계속돼요.</p>
+        <p className="dialog-note">
+          처음 여는 파일은 1분쯤 걸릴 수 있어요. 이 창을 닫아도 확인은 계속돼요.
+        </p>
       </Dialog>
     );
 
@@ -183,7 +218,12 @@ export function ImportDialog({
         {shown.length ? (
           <div className="slide-strip">
             {shown.map((src, index) => (
-              <SlideImage key={index} src={src} alt={`${index + 1}번 슬라이드`} loading="eager" />
+              <SlideImage
+                key={index}
+                src={src}
+                alt={`${index + 1}번 슬라이드`}
+                loading="eager"
+              />
             ))}
             {count > shown.length ? <span>+{count - shown.length}</span> : null}
           </div>

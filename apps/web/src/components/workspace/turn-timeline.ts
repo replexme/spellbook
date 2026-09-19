@@ -18,11 +18,19 @@ export type TimelineTurn = {
 };
 
 /** Consecutive direct-edit saves with no AI request started between them. */
-export type ManualRun = { from: string; to: string; saves: number; afterTurnId: string | null };
+export type ManualRun = {
+  from: string;
+  to: string;
+  saves: number;
+  afterTurnId: string | null;
+};
 
 const time = (value: string) => new Date(value).getTime();
 
-export function manualEditRuns(versions: VersionHistoryItem[], turns: TimelineTurn[]): ManualRun[] {
+export function manualEditRuns(
+  versions: VersionHistoryItem[],
+  turns: TimelineTurn[],
+): ManualRun[] {
   const starts = turns
     .filter((turn) => turn.turnId && turn.startedAt)
     .map((turn) => ({ id: turn.turnId!, at: time(turn.startedAt!) }))
@@ -38,13 +46,19 @@ export function manualEditRuns(versions: VersionHistoryItem[], turns: TimelineTu
       continue;
     }
     const at = time(version.createdAt);
-    const afterTurnId = starts.filter((start) => start.at <= at).at(-1)?.id ?? null;
+    const afterTurnId =
+      starts.filter((start) => start.at <= at).at(-1)?.id ?? null;
     if (current && current.afterTurnId === afterTurnId) {
       current.to = version.createdAt;
       current.saves += 1;
       continue;
     }
-    current = { from: version.createdAt, to: version.createdAt, saves: 1, afterTurnId };
+    current = {
+      from: version.createdAt,
+      to: version.createdAt,
+      saves: 1,
+      afterTurnId,
+    };
     runs.push(current);
   }
   return runs;
@@ -122,7 +136,11 @@ export function undoActionFor(input: {
   /** The person changed the document since (unsaved edits or later saves). */
   changedSince: boolean;
 }): UndoAction | null {
-  if (input.undone || (input.outcome !== "changed" && input.outcome !== "unverified")) return null;
+  if (
+    input.undone ||
+    (input.outcome !== "changed" && input.outcome !== "unverified")
+  )
+    return null;
   const summary = input.summary;
   if (
     input.latest &&
@@ -132,13 +150,21 @@ export function undoActionFor(input: {
     summary?.revisions?.before &&
     summary.revisions.after
   )
-    return { kind: "native", label: summary.changedSlides.length > 1 ? "모두 되돌리기" : "되돌리기" };
-  if (input.beforeVersionId) return { kind: "restore", label: "이 요청 전으로 돌아가기" };
+    return {
+      kind: "native",
+      label: summary.changedSlides.length > 1 ? "모두 되돌리기" : "되돌리기",
+    };
+  if (input.beforeVersionId)
+    return { kind: "restore", label: "이 요청 전으로 돌아가기" };
   return null;
 }
 
 /** Saves made after a request other than its own AI save. */
-export function savedAfter(versions: VersionHistoryItem[], turnId: string, finishedAt: string | null) {
+export function savedAfter(
+  versions: VersionHistoryItem[],
+  turnId: string,
+  finishedAt: string | null,
+) {
   if (!finishedAt) return false;
   const cutoff = time(finishedAt);
   return versions.some(

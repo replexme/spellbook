@@ -8,9 +8,15 @@ export async function POST(
 ) {
   try {
     const { id } = await context.params;
-    const body = (await request.json().catch(() => ({}))) as { turnId?: unknown };
+    const body = (await request.json().catch(() => ({}))) as {
+      turnId?: unknown;
+    };
     return Response.json(
-      await markNativeUndo(await requireNativeRequestSession(request, id), id, body.turnId),
+      await markNativeUndo(
+        await requireNativeRequestSession(request, id),
+        id,
+        body.turnId,
+      ),
     );
   } catch (error) {
     return routeError(error);

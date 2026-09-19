@@ -52,7 +52,11 @@ import {
   pollNativeSession,
   submitNativeTurn,
 } from "./native-runtime";
-import { listNativeTurns, listVersions, restoreVersion } from "./document-history";
+import {
+  listNativeTurns,
+  listVersions,
+  restoreVersion,
+} from "./document-history";
 import { signWopiToken } from "./wopi-token";
 import {
   createNativeLaunch,
@@ -811,8 +815,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       text: "제목 바꿔 줘",
       permission: "slides",
     });
-    const [turn] = await db()`select * from spellbook_native_turns where id=${submitted.turnId}`;
-    const owner = { jobId: turn.job_id, sessionId: f.nativeSessionId, executionToken: "worker-undo" };
+    const [turn] =
+      await db()`select * from spellbook_native_turns where id=${submitted.turnId}`;
+    const owner = {
+      jobId: turn.job_id,
+      sessionId: f.nativeSessionId,
+      executionToken: "worker-undo",
+    };
     await executeNativeTool({ ...owner, operation: "start" });
     const observed = (await executeNativeTool({
       ...owner,
@@ -822,12 +831,19 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     await pollNativeSession(session, f.documentId, 0);
     await completeNativeTask(session, f.documentId, {
       id: observed.taskId,
-      value: { ...observation, revision: "before", engine: { patchLevel: "stock", supportedOperations: [] } },
+      value: {
+        ...observation,
+        revision: "before",
+        engine: { patchLevel: "stock", supportedOperations: [] },
+      },
     });
     const edited = (await executeNativeTool({
       ...owner,
       operation: "task_create",
-      request: { operation: "edit_batch", commands: [{ op: "replace_text", elementId: "0/0" }] },
+      request: {
+        operation: "edit_batch",
+        commands: [{ op: "replace_text", elementId: "0/0" }],
+      },
     })) as { taskId: string };
     await pollNativeSession(session, f.documentId, 0);
     await completeNativeTask(session, f.documentId, {
@@ -835,7 +851,9 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       value: {
         ...observation,
         revision: "after",
-        slides: [{ slideIndex: 0, elements: [{ elementId: "0/0", text: "바뀜" }] }],
+        slides: [
+          { slideIndex: 0, elements: [{ elementId: "0/0", text: "바뀜" }] },
+        ],
         changedSlideIndexes: [0],
         transaction: { status: "applied", undoActionsAdded: 1 },
         layoutAudit: { introducedIssueCount: 0, introducedIssues: [] },
@@ -843,7 +861,11 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     });
     // While the request runs the AI can read the screenshot.
     expect(
-      await executeNativeTool({ ...owner, operation: "task_status", taskId: edited.taskId }),
+      await executeNativeTool({
+        ...owner,
+        operation: "task_status",
+        taskId: edited.taskId,
+      }),
     ).toMatchObject({ result: { images: [expect.any(Object)] } });
     await completeNativeTurn(
       { id: turn.job_id },
@@ -851,28 +873,55 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
         jobId: turn.job_id,
         status: "succeeded",
         mode: "native",
-        result: { text: "바꿨어요.", changed: true, reviewed: true, status: "completed", executionToken: "worker-undo" },
+        result: {
+          text: "바꿨어요.",
+          changed: true,
+          reviewed: true,
+          status: "completed",
+          executionToken: "worker-undo",
+        },
       },
     );
-    const tasks = await db()`select result from spellbook_native_tasks where turn_id=${submitted.turnId}`;
-    expect(tasks.every((task) => task.result && !("images" in task.result))).toBe(true);
-    const [stored] = await db()`select summary from spellbook_native_turns where id=${submitted.turnId}`;
+    const tasks =
+      await db()`select result from spellbook_native_tasks where turn_id=${submitted.turnId}`;
+    expect(
+      tasks.every((task) => task.result && !("images" in task.result)),
+    ).toBe(true);
+    const [stored] =
+      await db()`select summary from spellbook_native_turns where id=${submitted.turnId}`;
     expect(stored.summary).toMatchObject({
       outcome: "changed",
       undoSteps: 1,
       revisions: { before: "before", after: "after" },
-      evidence: [{ slideIndex: 0, before: `${observed.taskId}:0`, after: `${edited.taskId}:0` }],
+      evidence: [
+        {
+          slideIndex: 0,
+          before: `${observed.taskId}:0`,
+          after: `${edited.taskId}:0`,
+        },
+      ],
     });
-    const [engine] = await db()`select patch_level from spellbook_editor_engines where editor_mode='wopi'`;
+    const [engine] =
+      await db()`select patch_level from spellbook_editor_engines where editor_mode='wopi'`;
     expect(engine.patch_level).toBe("stock");
 
     // Undo is recorded once and names the next save.
-    const marked = await markNativeUndo(session, f.documentId, submitted.turnId);
+    const marked = await markNativeUndo(
+      session,
+      f.documentId,
+      submitted.turnId,
+    );
     expect(marked.turnId).toBe(submitted.turnId);
-    expect((await markNativeUndo(session, f.documentId, submitted.turnId)).undoneAt).toBe(marked.undoneAt);
+    expect(
+      (await markNativeUndo(session, f.documentId, submitted.turnId)).undoneAt,
+    ).toBe(marked.undoneAt);
     const events = await pollNativeSession(session, f.documentId, 0);
-    expect(events.events.filter((event) => event.type === "undone")).toHaveLength(1);
-    expect((await listNativeTurns(session, f.documentId)).at(-1)?.undoneAt).toBe(marked.undoneAt);
+    expect(
+      events.events.filter((event) => event.type === "undone"),
+    ).toHaveLength(1);
+    expect(
+      (await listNativeTurns(session, f.documentId)).at(-1)?.undoneAt,
+    ).toBe(marked.undoneAt);
     const token = signWopiToken({
       version: 1,
       sessionId: f.nativeSessionId,
@@ -882,14 +931,21 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     });
     const url = `https://spellbook.integration.invalid/api/wopi/files/${f.documentId}?access_token=${encodeURIComponent(token)}`;
     await wopiLock(
-      new Request(url, { method: "POST", headers: { "x-wopi-override": "LOCK", "x-wopi-lock": "undo-lock" } }),
+      new Request(url, {
+        method: "POST",
+        headers: { "x-wopi-override": "LOCK", "x-wopi-lock": "undo-lock" },
+      }),
       f.documentId,
     );
     const contentsUrl = new URL(url);
     contentsUrl.pathname += "/contents";
     const bytes = Buffer.from("PK-undone-document");
     await wopiPutFile(
-      new Request(contentsUrl, { method: "POST", headers: { "x-wopi-lock": "undo-lock" }, body: bytes }),
+      new Request(contentsUrl, {
+        method: "POST",
+        headers: { "x-wopi-lock": "undo-lock" },
+        body: bytes,
+      }),
       f.documentId,
     );
     const [saved] = await db()`
@@ -897,31 +953,53 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       from spellbook_native_sessions s join spellbook_versions v on v.id=s.working_version_id
       where s.id=${f.nativeSessionId}
     `;
-    expect(saved).toMatchObject({ undone_turn_id: submitted.turnId, pending_undo_turn_id: null });
+    expect(saved).toMatchObject({
+      undone_turn_id: submitted.turnId,
+      pending_undo_turn_id: null,
+    });
     expect(Number(saved.document_bytes)).toBe(bytes.length);
   });
 
   it("undoes only the latest request of the session", async () => {
     const f = await fixture();
-    await addPastNativeTurn(f, { request: "먼저", response: "했어요", status: "completed", createdAt: new Date(Date.now() - 60_000) });
-    await addPastNativeTurn(f, { request: "나중", response: "했어요", status: "completed", createdAt: new Date() });
-    const turns = await db()`select id from spellbook_native_turns where session_id=${f.nativeSessionId} order by created_at`;
-    await expect(markNativeUndo(session, f.documentId, turns[0]!.id)).rejects.toThrow("undo_not_latest_request");
-    await expect(markNativeUndo(session, f.documentId, turns[1]!.id)).rejects.toThrow("undo_nothing_changed");
+    await addPastNativeTurn(f, {
+      request: "먼저",
+      response: "했어요",
+      status: "completed",
+      createdAt: new Date(Date.now() - 60_000),
+    });
+    await addPastNativeTurn(f, {
+      request: "나중",
+      response: "했어요",
+      status: "completed",
+      createdAt: new Date(),
+    });
+    const turns =
+      await db()`select id from spellbook_native_turns where session_id=${f.nativeSessionId} order by created_at`;
+    await expect(
+      markNativeUndo(session, f.documentId, turns[0]!.id),
+    ).rejects.toThrow("undo_not_latest_request");
+    await expect(
+      markNativeUndo(session, f.documentId, turns[1]!.id),
+    ).rejects.toThrow("undo_nothing_changed");
   });
 
   it("restores a version as a new version with the same file and SHA-256", async () => {
     const f = await fixture();
     const restored = await restoreVersion(session, f.documentId, f.versionId);
-    const [source] = await db()`select document_object, document_sha256 from spellbook_versions where id=${f.versionId}`;
-    const [copy] = await db()`select document_object, document_sha256, restored_from_version_id from spellbook_versions where id=${restored.versionId}`;
+    const [source] =
+      await db()`select document_object, document_sha256 from spellbook_versions where id=${f.versionId}`;
+    const [copy] =
+      await db()`select document_object, document_sha256, restored_from_version_id from spellbook_versions where id=${restored.versionId}`;
     expect(copy).toMatchObject({
       document_object: source.document_object,
       document_sha256: source.document_sha256,
       restored_from_version_id: f.versionId,
     });
     const { versions } = await listVersions(session, f.documentId);
-    expect(versions.map((version) => version.id)).toEqual(expect.arrayContaining([f.versionId, restored.versionId]));
+    expect(versions.map((version) => version.id)).toEqual(
+      expect.arrayContaining([f.versionId, restored.versionId]),
+    );
   });
 
   it("hands a local subscription turn to the connector with only a job-scoped capability", async () => {

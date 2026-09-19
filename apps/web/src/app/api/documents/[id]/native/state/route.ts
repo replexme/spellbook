@@ -11,7 +11,10 @@ export async function GET(
   try {
     const { id } = await context.params;
     return Response.json(
-      await nativeSessionState(await requireNativeRequestSession(request, id), id),
+      await nativeSessionState(
+        await requireNativeRequestSession(request, id),
+        id,
+      ),
       { headers: { "cache-control": "private, no-store" } },
     );
   } catch (error) {

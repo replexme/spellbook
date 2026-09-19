@@ -6,7 +6,10 @@ import { useAiAccount } from "@/lib/use-ai-account";
 import { AppTop } from "../app-top";
 import { ConnectSteps } from "../workspace/connect-steps";
 
-const connectedDay = new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric" });
+const connectedDay = new Intl.DateTimeFormat("ko-KR", {
+  month: "long",
+  day: "numeric",
+});
 
 function planLabel(plan: string | null | undefined) {
   if (!plan) return null;
@@ -29,9 +32,12 @@ export function SettingsScreen({
     : "ChatGPT · Codex";
   const detail = account
     ? [
-        account.email ?? (account.type === "claude" ? "Claude 계정" : "ChatGPT 계정"),
+        account.email ??
+          (account.type === "claude" ? "Claude 계정" : "ChatGPT 계정"),
         planLabel(account.planType),
-        ai.connectedAt ? `${connectedDay.format(new Date(ai.connectedAt))} 연결` : null,
+        ai.connectedAt
+          ? `${connectedDay.format(new Date(ai.connectedAt))} 연결`
+          : null,
       ]
         .filter(Boolean)
         .join(" · ")
@@ -48,7 +54,11 @@ export function SettingsScreen({
             <a href="#account">계정</a>
           </nav>
           <div className="settings-body">
-            <section id="ai" className="settings-section" aria-labelledby="settings-ai">
+            <section
+              id="ai"
+              className="settings-section"
+              aria-labelledby="settings-ai"
+            >
               <header>
                 <h1 id="settings-ai">AI 연결</h1>
                 <p>
@@ -70,7 +80,11 @@ export function SettingsScreen({
                     <Badge tone="ok" dot>
                       연결됨
                     </Badge>
-                    <Button variant="danger-quiet" size="sm" onClick={() => void ai.disconnect()}>
+                    <Button
+                      variant="danger-quiet"
+                      size="sm"
+                      onClick={() => void ai.disconnect()}
+                    >
                       연결 해제
                     </Button>
                   </div>
@@ -81,10 +95,17 @@ export function SettingsScreen({
                 )}
               </div>
             </section>
-            <section id="account" className="settings-section" aria-labelledby="settings-account">
+            <section
+              id="account"
+              className="settings-section"
+              aria-labelledby="settings-account"
+            >
               <header>
                 <h1 id="settings-account">계정</h1>
-                <p>이 서버에 로그인한 계정이에요. 파일과 작업 기록은 계정마다 따로 보관해요.</p>
+                <p>
+                  이 서버에 로그인한 계정이에요. 파일과 작업 기록은 계정마다
+                  따로 보관해요.
+                </p>
               </header>
               <div className="conn-card">
                 <span className="conn-mark" aria-hidden="true">

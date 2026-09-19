@@ -588,7 +588,11 @@ export async function handleWorkerCallback(
       );
       return;
     }
-    await markJobFailure(job, callback.error ?? "worker_failed", workerErrorCode(callback));
+    await markJobFailure(
+      job,
+      callback.error ?? "worker_failed",
+      workerErrorCode(callback),
+    );
     return;
   }
   let dispatch: Dispatch | null = null;
@@ -1529,7 +1533,9 @@ async function claimJob(
  */
 function workerErrorCode(callback: WorkerCallback): string | null {
   const code = (callback as { errorCode?: unknown }).errorCode;
-  return typeof code === "string" && /^[a-z][a-z_]{2,63}$/.test(code) ? code : null;
+  return typeof code === "string" && /^[a-z][a-z_]{2,63}$/.test(code)
+    ? code
+    : null;
 }
 
 async function markJobFailure(

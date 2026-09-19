@@ -110,7 +110,9 @@
           "type": ["array", "null"],
           "items": { "type": "array", "items": { "type": "string" } }
         },
-        "graphicKind": { "enum": ["table", "chart", "diagram", "ole", "other", null] },
+        "graphicKind": {
+          "enum": ["table", "chart", "diagram", "ole", "other", null]
+        },
         "externalData": { "type": "boolean" }
       }
     }

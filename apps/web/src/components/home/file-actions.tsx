@@ -28,7 +28,8 @@ export function FileMenu({
   onRename: (document: LibraryDocument) => void;
   onDelete: (document: LibraryDocument) => void;
 }) {
-  const ready = document.status !== "failed" && document.status !== "processing";
+  const ready =
+    document.status !== "failed" && document.status !== "processing";
   return (
     <Menu
       label={`${document.fileName} 메뉴`}
@@ -125,9 +126,14 @@ export function RenameDialog({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ fileName: value }),
       });
-      const body = (await response.json().catch(() => ({}))) as { error?: string };
+      const body = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
       if (!response.ok) {
-        setError(renameErrors[body.error ?? ""] ?? "이름을 바꾸지 못했어요. 다시 시도해 주세요.");
+        setError(
+          renameErrors[body.error ?? ""] ??
+            "이름을 바꾸지 못했어요. 다시 시도해 주세요.",
+        );
         return;
       }
       onRenamed();
@@ -149,7 +155,12 @@ export function RenameDialog({
           <Button onClick={onClose} disabled={busy}>
             취소
           </Button>
-          <Button variant="primary" type="submit" form="rename-file" loading={busy}>
+          <Button
+            variant="primary"
+            type="submit"
+            form="rename-file"
+            loading={busy}
+          >
             바꾸기
           </Button>
         </>
@@ -201,7 +212,9 @@ export function DeleteDialog({
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`/api/documents/${document.id}`, { method: "DELETE" });
+      const response = await fetch(`/api/documents/${document.id}`, {
+        method: "DELETE",
+      });
       if (!response.ok && response.status !== 404) {
         setError("파일을 지우지 못했어요. 다시 시도해 주세요.");
         return;
@@ -225,7 +238,12 @@ export function DeleteDialog({
           <Button onClick={onClose} disabled={busy}>
             취소
           </Button>
-          <Button variant="danger" icon="trash" loading={busy} onClick={() => void remove()}>
+          <Button
+            variant="danger"
+            icon="trash"
+            loading={busy}
+            onClick={() => void remove()}
+          >
             지우기
           </Button>
         </>
@@ -235,12 +253,17 @@ export function DeleteDialog({
         <FileMark />
         <div>
           <strong>{document?.fileName}</strong>
-          <small>{document?.slideCount ? `${document.slideCount}장` : "PowerPoint 프레젠테이션"}</small>
+          <small>
+            {document?.slideCount
+              ? `${document.slideCount}장`
+              : "PowerPoint 프레젠테이션"}
+          </small>
         </div>
         <span />
       </div>
       <p className="dialog-lead">
-        파일과 버전 기록, AI 요청 기록이 모두 지워져요. 지운 뒤에는 되돌릴 수 없어요.
+        파일과 버전 기록, AI 요청 기록이 모두 지워져요. 지운 뒤에는 되돌릴 수
+        없어요.
       </p>
       {error ? (
         <Banner tone="danger" role="alert">

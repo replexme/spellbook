@@ -18,19 +18,27 @@ export function assetUrl(objectName: string) {
 }
 
 /** Preview image key for a slide of a rendered version (0-based index). */
-export function previewObject(graphObject: string | null | undefined, slideIndex: number) {
+export function previewObject(
+  graphObject: string | null | undefined,
+  slideIndex: number,
+) {
   if (!graphObject || !graphObject.endsWith("/element-graph.json")) return null;
   const prefix = graphObject.slice(0, -"/element-graph.json".length);
   return `${prefix}/slides/slide-${slideIndex + 1}.png`;
 }
 
-export function previewUrl(graphObject: string | null | undefined, slideIndex: number) {
+export function previewUrl(
+  graphObject: string | null | undefined,
+  slideIndex: number,
+) {
   const object = previewObject(graphObject, slideIndex);
   return object ? assetUrl(object) : null;
 }
 
 export function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
 async function ownedDocument(session: Session, documentId: string) {
@@ -71,13 +79,16 @@ export async function listNativeTurns(
       order by j.created_at
     `;
     for (const row of rows)
-      if (!afterVersions.has(row.turn_id)) afterVersions.set(row.turn_id, row.version_id);
+      if (!afterVersions.has(row.turn_id))
+        afterVersions.set(row.turn_id, row.version_id);
   }
   // Saved-version previews stand in for the AI's own screenshots, which are
   // kept only while a request runs.
   const versionIds = [
     ...new Set(
-      turns.flatMap((turn) => [turn.before_version_id, afterVersions.get(turn.id)]).filter(Boolean),
+      turns
+        .flatMap((turn) => [turn.before_version_id, afterVersions.get(turn.id)])
+        .filter(Boolean),
     ),
   ] as string[];
   const graphs = new Map<string, string | null>();
@@ -96,18 +107,22 @@ export async function listNativeTurns(
       if (summary)
         await db()`update spellbook_native_turns set summary=${db().json(summary as never)} where id=${turn.id} and summary is null`;
     }
-    const beforeGraph = turn.before_version_id ? graphs.get(turn.before_version_id) : null;
+    const beforeGraph = turn.before_version_id
+      ? graphs.get(turn.before_version_id)
+      : null;
     const afterVersionId = afterVersions.get(turn.id) ?? null;
     const afterGraph = afterVersionId ? graphs.get(afterVersionId) : null;
     const slideCount = summary?.slideCount;
     const savedPreviews = (summary?.changedSlides ?? []).map((slideIndex) => ({
       slideIndex,
       before:
-        slideCount?.before === null || slideIndex < (slideCount?.before ?? Infinity)
+        slideCount?.before === null ||
+        slideIndex < (slideCount?.before ?? Infinity)
           ? previewUrl(beforeGraph, slideIndex)
           : null,
       after:
-        slideCount?.after === null || slideIndex < (slideCount?.after ?? Infinity)
+        slideCount?.after === null ||
+        slideIndex < (slideCount?.after ?? Infinity)
           ? previewUrl(afterGraph, slideIndex)
           : null,
     }));
@@ -139,7 +154,8 @@ export async function listVersions(
     select working_version_id from spellbook_native_sessions
     where document_id=${documentId} and account_id=${session.accountId}
   `;
-  const currentVersionId: string = native?.working_version_id ?? document.current_version_id;
+  const currentVersionId: string =
+    native?.working_version_id ?? document.current_version_id;
   const rows = await db()`
     select v.id, v.parent_version_id, v.kind, v.created_at, v.slide_count, v.graph_object,
       v.restored_from_version_id, v.editor_modified, v.document_bytes, v.undone_turn_id,
@@ -156,7 +172,9 @@ export async function listVersions(
     order by v.created_at desc
     limit 300
   `;
-  const taskIds = [...new Set(rows.flatMap((row) => row.change_task_ids as string[]))];
+  const taskIds = [
+    ...new Set(rows.flatMap((row) => row.change_task_ids as string[])),
+  ];
   const turnByTask = new Map<string, { id: string; requestText: string }>();
   if (taskIds.length) {
     const turns = await db()`
@@ -165,23 +183,35 @@ export async function listVersions(
       where k.id::text = any(${taskIds}) and t.document_id=${documentId}
     `;
     for (const row of turns)
-      turnByTask.set(row.task_id, { id: row.id, requestText: row.request_text });
+      turnByTask.set(row.task_id, {
+        id: row.id,
+        requestText: row.request_text,
+      });
   }
-  const undoneIds = [...new Set(rows.map((row) => row.undone_turn_id).filter(Boolean))] as string[];
+  const undoneIds = [
+    ...new Set(rows.map((row) => row.undone_turn_id).filter(Boolean)),
+  ] as string[];
   const undoneTurns = new Map<string, { id: string; requestText: string }>();
   if (undoneIds.length) {
     const turns = await db()`
       select id, request_text from spellbook_native_turns
       where id = any(${undoneIds}) and document_id=${documentId}
     `;
-    for (const row of turns) undoneTurns.set(row.id, { id: row.id, requestText: row.request_text });
+    for (const row of turns)
+      undoneTurns.set(row.id, { id: row.id, requestText: row.request_text });
   }
   const versions = rows.map((row) => {
-    const undone = row.undone_turn_id ? (undoneTurns.get(row.undone_turn_id) ?? null) : null;
+    const undone = row.undone_turn_id
+      ? (undoneTurns.get(row.undone_turn_id) ?? null)
+      : null;
     const turn =
       undone ??
-      (row.change_task_ids as string[]).map((id) => turnByTask.get(id)).find(Boolean) ??
-      (row.legacy_edit_id ? { id: row.legacy_edit_id, requestText: row.legacy_request } : null);
+      (row.change_task_ids as string[])
+        .map((id) => turnByTask.get(id))
+        .find(Boolean) ??
+      (row.legacy_edit_id
+        ? { id: row.legacy_edit_id, requestText: row.legacy_request }
+        : null);
     const origin: VersionOrigin =
       row.kind === "original"
         ? "original"
@@ -204,8 +234,13 @@ export async function listVersions(
       current: row.id === currentVersionId,
       turn: turn ?? null,
       restoredFrom: row.restored_from_version_id ?? null,
-      previews: Array.from({ length: count }, (_, index) => previewUrl(row.graph_object, index)),
-      bytes: row.document_bytes === null || row.document_bytes === undefined ? null : Number(row.document_bytes),
+      previews: Array.from({ length: count }, (_, index) =>
+        previewUrl(row.graph_object, index),
+      ),
+      bytes:
+        row.document_bytes === null || row.document_bytes === undefined
+          ? null
+          : Number(row.document_bytes),
     } satisfies VersionHistoryItem;
   });
   return { currentVersionId, versions };
@@ -240,7 +275,8 @@ export async function restoreVersion(
       select * from spellbook_native_sessions
       where document_id=${documentId} and account_id=${session.accountId} for update
     `;
-    if (native?.status === "validating") throw new HttpError(409, "document_save_in_progress");
+    if (native?.status === "validating")
+      throw new HttpError(409, "document_save_in_progress");
     if (native) {
       const [running] = await sql`
         select id from spellbook_native_turns
@@ -248,7 +284,8 @@ export async function restoreVersion(
       `;
       if (running) throw new HttpError(409, "native_turn_already_running");
     }
-    const workingVersionId = native?.working_version_id ?? document.current_version_id;
+    const workingVersionId =
+      native?.working_version_id ?? document.current_version_id;
     const restoredId = randomUUID();
     await sql`
       insert into spellbook_versions

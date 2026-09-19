@@ -26,9 +26,12 @@ const exempt = new Set([
   path.join(sourceRoot, "design-system", "editor-theme.ts"),
 ]);
 
-const systemCss = ["tokens.css", "base.css", "components.css", "patterns.css"].map(
-  (file) => path.join(sourceRoot, "design-system", file),
-);
+const systemCss = [
+  "tokens.css",
+  "base.css",
+  "components.css",
+  "patterns.css",
+].map((file) => path.join(sourceRoot, "design-system", file));
 
 /** Legacy components that only the legacy allowlist renders. */
 const legacyComponents = new Set(
@@ -66,7 +69,9 @@ function tokenValues() {
 function definedClasses() {
   const classes = new Set<string>();
   for (const file of systemCss)
-    for (const match of readFileSync(file, "utf8").matchAll(/\.([a-z][a-z0-9-]*)/g))
+    for (const match of readFileSync(file, "utf8").matchAll(
+      /\.([a-z][a-z0-9-]*)/g,
+    ))
       classes.add(match[1]!);
   return classes;
 }
@@ -93,8 +98,13 @@ function classNamesIn(source: string) {
       .slice(start, index - 1)
       .replace(/[!=]==?\s*(?:"[^"]*"|'[^']*')/g, "")
       .replace(/(?:"[^"]*"|'[^']*')\s*[!=]==?/g, "");
-    for (const literal of expression.matchAll(/"([^"]*)"|'([^']*)'|`([^`]*)`/g)) {
-      const text = (literal[1] ?? literal[2] ?? literal[3] ?? "").replace(/\$\{[^}]*\}/g, " ");
+    for (const literal of expression.matchAll(
+      /"([^"]*)"|'([^']*)'|`([^`]*)`/g,
+    )) {
+      const text = (literal[1] ?? literal[2] ?? literal[3] ?? "").replace(
+        /\$\{[^}]*\}/g,
+        " ",
+      );
       names.push(...text.split(/\s+/));
     }
   }
@@ -106,9 +116,15 @@ describe("design system", () => {
     const classes = definedClasses();
     const unknown: string[] = [];
     for (const file of walk(sourceRoot)) {
-      if (!file.endsWith(".tsx") || legacyAllowlist.has(file) || legacyComponents.has(file)) continue;
+      if (
+        !file.endsWith(".tsx") ||
+        legacyAllowlist.has(file) ||
+        legacyComponents.has(file)
+      )
+        continue;
       for (const name of classNamesIn(readFileSync(file, "utf8")))
-        if (!classes.has(name)) unknown.push(`${path.relative(sourceRoot, file)}: .${name}`);
+        if (!classes.has(name))
+          unknown.push(`${path.relative(sourceRoot, file)}: .${name}`);
     }
     expect([...new Set(unknown)]).toEqual([]);
   });
@@ -119,14 +135,20 @@ describe("design system", () => {
       .filter((file) => !systemCss.includes(file) && !legacyAllowlist.has(file))
       .map((file) => path.relative(sourceRoot, file));
     expect(stray).toEqual([]);
-    const layout = readFileSync(path.join(sourceRoot, "app", "layout.tsx"), "utf8");
+    const layout = readFileSync(
+      path.join(sourceRoot, "app", "layout.tsx"),
+      "utf8",
+    );
     for (const file of systemCss)
       expect(layout).toContain(`@/design-system/${path.basename(file)}`);
     expect(layout).not.toContain("globals.css");
   });
 
   it("keeps accessibility behaviour in the base layer", () => {
-    const base = readFileSync(path.join(sourceRoot, "design-system", "base.css"), "utf8");
+    const base = readFileSync(
+      path.join(sourceRoot, "design-system", "base.css"),
+      "utf8",
+    );
     expect(base).toContain(":focus-visible");
     expect(base).toContain("prefers-reduced-motion: reduce");
     expect(base).toContain(".ds-visually-hidden");
@@ -170,25 +192,52 @@ describe("design system", () => {
 
   it("drives the editor's own accent from the value Spellbook passes", () => {
     const hostCss = readFileSync(
-      path.resolve(sourceRoot, "../../../services/office-editor/host-bridge.css"),
+      path.resolve(
+        sourceRoot,
+        "../../../services/office-editor/host-bridge.css",
+      ),
       "utf8",
     );
-    expect(collaboraCssVariables()).toContain("--spellbook-editor-accent-rgb=53,64,74");
+    expect(collaboraCssVariables()).toContain(
+      "--spellbook-editor-accent-rgb=53,64,74",
+    );
     expect(hostCss).toContain("--doc-type: var(--spellbook-editor-accent-rgb");
-    for (const duplicate of ["#document-titlebar", ".unoSave", ".unoUndo", ".unoRedo"])
+    for (const duplicate of [
+      "#document-titlebar",
+      ".unoSave",
+      ".unoUndo",
+      ".unoRedo",
+    ])
       expect(hostCss).toContain(duplicate);
   });
 
   it("sets type in the seven steps only", () => {
     const values = tokenValues();
     const steps = [...values.entries()]
-      .filter(([token, value]) => /^--ds-text-[a-z0-9]+$/.test(token) && value.endsWith("px"))
+      .filter(
+        ([token, value]) =>
+          /^--ds-text-[a-z0-9]+$/.test(token) && value.endsWith("px"),
+      )
       .map(([, value]) => value);
-    expect(steps).toEqual(["11.5px", "12.5px", "13px", "14px", "16px", "18px", "26px"]);
+    expect(steps).toEqual([
+      "11.5px",
+      "12.5px",
+      "13px",
+      "14px",
+      "16px",
+      "18px",
+      "26px",
+    ]);
     const stray: string[] = [];
     for (const file of systemCss.filter((file) => file !== tokensFile))
-      for (const match of stripComments(readFileSync(file, "utf8")).matchAll(/font-size:\s*([^;]+);/g))
-        if (!/^var\(--ds-text-(?:xs|sm|md|base|lg|xl|2xl)\)$|^[0-9.]+em$|^inherit$/.test(match[1]!.trim()))
+      for (const match of stripComments(readFileSync(file, "utf8")).matchAll(
+        /font-size:\s*([^;]+);/g,
+      ))
+        if (
+          !/^var\(--ds-text-(?:xs|sm|md|base|lg|xl|2xl)\)$|^[0-9.]+em$|^inherit$/.test(
+            match[1]!.trim(),
+          )
+        )
           stray.push(`${path.basename(file)}: ${match[1]}`);
     expect(stray).toEqual([]);
     expect(values.get("--ds-control-sm")).toBe("26px");
@@ -197,13 +246,21 @@ describe("design system", () => {
   });
 
   it("draws every icon inside its 24×24 box", () => {
-    const source = readFileSync(path.join(sourceRoot, "design-system", "icon.tsx"), "utf8");
+    const source = readFileSync(
+      path.join(sourceRoot, "design-system", "icon.tsx"),
+      "utf8",
+    );
     const outside: string[] = [];
     for (const [, name, paths] of source.matchAll(/^\s+(\w+): \[([^\]]*)\]/gm))
       for (const [, d] of paths!.matchAll(/"([^"]*)"/g)) {
         // A path's first move is absolute even when written lower-case.
         const start = /^[Mm]\s*(-?[\d.]+)[\s,]*(-?[\d.]+)/.exec(d!);
-        if (!start || [start[1], start[2]].some((value) => Number(value) < 0 || Number(value) > 24))
+        if (
+          !start ||
+          [start[1], start[2]].some(
+            (value) => Number(value) < 0 || Number(value) > 24,
+          )
+        )
           outside.push(`${name}: ${d}`);
       }
     expect(outside).toEqual([]);

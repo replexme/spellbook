@@ -18,11 +18,13 @@ export function uploadDocumentFile(
     };
     request.onload = () => {
       const body = request.response as { id?: string; error?: string } | null;
-      if (request.status >= 200 && request.status < 300 && body?.id) resolve(body.id);
+      if (request.status >= 200 && request.status < 300 && body?.id)
+        resolve(body.id);
       else
         reject(
           new UploadError(
-            body?.error ?? (request.status === 413 ? "file_too_large" : "unexpected_error"),
+            body?.error ??
+              (request.status === 413 ? "file_too_large" : "unexpected_error"),
           ),
         );
     };

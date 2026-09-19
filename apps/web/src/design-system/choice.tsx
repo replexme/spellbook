@@ -19,7 +19,14 @@ function moveFocus(
   selector: string,
 ) {
   if (!container) return null;
-  const keys = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"];
+  const keys = [
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowUp",
+    "ArrowDown",
+    "Home",
+    "End",
+  ];
   if (!keys.includes(event.key)) return null;
   const items = [...container.querySelectorAll<HTMLElement>(selector)].filter(
     (item) => !item.hasAttribute("disabled"),

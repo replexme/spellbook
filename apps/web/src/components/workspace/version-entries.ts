@@ -22,10 +22,17 @@ const GROUP_WINDOW_MS = 30 * 60 * 1000;
 export function dayLabel(value: string) {
   const date = new Date(value);
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const today = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  ).getTime();
   if (date.getTime() >= today) return "오늘";
   if (date.getTime() >= today - 86_400_000) return "어제";
-  return new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric" }).format(date);
+  return new Intl.DateTimeFormat("ko-KR", {
+    month: "long",
+    day: "numeric",
+  }).format(date);
 }
 
 function clip(text: string, limit = 48) {
@@ -55,7 +62,9 @@ export function versionEntries(versions: VersionHistoryItem[]): VersionEntry[] {
       version.origin === "manual" &&
       previous?.kind === "manual" &&
       last &&
-      new Date(last.createdAt).getTime() - new Date(version.createdAt).getTime() <= GROUP_WINDOW_MS
+      new Date(last.createdAt).getTime() -
+        new Date(version.createdAt).getTime() <=
+        GROUP_WINDOW_MS
     ) {
       previous.members.push(version);
       previous.current ||= version.current;
@@ -64,7 +73,9 @@ export function versionEntries(versions: VersionHistoryItem[]): VersionEntry[] {
       previous.detail = `${when(oldest.createdAt)}–${when(newest.createdAt).replace(/^.* /, "")} · 저장 ${previous.members.length}번`;
       continue;
     }
-    const restoredFrom = version.restoredFrom ? byId.get(version.restoredFrom) : null;
+    const restoredFrom = version.restoredFrom
+      ? byId.get(version.restoredFrom)
+      : null;
     entries.push({
       key: version.id,
       versionId: version.id,

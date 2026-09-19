@@ -415,7 +415,11 @@ export async function completeNativeTask(
       and expires_at > now() returning id
   `;
   if (!updated) throw new HttpError(409, "native_task_inactive");
-  if (value) await recordEditorEngine(native.editor_mode, (value as { engine?: unknown }).engine);
+  if (value)
+    await recordEditorEngine(
+      native.editor_mode,
+      (value as { engine?: unknown }).engine,
+    );
   return { ok: true };
 }
 
@@ -425,7 +429,10 @@ export async function completeNativeTask(
  * the file is opened. One row per editor mode; written only when it changes.
  */
 async function recordEditorEngine(editorMode: unknown, engine: unknown) {
-  const facts = engine as { patchLevel?: unknown; supportedOperations?: unknown } | null;
+  const facts = engine as {
+    patchLevel?: unknown;
+    supportedOperations?: unknown;
+  } | null;
   if (
     (editorMode !== "wopi" && editorMode !== "browser") ||
     !facts ||
@@ -433,10 +440,14 @@ async function recordEditorEngine(editorMode: unknown, engine: unknown) {
   )
     return;
   const operations = facts.supportedOperations
-    .filter((operation): operation is string => typeof operation === "string" && operation.length <= 64)
+    .filter(
+      (operation): operation is string =>
+        typeof operation === "string" && operation.length <= 64,
+    )
     .slice(0, 500)
     .sort();
-  const patchLevel = typeof facts.patchLevel === "string" ? facts.patchLevel.slice(0, 64) : null;
+  const patchLevel =
+    typeof facts.patchLevel === "string" ? facts.patchLevel.slice(0, 64) : null;
   await db()`
     insert into spellbook_editor_engines (editor_mode, patch_level, supported_operations, seen_at)
     values (${editorMode}, ${patchLevel}, ${db().json(operations)}, now())
@@ -457,8 +468,11 @@ export async function cancelNativeTurn(session: Session, documentId: string) {
     await sql`update spellbook_native_turns set status='cancelled', last_error='사용자가 작업을 중단했습니다.', updated_at=now() where job_id=${turn.job_id}`;
     await sql`update spellbook_jobs set status='failed', error='user_cancelled', updated_at=now() where id=${turn.job_id} and status in ('queued','running')`;
     await sql`update spellbook_native_tasks set status='expired', error='user_cancelled', updated_at=now() where turn_id=(select id from spellbook_native_turns where job_id=${turn.job_id}) and status in ('queued','delivered')`;
-    const [cancelled] = await sql`select id from spellbook_native_turns where job_id=${turn.job_id}`;
-    const summary = cancelled ? await storeTurnSummary(sql, cancelled.id) : null;
+    const [cancelled] =
+      await sql`select id from spellbook_native_turns where job_id=${turn.job_id}`;
+    const summary = cancelled
+      ? await storeTurnSummary(sql, cancelled.id)
+      : null;
     await sql`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
       select session_id,id,'error',${sql.json({ error: "작업을 중단했습니다.", summary } as never)} from spellbook_native_turns where job_id=${turn.job_id}`;
   });
@@ -674,7 +688,11 @@ async function storeTurnSummary(sql: any, turnId: string) {
  * the latest request of the session can be undone this way; the next save
  * is labelled as that undo.
  */
-export async function markNativeUndo(session: Session, documentId: string, turnId: unknown) {
+export async function markNativeUndo(
+  session: Session,
+  documentId: string,
+  turnId: unknown,
+) {
   if (typeof turnId !== "string" || !/^[0-9a-f-]{36}$/i.test(turnId))
     throw new HttpError(400, "invalid_native_turn");
   const native = await ownedSession(session, documentId);
@@ -684,10 +702,12 @@ export async function markNativeUndo(session: Session, documentId: string, turnI
       select id, status, changed, undone_at from spellbook_native_turns
       where session_id=${native.id} order by created_at desc limit 1
     `;
-    if (!latest || latest.id !== turnId) throw new HttpError(409, "undo_not_latest_request");
+    if (!latest || latest.id !== turnId)
+      throw new HttpError(409, "undo_not_latest_request");
     if (latest.status !== "completed" || !latest.changed)
       throw new HttpError(409, "undo_nothing_changed");
-    if (latest.undone_at) return { turnId, undoneAt: new Date(latest.undone_at).toISOString() };
+    if (latest.undone_at)
+      return { turnId, undoneAt: new Date(latest.undone_at).toISOString() };
     const [marked] = await sql`
       update spellbook_native_turns set undone_at=now(), updated_at=now()
       where id=${turnId} returning undone_at

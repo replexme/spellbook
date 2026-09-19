@@ -140,7 +140,9 @@ test("a PPTX reaches the live canvas, edits, saves and downloads", async ({
   const panel = page.getByRole("complementary", { name: "AI와 버전 기록" });
   await expect(panel).toBeVisible();
   // Without an AI connection the panel explains that direct editing works.
-  if (await panel.getByRole("heading", { name: "AI를 연결해 주세요" }).isVisible())
+  if (
+    await panel.getByRole("heading", { name: "AI를 연결해 주세요" }).isVisible()
+  )
     await expect(
       panel.getByText("AI 연결 전에도 편집기에서 직접 고칠 수 있어요."),
     ).toBeVisible();
@@ -219,7 +221,9 @@ test("a phone shows saved slides and the AI panel while the editor keeps running
     page.getByRole("button", { name: "PPTX 내려받기" }),
   ).toBeVisible();
   await expect(
-    page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
   ).resolves.toBe(true);
   await fs.mkdir(evidenceDir, { recursive: true });
   await page.screenshot({ path: path.join(evidenceDir, "mobile-editor.png") });

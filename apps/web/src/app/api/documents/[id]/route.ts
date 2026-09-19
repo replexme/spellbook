@@ -31,7 +31,9 @@ export async function PATCH(
 ) {
   try {
     const { id } = await context.params;
-    const body = (await request.json().catch(() => ({}))) as { fileName?: unknown };
+    const body = (await request.json().catch(() => ({}))) as {
+      fileName?: unknown;
+    };
     return Response.json(
       await renameDocument(await requireSession(request), id, body.fileName),
     );
@@ -46,7 +48,9 @@ export async function DELETE(
 ) {
   try {
     const { id } = await context.params;
-    return Response.json(await deleteDocument(await requireSession(request), id));
+    return Response.json(
+      await deleteDocument(await requireSession(request), id),
+    );
   } catch (error) {
     return routeError(error);
   }

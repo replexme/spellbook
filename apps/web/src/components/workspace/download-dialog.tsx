@@ -13,7 +13,10 @@ import { fontCheck, renderCheck } from "../document-checks";
 import { fileSize, when } from "../copy";
 
 /** Checks shown before a file leaves Spellbook. Only performed checks get a mark. */
-export function downloadChecks(summary: DocumentSummary | null, saved: boolean): CheckItem[] {
+export function downloadChecks(
+  summary: DocumentSummary | null,
+  saved: boolean,
+): CheckItem[] {
   const items: CheckItem[] = [];
   if (saved && summary?.version)
     items.push({
@@ -32,7 +35,8 @@ export function downloadChecks(summary: DocumentSummary | null, saved: boolean):
   if (summary?.version?.origin === "ai" && summary.version.changeCheck === true)
     items.push({
       tone: "ok",
-      label: "AI가 허용한 범위 밖을 바꾸지 않았는지 저장 파일에서 다시 검사했어요",
+      label:
+        "AI가 허용한 범위 밖을 바꾸지 않았는지 저장 파일에서 다시 검사했어요",
       evidence: "validation.json PackageChangeBudgetReport.valid",
     });
   const fonts = fontCheck(summary);
@@ -78,7 +82,13 @@ export function DownloadDialog({
           <Button onClick={onClose} disabled={busy}>
             취소
           </Button>
-          <Button variant="primary" icon="download" loading={busy} disabled={waiting} onClick={onDownload}>
+          <Button
+            variant="primary"
+            icon="download"
+            loading={busy}
+            disabled={waiting}
+            onClick={onDownload}
+          >
             {waiting
               ? "저장이 끝나기를 기다리는 중"
               : saved
@@ -102,7 +112,10 @@ export function DownloadDialog({
           <Spinner /> 마지막 저장본의 검사 결과를 불러오고 있어요.
         </p>
       ) : (
-        <CheckList items={downloadChecks(summary, saved)} label="내려받기 전 확인" />
+        <CheckList
+          items={downloadChecks(summary, saved)}
+          label="내려받기 전 확인"
+        />
       )}
     </Dialog>
   );
