@@ -1296,25 +1296,30 @@ try {
       });
     }
     if (engineOperationAvailable("set_line_style")) {
-      const dashName = observed.styleCatalog?.lineDashNames?.find(
-        (name) => name && name !== propertyTarget.lineDashName,
-      );
-      const markerNames = observed.styleCatalog?.lineMarkerNames ?? [];
-      const startArrowName = markerNames.find(
-        (name) => name && name !== propertyTarget.lineStartName,
-      );
-      const endArrowName = markerNames.find(
-        (name) =>
-          name &&
-          name !== propertyTarget.lineEndName &&
-          name !== startArrowName,
-      );
-      if (!dashName || !startArrowName || !endArrowName)
-        throw new Error("Document line style catalog is incomplete.");
+      // PowerPoint presets on an open line, each different from its current
+      // dash and line ends.
+      const lineTarget =
+        observed.slides
+          .flatMap((slide) => slide.elements)
+          .find(
+            (element) =>
+              element.parentElementId === null &&
+              /(?:Line|Connector)Shape$/u.test(String(element.kind)),
+          ) ?? propertyTarget;
       await editWithUndoRoundTrip({
         op: "set_line_style",
-        elementId: propertyTarget.elementId,
-        lineStyle: { dashName, startArrowName, endArrowName },
+        elementId: lineTarget.elementId,
+        lineStyle: {
+          dash: lineTarget.lineDash === "lgDashDot" ? "sysDash" : "lgDashDot",
+          startArrow:
+            lineTarget.lineStartArrow?.type === "triangle"
+              ? { type: "stealth", width: "lg", length: "sm" }
+              : { type: "triangle", width: "med", length: "lg" },
+          endArrow:
+            lineTarget.lineEndArrow?.type === "oval"
+              ? { type: "diamond", width: "sm", length: "med" }
+              : { type: "oval", width: "sm", length: "sm" },
+        },
       });
     }
     if (engineOperationAvailable("set_paragraph_format")) {

@@ -275,9 +275,9 @@ function withoutInactiveStyleValues(slides, authoredSlides = slides) {
         for (const field of [
           "lineColor",
           "lineWidth",
-          "lineDashName",
-          "lineStartName",
-          "lineEndName",
+          "lineDash",
+          "lineStartArrow",
+          "lineEndArrow",
           "lineOpacity",
         ])
           delete element[field];

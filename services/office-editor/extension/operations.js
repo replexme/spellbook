@@ -98,8 +98,6 @@ function spellbookDocumentOperation(request) {
     }
   };
   const styleCatalog = {
-    lineDashNames: documentStyleNames("com.sun.star.drawing.DashTable"),
-    lineMarkerNames: documentStyleNames("com.sun.star.drawing.MarkerTable"),
     fillGradientNames: documentStyleNames("com.sun.star.drawing.GradientTable"),
     fillHatchNames: documentStyleNames("com.sun.star.drawing.HatchTable"),
   };
@@ -288,6 +286,24 @@ function spellbookDocumentOperation(request) {
       (value || null)
     );
   };
+  // A line's dash and line ends as the PowerPoint presets PPTX export writes
+  // (engine patch 31): the dash name, and an arrowhead's type, width and
+  // length. null without a line, a line end, or engine support.
+  const linePreset = (shape, name) => {
+    try {
+      return String(shape.getPropertyValue(name) ?? "") || null;
+    } catch (_) {
+      return null;
+    }
+  };
+  const lineArrowText = (arrow) =>
+    arrow ? `${arrow.type} ${arrow.width} ${arrow.length}` : "none";
+  const lineArrowPreset = (shape, name) => {
+    const [type, width, length] = (linePreset(shape, name) ?? "none").split(
+      " ",
+    );
+    return type === "none" ? null : { type, width, length };
+  };
   const safeTextProperty = (shape, name) => {
     try {
       const cursor = shape.createTextCursor();
@@ -365,9 +381,9 @@ function spellbookDocumentOperation(request) {
       ["effects.glowTransparency", "GlowEffectTransparency"],
       ["effects.softEdgeRadius", "SoftEdgeRadius"],
       ["lineStyle", "LineStyle"],
-      ["lineDashName", "LineDashName"],
-      ["lineStartName", "LineStartName"],
-      ["lineEndName", "LineEndName"],
+      ["lineDash", "LineDash"],
+      ["lineStartArrow", "LineStart"],
+      ["lineEndArrow", "LineEnd"],
       ["graphicCrop", "GraphicCrop"],
       ["fillOpacity", "FillTransparence"],
       ["lineOpacity", "LineTransparence"],
@@ -1872,9 +1888,9 @@ function spellbookDocumentOperation(request) {
               softEdgeRadius: safeProperty(shape, "SoftEdgeRadius"),
             },
             lineStyle: enumName(safeProperty(shape, "LineStyle")),
-            lineDashName: safeProperty(shape, "LineDashName"),
-            lineStartName: safeProperty(shape, "LineStartName"),
-            lineEndName: safeProperty(shape, "LineEndName"),
+            lineDash: linePreset(shape, "SpellbookLineDash"),
+            lineStartArrow: lineArrowPreset(shape, "SpellbookLineStartArrow"),
+            lineEndArrow: lineArrowPreset(shape, "SpellbookLineEndArrow"),
             graphicCrop: safeProperty(shape, "GraphicCrop"),
             picture: pictureDetails(shape),
             fillOpacity:
@@ -5638,43 +5654,76 @@ function spellbookDocumentOperation(request) {
         if (command.lockSize !== null && command.lockSize !== undefined)
           properties.SizeProtect = command.lockSize;
       } else if (command.op === "set_line_style") {
+        // PowerPoint presets: a:prstDash, and a:headEnd/a:tailEnd type, width
+        // and length. A null dash or line end keeps its current value.
         const lineStyle = command.lineStyle;
-        const propertyByField = {
-          dashName: "LineDashName",
-          startArrowName: "LineStartName",
-          endArrowName: "LineEndName",
-        };
+        const dashes = [
+          "solid",
+          "dot",
+          "dash",
+          "dashDot",
+          "lgDash",
+          "lgDashDot",
+          "lgDashDotDot",
+          "sysDot",
+          "sysDash",
+          "sysDashDot",
+          "sysDashDotDot",
+        ];
+        const arrowTypes = [
+          "none",
+          "triangle",
+          "stealth",
+          "diamond",
+          "oval",
+          "arrow",
+        ];
+        const arrowSizes = ["sm", "med", "lg"];
         if (
           !lineStyle ||
           typeof lineStyle !== "object" ||
           Array.isArray(lineStyle) ||
           Object.keys(lineStyle).some(
-            (name) => !Object.hasOwn(propertyByField, name),
+            (name) => !["dash", "startArrow", "endArrow"].includes(name),
           )
         )
           throw new Error("invalid_line_style");
-        for (const [name, value] of Object.entries(lineStyle)) {
-          if (value === null || value === undefined) continue;
+        if (lineStyle.dash !== null && lineStyle.dash !== undefined) {
+          if (!dashes.includes(lineStyle.dash))
+            throw new Error("invalid_line_style");
+          properties.SpellbookLineDash = lineStyle.dash;
+        }
+        for (const [field, property] of [
+          ["startArrow", "SpellbookLineStartArrow"],
+          ["endArrow", "SpellbookLineEndArrow"],
+        ]) {
+          const arrow = lineStyle[field];
+          if (arrow === null || arrow === undefined) continue;
+          const size = (value) =>
+            value === null || value === undefined ? "med" : value;
           if (
-            typeof value !== "string" ||
-            value.length > 255 ||
-            /[\u0000-\u001f]/u.test(value)
+            typeof arrow !== "object" ||
+            Array.isArray(arrow) ||
+            Object.keys(arrow).some(
+              (name) => !["type", "width", "length"].includes(name),
+            ) ||
+            !arrowTypes.includes(arrow.type) ||
+            !arrowSizes.includes(size(arrow.width)) ||
+            !arrowSizes.includes(size(arrow.length))
           )
             throw new Error("invalid_line_style");
-          const availableNames =
-            name === "dashName"
-              ? styleCatalog.lineDashNames
-              : styleCatalog.lineMarkerNames;
-          if (value && !availableNames.includes(value))
-            throw new Error("line_style_name_not_in_document_catalog");
-          properties[propertyByField[name]] = value;
+          properties[property] = lineArrowText(
+            arrow.type === "none"
+              ? null
+              : {
+                  type: arrow.type,
+                  width: size(arrow.width),
+                  length: size(arrow.length),
+                },
+          );
         }
-        if (lineStyle.dashName) properties.LineStyle = 2;
-        else if (
-          lineStyle.dashName === "" &&
-          ["DASH", "2"].includes(enumToken(element.lineStyle))
-        )
-          properties.LineStyle = 1;
+        if (!Object.keys(properties).length)
+          throw new Error("no_line_style_supplied");
       } else if (command.op === "set_media_playback") {
         const playback = command.mediaPlayback;
         const zoomValues = {
@@ -5783,9 +5832,11 @@ function spellbookDocumentOperation(request) {
         SoftEdgeRadius: ["effects", "softEdgeRadius"],
         MoveProtect: "moveProtected",
         SizeProtect: "sizeProtected",
-        LineDashName: "lineDashName",
-        LineStartName: "lineStartName",
-        LineEndName: "lineEndName",
+        SpellbookLineDash: "lineDash",
+        SpellbookLineStartArrow: (value, target) =>
+          lineArrowText(target.lineStartArrow) === value,
+        SpellbookLineEndArrow: (value, target) =>
+          lineArrowText(target.lineEndArrow) === value,
         Loop: ["media", "loop"],
         Mute: ["media", "muted"],
         VolumeDB: ["media", "volumeDb"],
@@ -5835,10 +5886,26 @@ function spellbookDocumentOperation(request) {
       const undo = model.getUndoManager();
       const undoCount = undo.getAllUndoActionTitles().length;
       const objectPath = command.elementId.split("/").slice(1).join("/");
-      transformSlides([
-        { JumpToSlide: slideIndex },
-        { [`SetObjectProperties.${objectPath}`]: properties },
-      ]);
+      if (command.op === "set_line_style") {
+        // The engine applies a preset the way PPTX import does, and records
+        // the attributes before it for Undo.
+        const shape = resolveShape(command.elementId);
+        const ownsUndoContext = !request.transactionActive;
+        if (ownsUndoContext) undo.enterUndoContext("AI line style");
+        try {
+          for (const [name, value] of Object.entries(properties))
+            shape.setPropertyValue(name, new uno.Any(uno.type.string, value));
+        } catch (error) {
+          if (ownsUndoContext) undo.leaveUndoContext();
+          if (undo.getAllUndoActionTitles().length > undoCount) undo.undo();
+          throw error;
+        }
+        if (ownsUndoContext) undo.leaveUndoContext();
+      } else
+        transformSlides([
+          { JumpToSlide: slideIndex },
+          { [`SetObjectProperties.${objectPath}`]: properties },
+        ]);
       const after = read();
       const target = after.slides[slideIndex].elements.find(
         (candidate) => candidate.elementId === command.elementId,

@@ -558,9 +558,6 @@ test("browser adapter writes only bounded object, crop and interaction fields", 
           LineTransparence: 43,
           LineWidth: 200,
           LineStyle: 2,
-          LineDashName: "Fine Dashed",
-          LineStartName: "Arrow",
-          LineEndName: "Square",
           RotateAngle: 1_500,
           TextLeftDistance: 420,
           Shadow: true,
@@ -585,9 +582,6 @@ test("browser adapter writes only bounded object, crop and interaction fields", 
   assert.equal(runtime.secondShape.properties.LineTransparence, 43);
   assert.equal(runtime.secondShape.properties.LineWidth, 200);
   assert.equal(runtime.secondShape.properties.LineStyle, "dash");
-  assert.equal(runtime.secondShape.properties.LineDashName, "Fine Dashed");
-  assert.equal(runtime.secondShape.properties.LineStartName, "Arrow");
-  assert.equal(runtime.secondShape.properties.LineEndName, "Square");
   assert.equal(runtime.secondShape.properties.RotateAngle, 1_500);
   assert.deepEqual(
     runtime.mutations.filter(([, property]) =>

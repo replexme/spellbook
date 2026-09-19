@@ -820,7 +820,7 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 27
+        "minEnginePatch": 31
       },
       "set_printable": {
         "family": "object_style",
@@ -1804,17 +1804,78 @@
         "type": ["object", "null"],
         "additionalProperties": false,
         "properties": {
-          "dashName": { "type": ["string", "null"], "maxLength": 255 },
-          "startArrowName": {
+          "dash": {
             "type": ["string", "null"],
-            "maxLength": 255
+            "enum": [
+              "solid",
+              "dot",
+              "dash",
+              "dashDot",
+              "lgDash",
+              "lgDashDot",
+              "lgDashDotDot",
+              "sysDot",
+              "sysDash",
+              "sysDashDot",
+              "sysDashDotDot",
+              null
+            ]
           },
-          "endArrowName": {
-            "type": ["string", "null"],
-            "maxLength": 255
+          "startArrow": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "triangle",
+                  "stealth",
+                  "diamond",
+                  "oval",
+                  "arrow"
+                ]
+              },
+              "width": {
+                "type": ["string", "null"],
+                "enum": ["sm", "med", "lg", null]
+              },
+              "length": {
+                "type": ["string", "null"],
+                "enum": ["sm", "med", "lg", null]
+              }
+            },
+            "required": ["type", "width", "length"]
+          },
+          "endArrow": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "triangle",
+                  "stealth",
+                  "diamond",
+                  "oval",
+                  "arrow"
+                ]
+              },
+              "width": {
+                "type": ["string", "null"],
+                "enum": ["sm", "med", "lg", null]
+              },
+              "length": {
+                "type": ["string", "null"],
+                "enum": ["sm", "med", "lg", null]
+              }
+            },
+            "required": ["type", "width", "length"]
           }
         },
-        "required": ["dashName", "startArrowName", "endArrowName"]
+        "required": ["dash", "startArrow", "endArrow"],
+        "description": "PowerPoint line presets: the dash, and the arrowhead at the line's start and end with its width and length (medium when null). A null dash or line end keeps its current value."
       },
       "shapeFill": {
         "type": ["object", "null"],
