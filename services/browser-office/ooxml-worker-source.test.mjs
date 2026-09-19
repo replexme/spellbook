@@ -2570,6 +2570,31 @@ test("native snapshot adds new comment authors but leaves other presentation cha
   assert.ok(merged["ppt/commentAuthors.xml"]);
   assert.ok(merged["ppt/comments/comment1.xml"]);
 
+  // Deleting that comment, the deck's last, drops the authors part again, and
+  // its relationship leaves the author's copy.
+  const deleted = unzipSync(
+    preserveOriginalPptxParts(
+      zipSync(merged),
+      zipSync(engineSave(true)),
+      zipSync(engineSave(false)),
+      ["delete_comment"],
+    ).bytes,
+  );
+  assert.deepEqual(
+    deleted["ppt/presentation.xml"],
+    original["ppt/presentation.xml"],
+  );
+  assert.equal(
+    strFromU8(deleted["ppt/_rels/presentation.xml.rels"]),
+    strFromU8(original["ppt/_rels/presentation.xml.rels"]),
+  );
+  assert.equal(deleted["ppt/commentAuthors.xml"], undefined);
+  assert.equal(deleted["ppt/comments/comment1.xml"], undefined);
+  assert.doesNotMatch(
+    strFromU8(deleted["[Content_Types].xml"]),
+    /commentAuthors|comments\/comment1/u,
+  );
+
   // A presentation change beyond the new relationship is not this merge's
   // to make: the engine's save is not accepted in its place either.
   assert.throws(

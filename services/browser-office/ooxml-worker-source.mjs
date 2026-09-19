@@ -1604,14 +1604,16 @@ function mergeThemeValues(originalBytes, noEditBytes, editedBytes, part) {
 // taken as saved. A deck without a notes master gets one when a slide first
 // receives notes, and one without comment authors gets that part with its
 // first comment: only the new relationship and, for a notes master, its id
-// list entry join the author's copies. Otherwise the author's copies stay as
-// they are. The engine also rewrites the notes page size on some saves, which
-// no edit here asks for. Any other change to the presentation part is left
-// to the ordinary merge.
+// list entry join the author's copies. Deleting the deck's last comment drops
+// the comment authors part, and its relationship leaves the author's copy.
+// Otherwise the author's copies stay as they are. The engine also rewrites
+// the notes page size on some saves, which no edit here asks for. Any other
+// change to the presentation part is left to the ordinary merge.
 const addedPresentationRelationships = new Set([
   "notesMaster",
   "commentAuthors",
 ]);
+const removedPresentationRelationships = new Set(["commentAuthors"]);
 
 function mergePresentationParts(original, noEdit, edited) {
   const hasPresentation = (entries) =>
@@ -1651,9 +1653,13 @@ function mergePresentationParts(original, noEdit, edited) {
   const added = changed.filter(
     (relationship) => !normalizedIdentities.has(identity(relationship)),
   );
+  const removed = normalized.filter(
+    (relationship) => !changedIdentities.has(identity(relationship)),
+  );
   if (
-    normalized.some(
-      (relationship) => !changedIdentities.has(identity(relationship)),
+    removed.some(
+      ({ kind, target }) =>
+        !removedPresentationRelationships.has(kind) || edited[target],
     ) ||
     added.some(
       ({ kind }) =>
@@ -1699,7 +1705,7 @@ function mergePresentationParts(original, noEdit, edited) {
     !samePartBytes(comparable(noEdit, normalized), comparable(edited, changed))
   )
     return null;
-  if (!added.length)
+  if (!added.length && !removed.length)
     return {
       [presentationPath]: original[presentationPath],
       [presentationRelationshipsPath]: original[presentationRelationshipsPath],
@@ -1708,6 +1714,10 @@ function mergePresentationParts(original, noEdit, edited) {
   const relationships = parseXml(original, presentationRelationshipsPath);
   const presentation = parseXml(original, presentationPath);
   let presentationChanged = false;
+  for (const { kind } of removed)
+    for (const element of relationshipElements(relationships))
+      if (element.getAttribute("Type")?.split("/").at(-1) === kind)
+        element.parentNode.removeChild(element);
   for (const relationship of added) {
     // Every part the new one needs arrives from the engine; none may take the
     // place of one the author has.
