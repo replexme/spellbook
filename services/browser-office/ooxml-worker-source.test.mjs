@@ -2155,7 +2155,9 @@ test("native snapshot keeps the authored XML of shapes a command did not name", 
         ).bytes,
       )["ppt/slides/slide1.xml"],
     );
-  const targeted = preserve([{ slideIndex: 0, name: "TextBox 1" }]);
+  const targeted = preserve([
+    { op: "text_shadow", slideIndex: 0, name: "TextBox 1" },
+  ]);
   assert.match(
     targeted,
     /<p:cNvPr id="3" name="Rectangle 2"\/>[\s\S]*<a:p><a:pPr algn="ctr"\/><\/a:p>/u,
@@ -2204,7 +2206,7 @@ test("native snapshot takes only what the command changed inside the shape it na
         zipSync(withEngineRectangle(original, "2563eb")),
         zipSync(withEngineRectangle(original, "4f46e5")),
         ["fill_color"],
-        [{ slideIndex: 0, name: "Rectangle 2" }],
+        [{ op: "fill_color", slideIndex: 0, name: "Rectangle 2" }],
       ).bytes,
     )["ppt/slides/slide1.xml"],
   );
@@ -2235,7 +2237,7 @@ test("native snapshot never keeps the author's color beside a new engine color",
         zipSync(withEngineRectangle(original, "4472c4")),
         zipSync(withEngineRectangle(original, "ff0000")),
         ["fill_color"],
-        [{ slideIndex: 0, name: "Rectangle 2" }],
+        [{ op: "fill_color", slideIndex: 0, name: "Rectangle 2" }],
       ).bytes,
     )[slidePath],
   );
@@ -2269,7 +2271,7 @@ test("native snapshot takes the engine's element where the command changed its s
         zipSync(engineSave(["Spellbook 검증 العربية"])),
         zipSync(engineSave(["First", "Second"])),
         ["replace_text"],
-        [{ slideIndex: 0, name: "TextBox 1" }],
+        [{ op: "replace_text", slideIndex: 0, name: "TextBox 1" }],
       ).bytes,
     )["ppt/slides/slide1.xml"],
   );
@@ -2326,7 +2328,7 @@ test("native snapshot keeps the author's connector and animation on a slide it e
           zipSync(engineSave("2563eb", 500)),
           zipSync(edited),
           ["fill_color"],
-          [{ slideIndex: 0, name: "Rectangle 2" }],
+          [{ op: "fill_color", slideIndex: 0, name: "Rectangle 2" }],
         ).bytes,
       )[slidePath],
     );
@@ -2375,7 +2377,7 @@ test("native snapshot takes the engine's slide when a shape reference cannot fol
         zipSync(engineSave("2563eb")),
         zipSync(edited),
         ["fill_color"],
-        [{ slideIndex: 0, name: "Rectangle 2" }],
+        [{ op: "fill_color", slideIndex: 0, name: "Rectangle 2" }],
       ).bytes,
     )[slidePath],
   );
@@ -2700,7 +2702,7 @@ test("native snapshot ignores targets for commands that restructure the shape tr
         zipSync(noEdit),
         zipSync(edited),
         ["z_order"],
-        [{ slideIndex: 0, name: "TextBox 1" }],
+        [{ op: "z_order", slideIndex: 0, name: "TextBox 1" }],
       ).bytes,
     )["ppt/slides/slide1.xml"],
   );
@@ -2740,10 +2742,194 @@ test("native snapshot keeps slides a confined command did not target as authored
     zipSync(engineSave(original, false)),
     zipSync(engineSave(original, true)),
     ["text_shadow"],
-    [{ slideIndex: 0, name: "TextBox 1" }],
+    [{ op: "text_shadow", slideIndex: 0, name: "TextBox 1" }],
   );
   const merged = unzipSync(result.bytes);
   assert.match(strFromU8(merged[firstSlide]), /outerShdw/u);
   assert.deepEqual(merged[secondSlide], original[secondSlide]);
   assert.ok(!result.report.changedParts.includes(secondSlide));
+});
+
+// Two slides as the engine saves them: without the author's color mapping
+// override, every shape renumbered by `shift`, the rectangle's empty
+// paragraph with or without its alignment, and the first slide's background
+// in `background`.
+function withTwoSlideEngineSave(
+  entries,
+  paths,
+  { shift, alignment, background },
+) {
+  const next = { ...entries };
+  for (const [index, part] of paths.entries()) {
+    let slide = strFromU8(entries[part])
+      .replace("<p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>", "")
+      .replace(
+        'id="2" name="TextBox 1"',
+        `id="${66 + shift + index * 10}" name="TextBox 1"`,
+      )
+      .replace(
+        'id="3" name="Rectangle 2"',
+        `id="${67 + shift + index * 10}" name="Rectangle 2"`,
+      )
+      .replace(
+        '<a:p><a:pPr algn="ctr"/></a:p>',
+        alignment
+          ? '<a:p><a:pPr marR="0" algn="ctr"/><a:endParaRPr sz="1800"/></a:p>'
+          : '<a:p><a:endParaRPr sz="1800"/></a:p>',
+      );
+    if (index === 0)
+      slide = slide.replace(
+        '<a:srgbClr val="F8FAFC"/>',
+        `<a:srgbClr val="${background}"/>`,
+      );
+    next[part] = strToU8(slide);
+  }
+  return next;
+}
+
+test("native snapshot keeps every slide but the one a slide command names as authored", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "duplicate_slide",
+      slideIndex: 0,
+      insertIndex: 1,
+    }).bytes,
+  );
+  const paths = slidePaths(original);
+  // Between its two saves the engine renumbered every shape (the edit added
+  // a layout earlier in its save order) and dropped the empty paragraph's
+  // alignment on both slides; only the first slide's background was edited.
+  const result = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(
+      withTwoSlideEngineSave(original, paths, {
+        shift: 0,
+        alignment: true,
+        background: "F8FAFC",
+      }),
+    ),
+    zipSync(
+      withTwoSlideEngineSave(original, paths, {
+        shift: 1,
+        alignment: false,
+        background: "112233",
+      }),
+    ),
+    ["set_background"],
+    [{ op: "set_background", slideIndex: 0 }],
+  );
+  const merged = unzipSync(result.bytes);
+  const first = strFromU8(merged[paths[0]]);
+  assert.match(first, /<a:srgbClr val="112233"\/>/u);
+  // The slide command changed no shape: both keep the author's XML and ids.
+  assert.match(
+    first,
+    /<p:cNvPr id="2" name="TextBox 1"\/>[\s\S]*<p:cNvPr id="3" name="Rectangle 2"\/>[\s\S]*<a:p><a:pPr algn="ctr"\/><\/a:p>/u,
+  );
+  assert.deepEqual(merged[paths[1]], original[paths[1]]);
+  assert.ok(!result.report.changedParts.includes(paths[1]));
+
+  // Without its slide the command is not confined, and the engine's rewrite
+  // of the other slide reaches the file.
+  const unconfined = unzipSync(
+    preserveOriginalPptxParts(
+      zipSync(original),
+      zipSync(
+        withTwoSlideEngineSave(original, paths, {
+          shift: 0,
+          alignment: true,
+          background: "F8FAFC",
+        }),
+      ),
+      zipSync(
+        withTwoSlideEngineSave(original, paths, {
+          shift: 1,
+          alignment: false,
+          background: "112233",
+        }),
+      ),
+      ["set_background"],
+      null,
+    ).bytes,
+  );
+  assert.notDeepEqual(unconfined[paths[1]], original[paths[1]]);
+});
+
+test("native snapshot pairs shapes the engine renumbered between its saves", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const renumbered = (entries, from, to) => {
+    const part = "ppt/slides/slide1.xml";
+    return {
+      ...entries,
+      [part]: strToU8(
+        strFromU8(entries[part])
+          .replace('id="67" name="TextBox 1"', `id="${to}" name="TextBox 1"`)
+          .replace(
+            'id="68" name="Rectangle 2"',
+            `id="${to + 1}" name="Rectangle 2"`,
+          ),
+      ),
+    };
+  };
+  const noEdit = withEngineSave(original, {
+    shadow: false,
+    keepRectangleAlignment: true,
+  });
+  // A layout added earlier in the engine's save order moved every id by 3.
+  const edited = renumbered(
+    withEngineSave(original, { shadow: true, keepRectangleAlignment: false }),
+    67,
+    70,
+  );
+  const merged = strFromU8(
+    unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(original),
+        zipSync(noEdit),
+        zipSync(edited),
+        ["text_shadow"],
+        [{ op: "text_shadow", slideIndex: 0, name: "TextBox 1" }],
+      ).bytes,
+    )["ppt/slides/slide1.xml"],
+  );
+  assert.match(
+    merged,
+    /<p:cNvPr id="3" name="Rectangle 2"\/>[\s\S]*<a:p><a:pPr algn="ctr"\/><\/a:p>/u,
+  );
+  assert.match(
+    merged,
+    /<p:cNvPr id="2" name="TextBox 1"\/>[\s\S]*<a:outerShdw dist="12700"/u,
+  );
+  assert.doesNotMatch(merged, /id="7[01]"/u);
+});
+
+test("native snapshot keeps a slide the engine only renumbered as authored", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "duplicate_slide",
+      slideIndex: 0,
+      insertIndex: 1,
+    }).bytes,
+  );
+  const paths = slidePaths(original);
+  const save = (shift, background) =>
+    zipSync(
+      withTwoSlideEngineSave(original, paths, {
+        shift,
+        alignment: true,
+        background,
+      }),
+    );
+  // A direct human edit names no operation, so nothing confines it.
+  const result = preserveOriginalPptxParts(
+    zipSync(original),
+    save(0, "F8FAFC"),
+    save(4, "112233"),
+    null,
+  );
+  assert.ok(result.report.changedParts.includes(paths[0]));
+  assert.ok(!result.report.changedParts.includes(paths[1]));
+  assert.deepEqual(unzipSync(result.bytes)[paths[1]], original[paths[1]]);
 });

@@ -8,6 +8,7 @@ import {
   quantizedGeometryEquivalent,
 } from "./document-state-evidence.mjs";
 import {
+  historyStateDifference,
   historyStateEquivalent,
   persistenceStateFromObservation,
 } from "./persistence-evidence.mjs";
@@ -201,7 +202,7 @@ try {
       await page.waitForTimeout(100);
     } while (Date.now() < deadline);
     throw new Error(
-      `Native ${label} did not restore the product-equivalent document state: ${JSON.stringify({ expectedRevision: revision, actualRevision: candidate?.revision, difference: firstDocumentStateDifference({ slides: expected.slides, masters: expected.masters }, { slides: candidate?.slides, masters: candidate?.masters }), expected: summarizeSlides(expected.slides), actual: summarizeSlides(candidate?.slides ?? []) })}`,
+      `Native ${label} did not restore the product-equivalent document state: ${JSON.stringify({ expectedRevision: revision, actualRevision: candidate?.revision, difference: historyStateDifference({ revision, slides: expected.slides, masters: expected.masters }, candidate), expected: summarizeSlides(expected.slides), actual: summarizeSlides(candidate?.slides ?? []) })}`,
     );
   };
   const settleObservation = async (label) => {
@@ -1088,10 +1089,15 @@ try {
     });
   }
 
+  // A rectangle the probe drew, or the custom shape it becomes when the
+  // browser reopens a saved package for Undo or Redo.
   const transactionTarget = observed.slides[0].elements.find(
     (element) =>
       element.parentElementId === null &&
-      String(element.kind).endsWith("RectangleShape"),
+      (String(element.kind).endsWith("RectangleShape") ||
+        (String(element.kind).endsWith("CustomShape") &&
+          element.geometryType === "rect" &&
+          !element.text)),
   );
   if (!transactionTarget)
     throw new Error("No rectangle target for transaction probe.");

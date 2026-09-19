@@ -81,10 +81,6 @@ export function humanEditPreservationBudget() {
   };
 }
 
-// Operations whose effect the contract confines to the elements they name.
-// Anything else the engine rewrote while saving them is export noise that the
-// merge may replace with the author's XML. Reordering and regrouping change
-// the shape tree itself, so they are excluded.
 const elementScopedTargets = new Set([
   "element",
   "elements",
@@ -93,19 +89,28 @@ const elementScopedTargets = new Set([
 ]);
 const shapeTreeIdentityEffects = new Set(["reorder", "reparent"]);
 
-export function operationsConfinedToTargets(operations) {
-  return (
-    Array.isArray(operations) &&
-    operations.length > 0 &&
-    operations.every((operation) => {
-      const contract = capabilities.mutationModel.operations[operation];
-      return (
-        contract !== undefined &&
-        elementScopedTargets.has(contract.target) &&
-        !shapeTreeIdentityEffects.has(contract.identityEffect)
-      );
-    })
-  );
+/**
+ * What the contract lets an operation change on the one slide it targets:
+ * only the shapes it names ("named_shapes"), any shape ("any_shape"), or none
+ * of the slide's existing shapes ("no_shape": slide settings, notes, comments
+ * and animation timing, or a new object beside them). Every other slide and
+ * shape is export noise that the merge replaces with the author's XML. null
+ * means the operation can reach beyond its slide: slide structure, document
+ * and master settings.
+ */
+export function operationSlideScope(operation) {
+  const contract = capabilities.mutationModel.operations[operation];
+  if (!contract) return null;
+  if (elementScopedTargets.has(contract.target))
+    // Reordering and regrouping change the shape tree itself.
+    return shapeTreeIdentityEffects.has(contract.identityEffect)
+      ? "any_shape"
+      : "named_shapes";
+  if (contract.target === "animation_effect") return "no_shape";
+  if (contract.target !== "slide" || contract.family === "slide_structure")
+    return null;
+  // Applying a layout adds, removes and moves the slide's placeholders.
+  return operation === "set_slide_layout" ? "any_shape" : "no_shape";
 }
 
 export function nativePreservationBudget(operations) {

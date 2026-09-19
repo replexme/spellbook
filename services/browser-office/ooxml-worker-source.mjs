@@ -6,7 +6,7 @@ import {
   classifyNativePackagePart,
   nativePreservationBudget,
   humanEditPreservationBudget,
-  operationsConfinedToTargets,
+  operationSlideScope,
 } from "./native-preservation-policy.mjs";
 
 const presentationNamespace =
@@ -120,6 +120,23 @@ function sameEngineExportPart(part, left, right) {
       "fld",
     ))
       field.setAttribute("id", `__office_field_${++fieldIndex}__`);
+    // The engine numbers shapes across the deck in save order, so an edit
+    // elsewhere renumbers this part's shapes. Number them, and the references
+    // to them, by position instead.
+    const shapeIds = new Map();
+    for (const properties of document.getElementsByTagNameNS(
+      presentationNamespace,
+      "cNvPr",
+    )) {
+      const id = properties.getAttribute("id");
+      if (!shapeIds.has(id))
+        shapeIds.set(id, `__office_shape_${shapeIds.size + 1}__`);
+      properties.setAttribute("id", shapeIds.get(id));
+    }
+    for (const { element, attribute } of shapeReferences(document)) {
+      const id = shapeIds.get(element.getAttribute(attribute));
+      if (id) element.setAttribute(attribute, id);
+    }
     return serializeXml(document);
   };
   return samePartBytes(normalized(left), normalized(right));
@@ -134,20 +151,20 @@ const xmlHasText = (node) =>
       (child.nodeType === 3 || child.nodeType === 4) &&
       child.nodeValue.trim() !== "",
   );
-// The engine generates a new field GUID on every save.
+// The engine generates a new field GUID on every save, and numbers shapes
+// across the deck in save order.
 const volatileXmlAttribute = (element, attribute) =>
-  element.namespaceURI === drawingNamespace &&
-  element.localName === "fld" &&
   !attribute.namespaceURI &&
-  attribute.localName === "id";
+  attribute.localName === "id" &&
+  ((element.namespaceURI === drawingNamespace && element.localName === "fld") ||
+    (element.namespaceURI === presentationNamespace &&
+      element.localName === "cNvPr"));
 function comparableXml(node) {
   const copy = node.cloneNode(true);
   for (const element of [copy, ...copy.getElementsByTagName("*")])
-    if (
-      element.namespaceURI === drawingNamespace &&
-      element.localName === "fld"
-    )
-      element.removeAttribute("id");
+    for (const attribute of [...element.attributes])
+      if (volatileXmlAttribute(element, attribute))
+        element.removeAttribute(attribute.name);
   return new XMLSerializer().serializeToString(copy);
 }
 function occurrenceKeys(nodes) {
@@ -377,6 +394,30 @@ function preserveUnaffectedSlideShapes(
     return false;
   };
   const editedById = new Map(changed.map((node) => [identity(node)?.id, node]));
+  const uniqueByName = (nodes) => {
+    const byName = new Map();
+    for (const node of nodes) {
+      const name = identity(node)?.name;
+      if (name) byName.set(name, byName.has(name) ? null : node);
+    }
+    return byName;
+  };
+  const editedByName = uniqueByName(changed);
+  const baselineByName = uniqueByName(normalized);
+  // The engine numbers shapes across the deck in save order, so a save after
+  // an edit that added a layout or a shape earlier in that order renumbers
+  // unchanged shapes. A name unique in both saves still pairs them.
+  const editedCounterpart = (baseline) => {
+    const { id, name } = identity(baseline);
+    const byId = editedById.get(id);
+    const candidate =
+      byId && identity(byId)?.name === name
+        ? byId
+        : baselineByName.get(name) === baseline
+          ? editedByName.get(name)
+          : null;
+    return candidate?.localName === baseline.localName ? candidate : null;
+  };
   const additiveOnly =
     sourceOperations.length > 0 &&
     sourceOperations.every((operation) =>
@@ -405,25 +446,42 @@ function preserveUnaffectedSlideShapes(
       sourceIdentity.name !== baselineIdentity.name
     )
       continue;
-    const editedShape = editedById.get(baselineIdentity.id);
-    if (
-      !editedShape ||
-      editedShape.localName !== baseline.localName ||
-      identity(editedShape)?.name !== baselineIdentity.name
-    )
-      continue;
-    const pair = {
+    const editedShape = editedCounterpart(baseline);
+    if (!editedShape) continue;
+    pairs.push({
+      source,
+      baseline,
+      editedShape,
       sourceId: sourceIdentity.id,
       baselineId: baselineIdentity.id,
       editedId: identity(editedShape).id,
       finalId: identity(editedShape).id,
-    };
-    pairs.push(pair);
+    });
+  }
+  // An engine element as the author would name it: its references to other
+  // shapes in the author's ids, and without its own engine-numbered id.
+  const asAuthored = (node, ids) => {
+    const copy = node.cloneNode(true);
+    for (const { element, attribute } of shapeReferences(copy)) {
+      const id = ids.get(element.getAttribute(attribute));
+      if (id !== undefined) element.setAttribute(attribute, id);
+    }
+    return comparableXml(copy);
+  };
+  const baselineInAuthorIds = new Map(
+    pairs.map((pair) => [pair.baselineId, pair.sourceId]),
+  );
+  const editedInAuthorIds = new Map(
+    pairs.map((pair) => [pair.editedId, pair.sourceId]),
+  );
+  for (const pair of pairs) {
+    const { source, baseline, editedShape } = pair;
     if (hasRelationshipReference(source)) continue;
     if (
       additiveOnly ||
       untargeted(source) ||
-      samePartBytes(serializeXml(editedShape), serializeXml(baseline))
+      asAuthored(editedShape, editedInAuthorIds) ===
+        asAuthored(baseline, baselineInAuthorIds)
     ) {
       replacements.push({
         pair,
@@ -1118,26 +1176,39 @@ function orderedSlidePaths(entries) {
   });
 }
 
-// The author's names of the shapes the commands target, per slide part.
-// Null unless every operation is confined to the shapes it names and every
-// target was identified, in which case the merge keeps nothing else from
-// the engine's save.
+// The slide parts the commands target, each with the author's names of the
+// shapes they may change there (null: any shape). Null unless every operation
+// is confined to its slide and every target was identified; the merge then
+// keeps every other slide, and every other shape, as authored.
 function shapeTargetsBySlide(original, sourceOperations, sourceTargets) {
   if (
     !Array.isArray(sourceTargets) ||
     sourceTargets.length === 0 ||
-    !operationsConfinedToTargets(sourceOperations)
+    !sourceOperations.every(
+      (operation) =>
+        operationSlideScope(operation) !== null &&
+        sourceTargets.some((target) => target?.op === operation),
+    )
   )
     return null;
   const slidePaths = orderedSlidePaths(original);
   const targets = new Map();
   for (const target of sourceTargets) {
+    const scope = sourceOperations.includes(target?.op)
+      ? operationSlideScope(target.op)
+      : null;
     const part = Number.isSafeInteger(target?.slideIndex)
       ? slidePaths[target.slideIndex]
       : null;
-    if (!part || typeof target.name !== "string" || !target.name) return null;
+    if (!scope || !part) return null;
+    if (scope === "any_shape") {
+      targets.set(part, null);
+      continue;
+    }
     if (!targets.has(part)) targets.set(part, new Set());
-    targets.get(part).add(target.name);
+    if (scope === "no_shape") continue;
+    if (typeof target.name !== "string" || !target.name) return null;
+    targets.get(part)?.add(target.name);
   }
   return targets;
 }

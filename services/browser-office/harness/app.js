@@ -484,14 +484,22 @@ function inspectPackage(bytes) {
 // The top-level shapes the commands name, by slide and authored name, so the
 // preservation merge can keep every other shape as the author wrote it. Null
 // when a command names no element or a target cannot be identified.
+// The slide and author's name of every element each command names, or the
+// slide it names; the preservation merge decides from the operation what it
+// may change there.
 function nativeSnapshotTargets(observation, commands) {
   const targets = [];
   for (const command of commands) {
+    const op = command?.op;
     const elementIds = [
       ...(typeof command?.elementId === "string" ? [command.elementId] : []),
       ...(Array.isArray(command?.elementIds) ? command.elementIds : []),
     ];
-    if (!elementIds.length) return null;
+    if (!elementIds.length) {
+      if (!Number.isSafeInteger(command?.slideIndex)) return null;
+      targets.push({ op, slideIndex: command.slideIndex });
+      continue;
+    }
     for (const elementId of elementIds) {
       const [slide, shape] = String(elementId).split("/");
       const slideIndex = Number(slide);
@@ -499,7 +507,7 @@ function nativeSnapshotTargets(observation, commands) {
         (candidate) => candidate.elementId === `${slide}/${shape}`,
       );
       if (!Number.isSafeInteger(slideIndex) || !element?.name) return null;
-      targets.push({ slideIndex, name: element.name });
+      targets.push({ op, slideIndex, name: element.name });
     }
   }
   return targets;
@@ -1178,7 +1186,11 @@ async function prepareProductPackageMutation(nativeRequest) {
       },
       sourceOperations: [nativeRequest.operation],
       sourceTargets: nativeSnapshotTargets(beforeObservation, [
-        { elementId: nativeRequest.elementId ?? null },
+        {
+          op: nativeRequest.operation,
+          elementId: nativeRequest.elementId ?? null,
+          slideIndex: nativeRequest.slideIndex,
+        },
       ]),
     };
   }

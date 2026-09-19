@@ -9,6 +9,7 @@ import {
   firstPersistenceDeltaDifference,
   firstPersistenceDifference,
   formatCanonicalDifferences,
+  historyStateDifference,
   historyStateEquivalent,
   intendedDocumentMutationDifferences,
   normalizeDocumentPersistenceState,
@@ -1025,6 +1026,102 @@ test("a browser history step matches its target as persisted state, any other ex
       observation("office", "Arial", 0xffffff, "b"),
     ),
     false,
+  );
+  // A failed step reports the difference the rule failed on, not the first
+  // raw one (here the substituted font).
+  assert.equal(
+    historyStateDifference(
+      target,
+      observation("browser-wasm", "Arial", 0xffffff, "b"),
+    ),
+    null,
+  );
+  assert.deepEqual(
+    historyStateDifference(
+      target,
+      observation("browser-wasm", "Arial", 0x000000, "b"),
+    ),
+    {
+      path: "$.slides[0].elements[0].fill",
+      expected: 0xffffff,
+      observed: 0x000000,
+      invariant: "format-canonical",
+    },
+  );
+  assert.equal(
+    historyStateDifference(
+      observation("office", "Liberation Sans", 0xffffff, "a"),
+      observation("office", "Arial", 0xffffff, "b"),
+    ).path,
+    "slides.slides[0].elements[0].fontFamily",
+  );
+});
+
+test("a saved placeholder a new layout created is compared with its live self", () => {
+  // Live, the placeholders of a newly applied layout are unnamed and their
+  // text formatting is inherited; reopened, they carry the name the save
+  // gave them and the formatting resolved from the layout.
+  const placeholder = (kind, name, objectName, resolved) => ({
+    elementId: `0/${kind === "TitleTextShape" ? 0 : 1}`,
+    name,
+    objectName,
+    kind: `com.sun.star.presentation.${kind}`,
+    text: "",
+    x: 100,
+    ...(resolved ? { fontSize: 44, textVerticalAlignment: "CENTER" } : {}),
+    propertyStates: resolved
+      ? {
+          fontSize: "DIRECT_VALUE",
+          textVerticalAlignment: "DIRECT_VALUE",
+        }
+      : {
+          fontSize: "DEFAULT_VALUE",
+          textVerticalAlignment: "DEFAULT_VALUE",
+        },
+  });
+  const state = (resolved) => ({
+    masters: [],
+    slides: [
+      {
+        elements: ["TitleTextShape", "SubtitleShape"].map((kind, index) =>
+          resolved
+            ? placeholder(
+                kind,
+                `PlaceHolder ${index + 1}`,
+                `PlaceHolder ${index + 1}`,
+                true,
+              )
+            : placeholder(
+                kind,
+                `unnamed-com.sun.star.presentation.${kind}`,
+                "",
+                false,
+              ),
+        ),
+      },
+    ],
+  });
+  const live = state(false);
+  live.slides[0].elements[0].fontSize = 44;
+  live.slides[0].elements[1].fontSize = 32;
+  const reopened = state(true);
+  assert.deepEqual(
+    formatCanonicalDifferences(
+      normalizeDocumentPersistenceState(live),
+      normalizeDocumentPersistenceState(reopened, { authoredBy: live }),
+    ),
+    [],
+  );
+  // A placeholder the user named is identity, not position.
+  const named = state(true);
+  named.slides[0].elements[0].name = "Agenda";
+  named.slides[0].elements[0].objectName = "Agenda";
+  assert.notDeepEqual(
+    formatCanonicalDifferences(
+      normalizeDocumentPersistenceState(live),
+      normalizeDocumentPersistenceState(named, { authoredBy: live }),
+    ),
+    [],
   );
 });
 

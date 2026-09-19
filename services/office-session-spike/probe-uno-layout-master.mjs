@@ -3,7 +3,10 @@ import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
-import { historyStateEquivalent } from "./persistence-evidence.mjs";
+import {
+  historyStateDifference,
+  historyStateEquivalent,
+} from "./persistence-evidence.mjs";
 import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
@@ -85,7 +88,11 @@ try {
       if (historyStateEquivalent(expected, observed)) return observed;
       await page.waitForTimeout(100);
     } while (Date.now() < stop);
-    throw new Error(`${label} did not restore every slide and master exactly.`);
+    throw new Error(
+      `${label} did not restore every slide and master exactly: ${JSON.stringify(
+        historyStateDifference(expected, observed),
+      )}`,
+    );
   };
 
   const before = await call({ operation: "observe" });

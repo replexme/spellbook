@@ -5,7 +5,7 @@ import {
   classifyNativePackagePart,
   humanEditPreservationBudget,
   nativePreservationBudget,
-  operationsConfinedToTargets,
+  operationSlideScope,
 } from "./native-preservation-policy.mjs";
 
 test("browser package category mapping covers every native budget category", () => {
@@ -75,17 +75,42 @@ test("human edits keep macros and unknown parts out of the saved candidate", () 
     assert.equal(human.allowedCategories.has(category), false, category);
 });
 
-test("only commands confined to the shapes they name let the merge keep other shapes", () => {
-  assert.equal(operationsConfinedToTargets(["text_shadow"]), true);
-  assert.equal(operationsConfinedToTargets(["align", "move"]), true);
-  assert.equal(operationsConfinedToTargets(["set_table_cell_format"]), true);
-  // Reordering or regrouping changes the shape tree itself.
-  assert.equal(operationsConfinedToTargets(["z_order"]), false);
-  assert.equal(operationsConfinedToTargets(["group"]), false);
-  // Slide, document and animation commands do not name shapes.
-  assert.equal(operationsConfinedToTargets(["set_background"]), false);
-  assert.equal(operationsConfinedToTargets(["move", "set_slide_size"]), false);
-  assert.equal(operationsConfinedToTargets(["add_animation_effect"]), true);
-  assert.equal(operationsConfinedToTargets([]), false);
-  assert.equal(operationsConfinedToTargets(null), false);
+test("each command's reach on its slide comes from the contract", () => {
+  for (const operation of [
+    "text_shadow",
+    "align",
+    "move",
+    "set_table_cell_format",
+    "add_animation_effect",
+  ])
+    assert.equal(operationSlideScope(operation), "named_shapes", operation);
+  // Reordering or regrouping changes the shape tree itself, and a layout its
+  // placeholders.
+  for (const operation of ["z_order", "group", "set_slide_layout"])
+    assert.equal(operationSlideScope(operation), "any_shape", operation);
+  // Slide settings, notes, comments and timing leave existing shapes alone,
+  // and a new object is added beside them.
+  for (const operation of [
+    "set_background",
+    "rename_slide",
+    "set_slide_hidden",
+    "set_slide_transition",
+    "set_speaker_notes",
+    "add_comment",
+    "set_animation_timing",
+    "add_shape",
+    "insert_image",
+  ])
+    assert.equal(operationSlideScope(operation), "no_shape", operation);
+  // Slide structure, document and master settings reach beyond one slide.
+  for (const operation of [
+    "insert_slide",
+    "move_slide",
+    "delete_slide",
+    "set_sections",
+    "set_slide_size",
+    "set_master_theme",
+    "not_an_operation",
+  ])
+    assert.equal(operationSlideScope(operation), null, operation);
 });

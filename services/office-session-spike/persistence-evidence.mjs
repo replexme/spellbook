@@ -1,4 +1,5 @@
 import {
+  firstDocumentStateDifference,
   quantizedGeometryEquivalent,
   undoDocumentStateEquivalent,
 } from "./document-state-evidence.mjs";
@@ -70,6 +71,13 @@ function deleteNestedProperty(value, path) {
 // comparison; ambiguous named objects are never used to mask changed values.
 function authoredArrayEntry(value, authored, index) {
   if (!Array.isArray(authored)) return undefined;
+  // An automatic placeholder name is not identity (see
+  // withoutTransientEmptyPlaceholderDefaults): a save names the placeholders
+  // a new layout created. Such placeholders keep their positions.
+  if (isAutomaticEmptyPlaceholder(value))
+    return isAutomaticEmptyPlaceholder(authored[index])
+      ? authored[index]
+      : null;
   const identity =
     typeof value?.objectName === "string" && value.objectName
       ? ["objectName", value.objectName]
@@ -176,21 +184,25 @@ const SERIALIZED_PLACEHOLDER_NAME = /^PlaceHolder [1-9][0-9]*$/u;
  * changing a rendered pixel. These fields are not stable identity until the
  * placeholder contains text or receives a user-assigned name.
  */
+function isAutomaticEmptyPlaceholder(element) {
+  if (
+    element?.text !== "" ||
+    !String(element.kind ?? "").startsWith("com.sun.star.presentation.")
+  )
+    return false;
+  const automaticInMemoryName =
+    AUTOMATIC_UNO_PLACEHOLDER_NAME.test(element.name ?? "") &&
+    (element.objectName ?? "") === "";
+  const automaticSerializedName =
+    SERIALIZED_PLACEHOLDER_NAME.test(element.name ?? "") &&
+    element.objectName === element.name;
+  return automaticInMemoryName || automaticSerializedName;
+}
+
 function withoutTransientEmptyPlaceholderDefaults(slides) {
   for (const slide of slides) {
     for (const element of slide.elements ?? []) {
-      const automaticInMemoryName =
-        AUTOMATIC_UNO_PLACEHOLDER_NAME.test(element.name ?? "") &&
-        (element.objectName ?? "") === "";
-      const automaticSerializedName =
-        SERIALIZED_PLACEHOLDER_NAME.test(element.name ?? "") &&
-        element.objectName === element.name;
-      if (
-        element.text !== "" ||
-        !String(element.kind ?? "").startsWith("com.sun.star.presentation.") ||
-        (!automaticInMemoryName && !automaticSerializedName)
-      )
-        continue;
+      if (!isAutomaticEmptyPlaceholder(element)) continue;
       if (
         element.presentationObject === true &&
         element.emptyPresentationObject === true &&
@@ -424,25 +436,42 @@ export function normalizeDocumentPersistenceState(
 }
 
 /**
- * Whether an Undo or Redo reached its target state. The browser product
- * returns to a saved package by reopening it whenever its native fast path is
- * not exact, and a reopened model can differ from the live model that produced
- * the package in import-normalized details (a substituted font name, an
- * inherited default). A browser history step therefore matches its target as
- * persisted state, the way that save itself was verified; every other runtime
- * must match exactly.
+ * The difference that keeps an Undo or Redo from its target state, or null
+ * when it reached it. The browser product returns to a saved package by
+ * reopening it whenever its native fast path is not exact, and a reopened
+ * model can differ from the live model that produced the package in
+ * import-normalized details (a substituted font name, an inherited default).
+ * A browser history step therefore matches its target as persisted state, the
+ * way that save itself was verified; every other runtime must match exactly.
  */
-export function historyStateEquivalent(expected, actual) {
-  if (undoDocumentStateEquivalent(expected, actual)) return true;
-  if (actual?.engine?.engineImage !== "browser-wasm") return false;
+export function historyStateDifference(expected, actual) {
+  if (undoDocumentStateEquivalent(expected, actual)) return null;
+  if (actual?.engine?.engineImage !== "browser-wasm")
+    return (
+      firstDocumentStateDifference(
+        { slides: expected?.slides, masters: expected?.masters },
+        { slides: actual?.slides, masters: actual?.masters },
+      ) ?? {
+        path: "revision",
+        expected: expected?.revision,
+        actual: actual?.revision,
+      }
+    );
   const target = persistenceStateFromObservation(expected);
-  return !formatCanonicalDifferences(
-    normalizeDocumentPersistenceState(target),
-    normalizeDocumentPersistenceState(persistenceStateFromObservation(actual), {
-      authoredBy: target,
-    }),
-    { limit: 1 },
-  ).length;
+  return (
+    formatCanonicalDifferences(
+      normalizeDocumentPersistenceState(target),
+      normalizeDocumentPersistenceState(
+        persistenceStateFromObservation(actual),
+        { authoredBy: target },
+      ),
+      { limit: 1 },
+    )[0] ?? null
+  );
+}
+
+export function historyStateEquivalent(expected, actual) {
+  return historyStateDifference(expected, actual) === null;
 }
 
 export function firstPersistenceDifference(expected, observed, path = "$") {

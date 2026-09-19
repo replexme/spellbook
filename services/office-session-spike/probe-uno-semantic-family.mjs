@@ -4,10 +4,10 @@ import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
-  firstPersistenceDifference,
+  historyStateDifference,
+  historyStateEquivalent,
   persistenceStateFromObservation,
 } from "./persistence-evidence.mjs";
-import { historyStateEquivalent } from "./persistence-evidence.mjs";
 import {
   PROBE_IMAGE_ASSET_ID as IMAGE_ASSET_ID,
   PROBE_MEDIA_ASSET_ID as MEDIA_ASSET_ID,
@@ -104,21 +104,16 @@ try {
       direction,
     );
   };
-  const sameDocument = historyStateEquivalent;
   const waitForState = async (expected, label) => {
     const stop = Date.now() + 10_000;
     let actual;
     do {
       actual = await call({ operation: "observe" });
-      if (sameDocument(actual, expected)) return actual;
+      if (historyStateEquivalent(expected, actual)) return actual;
       await page.waitForTimeout(100);
     } while (Date.now() < stop);
-    const difference = firstPersistenceDifference(
-      { slides: expected.slides, masters: expected.masters },
-      { slides: actual?.slides, masters: actual?.masters },
-    );
     throw new Error(
-      `${label} did not restore the exact observed document: ${JSON.stringify(difference)}`,
+      `${label} did not restore the exact observed document: ${JSON.stringify(historyStateDifference(expected, actual))}`,
     );
   };
 
@@ -149,7 +144,7 @@ try {
     const after = structuredClone(observed);
     const historyAfter = await history();
     if (
-      sameDocument(before, after) ||
+      historyStateEquivalent(before, after) ||
       historyAfter.undo.length !== historyBefore.undo.length + 1
     )
       throw new Error(

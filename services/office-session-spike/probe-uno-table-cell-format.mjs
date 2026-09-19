@@ -3,7 +3,10 @@ import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { historyStateEquivalent } from "./persistence-evidence.mjs";
+import {
+  historyStateDifference,
+  historyStateEquivalent,
+} from "./persistence-evidence.mjs";
 import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
@@ -19,26 +22,6 @@ const stable = (value) => JSON.stringify(value);
 const cellComparable = (cell) => {
   const { propertyStates: _propertyStates, ...persistedValues } = cell ?? {};
   return persistedValues;
-};
-const firstDifference = (expected, observed, currentPath = "document") => {
-  if (Object.is(expected, observed)) return null;
-  if (
-    !expected ||
-    !observed ||
-    typeof expected !== "object" ||
-    typeof observed !== "object"
-  )
-    return { path: currentPath, expected, observed };
-  const keys = new Set([...Object.keys(expected), ...Object.keys(observed)]);
-  for (const key of keys) {
-    const difference = firstDifference(
-      expected[key],
-      observed[key],
-      `${currentPath}.${key}`,
-    );
-    if (difference) return difference;
-  }
-  return null;
 };
 
 try {
@@ -132,10 +115,7 @@ try {
     } while (Date.now() < stop);
     throw new Error(
       `${label} did not restore the exact document: ${JSON.stringify(
-        firstDifference(
-          { slides: expected.slides, masters: expected.masters },
-          { slides: observed?.slides, masters: observed?.masters },
-        ),
+        historyStateDifference(expected, observed),
       )}`,
     );
   };

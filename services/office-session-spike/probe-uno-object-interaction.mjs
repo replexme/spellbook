@@ -4,7 +4,10 @@ import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { verifySlideshowPlayback } from "./slideshow-playback.mjs";
-import { historyStateEquivalent } from "./persistence-evidence.mjs";
+import {
+  historyStateDifference,
+  historyStateEquivalent,
+} from "./persistence-evidence.mjs";
 import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
@@ -87,7 +90,11 @@ try {
       if (historyStateEquivalent(expected, observed)) return observed;
       await page.waitForTimeout(100);
     } while (Date.now() < stop);
-    throw new Error(`${label} did not restore the exact document.`);
+    throw new Error(
+      `${label} did not restore the exact document: ${JSON.stringify(
+        historyStateDifference(expected, observed),
+      )}`,
+    );
   };
   const edit = (observed, commands) =>
     call({
