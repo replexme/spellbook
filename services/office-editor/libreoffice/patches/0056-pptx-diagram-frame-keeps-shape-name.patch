@@ -1,0 +1,76 @@
+diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
+--- a/oox/source/export/drawingml.cxx
++++ b/oox/source/export/drawingml.cxx
+@@ -7107,8 +7107,29 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+     // but can be different from diagram's own id
+     const sal_Int32 nExpShapeId = nShapeId != -1 ? nShapeId : nDiagramId;
+     pDocPrAttrList->add(XML_id, OString::number(nExpShapeId));
+-    OString sName = "Diagram" + OString::number(nDiagramId);
+-    pDocPrAttrList->add(XML_name, sName);
++    // A frame written for a shape keeps the shape's own name and alternative
++    // text. It was always named "Diagram" plus the diagram number and lost its
++    // alternative text; that name remains only for an unnamed frame.
++    OUString sShapeName;
++    OUString sDescription;
++    OUString sTitle;
++    uno::Reference<beans::XPropertySet> xShapeProperties(rXShape, uno::UNO_QUERY);
++    if (nShapeId != -1 && xShapeProperties.is())
++    {
++        if (GetProperty(xShapeProperties, u"Name"_ustr))
++            mAny >>= sShapeName;
++        if (GetProperty(xShapeProperties, u"Description"_ustr))
++            mAny >>= sDescription;
++        if (GetProperty(xShapeProperties, u"Title"_ustr))
++            mAny >>= sTitle;
++    }
++    pDocPrAttrList->add(XML_name, sShapeName.isEmpty()
++                                      ? OString("Diagram" + OString::number(nDiagramId))
++                                      : sShapeName.toUtf8());
++    if (!sDescription.isEmpty())
++        pDocPrAttrList->add(XML_descr, sDescription.toUtf8());
++    if (!sTitle.isEmpty())
++        pDocPrAttrList->add(XML_title, sTitle.toUtf8());
+ 
+     if (GetDocumentType() == DOCUMENT_DOCX)
+     {
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -1369,6 +1369,37 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testDocumentStructureMetadataLineAndParagr
+     assertChanged(true);
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testPptxDiagramFrameKeepsShapeName)
++{
++    createSdImpressDoc("pptx/smartart-hierarchy3-two-parents.pptx");
++    const auto diagram = [this]() {
++        auto pImpressDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
++        CPPUNIT_ASSERT(pImpressDocument);
++        SdrObject* pDiagram
++            = pImpressDocument->GetDoc()->GetSdPage(0, PageKind::Standard)->GetObj(0);
++        CPPUNIT_ASSERT(pDiagram);
++        CPPUNIT_ASSERT(pDiagram->isDiagram());
++        return pDiagram;
++    };
++    uno::Reference<beans::XPropertySet> xProperties(diagram()->getUnoShape(),
++                                                    uno::UNO_QUERY_THROW);
++    xProperties->setPropertyValue(u"Name"_ustr, cpo::uno::Any(u"Reporting lines"_ustr));
++    xProperties->setPropertyValue(u"Title"_ustr, cpo::uno::Any(u"Team"_ustr));
++    xProperties->setPropertyValue(u"Description"_ustr,
++                                  cpo::uno::Any(u"Who reports to whom"_ustr));
++
++    // The frame was written as "Diagram1" whatever the shape was called, and
++    // without its alternative text.
++    saveAndReload(TestFilter::PPTX);
++    xmlDocUniquePtr pSlideXml = parseExport(u"ppt/slides/slide1.xml"_ustr);
++    assertXPath(pSlideXml, "//p:graphicFrame/p:nvGraphicFramePr/p:cNvPr", "name",
++                u"Reporting lines");
++    assertXPath(pSlideXml, "//p:graphicFrame/p:nvGraphicFramePr/p:cNvPr", "title", u"Team");
++    assertXPath(pSlideXml, "//p:graphicFrame/p:nvGraphicFramePr/p:cNvPr", "descr",
++                u"Who reports to whom");
++    CPPUNIT_ASSERT_EQUAL(u"Reporting lines"_ustr, diagram()->GetName());
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testAutoAdvanceKeepsTransitionEffectOnReload)
+ {
+     createSdImpressDoc();

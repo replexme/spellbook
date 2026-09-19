@@ -1,0 +1,50 @@
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -11,6 +11,7 @@
+ 
+ #include <config_folders.h>
+ 
++#include <algorithm>
+ #include <cmath>
+ #include <functional>
+ #include <tuple>
+@@ -2347,6 +2348,23 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testDocumentStructureAnimationLifecycleUnd
+     CPPUNIT_ASSERT_EQUAL(u"ooo-entrance-wipe"_ustr, pReplaced->getPresetId());
+     CPPUNIT_ASSERT_EQUAL(0.8, pReplaced->getDuration());
+     CPPUNIT_ASSERT_EQUAL(0.1, pReplaced->getBegin());
++    // The animations that play the effect carry the kept duration too; the
++    // stored duration alone kept 0.8 while they played at the preset's 0.5.
++    double fPlayedDuration = 0.0;
++    uno::Reference<container::XEnumerationAccess> xEffectAccess(pReplaced->getNode(),
++                                                                uno::UNO_QUERY_THROW);
++    uno::Reference<container::XEnumeration> xEffectChildren = xEffectAccess->createEnumeration();
++    while (xEffectChildren->hasMoreElements())
++    {
++        uno::Reference<animations::XAnimationNode> xChild(xEffectChildren->nextElement(),
++                                                          uno::UNO_QUERY_THROW);
++        double fBegin = 0.0;
++        double fDuration = 0.0;
++        xChild->getBegin() >>= fBegin;
++        xChild->getDuration() >>= fDuration;
++        fPlayedDuration = std::max(fPlayedDuration, fBegin + fDuration);
++    }
++    CPPUNIT_ASSERT_DOUBLES_EQUAL(0.8, fPlayedDuration, 0.001);
+ 
+     if (pPage->getMainSequence()->getCount() > 1)
+     {
+diff --git a/sd/source/core/CustomAnimationEffect.cxx b/sd/source/core/CustomAnimationEffect.cxx
+--- a/sd/source/core/CustomAnimationEffect.cxx
++++ b/sd/source/core/CustomAnimationEffect.cxx
+@@ -855,6 +855,11 @@ void CustomAnimationEffect::replaceNode( const css::uno::Reference< css::animati
+     double fIterateInterval = mfIterateInterval;
+     sal_Int16 nSubItem = mnTargetSubItem;
+ 
++    // setNode() takes the effect's duration as the longest of the new node's
++    // animations, counting from the current value. Starting from the old
++    // duration kept it, so setDuration() below skipped scaling the new
++    // animations and the effect played at the preset's own timing.
++    mfDuration = -1.0;
+     setNode( xNode );
+ 
+     setAudio( xAudio );

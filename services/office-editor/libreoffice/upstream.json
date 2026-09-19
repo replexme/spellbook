@@ -12,7 +12,7 @@
   "patchLevel": "undo-v31",
   "sourcePatchSeriesReady": true,
   "sourceCandidateReady": false,
-  "patchSeriesSha256": "78cb07e2b1a46d8c11804f1e3eeb93e3279d32886a9fbae5e872fdb9bd1dc040",
+  "patchSeriesSha256": "df825500dd41be8ad0cf4b184ff1ed28b3555fe7577d18cca5d42798518802e7",
   "engineImageTag": "26.04.4.1-spellbook-undo-v31-r1-candidate",
   "impressUiUnoCommandCount": 725,
   "impressUiUnoCommandsSha256": "ddfe8aeb5f798b6656b22276d219311bd30e9ce5c26cdf8ffe3d321f2c2f3fbb",
@@ -69,7 +69,11 @@
     "patches/0052-pptx-paragraph-margin-semantics.patch",
     "patches/0053-pptx-auto-advance-keeps-transition-effect.patch",
     "patches/0054-text-kerning-model-unit.patch",
-    "patches/0055-attribute-undo-restores-object-text-items.patch"
+    "patches/0055-attribute-undo-restores-object-text-items.patch",
+    "patches/0056-pptx-diagram-frame-keeps-shape-name.patch",
+    "patches/0057-pptx-paragraph-right-margin-does-not-carry-over.patch",
+    "patches/0058-animation-replace-keeps-timing.patch",
+    "patches/0059-metadata-paragraph-test-edits-placeholder-text.patch"
   ],
   "requiredCppunitTargets": [
     "CppunitTest_sd_uiimpress",
@@ -112,6 +116,8 @@
     "CppunitTest_sd_misc_tests:testApiTableInsertInheritsDimensions",
     "CppunitTest_sd_misc_tests:testApiTableCellPropertyUndo",
     "CppunitTest_sd_uiimpress:testAutoAdvanceKeepsTransitionEffectOnReload",
-    "CppunitTest_sd_uiimpress:testObjectTextAttributeUndoRestoresObjectItems"
+    "CppunitTest_sd_uiimpress:testObjectTextAttributeUndoRestoresObjectItems",
+    "CppunitTest_sd_uiimpress:testPptxDiagramFrameKeepsShapeName",
+    "CppunitTest_sd_uiimpress:testPptxParagraphRightMarginDoesNotCarryOver"
   ]
 }

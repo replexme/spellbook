@@ -1,0 +1,14 @@
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -1180,6 +1180,10 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testDocumentStructureMetadataLineAndParagr
+     CPPUNIT_ASSERT(pTextObject);
+     pDoc->EnableUndo(false);
+     pTextObject->SetText(u"First paragraph\nSecond paragraph"_ustr);
++    // Every editing path clears the placeholder's empty state when it sets
++    // text; setting the model text directly does not, and PPTX export then
++    // wrote the title as an empty placeholder without its paragraphs.
++    pTextObject->SetEmptyPresObj(false);
+     pDoc->EnableUndo(true);
+ 
+     const sd::HeaderFooterSettings aOldHeaderFooter = pPage->getHeaderFooterSettings();
