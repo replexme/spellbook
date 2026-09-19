@@ -75,6 +75,33 @@ public sealed class PackageChangeBudgetTests : IDisposable
     }
 
     [Fact]
+    public void ResolvesTargetScopeThroughNonAsciiPartNames()
+    {
+        var source = TestPresentationFactory.Create(directory);
+        var baseline = Path.Combine(directory, "non-ascii-baseline.pptx");
+        var candidate = Path.Combine(directory, "non-ascii-candidate.pptx");
+        File.Copy(source, baseline);
+        AddTransitionSound(baseline, "RIFF-before");
+        File.Copy(baseline, candidate);
+        using (var archive = ZipFile.Open(candidate, ZipArchiveMode.Update))
+        {
+            archive.GetEntry("ppt/media/Cortázar.wav")?.Delete();
+            using var stream = archive.CreateEntry("ppt/media/Cortázar.wav").Open();
+            stream.Write("RIFF-after"u8);
+        }
+
+        var report = new PptxPackageChangeBudgetValidator().Validate(
+            baseline,
+            candidate,
+            new PackageChangeBudgetRequest(ContractVersions.Current, ["media_parts"], [0]));
+
+        Assert.True(report.Valid, string.Join("\n", report.Errors));
+        var change = Assert.Single(report.Changes);
+        Assert.Equal("ppt/media/Cortázar.wav", change.Part);
+        Assert.True(change.InTargetScope);
+    }
+
+    [Fact]
     public void RejectsUndeclaredPartsAndPartCreation()
     {
         var baseline = TestPresentationFactory.Create(directory);
@@ -457,6 +484,40 @@ public sealed class PackageChangeBudgetTests : IDisposable
                 new XAttribute("type", "slidenum"),
                 new XElement(drawing + "t", fieldText)));
         Replace(archive, "ppt/slides/slide1.xml", slide);
+    }
+
+    // PowerPoint writes the raw non-ASCII relationship target and a
+    // percent-encoded content-type override for the same part.
+    private static void AddTransitionSound(string path, string content)
+    {
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Update);
+        using (var stream = archive.CreateEntry("ppt/media/Cortázar.wav").Open())
+            stream.Write(System.Text.Encoding.ASCII.GetBytes(content));
+        XNamespace relationships = "http://schemas.openxmlformats.org/package/2006/relationships";
+        var slide = archive.Entries.First(entry =>
+            entry.FullName.StartsWith("ppt/slides/", StringComparison.Ordinal)
+            && !entry.FullName.Contains("/_rels/", StringComparison.Ordinal));
+        var slideRelationshipsPart = $"ppt/slides/_rels/{slide.Name}.rels";
+        var slideRelationships = archive.GetEntry(slideRelationshipsPart) is null
+            ? new XDocument(new XElement(relationships + "Relationships"))
+            : ReadXml(archive, slideRelationshipsPart);
+        slideRelationships.Root?.Add(
+            new XElement(
+                relationships + "Relationship",
+                new XAttribute("Id", "rIdTransitionSound"),
+                new XAttribute(
+                    "Type",
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/audio"),
+                new XAttribute("Target", "../media/Cortázar.wav")));
+        Replace(archive, slideRelationshipsPart, slideRelationships);
+        XNamespace contentTypes = "http://schemas.openxmlformats.org/package/2006/content-types";
+        var manifest = ReadXml(archive, "[Content_Types].xml");
+        manifest.Root?.Add(
+            new XElement(
+                contentTypes + "Override",
+                new XAttribute("PartName", "/ppt/media/Cort%C3%A1zar.wav"),
+                new XAttribute("ContentType", "audio/wav")));
+        Replace(archive, "[Content_Types].xml", manifest);
     }
 
     private static void Replace(ZipArchive archive, string part, XDocument document)

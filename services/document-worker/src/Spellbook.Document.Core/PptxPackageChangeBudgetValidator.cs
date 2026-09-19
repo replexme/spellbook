@@ -1,7 +1,6 @@
 using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
-using DocumentFormat.OpenXml.Packaging;
 
 namespace Spellbook.Document.Core;
 
@@ -25,6 +24,12 @@ public sealed class PptxPackageChangeBudgetValidator
         "urn:com:collaboraoffice:names:experimental:ooxml:xmlns:coext:1.0";
     private static readonly XNamespace ChartNamespace =
         "http://schemas.openxmlformats.org/drawingml/2006/chart";
+    private static readonly XNamespace PackageRelationshipNamespace =
+        "http://schemas.openxmlformats.org/package/2006/relationships";
+    private static readonly XNamespace OfficeRelationshipNamespace =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    private const string OfficeDocumentRelationshipType =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument";
 
     public static IReadOnlySet<string> Categories { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
@@ -149,32 +154,78 @@ public sealed class PptxPackageChangeBudgetValidator
         "notes_parts" or "notes_relationships" or
         "chart_parts" or "embedded_workbooks" or "media_parts" or "diagram_parts";
 
+    // Reads the slide order and each target slide's part closure straight
+    // from the package relationships. System.IO.Packaging rejects valid
+    // packages whose relationship targets use non-ASCII part names (for
+    // example a transition sound named "Cortázar.wav"), so the Open XML SDK
+    // is not used here.
     private static HashSet<string> ResolveTargetScope(string path, IReadOnlyList<int> targetIndexes)
     {
-        using var document = PresentationDocument.Open(path, false);
-        var presentationPart = document.PresentationPart
-            ?? throw new InvalidDataException("The PPTX has no presentation part.");
-        var orderedSlides = presentationPart.Presentation?.SlideIdList?.ChildElements
-            .OfType<DocumentFormat.OpenXml.Presentation.SlideId>()
-            .Select(slideId => presentationPart.GetPartById(slideId.RelationshipId!) as SlidePart
-                ?? throw new InvalidDataException("A slide relationship does not resolve to a slide part."))
+        using var archive = ZipFile.OpenRead(path);
+        var entries = new Dictionary<string, ZipArchiveEntry>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name)))
+            entries.TryAdd(NormalizePart(entry.FullName), entry);
+
+        List<(string Id, string Type, string Target)> Relationships(string sourcePart)
+        {
+            var relationships = new List<(string Id, string Type, string Target)>();
+            var relationshipPart = sourcePart.Length == 0 ? "_rels/.rels" : RelationshipPartFor(sourcePart);
+            if (!entries.TryGetValue(relationshipPart, out var relationshipEntry)) return relationships;
+            using var stream = relationshipEntry.Open();
+            foreach (var relationship in XDocument.Load(stream).Root?
+                .Elements(PackageRelationshipNamespace + "Relationship") ?? [])
+            {
+                if ((string?)relationship.Attribute("TargetMode") == "External") continue;
+                relationships.Add((
+                    (string?)relationship.Attribute("Id") ?? "",
+                    (string?)relationship.Attribute("Type") ?? "",
+                    ResolveTarget(sourcePart, (string?)relationship.Attribute("Target") ?? "")));
+            }
+            return relationships;
+        }
+
+        var presentationPart = Relationships("")
+            .Where(relationship => relationship.Type == OfficeDocumentRelationshipType)
+            .Select(relationship => relationship.Target)
+            .FirstOrDefault();
+        if (presentationPart is null || !entries.TryGetValue(presentationPart, out var presentationEntry))
+            throw new InvalidDataException("The PPTX has no presentation part.");
+        var presentationTargets = Relationships(presentationPart)
+            .GroupBy(relationship => relationship.Id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First().Target, StringComparer.Ordinal);
+        XDocument presentation;
+        using (var stream = presentationEntry.Open())
+            presentation = XDocument.Load(stream);
+        var orderedSlides = presentation.Root?
+            .Element(PresentationNamespace + "sldIdLst")?
+            .Elements(PresentationNamespace + "sldId")
+            .Select(slideId => (string?)slideId.Attribute(OfficeRelationshipNamespace + "id") is { } id
+                && presentationTargets.TryGetValue(id, out var target)
+                && entries.ContainsKey(target)
+                    ? target
+                    : throw new InvalidDataException("A slide relationship does not resolve to a slide part."))
             .ToArray() ?? [];
         if (targetIndexes.Any(index => index >= orderedSlides.Length))
             throw new InvalidDataException("A target slide index is outside the saved presentation.");
 
         var scope = new HashSet<string>(StringComparer.Ordinal);
+        void AddPartClosure(string part)
+        {
+            var actual = entries.TryGetValue(part, out var entry) ? NormalizePart(entry.FullName) : part;
+            if (!scope.Add(actual)) return;
+            scope.Add(RelationshipPartFor(actual));
+            foreach (var relationship in Relationships(actual))
+                AddPartClosure(relationship.Target);
+        }
         foreach (var index in targetIndexes)
-            AddPartClosure(orderedSlides[index], scope);
+            AddPartClosure(orderedSlides[index]);
         return scope;
     }
 
-    private static void AddPartClosure(OpenXmlPart part, ISet<string> scope)
+    private static string ResolveTarget(string sourcePart, string target)
     {
-        var normalized = NormalizePart(part.Uri.OriginalString);
-        if (!scope.Add(normalized)) return;
-        scope.Add(RelationshipPartFor(normalized));
-        foreach (var child in part.Parts.Select(pair => pair.OpenXmlPart))
-            AddPartClosure(child, scope);
+        var resolved = new Uri(new Uri($"http://package.invalid/{sourcePart}"), target);
+        return NormalizePart(Uri.UnescapeDataString(resolved.AbsolutePath));
     }
 
     private static string RelationshipPartFor(string part)
