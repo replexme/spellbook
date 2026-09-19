@@ -1,4 +1,7 @@
-import { quantizedGeometryEquivalent } from "./document-state-evidence.mjs";
+import {
+  quantizedGeometryEquivalent,
+  undoDocumentStateEquivalent,
+} from "./document-state-evidence.mjs";
 
 function valueSummary(value) {
   if (value === undefined) return "undefined";
@@ -418,6 +421,27 @@ export function normalizeDocumentPersistenceState(
     ),
   );
   return { slides, masters };
+}
+
+/**
+ * Whether an Undo or Redo reached its target state. The browser product
+ * returns to a saved package by reopening it whenever its native fast path is
+ * not exact, and a reopened model can differ from the live model that produced
+ * the package in import-normalized details (a substituted font name, an
+ * inherited default). A browser history step therefore matches its target as
+ * persisted state, the way that save itself was verified; every other runtime
+ * must match exactly.
+ */
+export function historyStateEquivalent(expected, actual) {
+  if (undoDocumentStateEquivalent(expected, actual)) return true;
+  if (actual?.engine?.engineImage !== "browser-wasm") return false;
+  const target = persistenceStateFromObservation(expected);
+  return !firstPersistenceDifference(
+    normalizeDocumentPersistenceState(target),
+    normalizeDocumentPersistenceState(persistenceStateFromObservation(actual), {
+      authoredBy: target,
+    }),
+  );
 }
 
 export function firstPersistenceDifference(expected, observed, path = "$") {

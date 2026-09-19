@@ -8,6 +8,7 @@ import {
   documentPersistenceDeltaDifferences,
   firstPersistenceDeltaDifference,
   firstPersistenceDifference,
+  historyStateEquivalent,
   intendedDocumentMutationDifferences,
   normalizeDocumentPersistenceState,
   persistenceStateFromObservation,
@@ -971,5 +972,57 @@ test("persistence diagnostics collect the complete bounded difference set", () =
       { path: "$.untouched", invariant: "unchanged-after-normalization" },
       { path: "$.value", invariant: "intended-change" },
     ],
+  );
+});
+
+test("a browser history step matches its target as persisted state, any other exactly", () => {
+  // A new table cell before its save, and the same cell reopened from the
+  // saved package: the inherited font was saved as its substitute.
+  const observation = (engineImage, fontFamily, fill, revision) => ({
+    revision,
+    engine: { engineImage },
+    masters: [],
+    slides: [
+      {
+        slideIndex: 0,
+        elements: [
+          {
+            elementId: "0/0",
+            objectName: "Table 1",
+            kind: "com.sun.star.drawing.TableShape",
+            fontFamily,
+            fill,
+            propertyStates: {
+              fontFamily: "com.sun.star.beans.PropertyState.DEFAULT_VALUE",
+              fill: "com.sun.star.beans.PropertyState.DIRECT_VALUE",
+            },
+          },
+        ],
+      },
+    ],
+  });
+  const target = observation("browser-wasm", "Liberation Sans", 0xffffff, "a");
+  assert.equal(
+    historyStateEquivalent(
+      target,
+      observation("browser-wasm", "Arial", 0xffffff, "b"),
+    ),
+    true,
+  );
+  // A changed direct value is a different state in the browser too.
+  assert.equal(
+    historyStateEquivalent(
+      target,
+      observation("browser-wasm", "Arial", 0x000000, "b"),
+    ),
+    false,
+  );
+  // The Office runtime restores its native history exactly.
+  assert.equal(
+    historyStateEquivalent(
+      observation("office", "Liberation Sans", 0xffffff, "a"),
+      observation("office", "Arial", 0xffffff, "b"),
+    ),
+    false,
   );
 });

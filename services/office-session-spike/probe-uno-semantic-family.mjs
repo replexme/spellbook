@@ -7,7 +7,7 @@ import {
   firstPersistenceDifference,
   persistenceStateFromObservation,
 } from "./persistence-evidence.mjs";
-import { undoDocumentStateEquivalent } from "./document-state-evidence.mjs";
+import { historyStateEquivalent } from "./persistence-evidence.mjs";
 import {
   PROBE_IMAGE_ASSET_ID as IMAGE_ASSET_ID,
   PROBE_MEDIA_ASSET_ID as MEDIA_ASSET_ID,
@@ -104,7 +104,7 @@ try {
       direction,
     );
   };
-  const sameDocument = undoDocumentStateEquivalent;
+  const sameDocument = historyStateEquivalent;
   const waitForState = async (expected, label) => {
     const stop = Date.now() + 10_000;
     let actual;

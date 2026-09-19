@@ -6,9 +6,11 @@ import path from "node:path";
 import {
   firstDocumentStateDifference,
   quantizedGeometryEquivalent,
-  undoDocumentStateEquivalent,
 } from "./document-state-evidence.mjs";
-import { persistenceStateFromObservation } from "./persistence-evidence.mjs";
+import {
+  historyStateEquivalent,
+  persistenceStateFromObservation,
+} from "./persistence-evidence.mjs";
 import { activeTextFontEvidence } from "./text-format-evidence.mjs";
 import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
 
@@ -187,10 +189,11 @@ try {
       candidate = await call({ operation: "observe" });
       // The same Undo rule as every other probe: the exact revision, which
       // covers authored masters but not their diagnostic shape counts, and
-      // exact slide state.
+      // exact slide state, or in the browser the persisted state of the
+      // package it reopened.
       if (
-        undoDocumentStateEquivalent(
-          { revision, slides: expected.slides },
+        historyStateEquivalent(
+          { revision, slides: expected.slides, masters: expected.masters },
           candidate,
         )
       )

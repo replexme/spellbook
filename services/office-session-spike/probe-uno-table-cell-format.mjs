@@ -3,7 +3,7 @@ import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { undoDocumentStateEquivalent } from "./document-state-evidence.mjs";
+import { historyStateEquivalent } from "./persistence-evidence.mjs";
 import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
@@ -127,7 +127,7 @@ try {
     let observed;
     do {
       observed = await call({ operation: "observe" });
-      if (undoDocumentStateEquivalent(expected, observed)) return observed;
+      if (historyStateEquivalent(expected, observed)) return observed;
       await page.waitForTimeout(100);
     } while (Date.now() < stop);
     throw new Error(
