@@ -1440,83 +1440,151 @@ function mergeThemeValues(originalBytes, noEditBytes, editedBytes, part) {
   return serializeXml(original);
 }
 
-// A deck without a notes master gets one when a slide first receives notes.
-// The engine's presentation part and its relationships differ from the
-// author's throughout (it writes one master per layout), so only the new notes
-// master joins the author's copies: its id list entry and its relationship.
-// The notes master, its theme and the notes slide arrive as new parts.
-function mergeAddedNotesMaster(original, noEdit, edited) {
-  const notesMasters = (entries) =>
-    entries[presentationPath] && entries[presentationRelationshipsPath]
-      ? relationshipsOfType(entries, presentationPath, "notesMaster")
-      : [];
-  if (
-    !original[presentationPath] ||
-    notesMasters(original).length ||
-    notesMasters(noEdit).length
-  )
-    return null;
-  const added = notesMasters(edited);
-  if (added.length !== 1) return null;
-  const notesMaster = added[0].target;
-  const engineRelationships = parseXml(edited, presentationRelationshipsPath);
-  const engineRelationship = relationshipElements(engineRelationships).find(
-    (relationship) => relationship.getAttribute("Id") === added[0].id,
-  );
-  // The engine names these parts after all of its own masters, which are at
-  // least as many as the author's; a clash means an unexpected package.
-  const dependencies = edited[relationshipsPath(notesMaster)]
-    ? relationshipElements(parseXml(edited, relationshipsPath(notesMaster)))
-    : [];
-  for (const part of [
-    notesMaster,
-    ...dependencies
+// A deck without a notes master gets one when a slide first receives notes,
+// and one without comment authors gets that part with its first comment. The
+// engine's presentation part and its relationships differ from the author's
+// throughout (it writes one master per layout), so only what the edit added
+// joins the author's copies: the new relationship and, for a notes master,
+// its id list entry. The new parts themselves arrive with the other parts.
+// Anything else the engine changed there is left to the ordinary merge.
+const addedPresentationRelationships = new Set([
+  "notesMaster",
+  "commentAuthors",
+]);
+
+function mergeAddedPresentationParts(original, noEdit, edited) {
+  const hasPresentation = (entries) =>
+    Boolean(
+      entries[presentationPath] && entries[presentationRelationshipsPath],
+    );
+  if (![original, noEdit, edited].every(hasPresentation)) return null;
+  const relationshipsOf = (entries) =>
+    relationshipElements(parseXml(entries, presentationRelationshipsPath))
       .filter(
         (relationship) =>
           relationship.getAttribute("TargetMode") !== "External",
       )
-      .map((relationship) =>
-        resolvePart(notesMaster, relationship.getAttribute("Target")),
+      .map((relationship) => ({
+        id: relationship.getAttribute("Id"),
+        type: relationship.getAttribute("Type"),
+        kind: relationship.getAttribute("Type")?.split("/").at(-1),
+        target: resolvePart(
+          presentationPath,
+          relationship.getAttribute("Target"),
+        ),
+      }));
+  const identity = ({ type, target }) => `${type}|${target}`;
+  const [authored, normalized, changed] = [original, noEdit, edited].map(
+    relationshipsOf,
+  );
+  const normalizedIdentities = new Set(normalized.map(identity));
+  const changedIdentities = new Set(changed.map(identity));
+  const added = changed.filter(
+    (relationship) => !normalizedIdentities.has(identity(relationship)),
+  );
+  if (
+    !added.length ||
+    normalized.some(
+      (relationship) => !changedIdentities.has(identity(relationship)),
+    ) ||
+    added.some(
+      ({ kind }) =>
+        !addedPresentationRelationships.has(kind) ||
+        authored.some((relationship) => relationship.kind === kind),
+    )
+  )
+    return null;
+
+  // The engine's presentation part may differ from its no-edit save only by
+  // the new notes master's list, with every r:id read as its target.
+  const comparable = (entries, relationships) => {
+    const targets = new Map(
+      relationships.map((relationship) => [
+        relationship.id,
+        identity(relationship),
+      ]),
+    );
+    const document = parseXml(entries, presentationPath);
+    for (const list of [
+      ...document.documentElement.getElementsByTagNameNS(
+        presentationNamespace,
+        "notesMasterIdLst",
       ),
-  ])
-    if (original[part])
-      throw new Error(
-        `Native snapshot cannot add a notes master over the author's ${part}.`,
-      );
+    ])
+      list.parentNode.removeChild(list);
+    for (const element of [
+      document.documentElement,
+      ...document.getElementsByTagName("*"),
+    ]) {
+      const id = element.getAttributeNS(relationshipAttributeNamespace, "id");
+      if (id)
+        element.setAttributeNS(
+          relationshipAttributeNamespace,
+          "r:id",
+          targets.get(id) ?? `missing:${id}`,
+        );
+    }
+    return serializeXml(document);
+  };
+  if (
+    !samePartBytes(comparable(noEdit, normalized), comparable(edited, changed))
+  )
+    return null;
 
   const relationships = parseXml(original, presentationRelationshipsPath);
-  const relationshipId = nextRelationshipId(relationships);
-  const relationship = relationships.createElementNS(
-    packageRelationshipNamespace,
-    "Relationship",
-  );
-  relationship.setAttribute("Id", relationshipId);
-  relationship.setAttribute("Type", engineRelationship.getAttribute("Type"));
-  relationship.setAttribute(
-    "Target",
-    relativePart(presentationPath, notesMaster),
-  );
-  relationships.documentElement.appendChild(relationship);
-
   const presentation = parseXml(original, presentationPath);
-  const root = presentation.documentElement;
-  const list = presentation.createElementNS(
-    presentationNamespace,
-    "p:notesMasterIdLst",
-  );
-  const entry = presentation.createElementNS(
-    presentationNamespace,
-    "p:notesMasterId",
-  );
-  entry.setAttributeNS(relationshipAttributeNamespace, "r:id", relationshipId);
-  list.appendChild(entry);
-  // CT_Presentation: sldMasterIdLst, then notesMasterIdLst.
-  const slideMasters = directXmlChild(
-    root,
-    presentationNamespace,
-    "sldMasterIdLst",
-  );
-  root.insertBefore(list, slideMasters.nextSibling);
+  for (const relationship of added) {
+    // Every part the new one needs arrives from the engine; none may take the
+    // place of one the author has.
+    const dependencies = edited[relationshipsPath(relationship.target)]
+      ? relationshipElements(
+          parseXml(edited, relationshipsPath(relationship.target)),
+        )
+          .filter(
+            (dependency) =>
+              dependency.getAttribute("TargetMode") !== "External",
+          )
+          .map((dependency) =>
+            resolvePart(relationship.target, dependency.getAttribute("Target")),
+          )
+      : [];
+    for (const part of [relationship.target, ...dependencies])
+      if (original[part])
+        throw new Error(
+          `Native snapshot cannot add ${relationship.target} over the author's ${part}.`,
+        );
+    const id = nextRelationshipId(relationships);
+    const element = relationships.createElementNS(
+      packageRelationshipNamespace,
+      "Relationship",
+    );
+    element.setAttribute("Id", id);
+    element.setAttribute("Type", relationship.type);
+    element.setAttribute(
+      "Target",
+      relativePart(presentationPath, relationship.target),
+    );
+    relationships.documentElement.appendChild(element);
+    if (relationship.kind !== "notesMaster") continue;
+    const root = presentation.documentElement;
+    const list = presentation.createElementNS(
+      presentationNamespace,
+      "p:notesMasterIdLst",
+    );
+    const entry = presentation.createElementNS(
+      presentationNamespace,
+      "p:notesMasterId",
+    );
+    entry.setAttributeNS(relationshipAttributeNamespace, "r:id", id);
+    list.appendChild(entry);
+    // CT_Presentation: sldMasterIdLst, then notesMasterIdLst.
+    const slideMasters = directXmlChild(
+      root,
+      presentationNamespace,
+      "sldMasterIdLst",
+    );
+    root.insertBefore(list, slideMasters.nextSibling);
+  }
   return {
     [presentationPath]: serializeXml(presentation),
     [presentationRelationshipsPath]: serializeXml(relationships),
@@ -1861,9 +1929,9 @@ export function preserveOriginalPptxParts(
     sourceOperations.length === 1 && sourceOperations[0] === "set_master_theme"
       ? mergeMasterThemeIntoOriginal(original, noEdit, edited)
       : null;
-  const notesMasterPatch = semanticMasterThemePatch
+  const presentationPartsPatch = semanticMasterThemePatch
     ? null
-    : mergeAddedNotesMaster(original, noEdit, edited);
+    : mergeAddedPresentationParts(original, noEdit, edited);
   const paths = new Set([
     ...Object.keys(original),
     ...Object.keys(noEdit),
@@ -1981,8 +2049,8 @@ export function preserveOriginalPptxParts(
     const selected =
       semanticMasterThemePatch && Object.hasOwn(semanticMasterThemePatch, part)
         ? semanticMasterThemePatch[part]
-        : notesMasterPatch && Object.hasOwn(notesMasterPatch, part)
-          ? notesMasterPatch[part]
+        : presentationPartsPatch && Object.hasOwn(presentationPartsPatch, part)
+          ? presentationPartsPatch[part]
           : authoredChange
             ? semanticSlideSizePatch
               ? mergeSlideSizeIntoOriginal(original, noEdit, edited)
@@ -2010,7 +2078,7 @@ export function preserveOriginalPptxParts(
     if (
       (semanticMasterThemePatch &&
         Object.hasOwn(semanticMasterThemePatch, part)) ||
-      (notesMasterPatch && Object.hasOwn(notesMasterPatch, part))
+      (presentationPartsPatch && Object.hasOwn(presentationPartsPatch, part))
     )
       semanticPatchedParts.push(part);
     if (selected) merged[part] = selected;

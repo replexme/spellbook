@@ -2496,6 +2496,86 @@ test("native snapshot adds a new notes master to the author's presentation parts
   );
 });
 
+test("native snapshot adds new comment authors but leaves other presentation changes to the merge", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const relationship = (id, type, target) =>
+    `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${type}" Target="${target}"/>`;
+  const relationships = (...items) =>
+    strToU8(
+      `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${items.join("")}</Relationships>`,
+    );
+  // The engine numbers its relationships its own way; the comment authors
+  // part is new, and the slide's comments are listed in its relationships.
+  const engineSave = (comments, slideId = "256") => ({
+    ...original,
+    "ppt/presentation.xml": strToU8(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId2"/><p:sldMasterId id="2147483650" r:id="rId3"/></p:sldMasterIdLst><p:sldIdLst><p:sldId id="${slideId}" r:id="${comments ? "rId5" : "rId4"}"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/></p:presentation>`,
+    ),
+    "ppt/_rels/presentation.xml.rels": relationships(
+      relationship("rId2", "slideMaster", "slideMasters/slideMaster1.xml"),
+      relationship("rId3", "slideMaster", "slideMasters/slideMaster2.xml"),
+      ...(comments
+        ? [
+            relationship("rId4", "commentAuthors", "commentAuthors.xml"),
+            relationship("rId5", "slide", "slides/slide1.xml"),
+          ]
+        : [relationship("rId4", "slide", "slides/slide1.xml")]),
+    ),
+    "ppt/slideMasters/slideMaster2.xml":
+      original["ppt/slideMasters/slideMaster1.xml"],
+    "ppt/slideMasters/_rels/slideMaster2.xml.rels":
+      original["ppt/slideMasters/_rels/slideMaster1.xml.rels"],
+    ...(comments
+      ? {
+          "ppt/commentAuthors.xml": strToU8(
+            '<p:cmAuthorLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cmAuthor id="0" name="Spellbook AI" initials="AI" lastIdx="1" clrIdx="0"/></p:cmAuthorLst>',
+          ),
+          "ppt/comments/comment1.xml": strToU8(
+            '<p:cmLst xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cm authorId="0" idx="1"><p:pos x="10" y="10"/><p:text>Spellbook comment</p:text></p:cm></p:cmLst>',
+          ),
+          "ppt/slides/_rels/slide1.xml.rels": relationships(
+            relationship(
+              "rId1",
+              "slideLayout",
+              "../slideLayouts/slideLayout7.xml",
+            ),
+            relationship("rId2", "comments", "../comments/comment1.xml"),
+          ),
+        }
+      : {}),
+  });
+  const preserve = (edited) =>
+    unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(original),
+        zipSync(engineSave(false)),
+        zipSync(edited),
+        ["add_comment"],
+      ).bytes,
+    );
+  const merged = preserve(engineSave(true));
+  assert.deepEqual(
+    merged["ppt/presentation.xml"],
+    original["ppt/presentation.xml"],
+  );
+  assert.equal(
+    strFromU8(merged["ppt/_rels/presentation.xml.rels"]),
+    strFromU8(original["ppt/_rels/presentation.xml.rels"]).replace(
+      "</Relationships>",
+      '<Relationship Id="rIdSpellbook1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/commentAuthors" Target="commentAuthors.xml"/></Relationships>',
+    ),
+  );
+  assert.ok(merged["ppt/commentAuthors.xml"]);
+  assert.ok(merged["ppt/comments/comment1.xml"]);
+
+  // A presentation change beyond the new relationship is not this merge's
+  // to make: the engine's save is not accepted in its place either.
+  assert.throws(
+    () => preserve(engineSave(true, "257")),
+    /missing dependency|consistent with its relationships/u,
+  );
+});
+
 test("native snapshot ignores targets for commands that restructure the shape tree", async () => {
   const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
   const noEdit = withEngineSave(original, {
