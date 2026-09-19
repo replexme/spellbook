@@ -2072,11 +2072,125 @@ test("native snapshot keeps the authored XML of shapes a command did not name", 
     targeted,
     /<p:cNvPr id="3" name="Rectangle 2"\/>[\s\S]*<a:p><a:pPr algn="ctr"\/><\/a:p>/u,
   );
-  assert.match(targeted, /id="67" name="TextBox 1"[\s\S]*outerShdw/u);
+  // The named shape takes only the shadow the command added, in the engine's
+  // element order; its id and font stay as the author wrote them although
+  // the engine renumbered the shape and renamed Liberation Sans to Arial.
+  assert.match(
+    targeted,
+    /<p:cNvPr id="2" name="TextBox 1"\/>[\s\S]*<a:effectLst><a:outerShdw dist="12700" dir="2700000"><a:srgbClr val="000000"\/><\/a:outerShdw><\/a:effectLst><a:latin typeface="Liberation Sans"\/>/u,
+  );
+  assert.doesNotMatch(targeted, /typeface="Arial"|id="67"/u);
   // Without the command's targets the rectangle looks changed by the edit,
   // so the merge cannot tell the engine's rewrite from an intended change.
   const untargeted = preserve(null);
   assert.doesNotMatch(untargeted, /<a:pPr algn="ctr"\/>/u);
+});
+
+// An engine save of the rectangle as LibreOffice writes it: explicit insets,
+// no empty list style, an explicit end-of-paragraph font, lower-case colors
+// and a size rounded through 1/100 mm.
+function withEngineRectangle(entries, fill) {
+  const slidePath = "ppt/slides/slide1.xml";
+  const slide = strFromU8(entries[slidePath])
+    .replace('id="3" name="Rectangle 2"', 'id="68" name="Rectangle 2"')
+    .replace(
+      '<a:ext cx="2926080" cy="1005840"/>',
+      '<a:ext cx="2925720" cy="1005480"/>',
+    )
+    .replace('<a:srgbClr val="2563EB"/>', `<a:srgbClr val="${fill}"/>`)
+    .replace('<a:srgbClr val="1E3A8A"/>', '<a:srgbClr val="1e3a8a"/>')
+    .replace(
+      '<a:bodyPr rtlCol="0" anchor="ctr"/><a:lstStyle/><a:p><a:pPr algn="ctr"/></a:p>',
+      '<a:bodyPr lIns="90000" rIns="90000" tIns="45000" bIns="45000" anchor="ctr"><a:noAutofit/></a:bodyPr><a:p><a:pPr algn="ctr"/><a:endParaRPr sz="1800"><a:latin typeface="Calibri"/></a:endParaRPr></a:p>',
+    );
+  return { ...entries, [slidePath]: strToU8(slide) };
+}
+
+test("native snapshot takes only what the command changed inside the shape it named", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const authored = strFromU8(original["ppt/slides/slide1.xml"]);
+  const merged = strFromU8(
+    unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(original),
+        zipSync(withEngineRectangle(original, "2563eb")),
+        zipSync(withEngineRectangle(original, "4f46e5")),
+        ["fill_color"],
+        [{ slideIndex: 0, name: "Rectangle 2" }],
+      ).bytes,
+    )["ppt/slides/slide1.xml"],
+  );
+  assert.equal(
+    merged,
+    authored.replace('<a:srgbClr val="2563EB"/>', '<a:srgbClr val="4f46e5"/>'),
+  );
+});
+
+test("native snapshot never keeps the author's color beside a new engine color", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const slidePath = "ppt/slides/slide1.xml";
+  // The author filled the rectangle with a theme color; the engine writes the
+  // resolved RGB value, before the command and after it.
+  const themed = {
+    ...original,
+    [slidePath]: strToU8(
+      strFromU8(original[slidePath]).replace(
+        '<a:srgbClr val="2563EB"/>',
+        '<a:schemeClr val="accent1"/>',
+      ),
+    ),
+  };
+  const merged = strFromU8(
+    unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(themed),
+        zipSync(withEngineRectangle(original, "4472c4")),
+        zipSync(withEngineRectangle(original, "ff0000")),
+        ["fill_color"],
+        [{ slideIndex: 0, name: "Rectangle 2" }],
+      ).bytes,
+    )[slidePath],
+  );
+  assert.match(
+    merged,
+    /<a:prstGeom prst="rect"><a:avLst\/><\/a:prstGeom><a:solidFill><a:srgbClr val="ff0000"\/><\/a:solidFill>/u,
+  );
+  assert.doesNotMatch(merged, /schemeClr val="accent1"\/><a:srgbClr/u);
+});
+
+test("native snapshot takes the engine's element where the command changed its structure", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const paragraphs = (text) =>
+    text
+      .map(
+        (value) =>
+          `<a:p><a:r><a:rPr sz="2400"><a:solidFill><a:srgbClr val="11181f"/></a:solidFill><a:latin typeface="Arial"/></a:rPr><a:t>${value}</a:t></a:r></a:p>`,
+      )
+      .join("");
+  const engineSave = (text) => {
+    const slidePath = "ppt/slides/slide1.xml";
+    const slide = strFromU8(original[slidePath])
+      .replace('id="2" name="TextBox 1"', 'id="67" name="TextBox 1"')
+      .replace(/<a:p><a:r><a:rPr sz="2400">[\s\S]*?<\/a:p>/u, paragraphs(text));
+    return { ...original, [slidePath]: strToU8(slide) };
+  };
+  const merged = strFromU8(
+    unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(original),
+        zipSync(engineSave(["Spellbook 검증 العربية"])),
+        zipSync(engineSave(["First", "Second"])),
+        ["replace_text"],
+        [{ slideIndex: 0, name: "TextBox 1" }],
+      ).bytes,
+    )["ppt/slides/slide1.xml"],
+  );
+  // Two paragraphs cannot be matched to one, so the text body is the
+  // engine's; the rest of the shape stays authored.
+  assert.match(
+    merged,
+    /<p:cNvPr id="2" name="TextBox 1"\/>[\s\S]*<a:bodyPr wrap="none"><a:spAutoFit\/><\/a:bodyPr><a:lstStyle\/><a:p><a:r><a:rPr sz="2400">[\s\S]*<a:t>First<\/a:t>[\s\S]*<a:t>Second<\/a:t>/u,
+  );
 });
 
 test("native snapshot ignores targets for commands that restructure the shape tree", async () => {

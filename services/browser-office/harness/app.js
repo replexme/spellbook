@@ -144,6 +144,13 @@ const productRedoHistory = [];
 let reconciledModelRevision = "";
 let unreconciledModelRevision = "";
 let reconciledObservation = null;
+// The engine's save of the live document at one reconciled revision, taken
+// before an edit or kept from the previous edit's save. Comparing two saves
+// of the same live document isolates what the edit changed. A fresh load of
+// the saved file can differ from the live document in details no edit made
+// (for example an empty paragraph's alignment), and comparing against it let
+// those differences reach the author's file.
+let liveExportBaseline = null;
 
 function captureProductEditState() {
   return snapshotProductEditState({
@@ -282,6 +289,7 @@ async function sha256(bytes) {
 }
 
 async function writeAndOpen(bytes, name = "document.pptx") {
+  liveExportBaseline = null;
   currentBytes = bytes.slice();
   filename = name;
   activePath = `/tmp/spellbook/${name.replace(/[^a-zA-Z0-9._-]/gu, "-")}`;
@@ -612,11 +620,14 @@ async function preserveAndInspectNativeDocument(
   detailSlideIndex,
   sourceOperations,
   sourceTargets = null,
+  baselineBytes = null,
 ) {
   markBrowserProbePhase("snapshot:serialize");
   const serialized = await serializeNativeDocument();
   markBrowserProbePhase("snapshot:normalize");
-  const noEdit = await normalizeNativeDocumentBytes(originalBytes);
+  const noEdit =
+    baselineBytes?.slice() ??
+    (await normalizeNativeDocumentBytes(originalBytes));
   if (browserProbeMode && query.get("nativeRaw") === "1") {
     savedArtifacts.set("native-snapshot-original", originalBytes.slice());
     savedArtifacts.set("native-snapshot-no-edit", noEdit.slice());
@@ -635,7 +646,20 @@ async function preserveAndInspectNativeDocument(
     savedArtifacts.set("native-snapshot-preserved", bytes.slice());
   markBrowserProbePhase("snapshot:inspect");
   const observation = await inspectNativeDocumentBytes(bytes, detailSlideIndex);
-  return { bytes, observation, report: preserved.report };
+  return { bytes, observation, report: preserved.report, serialized };
+}
+
+// A save of the live document for the preservation baseline, only when the
+// live model is the reconciled one; otherwise the caller falls back to a
+// fresh load of the saved file.
+async function liveExportBaselineAt(liveRevision) {
+  if (!liveRevision || liveRevision !== reconciledModelRevision) return null;
+  if (liveExportBaseline?.revision !== liveRevision)
+    liveExportBaseline = {
+      revision: liveRevision,
+      bytes: await serializeNativeDocument(),
+    };
+  return liveExportBaseline.bytes.slice();
 }
 
 function assertPersistedNativeIntent(
@@ -1114,6 +1138,7 @@ async function prepareProductPackageMutation(nativeRequest) {
       beforeBytes: currentBytes.slice(),
       beforeRevision: reconciledModelRevision,
       beforeObservation,
+      baselineBytes: await liveExportBaselineAt(beforeObservation.revision),
       beforeSlides: expectedSlides,
       nativeRequest: structuredClone(nativeRequest),
       persistedNativeRequest: {
@@ -1180,6 +1205,7 @@ async function prepareProductPackageMutation(nativeRequest) {
       beforeBytes: currentBytes.slice(),
       beforeRevision: reconciledModelRevision,
       beforeObservation,
+      baselineBytes: await liveExportBaselineAt(beforeObservation.revision),
       beforeSlides: expectedSlides,
       nativeRequest: {
         operation: nativeRequest.operation,
@@ -1489,15 +1515,19 @@ async function commitProductPackageMutation(prepared, nativeValue) {
     }
     let afterBytes;
     let preservationReport;
+    let liveSave;
+    liveExportBaseline = null;
     try {
       const preserved = await preserveAndInspectNativeDocument(
         prepared.beforeBytes,
         nativeValue.textDetails?.slideIndex,
         prepared.sourceOperations,
         prepared.sourceTargets ?? null,
+        prepared.baselineBytes ?? null,
       );
       afterBytes = preserved.bytes;
       preservationReport = preserved.report;
+      liveSave = preserved.serialized;
       if ((await sha256(afterBytes)) === (await sha256(prepared.beforeBytes)))
         throw new Error("Browser native edit did not change the PPTX package.");
       assertPersistedNativeIntent(
@@ -1561,6 +1591,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
       );
       throw error;
     }
+    liveExportBaseline = { revision: nativeValue.revision, bytes: liveSave };
     observed.lastMutation = {
       persistence: "native_snapshot",
       sourceOperations: prepared.sourceOperations,
@@ -1736,6 +1767,7 @@ async function restoreProductHistoryPackage({
 async function undoProductMutation() {
   const previous = productUndoHistory.at(-1);
   if (!previous) return false;
+  liveExportBaseline = null;
   const previousState = captureProductEditState();
   const current = await observeNativeDocument();
   if (current.revision !== reconciledModelRevision) {
@@ -1790,6 +1822,7 @@ async function undoProductMutation() {
 async function redoProductMutation() {
   const next = productRedoHistory.at(-1);
   if (!next) return false;
+  liveExportBaseline = null;
   const previousState = captureProductEditState();
   if ((await sha256(currentBytes)) !== (await sha256(next.beforeBytes)))
     throw new Error("Browser redo base no longer matches the package history.");
@@ -1940,12 +1973,19 @@ async function checkpointLiveNativeState(live, reason) {
   const beforeRevision = previousState.reconciledModelRevision;
   if (reconciledObservation?.revision !== beforeRevision)
     throw new Error("browser_native_baseline_unavailable");
+  const baselineBytes =
+    liveExportBaseline?.revision === beforeRevision
+      ? liveExportBaseline.bytes
+      : null;
+  liveExportBaseline = null;
   // A direct human edit has no command list; null selects the human-edit
   // preservation budget instead of an AI operation family.
   const preserved = await preserveAndInspectNativeDocument(
     previousState.currentBytes,
     live.textDetails?.slideIndex,
     null,
+    null,
+    baselineBytes,
   );
   const afterBytes = preserved.bytes;
   assertPersistedNativeIntent(
@@ -1978,6 +2018,7 @@ async function checkpointLiveNativeState(live, reason) {
     unreconciledModelRevision = live.revision;
     throw error;
   }
+  liveExportBaseline = { revision: live.revision, bytes: preserved.serialized };
   return true;
 }
 

@@ -125,6 +125,189 @@ function sameEngineExportPart(part, left, right) {
   return samePartBytes(normalized(left), normalized(right));
 }
 
+const xmlElementChildren = (node) =>
+  [...node.childNodes].filter((child) => child.nodeType === 1);
+const xmlElementKey = (node) => `${node.namespaceURI ?? ""}|${node.localName}`;
+const xmlHasText = (node) =>
+  [...node.childNodes].some(
+    (child) =>
+      (child.nodeType === 3 || child.nodeType === 4) &&
+      child.nodeValue.trim() !== "",
+  );
+// The engine generates a new field GUID on every save.
+const volatileXmlAttribute = (element, attribute) =>
+  element.namespaceURI === drawingNamespace &&
+  element.localName === "fld" &&
+  !attribute.namespaceURI &&
+  attribute.localName === "id";
+function comparableXml(node) {
+  const copy = node.cloneNode(true);
+  for (const element of [copy, ...copy.getElementsByTagName("*")])
+    if (
+      element.namespaceURI === drawingNamespace &&
+      element.localName === "fld"
+    )
+      element.removeAttribute("id");
+  return new XMLSerializer().serializeToString(copy);
+}
+function occurrenceKeys(nodes) {
+  const seen = new Map();
+  return nodes.map((node) => {
+    const key = xmlElementKey(node);
+    const index = seen.get(key) ?? 0;
+    seen.set(key, index + 1);
+    return `${key}#${index}`;
+  });
+}
+function countByName(nodes) {
+  const counts = new Map();
+  for (const node of nodes)
+    counts.set(xmlElementKey(node), (counts.get(xmlElementKey(node)) ?? 0) + 1);
+  return counts;
+}
+
+// Three-way merge of one element: `source` is the author's XML, `baseline`
+// and `edited` are the engine's saves before and after the command. The
+// engine rewrites everything it saves (inherited text settings become
+// explicit, fonts get their Microsoft names, sizes pass through 1/100 mm), so
+// wherever its two saves agree the author's XML is kept, and only attributes
+// and children the command changed are taken from the edited save. Returns
+// null when the children cannot be matched by name and position, for example
+// when the command changed the number of paragraphs; the caller then takes
+// the engine's element whole.
+function mergeElementThreeWay(document, source, baseline, edited) {
+  if (comparableXml(baseline) === comparableXml(edited))
+    return document.importNode(source, true);
+  if (
+    xmlElementKey(source) !== xmlElementKey(baseline) ||
+    xmlElementKey(baseline) !== xmlElementKey(edited) ||
+    xmlHasText(source) ||
+    xmlHasText(baseline) ||
+    xmlHasText(edited)
+  )
+    return null;
+  const sourceChildren = xmlElementChildren(source);
+  const baselineChildren = xmlElementChildren(baseline);
+  const editedChildren = xmlElementChildren(edited);
+  const sourceCounts = countByName(sourceChildren);
+  const baselineCounts = countByName(baselineChildren);
+  const editedCounts = countByName(editedChildren);
+  for (const name of new Set([
+    ...baselineCounts.keys(),
+    ...editedCounts.keys(),
+  ])) {
+    const before = baselineCounts.get(name) ?? 0;
+    const after = editedCounts.get(name) ?? 0;
+    const authored = sourceCounts.get(name) ?? 0;
+    if (before && after && before !== after) return null;
+    if (authored && before && authored !== before) return null;
+    if (authored && !before && after && authored !== after) return null;
+  }
+
+  const merged = document.importNode(source, false);
+  const attributes = new Map();
+  for (const element of [baseline, edited])
+    for (let index = 0; index < element.attributes.length; index += 1) {
+      const attribute = element.attributes.item(index);
+      if (!volatileXmlAttribute(element, attribute))
+        attributes.set(
+          `${attribute.namespaceURI ?? ""}|${attribute.localName}`,
+          attribute,
+        );
+    }
+  for (const attribute of attributes.values()) {
+    const namespace = attribute.namespaceURI || null;
+    const before = baseline.hasAttributeNS(namespace, attribute.localName)
+      ? baseline.getAttributeNS(namespace, attribute.localName)
+      : null;
+    const after = edited.hasAttributeNS(namespace, attribute.localName)
+      ? edited.getAttributeNS(namespace, attribute.localName)
+      : null;
+    if (before === after) continue;
+    if (after === null)
+      merged.removeAttributeNS(namespace, attribute.localName);
+    else merged.setAttributeNS(namespace, attribute.name, after);
+  }
+
+  const sourceKeys = occurrenceKeys(sourceChildren);
+  const baselineByKey = new Map(
+    occurrenceKeys(baselineChildren).map((key, index) => [
+      key,
+      baselineChildren[index],
+    ]),
+  );
+  const editedKeys = occurrenceKeys(editedChildren);
+  const editedByKey = new Map(
+    editedKeys.map((key, index) => [key, editedChildren[index]]),
+  );
+  const sourceKeySet = new Set(sourceKeys);
+  // The author and the engine can express one choice (a color, a fill, an
+  // autofit mode) with different elements. Keeping the author's element
+  // beside one the edit introduced would leave two choices, so such an
+  // element is taken from the engine whole.
+  if (
+    sourceKeys.some(
+      (key) => !baselineByKey.has(key) && !editedByKey.has(key),
+    ) &&
+    editedKeys.some(
+      (key, index) =>
+        !sourceKeySet.has(key) &&
+        (!baselineByKey.has(key) ||
+          comparableXml(baselineByKey.get(key)) !==
+            comparableXml(editedChildren[index])),
+    )
+  )
+    return null;
+  const output = [];
+  for (const [index, key] of sourceKeys.entries()) {
+    const authored = sourceChildren[index];
+    const before = baselineByKey.get(key);
+    const after = editedByKey.get(key);
+    // The engine never writes this child (for example an empty a:lstStyle).
+    if (!before && !after)
+      output.push({ key, node: document.importNode(authored, true) });
+    else if (!after) continue;
+    else if (!before)
+      output.push({ key, node: document.importNode(after, true) });
+    else
+      output.push({
+        key,
+        node:
+          mergeElementThreeWay(document, authored, before, after) ??
+          document.importNode(after, true),
+      });
+  }
+  for (const [index, key] of editedKeys.entries()) {
+    if (sourceKeySet.has(key)) continue;
+    const before = baselineByKey.get(key);
+    const after = editedChildren[index];
+    // A child only the engine writes, unchanged by the command: the author's
+    // XML never had it, so it stays absent.
+    if (before && comparableXml(before) === comparableXml(after)) continue;
+    // Keep the engine's order: after the nearest earlier sibling already
+    // placed, otherwise before the nearest later one.
+    let position = -1;
+    for (let earlier = index - 1; earlier >= 0 && position < 0; earlier -= 1) {
+      const at = output.findIndex((entry) => entry.key === editedKeys[earlier]);
+      if (at >= 0) position = at + 1;
+    }
+    for (
+      let later = index + 1;
+      later < editedKeys.length && position < 0;
+      later += 1
+    ) {
+      const at = output.findIndex((entry) => entry.key === editedKeys[later]);
+      if (at >= 0) position = at;
+    }
+    output.splice(position < 0 ? output.length : position, 0, {
+      key,
+      node: document.importNode(after, true),
+    });
+  }
+  for (const { node } of output) merged.appendChild(node);
+  return merged;
+}
+
 function preserveUnaffectedSlideShapes(
   part,
   originalBytes,
@@ -233,13 +416,30 @@ function preserveUnaffectedSlideShapes(
     if (
       !editedShape ||
       editedShape.localName !== baseline.localName ||
-      identity(editedShape)?.name !== baselineIdentity.name ||
-      (!additiveOnly &&
-        !untargeted(source) &&
-        !samePartBytes(serializeXml(editedShape), serializeXml(baseline)))
+      identity(editedShape)?.name !== baselineIdentity.name
     )
       continue;
-    replacements.push({ source, editedShape });
+    if (
+      additiveOnly ||
+      untargeted(source) ||
+      samePartBytes(serializeXml(editedShape), serializeXml(baseline))
+    ) {
+      replacements.push({
+        source,
+        editedShape,
+        node: documents[2].importNode(source, true),
+      });
+      continue;
+    }
+    // A shape the command named keeps the author's XML wherever the engine's
+    // saves before and after the command agree.
+    const merged = mergeElementThreeWay(
+      documents[2],
+      source,
+      baseline,
+      editedShape,
+    );
+    if (merged) replacements.push({ source, editedShape, node: merged });
   }
   if (!replacements.length) return null;
   const replacing = new Set(replacements.map(({ editedShape }) => editedShape));
@@ -250,11 +450,8 @@ function preserveUnaffectedSlideShapes(
   );
   if (replacements.some(({ source }) => remainingIds.has(identity(source).id)))
     return null;
-  for (const { source, editedShape } of replacements)
-    editedShape.parentNode.replaceChild(
-      documents[2].importNode(source, true),
-      editedShape,
-    );
+  for (const { editedShape, node } of replacements)
+    editedShape.parentNode.replaceChild(node, editedShape);
   return serializeXml(documents[2]);
 }
 
