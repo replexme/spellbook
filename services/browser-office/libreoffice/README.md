@@ -119,6 +119,12 @@ Patch `0041` keeps a comment's initials, position and text: export made the
 initials up from the author's name, wrote a missing date as zeros and the text
 unescaped, and import rounded the position through whole 1/100 mm into
 15.87 mm steps and dropped the initials.
+Patch `0042` gives a PPTX paragraph without `rtl` a left-to-right direction
+and one without a tab list no tab stops, and keeps the tab stops of a
+paragraph with an indent: inserting a paragraph copied the previous
+paragraph's attributes, so a right-to-left direction and tab stops carried
+over on import, and the indent rule replaced a paragraph's own tab stops with
+one at zero.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

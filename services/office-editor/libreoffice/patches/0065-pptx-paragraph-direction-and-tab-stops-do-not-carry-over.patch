@@ -1,0 +1,134 @@
+diff --git a/oox/source/drawingml/textparagraph.cxx b/oox/source/drawingml/textparagraph.cxx
+--- a/oox/source/drawingml/textparagraph.cxx
++++ b/oox/source/drawingml/textparagraph.cxx
+@@ -185,6 +185,12 @@ void TextParagraph::insertAt(
+             {
+                 aParaProp.getTextParagraphPropertyMap().setProperty(PROP_WritingMode, nWritingMode);
+             }
++            // A paragraph without rtl flows left to right. A new paragraph copies
++            // the previous one's attributes, so leaving the direction unset
++            // carried a right-to-left paragraph's direction over.
++            if (!aParaProp.getTextParagraphPropertyMap().hasProperty(PROP_WritingMode))
++                aParaProp.getTextParagraphPropertyMap().setProperty(PROP_WritingMode,
++                                                                    text::WritingMode2::LR_TB);
+ 
+             float fCharacterSize = nCharHeight > 0 ? GetFontHeight ( nCharHeight ) : pTextParagraphStyle->getCharHeightPoints( 12 );
+             aParaProp.pushToPropSet( &rFilterBase, xProps, aioBulletList, &pTextParagraphStyle->getBulletList(), true, fCharacterSize, true, &aCombinedTextStyle );
+diff --git a/oox/source/drawingml/textparagraphproperties.cxx b/oox/source/drawingml/textparagraphproperties.cxx
+--- a/oox/source/drawingml/textparagraphproperties.cxx
++++ b/oox/source/drawingml/textparagraphproperties.cxx
+@@ -420,11 +420,14 @@ void TextParagraphProperties::pushToPropSet( const ::oox::core::XmlFilterBase* p
+ {
+     PropertySet aPropSet( xPropSet );
+     aPropSet.setProperties( maTextParagraphPropertyMap );
+-    // A paragraph without marR has no right margin. Inserting a paragraph
+-    // copies the previous paragraph's attributes, so leaving the property
+-    // unset carried that paragraph's right margin over.
++    // A paragraph without marR has no right margin, and one without a tab
++    // list no tab stops. Inserting a paragraph copies the previous
++    // paragraph's attributes, so leaving a property unset carried that
++    // paragraph's value over.
+     if ( !maTextParagraphPropertyMap.hasProperty( PROP_ParaRightMargin ) )
+         aPropSet.setProperty<sal_Int32>( PROP_ParaRightMargin, 0 );
++    if ( !maTextParagraphPropertyMap.hasProperty( PROP_ParaTabStops ) )
++        aPropSet.setProperty( PROP_ParaTabStops, Sequence< TabStop >() );
+ 
+     sal_Int32 nNumberingType = NumberingType::NUMBER_NONE;
+     if ( maBulletList.mnNumberingType.hasValue() )
+@@ -527,7 +530,8 @@ void TextParagraphProperties::pushToPropSet( const ::oox::core::XmlFilterBase* p
+     if ( noFirstLineIndentation )
+     {
+         aPropSet.setProperty( PROP_ParaFirstLineIndent, *noFirstLineIndentation );
+-        if( bPushDefaultValues )
++        // The tab stops the paragraph sets itself stay.
++        if( bPushDefaultValues && !maTextParagraphPropertyMap.hasProperty( PROP_ParaTabStops ) )
+         {
+             // Reset TabStops - these would be auto calculated by Impress
+             TabStop aTabStop;
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -61,6 +61,7 @@
+ #include <com/sun/star/drawing/XShape.hpp>
+ #include <com/sun/star/drawing/XMasterPageTarget.hpp>
+ #include <com/sun/star/style/ParagraphAdjust.hpp>
++#include <com/sun/star/style/TabStop.hpp>
+ #include <com/sun/star/table/XMergeableCell.hpp>
+ #include <com/sun/star/text/GraphicCrop.hpp>
+ #include <com/sun/star/text/XText.hpp>
+@@ -1469,6 +1470,75 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testPptxParagraphRightMarginDoesNotCarryOv
+     CPPUNIT_ASSERT_EQUAL(sal_Int32(0), nSecond);
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testPptxParagraphDirectionAndTabStopsDoNotCarryOver)
++{
++    createSdImpressDoc();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShape> xShape(
++        xFactory->createInstance(u"com.sun.star.drawing.TextShape"_ustr), uno::UNO_QUERY_THROW);
++    xShape->setPosition(awt::Point(1000, 1000));
++    xShape->setSize(awt::Size(10000, 3000));
++    xShapes->add(xShape);
++    uno::Reference<text::XText> xText(xShape, uno::UNO_QUERY_THROW);
++    xText->setString(u"First paragraph\nSecond paragraph"_ustr);
++    const auto paragraphs = [this]() {
++        uno::Reference<drawing::XDrawPagesSupplier> xSupplier(mxComponent,
++                                                              uno::UNO_QUERY_THROW);
++        uno::Reference<container::XIndexAccess> xPageShapes(
++            xSupplier->getDrawPages()->getByIndex(0), uno::UNO_QUERY_THROW);
++        std::vector<uno::Reference<beans::XPropertySet>> aParagraphs;
++        for (sal_Int32 nShape = 0; nShape < xPageShapes->getCount() && aParagraphs.empty();
++             ++nShape)
++        {
++            uno::Reference<text::XText> xCandidate(xPageShapes->getByIndex(nShape),
++                                                   uno::UNO_QUERY);
++            if (!xCandidate.is() || !xCandidate->getString().startsWith("First paragraph"))
++                continue;
++            uno::Reference<container::XEnumerationAccess> xAccess(xCandidate,
++                                                                  uno::UNO_QUERY_THROW);
++            uno::Reference<container::XEnumeration> xParagraphs = xAccess->createEnumeration();
++            while (xParagraphs->hasMoreElements())
++                aParagraphs.emplace_back(xParagraphs->nextElement(), uno::UNO_QUERY_THROW);
++        }
++        return aParagraphs;
++    };
++    auto aParagraphs = paragraphs();
++    CPPUNIT_ASSERT_EQUAL(size_t(2), aParagraphs.size());
++    style::TabStop aTabStop;
++    aTabStop.Position = 5000;
++    aParagraphs[0]->setPropertyValue(u"WritingMode"_ustr,
++                                     cpo::uno::Any(sal_Int16(text::WritingMode2::RL_TB)));
++    aParagraphs[0]->setPropertyValue(u"ParaLeftMargin"_ustr, cpo::uno::Any(sal_Int32(1200)));
++    aParagraphs[0]->setPropertyValue(u"ParaFirstLineIndent"_ustr,
++                                     cpo::uno::Any(sal_Int32(-600)));
++    aParagraphs[0]->setPropertyValue(u"ParaTabStops"_ustr,
++                                     cpo::uno::Any(uno::Sequence<style::TabStop>{ aTabStop }));
++
++    // Import replaced the tab stop of a paragraph with an indent by one at
++    // zero, and gave the second paragraph, which sets neither, the first
++    // paragraph's direction and tab stops.
++    saveAndReload(TestFilter::PPTX);
++    aParagraphs = paragraphs();
++    CPPUNIT_ASSERT_EQUAL(size_t(2), aParagraphs.size());
++    const auto direction = [&aParagraphs](size_t nParagraph) {
++        return aParagraphs[nParagraph]->getPropertyValue(u"WritingMode"_ustr).get<sal_Int16>();
++    };
++    const auto tabStops = [&aParagraphs](size_t nParagraph) {
++        return aParagraphs[nParagraph]
++            ->getPropertyValue(u"ParaTabStops"_ustr)
++            .get<uno::Sequence<style::TabStop>>();
++    };
++    CPPUNIT_ASSERT_EQUAL(sal_Int16(text::WritingMode2::RL_TB), direction(0));
++    CPPUNIT_ASSERT_EQUAL(sal_Int32(1), tabStops(0).getLength());
++    CPPUNIT_ASSERT_EQUAL(sal_Int32(5000), tabStops(0)[0].Position);
++    CPPUNIT_ASSERT_EQUAL(sal_Int16(text::WritingMode2::LR_TB), direction(1));
++    CPPUNIT_ASSERT_EQUAL(sal_Int32(0), tabStops(1).getLength());
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testPptxEmptyTextKeepsShapeAlignment)
+ {
+     createSdImpressDoc();

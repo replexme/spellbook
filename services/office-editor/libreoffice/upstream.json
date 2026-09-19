@@ -12,7 +12,7 @@
   "patchLevel": "undo-v31",
   "sourcePatchSeriesReady": true,
   "sourceCandidateReady": false,
-  "patchSeriesSha256": "c7ed217df77c1a6b9d108bede0917695f3b3ddddef29ea2499ce7ee7e5e5c0ed",
+  "patchSeriesSha256": "9f9607dc6f90ac60fcd33490289d2ea8bfb13f6b59d258355ef35e7dbfd05d11",
   "engineImageTag": "26.04.4.1-spellbook-undo-v31-r1-candidate",
   "impressUiUnoCommandCount": 725,
   "impressUiUnoCommandsSha256": "ddfe8aeb5f798b6656b22276d219311bd30e9ce5c26cdf8ffe3d321f2c2f3fbb",
@@ -78,7 +78,8 @@
     "patches/0061-pptx-empty-text-keeps-alignment.patch",
     "patches/0062-pptx-connector-keeps-its-end-points.patch",
     "patches/0063-freeform-is-pptx-custom-geometry.patch",
-    "patches/0064-pptx-comments-keep-their-position.patch"
+    "patches/0064-pptx-comments-keep-their-position.patch",
+    "patches/0065-pptx-paragraph-direction-and-tab-stops-do-not-carry-over.patch"
   ],
   "requiredCppunitTargets": [
     "CppunitTest_sd_uiimpress",
@@ -127,6 +128,7 @@
     "CppunitTest_sd_uiimpress:testPptxEmptyTextKeepsShapeAlignment",
     "CppunitTest_sd_uiimpress:testPptxConnectorKeepsItsEndPoints",
     "CppunitTest_sd_uiimpress:testFreeformIsPptxCustomGeometry",
-    "CppunitTest_sd_uiimpress:testPptxCommentKeepsItsPosition"
+    "CppunitTest_sd_uiimpress:testPptxCommentKeepsItsPosition",
+    "CppunitTest_sd_uiimpress:testPptxParagraphDirectionAndTabStopsDoNotCarryOver"
   ]
 }
