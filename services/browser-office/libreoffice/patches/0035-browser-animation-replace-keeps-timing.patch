@@ -1,0 +1,64 @@
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -15,6 +15,7 @@
+ #include <cstdlib>
+ #include <vector>
+ 
++#include <com/sun/star/animations/XAnimationNode.hpp>
+ #include <com/sun/star/beans/XPropertySet.hpp>
+ #include <com/sun/star/beans/XPropertyState.hpp>
+ #include <com/sun/star/container/XEnumeration.hpp>
+@@ -2487,6 +2488,37 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookDocumentDesignAndAnimationCom
+     pUndoManager->Redo();
+     assertTiming(1.5, 0.4, sal_Int16(1));
+ 
++    // Replacing the preset keeps the effect's timing in the animations that
++    // play it, not only in the effect's stored duration.
++    uno::Sequence<beans::PropertyValue> aReplaceCommand{
++        comphelper::makePropertyValue(u"Action"_ustr, u"replace"_ustr),
++        comphelper::makePropertyValue(u"ObjectPath"_ustr, OUString::number(nShapeIndex)),
++        comphelper::makePropertyValue(u"SequenceIndex"_ustr, sal_Int32(0)),
++        comphelper::makePropertyValue(u"ExpectedPresetId"_ustr, u"ooo-entrance-appear"_ustr),
++        comphelper::makePropertyValue(u"PresetId"_ustr, u"ooo-entrance-wipe"_ustr),
++    };
++    xPageProperties->setPropertyValue(u"SpellbookAnimationCommand"_ustr,
++                                      uno::Any(aReplaceCommand));
++    auto pReplaced = *pPage->getMainSequence()->getBegin();
++    CPPUNIT_ASSERT_EQUAL(u"ooo-entrance-wipe"_ustr, pReplaced->getPresetId());
++    assertTiming(1.5, 0.4, sal_Int16(1));
++    double fPlayedDuration = 0.0;
++    uno::Reference<container::XEnumerationAccess> xEffectAccess(pReplaced->getNode(),
++                                                                uno::UNO_QUERY_THROW);
++    uno::Reference<container::XEnumeration> xEffectChildren
++        = xEffectAccess->createEnumeration();
++    while (xEffectChildren->hasMoreElements())
++    {
++        uno::Reference<animations::XAnimationNode> xChild(xEffectChildren->nextElement(),
++                                                          uno::UNO_QUERY_THROW);
++        double fBegin = 0.0;
++        double fDuration = 0.0;
++        xChild->getBegin() >>= fBegin;
++        xChild->getDuration() >>= fDuration;
++        fPlayedDuration = std::max(fPlayedDuration, fBegin + fDuration);
++    }
++    CPPUNIT_ASSERT_DOUBLES_EQUAL(1.5, fPlayedDuration, 0.001);
++
+     saveAndReloadSdImpressDocModelOnly("Impress Office Open XML");
+     pDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
+     CPPUNIT_ASSERT(pDocument);
+diff --git a/sd/source/core/CustomAnimationEffect.cxx b/sd/source/core/CustomAnimationEffect.cxx
+--- a/sd/source/core/CustomAnimationEffect.cxx
++++ b/sd/source/core/CustomAnimationEffect.cxx
+@@ -853,6 +853,11 @@ void CustomAnimationEffect::replaceNode( const css::uno::Reference< css::animati
+     double fIterateInterval = mfIterateInterval;
+     sal_Int16 nSubItem = mnTargetSubItem;
+ 
++    // setNode() takes the effect's duration as the longest of the new node's
++    // animations, counting from the current value. Starting from the old
++    // duration kept it, so setDuration() below skipped scaling the new
++    // animations and the effect played at the preset's own timing.
++    mfDuration = -1.0;
+     setNode( xNode );
+ 
+     setAudio( xAudio );

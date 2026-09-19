@@ -85,7 +85,20 @@ thread, and loading, exporting and observing documents there overflowed the
 stack into its thread-local data, so a session aborted after about a dozen
 native edits. The first v30 build passed 21 of 22 focused native tests; the
 SmartArt test exposed a unoxml clone that belongs to no document, fixed by
-moving the node instead.
+moving the node instead. The second v30 build passed all 22 and 8 of the 12
+browser scenarios.
+The `browser-undo-v31` source series fixes what the other four found. Patch
+`0032` writes a SmartArt frame with the shape's own id, name and alternative
+text: export numbered the frame by its diagram, which gave the first diagram
+id 1 (the shape tree's own id) and the name "Diagram1" and dropped its
+alternative text. Patch `0033` duplicates an object inside the engine with
+one native Undo action, because the browser runtime has no system clipboard
+and Copy and Paste inserted nothing. Patch `0034` gives a PPTX paragraph
+without `marR` no right margin; inserting a paragraph copied the previous
+paragraph's attributes, so its right margin carried over on import. Patch
+`0035` makes replacing an animation effect scale the new preset's animations
+to the kept duration; the effect had kept its stored duration while playing
+at the preset's own timing.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

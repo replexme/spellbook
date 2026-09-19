@@ -1398,7 +1398,7 @@
       },
       {
         match: (key) => key.startsWith("DuplicateObject."),
-        prepare: ({ key, value, controller, dispatch, state }) => {
+        prepare: ({ key, value, state }) => {
           const payload = assertRecord(value, "Browser duplicate object");
           if (Object.keys(payload).length)
             throw new Error("Browser duplicate object payload must be empty.");
@@ -1411,13 +1411,16 @@
             path,
             "Browser duplicate object target",
           );
+          // The browser runtime has no system clipboard, so Copy and Paste
+          // inserted nothing; the engine clones the object directly above
+          // its source instead.
           return {
             mutates: true,
-            apply: () => {
-              controller.select(shape);
-              dispatch(".uno:Copy");
-              dispatch(".uno:Paste");
-            },
+            apply: () =>
+              shape.setPropertyValue(
+                "SpellbookDuplicateObject",
+                any("boolean", true),
+              ),
           };
         },
       },

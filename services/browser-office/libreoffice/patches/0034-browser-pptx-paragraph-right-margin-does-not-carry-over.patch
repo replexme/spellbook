@@ -1,0 +1,90 @@
+diff --git a/oox/source/drawingml/textparagraphproperties.cxx b/oox/source/drawingml/textparagraphproperties.cxx
+--- a/oox/source/drawingml/textparagraphproperties.cxx
++++ b/oox/source/drawingml/textparagraphproperties.cxx
+@@ -414,6 +414,11 @@ void TextParagraphProperties::pushToPropSet( const ::oox::core::XmlFilterBase* p
+ {
+     PropertySet aPropSet( xPropSet );
+     aPropSet.setProperties( maTextParagraphPropertyMap );
++    // A paragraph without marR has no right margin. Inserting a paragraph
++    // copies the previous paragraph's attributes, so leaving the property
++    // unset carried that paragraph's right margin over.
++    if ( !maTextParagraphPropertyMap.hasProperty( PROP_ParaRightMargin ) )
++        aPropSet.setProperty<sal_Int32>( PROP_ParaRightMargin, 0 );
+ 
+     sal_Int32 nNumberingType = NumberingType::NUMBER_NONE;
+     if ( maBulletList.mnNumberingType.hasValue() )
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -13,11 +13,13 @@
+ 
+ #include <algorithm>
+ #include <cstdlib>
++#include <vector>
+ 
+ #include <com/sun/star/beans/XPropertySet.hpp>
+ #include <com/sun/star/beans/XPropertyState.hpp>
+ #include <com/sun/star/container/XEnumeration.hpp>
+ #include <com/sun/star/container/XEnumerationAccess.hpp>
++#include <com/sun/star/container/XIndexAccess.hpp>
+ #include <com/sun/star/container/XNameAccess.hpp>
+ #include <com/sun/star/container/XNameContainer.hpp>
+ #include <com/sun/star/container/XNamed.hpp>
+@@ -2935,6 +2937,57 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookDuplicateObjectUsesOneNativeU
+     CPPUNIT_ASSERT_EQUAL(nCount + 1, pPage->GetObjCount());
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxParagraphRightMarginDoesNotCarryOver)
++{
++    createSdImpressDocModelOnly();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShape> xShape(
++        xFactory->createInstance("com.sun.star.drawing.TextShape"), uno::UNO_QUERY_THROW);
++    xShape->setPosition(awt::Point(1000, 1000));
++    xShape->setSize(awt::Size(10000, 3000));
++    xShapes->add(xShape);
++    uno::Reference<text::XText> xText(xShape, uno::UNO_QUERY_THROW);
++    xText->setString("First paragraph\nSecond paragraph");
++    const auto paragraphs = [this]() {
++        uno::Reference<drawing::XDrawPagesSupplier> xSupplier(mxComponent,
++                                                              uno::UNO_QUERY_THROW);
++        uno::Reference<container::XIndexAccess> xPageShapes(
++            xSupplier->getDrawPages()->getByIndex(0), uno::UNO_QUERY_THROW);
++        std::vector<uno::Reference<beans::XPropertySet>> aParagraphs;
++        for (sal_Int32 nShape = 0; nShape < xPageShapes->getCount() && aParagraphs.empty();
++             ++nShape)
++        {
++            uno::Reference<text::XText> xCandidate(xPageShapes->getByIndex(nShape),
++                                                   uno::UNO_QUERY);
++            if (!xCandidate.is() || !xCandidate->getString().startsWith("First paragraph"))
++                continue;
++            uno::Reference<container::XEnumerationAccess> xAccess(xCandidate,
++                                                                  uno::UNO_QUERY_THROW);
++            uno::Reference<container::XEnumeration> xParagraphs = xAccess->createEnumeration();
++            while (xParagraphs->hasMoreElements())
++                aParagraphs.emplace_back(xParagraphs->nextElement(), uno::UNO_QUERY_THROW);
++        }
++        return aParagraphs;
++    };
++    auto aParagraphs = paragraphs();
++    CPPUNIT_ASSERT_EQUAL(size_t(2), aParagraphs.size());
++    aParagraphs[0]->setPropertyValue("ParaRightMargin", uno::Any(sal_Int32(300)));
++
++    // Import gave the second paragraph, which has no marR, the first
++    // paragraph's right margin.
++    saveAndReloadSdImpressDocModelOnly(u"Impress Office Open XML"_ustr);
++    aParagraphs = paragraphs();
++    CPPUNIT_ASSERT_EQUAL(size_t(2), aParagraphs.size());
++    CPPUNIT_ASSERT_EQUAL(sal_Int32(300),
++                         aParagraphs[0]->getPropertyValue("ParaRightMargin").get<sal_Int32>());
++    CPPUNIT_ASSERT_EQUAL(sal_Int32(0),
++                         aParagraphs[1]->getPropertyValue("ParaRightMargin").get<sal_Int32>());
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxTextShadowRoundTrip)
+ {
+     createSdImpressDocModelOnly();

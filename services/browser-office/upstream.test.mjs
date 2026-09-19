@@ -107,7 +107,7 @@ test("browser Office runtime is reproducible and remains unapproved by default",
     "CppunitTest_sd_uiimpress",
     "CppunitTest_sd_misc_tests",
   ]);
-  assert.equal(manifest.sourceCandidate.focusedCppunitTests.length, 22);
+  assert.equal(manifest.sourceCandidate.focusedCppunitTests.length, 25);
   assert.equal(
     new Set(manifest.sourceCandidate.focusedCppunitTests).size,
     manifest.sourceCandidate.focusedCppunitTests.length,
@@ -198,6 +198,7 @@ test("browser LibreOffice patches name their complete source surface", () => {
   assert.deepEqual([...new Set(paths)].sort(), [
     "docmodel/source/theme/Theme.cxx",
     "include/oox/drawingml/shape.hxx",
+    "include/oox/export/drawingml.hxx",
     "include/oox/export/shapes.hxx",
     "include/oox/ppt/slidetransitioncontext.hxx",
     "include/svx/sdr/contact/viewcontactofsdrmediaobj.hxx",
@@ -210,6 +211,7 @@ test("browser LibreOffice patches name their complete source surface", () => {
     "oox/source/drawingml/shapegroupcontext.cxx",
     "oox/source/drawingml/textcharacterproperties.cxx",
     "oox/source/drawingml/textcharacterpropertiescontext.cxx",
+    "oox/source/drawingml/textparagraphproperties.cxx",
     "oox/source/export/drawingml.cxx",
     "oox/source/export/shapes.cxx",
     "oox/source/ppt/pptgraphicshapecontext.cxx",
@@ -222,6 +224,7 @@ test("browser LibreOffice patches name their complete source surface", () => {
     "sd/qa/unit/misc-tests.cxx",
     "sd/qa/unit/sdmodeltestbase.hxx",
     "sd/qa/unit/uiimpress.cxx",
+    "sd/source/core/CustomAnimationEffect.cxx",
     "sd/source/core/drawdoc2.cxx",
     "sd/source/core/sdpage.cxx",
     "sd/source/filter/eppt/epptooxml.hxx",

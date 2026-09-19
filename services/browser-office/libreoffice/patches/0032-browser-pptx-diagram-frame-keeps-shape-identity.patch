@@ -1,0 +1,117 @@
+diff --git a/include/oox/export/drawingml.hxx b/include/oox/export/drawingml.hxx
+--- a/include/oox/export/drawingml.hxx
++++ b/include/oox/export/drawingml.hxx
+@@ -492,7 +492,10 @@ public:
+     void Write3DEffects(const css::uno::Reference<css::beans::XPropertySet>& rXPropSet, bool bIsText);
+     void WriteArtisticEffect( const css::uno::Reference< css::beans::XPropertySet >& rXPropSet );
+     OString WriteWdpPicture( const OUString& rFileId, const css::uno::Sequence< sal_Int8 >& rPictureData );
+-    void WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rXShape, int nDiagramId);
++    /// nShapeId > 0 writes a PPTX frame with that unique id and the shape's own name and
++    /// alternative text; the diagram number then only names the diagram parts.
++    void WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rXShape, int nDiagramId,
++                      sal_Int32 nShapeId = -1);
+     void writeDiagramRels(const css::uno::Sequence<css::uno::Sequence<css::uno::Any>>& xRelSeq,
+                           const css::uno::Reference<css::io::XOutputStream>& xOutStream,
+                           std::u16string_view sGrabBagProperyName, int nDiagramId);
+diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
+--- a/oox/source/export/drawingml.cxx
++++ b/oox/source/export/drawingml.cxx
+@@ -6670,7 +6670,8 @@ lcl_spellbookDiagramData(const uno::Reference<xml::dom::XDocument>& xImported,
+ }
+ }
+ 
+-void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rXShape, int nDiagramId)
++void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rXShape, int nDiagramId,
++                             sal_Int32 nShapeId)
+ {
+     uno::Reference<beans::XPropertySet> xPropSet(rXShape, uno::UNO_QUERY);
+ 
+@@ -6737,12 +6738,32 @@ void DrawingML::WriteDiagram(const css::uno::Reference<css::drawing::XShape>& rX
+         }
+     }
+ 
+-    // generate a unique id
++    // A frame numbered by its diagram took id 1 (the shape tree's own id) and
++    // the name "Diagram1" whatever the shape was called. A PPTX frame keeps
++    // the shape's unique id, name and alternative text instead.
+     rtl::Reference<sax_fastparser::FastAttributeList> pDocPrAttrList
+         = sax_fastparser::FastSerializerHelper::createAttrList();
+-    pDocPrAttrList->add(XML_id, OString::number(nDiagramId));
+-    OString sName = "Diagram" + OString::number(nDiagramId);
+-    pDocPrAttrList->add(XML_name, sName);
++    pDocPrAttrList->add(XML_id, OString::number(nShapeId > 0 ? nShapeId : nDiagramId));
++    OUString sShapeName;
++    OUString sDescription;
++    OUString sTitle;
++    uno::Reference<beans::XPropertySet> xShapeProperties(rXShape, uno::UNO_QUERY);
++    if (nShapeId > 0 && xShapeProperties.is())
++    {
++        if (GetProperty(xShapeProperties, u"Name"_ustr))
++            mAny >>= sShapeName;
++        if (GetProperty(xShapeProperties, u"Description"_ustr))
++            mAny >>= sDescription;
++        if (GetProperty(xShapeProperties, u"Title"_ustr))
++            mAny >>= sTitle;
++    }
++    pDocPrAttrList->add(XML_name, sShapeName.isEmpty()
++                                      ? OString("Diagram" + OString::number(nDiagramId))
++                                      : sShapeName.toUtf8());
++    if (!sDescription.isEmpty())
++        pDocPrAttrList->add(XML_descr, sDescription.toUtf8());
++    if (!sTitle.isEmpty())
++        pDocPrAttrList->add(XML_title, sTitle.toUtf8());
+ 
+     if (GetDocumentType() == DOCUMENT_DOCX)
+     {
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2856,6 +2856,36 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookFontworkShapeTypeIsObservable
+                          xProperties->getPropertyValue("SpellbookFontworkShapeType").get<OUString>());
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxDiagramFrameKeepsShapeIdentity)
++{
++    createSdImpressDocModelOnly("pptx/smartart-children.pptx");
++    const auto diagram = [this]() {
++        auto pDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
++        CPPUNIT_ASSERT(pDocument);
++        SdrObject* pDiagram = pDocument->GetDoc()->GetSdPage(0, PageKind::Standard)->GetObj(0);
++        CPPUNIT_ASSERT(pDiagram);
++        CPPUNIT_ASSERT(pDiagram->isDiagram());
++        return pDiagram;
++    };
++    uno::Reference<beans::XPropertySet> xProperties(diagram()->getUnoShape(),
++                                                    uno::UNO_QUERY_THROW);
++    xProperties->setPropertyValue("Name", uno::Any(u"Reporting lines"_ustr));
++    xProperties->setPropertyValue("Title", uno::Any(u"Team"_ustr));
++    xProperties->setPropertyValue("Description", uno::Any(u"Who reports to whom"_ustr));
++
++    // The frame was written as "Diagram1" with id 1, the shape tree's own id,
++    // and without its alternative text.
++    saveAndReloadSdImpressDocModelOnly(u"Impress Office Open XML"_ustr);
++    xmlDocUniquePtr pSlideXml = parseExport("ppt/slides/slide1.xml");
++    assertXPath(pSlideXml, "//p:graphicFrame/p:nvGraphicFramePr/p:cNvPr", "name",
++                u"Reporting lines");
++    assertXPath(pSlideXml, "//p:graphicFrame/p:nvGraphicFramePr/p:cNvPr", "title", u"Team");
++    assertXPath(pSlideXml, "//p:graphicFrame/p:nvGraphicFramePr/p:cNvPr", "descr",
++                u"Who reports to whom");
++    assertXPath(pSlideXml, "//p:cNvPr[@id='1']", 1);
++    CPPUNIT_ASSERT_EQUAL(u"Reporting lines"_ustr, diagram()->GetName());
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxTextShadowRoundTrip)
+ {
+     createSdImpressDocModelOnly();
+diff --git a/sd/source/filter/eppt/pptx-epptooxml.cxx b/sd/source/filter/eppt/pptx-epptooxml.cxx
+--- a/sd/source/filter/eppt/pptx-epptooxml.cxx
++++ b/sd/source/filter/eppt/pptx-epptooxml.cxx
+@@ -2196,7 +2196,7 @@ void PowerPointExport::WriteDiagram(const FSHelperPtr& pFS, PowerPointShapeExpor
+ {
+     SAL_INFO("sd.eppt", "writing Diagram " + OUString::number(nDiagramId));
+     pFS->startElementNS(XML_p, XML_graphicFrame);
+-    rDML.WriteDiagram(rXShape, nDiagramId);
++    rDML.WriteDiagram(rXShape, nDiagramId, rDML.GetNewShapeID(rXShape));
+     pFS->endElementNS(XML_p, XML_graphicFrame);
+ }
+ 

@@ -1,0 +1,112 @@
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2886,6 +2886,55 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxDiagramFrameKeepsShapeIde
+     CPPUNIT_ASSERT_EQUAL(u"Reporting lines"_ustr, diagram()->GetName());
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookDuplicateObjectUsesOneNativeUndo)
++{
++    createSdImpressDocModelOnly();
++    auto pDocument = dynamic_cast<SdXImpressDocument*>(mxComponent.get());
++    CPPUNIT_ASSERT(pDocument);
++    SdDrawDocument* pDrawDocument = pDocument->GetDoc();
++    SdPage* pPage = pDrawDocument->GetSdPage(0, PageKind::Standard);
++    CPPUNIT_ASSERT(pPage);
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShape> xShape(
++        xFactory->createInstance("com.sun.star.drawing.RectangleShape"), uno::UNO_QUERY_THROW);
++    xShape->setPosition(awt::Point(1000, 1000));
++    xShape->setSize(awt::Size(4000, 2000));
++    xShapes->add(xShape);
++    uno::Reference<beans::XPropertySet> xProperties(xShape, uno::UNO_QUERY_THROW);
++    xProperties->setPropertyValue("Name", uno::Any(u"Box"_ustr));
++    xProperties->setPropertyValue("FillColor", uno::Any(sal_Int32(0x4F46E5)));
++    SdrObject* pSource = SdrObject::getSdrObjectFromXShape(xShape);
++    CPPUNIT_ASSERT(pSource);
++    const size_t nCount = pPage->GetObjCount();
++    const size_t nSourceOrder = pSource->GetOrdNum();
++
++    auto* pUndoManager = pDrawDocument->GetDocSh()->GetUndoManager();
++    pUndoManager->Clear();
++    // The browser runtime has no system clipboard, so Copy and Paste
++    // inserted nothing there.
++    pDrawDocument->BegUndo("Browser duplicate");
++    xProperties->setPropertyValue("SpellbookDuplicateObject", uno::Any(true));
++    pDrawDocument->EndUndo();
++
++    CPPUNIT_ASSERT_EQUAL(size_t(1), pUndoManager->GetUndoActionCount());
++    CPPUNIT_ASSERT_EQUAL(nCount + 1, pPage->GetObjCount());
++    SdrObject* pCopy = pPage->GetObj(nSourceOrder + 1);
++    CPPUNIT_ASSERT(pCopy && pCopy != pSource);
++    CPPUNIT_ASSERT(pCopy->GetName() != pSource->GetName());
++    CPPUNIT_ASSERT(pCopy->GetSnapRect() == pSource->GetSnapRect());
++    uno::Reference<beans::XPropertySet> xCopy(pCopy->getUnoShape(), uno::UNO_QUERY_THROW);
++    CPPUNIT_ASSERT_EQUAL(sal_Int32(0x4F46E5), xCopy->getPropertyValue("FillColor").get<sal_Int32>());
++
++    pUndoManager->Undo();
++    CPPUNIT_ASSERT_EQUAL(nCount, pPage->GetObjCount());
++    pUndoManager->Redo();
++    CPPUNIT_ASSERT_EQUAL(nCount + 1, pPage->GetObjCount());
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxTextShadowRoundTrip)
+ {
+     createSdImpressDocModelOnly();
+diff --git a/sd/source/ui/unoidl/unoobj.cxx b/sd/source/ui/unoidl/unoobj.cxx
+--- a/sd/source/ui/unoidl/unoobj.cxx
++++ b/sd/source/ui/unoidl/unoobj.cxx
+@@ -22,6 +22,7 @@
+ #include <memory>
+ #include <optional>
+ #include <set>
++#include <unordered_set>
+ #include <sstream>
+ #include <string_view>
+ #include <utility>
+@@ -625,6 +626,27 @@ void applySpellbookObjectReplacement(SdrObject* pNewObject, SdDrawDocument* pDoc
+     pOldObject->SetChanged();
+     pOldObject->BroadcastObjectChange();
+ }
++
++// Duplicates the object directly above itself with one native Undo action.
++// The browser runtime has no system clipboard, so Copy and Paste inserted
++// nothing there.
++void applySpellbookObjectDuplication(SdrObject* pObject, SdDrawDocument* pDocument,
++                                     const uno::Any& rValue)
++{
++    bool bDuplicate = false;
++    if (!(rValue >>= bDuplicate) || !bDuplicate)
++        throw lang::IllegalArgumentException(u"Invalid duplicate request"_ustr, nullptr, 0);
++    SdrObjList* pList = pObject ? pObject->getParentSdrObjListFromSdrObject() : nullptr;
++    if (!pObject || !pDocument || !pList)
++        throw lang::IllegalArgumentException(u"Duplicate target is unavailable"_ustr, nullptr, 0);
++    rtl::Reference<SdrObject> pClone(pObject->CloneSdrObject(pObject->getSdrModelFromSdrObject()));
++    if (!pClone)
++        throw lang::IllegalArgumentException(u"Object cannot be duplicated"_ustr, nullptr, 0);
++    std::unordered_set<OUString> aNameSet;
++    pList->InsertObjectThenMakeNameUnique(pClone.get(), aNameSet, pObject->GetOrdNum() + 1);
++    if (pDocument->IsUndoEnabled())
++        pDocument->AddUndo(pDocument->GetSdrUndoFactory().CreateUndoNewObject(*pClone));
++}
+ }
+ 
+ #define IMPRESS_MAP_ENTRIES \
+@@ -951,6 +973,13 @@ void SAL_CALL SdXShape::setPropertyValue( const OUString& aPropertyName, const c
+             mpModel->SetModified();
+         return;
+     }
++    if (aPropertyName == u"SpellbookDuplicateObject"_ustr)
++    {
++        applySpellbookObjectDuplication(pSpellbookObject, pSpellbookDocument, aValue);
++        if (mpModel)
++            mpModel->SetModified();
++        return;
++    }
+ 
+     const SfxItemPropertyMapEntry* pEntry = mpPropSet->getPropertyMapEntry(aPropertyName);
+ 
