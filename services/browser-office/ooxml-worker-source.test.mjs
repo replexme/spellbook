@@ -2382,6 +2382,120 @@ test("native snapshot takes the engine's slide when a shape reference cannot fol
   assert.equal(merged, strFromU8(edited[slidePath]));
 });
 
+test("native snapshot adds a new notes master to the author's presentation parts", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const relationship = (id, type, target) =>
+    `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${type}" Target="${target}"/>`;
+  const relationships = (...items) =>
+    strToU8(
+      `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${items.join("")}</Relationships>`,
+    );
+  const contentType = (part, type) =>
+    `<Override PartName="/${part}" ContentType="application/vnd.openxmlformats-officedocument.${type}+xml"/>`;
+  // The engine's presentation part differs from the author's throughout:
+  // one master per layout, renumbered relationships, dropped defaults.
+  const enginePresentation = (notes) =>
+    strToU8(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId2"/><p:sldMasterId id="2147483650" r:id="rId3"/></p:sldMasterIdLst>${notes ? '<p:notesMasterIdLst><p:notesMasterId r:id="rId13"/></p:notesMasterIdLst>' : ""}<p:sldIdLst><p:sldId id="256" r:id="rId14"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/><p:notesSz cx="7772400" cy="10058400"/></p:presentation>`,
+    );
+  const engineRelationships = (notes) =>
+    relationships(
+      relationship("rId1", "theme", "theme/theme1.xml"),
+      relationship("rId2", "slideMaster", "slideMasters/slideMaster1.xml"),
+      relationship("rId3", "slideMaster", "slideMasters/slideMaster2.xml"),
+      ...(notes
+        ? [
+            relationship(
+              "rId13",
+              "notesMaster",
+              "notesMasters/notesMaster1.xml",
+            ),
+          ]
+        : []),
+      relationship("rId14", "slide", "slides/slide1.xml"),
+    );
+  const engineSave = (notes) => {
+    const entries = {
+      ...original,
+      "ppt/presentation.xml": enginePresentation(notes),
+      "ppt/_rels/presentation.xml.rels": engineRelationships(notes),
+      "ppt/slideMasters/slideMaster2.xml":
+        original["ppt/slideMasters/slideMaster1.xml"],
+      "ppt/slideMasters/_rels/slideMaster2.xml.rels":
+        original["ppt/slideMasters/_rels/slideMaster1.xml.rels"],
+    };
+    if (!notes) return entries;
+    return {
+      ...entries,
+      "ppt/notesMasters/notesMaster1.xml": strToU8(
+        '<p:notesMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
+      ),
+      "ppt/notesMasters/_rels/notesMaster1.xml.rels": relationships(
+        relationship("rId1", "theme", "../theme/theme12.xml"),
+      ),
+      "ppt/theme/theme12.xml": original["ppt/theme/theme1.xml"],
+      "ppt/notesSlides/notesSlide1.xml": strToU8(
+        '<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>',
+      ),
+      "ppt/notesSlides/_rels/notesSlide1.xml.rels": relationships(
+        relationship("rId1", "slide", "../slides/slide1.xml"),
+        relationship("rId2", "notesMaster", "../notesMasters/notesMaster1.xml"),
+      ),
+      "ppt/slides/_rels/slide1.xml.rels": relationships(
+        relationship("rId1", "slideLayout", "../slideLayouts/slideLayout7.xml"),
+        relationship("rId2", "notesSlide", "../notesSlides/notesSlide1.xml"),
+      ),
+      "[Content_Types].xml": strToU8(
+        strFromU8(original["[Content_Types].xml"]).replace(
+          "</Types>",
+          `${contentType("ppt/notesMasters/notesMaster1.xml", "presentationml.notesMaster")}${contentType("ppt/notesSlides/notesSlide1.xml", "presentationml.notesSlide")}${contentType("ppt/theme/theme12.xml", "theme")}</Types>`,
+        ),
+      ),
+    };
+  };
+  const merged = unzipSync(
+    preserveOriginalPptxParts(
+      zipSync(original),
+      zipSync(engineSave(false)),
+      zipSync(engineSave(true)),
+      ["set_speaker_notes"],
+    ).bytes,
+  );
+  const presentation = strFromU8(merged["ppt/presentation.xml"]);
+  const presentationRelationships = strFromU8(
+    merged["ppt/_rels/presentation.xml.rels"],
+  );
+  // Only the notes master joins the author's presentation part.
+  assert.equal(
+    presentation.replace(
+      /<p:notesMasterIdLst><p:notesMasterId r:id="rIdSpellbook1"\/><\/p:notesMasterIdLst>/u,
+      "",
+    ),
+    strFromU8(original["ppt/presentation.xml"]),
+  );
+  assert.match(presentation, /<\/p:sldMasterIdLst><p:notesMasterIdLst>/u);
+  assert.match(
+    presentationRelationships,
+    /<Relationship Id="rIdSpellbook1" Type="http:\/\/schemas.openxmlformats.org\/officeDocument\/2006\/relationships\/notesMaster" Target="notesMasters\/notesMaster1.xml"\/><\/Relationships>/u,
+  );
+  assert.doesNotMatch(presentationRelationships, /slideMaster2/u);
+  assert.equal(merged["ppt/slideMasters/slideMaster2.xml"], undefined);
+  for (const part of [
+    "ppt/notesMasters/notesMaster1.xml",
+    "ppt/theme/theme12.xml",
+    "ppt/notesSlides/notesSlide1.xml",
+  ])
+    assert.ok(merged[part], part);
+  assert.match(
+    strFromU8(merged["ppt/slides/_rels/slide1.xml.rels"]),
+    /notesSlides\/notesSlide1.xml/u,
+  );
+  assert.match(
+    strFromU8(merged["[Content_Types].xml"]),
+    /notesMaster1.xml" ContentType="application\/vnd.openxmlformats-officedocument.presentationml.notesMaster\+xml"/u,
+  );
+});
+
 test("native snapshot ignores targets for commands that restructure the shape tree", async () => {
   const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
   const noEdit = withEngineSave(original, {

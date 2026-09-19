@@ -602,6 +602,10 @@ function spellbookDocumentOperation(request) {
               ? safeProperty(textCursor, name)
               : safeProperty(cell, name);
           const fillTransparency = safeProperty(cell, "FillTransparence");
+          // A fill that is not drawn keeps a colour nobody sees; PPTX saves
+          // it as no fill, so only a drawn fill has a colour and opacity.
+          const fillDrawn =
+            enumToken(safeProperty(cell, "FillStyle")) !== "NONE";
           let text = null;
           try {
             text = cell.getString();
@@ -617,9 +621,11 @@ function spellbookDocumentOperation(request) {
             merged: Boolean(safeCall(cell, "isMerged", false)),
             rowSpan: Number(safeCall(cell, "getRowSpan", 1)),
             columnSpan: Number(safeCall(cell, "getColumnSpan", 1)),
-            fillColor: safeProperty(cell, "FillColor"),
+            fillColor: fillDrawn ? safeProperty(cell, "FillColor") : null,
             fillOpacity:
-              fillTransparency === null ? null : 100 - Number(fillTransparency),
+              !fillDrawn || fillTransparency === null
+                ? null
+                : 100 - Number(fillTransparency),
             fontFamily: textProperty("CharFontName"),
             fontSize: textProperty("CharHeight"),
             fontWeight: textProperty("CharWeight"),
@@ -1645,6 +1651,21 @@ function spellbookDocumentOperation(request) {
       service: "com.sun.star.formula.FormulaProperties",
     };
   };
+  // A UNO interface attribute is a pair of accessor methods in the Office
+  // bridge and a plain property in the browser bridge.
+  const unoAttribute = (value, name, fallback = null) => {
+    try {
+      if (typeof value?.[`get${name}`] === "function")
+        return value[`get${name}`]();
+      return value?.[name] ?? fallback;
+    } catch (_) {
+      return fallback;
+    }
+  };
+  const setUnoAttribute = (value, name, next) => {
+    if (typeof value[`set${name}`] === "function") value[`set${name}`](next);
+    else value[name] = next;
+  };
   const slideComments = (page) => {
     const comments = [];
     try {
@@ -1652,12 +1673,12 @@ function spellbookDocumentOperation(request) {
       let index = 0;
       while (enumeration.hasMoreElements()) {
         const annotation = enumeration.nextElement();
-        const position = safeCall(annotation, "getPosition", null);
-        const textRange = safeCall(annotation, "getTextRange", null);
+        const position = unoAttribute(annotation, "Position");
+        const textRange = unoAttribute(annotation, "TextRange");
         comments.push({
           commentIndex: index,
-          author: safeCall(annotation, "getAuthor", ""),
-          initials: safeCall(annotation, "getInitials", ""),
+          author: unoAttribute(annotation, "Author", ""),
+          initials: unoAttribute(annotation, "Initials", ""),
           text: safeCall(textRange, "getString", ""),
           x: position ? Math.round(Number(position.X) * 100) : null,
           y: position ? Math.round(Number(position.Y) * 100) : null,
@@ -3314,34 +3335,43 @@ function spellbookDocumentOperation(request) {
         }
         if (command.op === "add_comment") {
           const annotation = page.createAndInsertAnnotation();
-          annotation.setAuthor(command.author.trim());
-          annotation.setInitials(
+          setUnoAttribute(annotation, "Author", command.author.trim());
+          setUnoAttribute(
+            annotation,
+            "Initials",
             typeof command.initials === "string"
               ? command.initials.slice(0, 16)
               : "AI",
           );
-          annotation.setPosition(
+          setUnoAttribute(
+            annotation,
+            "Position",
             new uno.idl.com.sun.star.geometry.RealPoint2D({
               X: command.x / 100,
               Y: command.y / 100,
             }),
           );
-          annotation.getTextRange().setString(command.text);
+          unoAttribute(annotation, "TextRange").setString(command.text);
         } else {
           const annotations = enumerate();
           const annotation = annotations[command.commentIndex];
           if (
             !annotation ||
-            annotation.getTextRange().getString() !== command.expectedText
+            unoAttribute(annotation, "TextRange")?.getString() !==
+              command.expectedText
           )
             throw new Error("observed_comment_changed");
           if (command.op === "delete_comment")
             page.removeAnnotation(annotation);
           else {
-            annotation.setAuthor(command.author.trim());
+            setUnoAttribute(annotation, "Author", command.author.trim());
             if (typeof command.initials === "string")
-              annotation.setInitials(command.initials.slice(0, 16));
-            annotation.getTextRange().setString(command.text);
+              setUnoAttribute(
+                annotation,
+                "Initials",
+                command.initials.slice(0, 16),
+              );
+            unoAttribute(annotation, "TextRange").setString(command.text);
           }
         }
         if (undoContextOpen) {
@@ -3666,9 +3696,7 @@ function spellbookDocumentOperation(request) {
           : command.op === "add_connector"
             ? "com.sun.star.drawing.ConnectorShape"
             : command.op === "add_freeform"
-              ? command.closed
-                ? "com.sun.star.drawing.PolyPolygonShape"
-                : "com.sun.star.drawing.PolyLineShape"
+              ? "com.sun.star.drawing.CustomShape"
               : {
                   rectangle: "com.sun.star.drawing.RectangleShape",
                   ellipse: "com.sun.star.drawing.EllipseShape",
@@ -3699,23 +3727,29 @@ function spellbookDocumentOperation(request) {
           new uno.Any(uno.type.enum(css.drawing.ConnectorType), connectorType),
         );
       } else if (command.op === "add_freeform") {
-        const pointType = uno.type.struct(uno.idl.com.sun.star.awt.Point);
-        shape.setPropertyValue(
-          "PolyPolygon",
-          new uno.Any(uno.type.sequence(uno.type.sequence(pointType)), [
-            command.points.map(
-              (point) =>
-                new uno.idl.com.sun.star.awt.Point({
-                  X: Math.round(point.x),
-                  Y: Math.round(point.y),
-                }),
+        // PPTX has no polygon object: a freeform is custom geometry, and a
+        // saved polygon reopens as a custom shape. The engine gives the new
+        // custom shape that geometry once it is on the page, so the editor
+        // and the saved file hold the same object.
+        const css = uno.idl.com.sun.star;
+        if (command.closed)
+          shape.setPropertyValue(
+            "FillColor",
+            new uno.Any(uno.type.long, command.color),
+          );
+        else {
+          shape.setPropertyValue(
+            "FillStyle",
+            new uno.Any(
+              uno.type.enum(css.drawing.FillStyle),
+              css.drawing.FillStyle.NONE,
             ),
-          ]),
-        );
-        shape.setPropertyValue(
-          command.closed ? "FillColor" : "LineColor",
-          new uno.Any(uno.type.long, command.color),
-        );
+          );
+          shape.setPropertyValue(
+            "LineColor",
+            new uno.Any(uno.type.long, command.color),
+          );
+        }
       } else if (command.op !== "add_text_box" && command.geometry === "line")
         shape.setPropertyValue(
           "LineColor",
@@ -3756,6 +3790,24 @@ function spellbookDocumentOperation(request) {
           page.add(shape);
           shape.setName(generatedObjectName);
           if (command.op === "add_text_box") shape.setString(command.text);
+          // The points lie in the freeform's own box.
+          if (command.op === "add_freeform") {
+            const pointType = uno.type.struct(uno.idl.com.sun.star.awt.Point);
+            shape.setPropertyValue(
+              command.closed
+                ? "SpellbookFreeformPolygon"
+                : "SpellbookFreeformPolyline",
+              new uno.Any(uno.type.sequence(uno.type.sequence(pointType)), [
+                command.points.map(
+                  (point) =>
+                    new uno.idl.com.sun.star.awt.Point({
+                      X: Math.round(point.x),
+                      Y: Math.round(point.y),
+                    }),
+                ),
+              ]),
+            );
+          }
           // A connector is defined by its end points; an unattached connector
           // can ignore the size it was given before insertion.
           if (command.op === "add_connector")
@@ -3834,7 +3886,10 @@ function spellbookDocumentOperation(request) {
           : command.op === "add_connector"
             ? created?.connector !== null
             : command.op === "add_freeform"
-              ? created?.freeform !== null
+              ? String(created?.kind ?? "").endsWith("CustomShape") &&
+                (command.closed
+                  ? created?.fill === Math.round(command.color)
+                  : created?.lineColor === Math.round(command.color))
               : command.geometry === "line"
                 ? created?.lineColor === Math.round(command.color)
                 : created?.fill === Math.round(command.color);
@@ -5900,8 +5955,18 @@ function spellbookDocumentOperation(request) {
         // FillColor changes the live RGB but retains an imported theme color.
         // The PPTX exporter then serializes the stale scheme reference. Clear
         // that reference before applying the explicit RGB, as text colors do.
+        // A cell without a drawn fill gets a solid one in that colour.
+        properties.FillStyle = { kind: "fillStyle", value: "SOLID" };
         properties.FillColorTheme = -1;
         setOptional("fillColor", "FillColor", "fillColor", Math.round);
+        // A newly drawn fill is opaque unless the command sets its opacity.
+        if (
+          beforeCell.fillColor === null &&
+          (format.fillOpacity === null || format.fillOpacity === undefined)
+        ) {
+          properties.FillTransparence = 0;
+          expected.fillOpacity = 100;
+        }
       }
       if (format.fillOpacity !== null && format.fillOpacity !== undefined) {
         properties.FillTransparence = 100 - Math.round(format.fillOpacity);
@@ -6052,6 +6117,14 @@ function spellbookDocumentOperation(request) {
         }
         for (const [name, value] of Object.entries(properties)) {
           const targetPropertySet = propertyTarget(name);
+          if (value?.kind === "fillStyle") {
+            const fillStyle = uno.idl.com.sun.star.drawing.FillStyle;
+            targetPropertySet.setPropertyValue(
+              name,
+              new uno.Any(uno.type.enum(fillStyle), fillStyle[value.value]),
+            );
+            continue;
+          }
           if (value?.kind === "tableBorderLine") {
             targetPropertySet.setPropertyValue(
               name,

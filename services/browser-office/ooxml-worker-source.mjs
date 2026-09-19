@@ -499,8 +499,11 @@ function preserveUnaffectedSlideShapes(
   const replacedEngineIds = new Set(
     replacements.flatMap(({ editedShape }) => descendantIds(editedShape)),
   );
+  // Only a restored shape is known to keep the author's ids inside it.
   const restoredAuthorIds = new Set(
-    replacements.flatMap(({ node }) => descendantIds(node)),
+    replacements
+      .filter(({ restored }) => restored)
+      .flatMap(({ node }) => descendantIds(node)),
   );
   const authorOrigin = new Set(
     replacements.filter(({ restored }) => restored).map(({ node }) => node),
@@ -1437,6 +1440,89 @@ function mergeThemeValues(originalBytes, noEditBytes, editedBytes, part) {
   return serializeXml(original);
 }
 
+// A deck without a notes master gets one when a slide first receives notes.
+// The engine's presentation part and its relationships differ from the
+// author's throughout (it writes one master per layout), so only the new notes
+// master joins the author's copies: its id list entry and its relationship.
+// The notes master, its theme and the notes slide arrive as new parts.
+function mergeAddedNotesMaster(original, noEdit, edited) {
+  const notesMasters = (entries) =>
+    entries[presentationPath] && entries[presentationRelationshipsPath]
+      ? relationshipsOfType(entries, presentationPath, "notesMaster")
+      : [];
+  if (
+    !original[presentationPath] ||
+    notesMasters(original).length ||
+    notesMasters(noEdit).length
+  )
+    return null;
+  const added = notesMasters(edited);
+  if (added.length !== 1) return null;
+  const notesMaster = added[0].target;
+  const engineRelationships = parseXml(edited, presentationRelationshipsPath);
+  const engineRelationship = relationshipElements(engineRelationships).find(
+    (relationship) => relationship.getAttribute("Id") === added[0].id,
+  );
+  // The engine names these parts after all of its own masters, which are at
+  // least as many as the author's; a clash means an unexpected package.
+  const dependencies = edited[relationshipsPath(notesMaster)]
+    ? relationshipElements(parseXml(edited, relationshipsPath(notesMaster)))
+    : [];
+  for (const part of [
+    notesMaster,
+    ...dependencies
+      .filter(
+        (relationship) =>
+          relationship.getAttribute("TargetMode") !== "External",
+      )
+      .map((relationship) =>
+        resolvePart(notesMaster, relationship.getAttribute("Target")),
+      ),
+  ])
+    if (original[part])
+      throw new Error(
+        `Native snapshot cannot add a notes master over the author's ${part}.`,
+      );
+
+  const relationships = parseXml(original, presentationRelationshipsPath);
+  const relationshipId = nextRelationshipId(relationships);
+  const relationship = relationships.createElementNS(
+    packageRelationshipNamespace,
+    "Relationship",
+  );
+  relationship.setAttribute("Id", relationshipId);
+  relationship.setAttribute("Type", engineRelationship.getAttribute("Type"));
+  relationship.setAttribute(
+    "Target",
+    relativePart(presentationPath, notesMaster),
+  );
+  relationships.documentElement.appendChild(relationship);
+
+  const presentation = parseXml(original, presentationPath);
+  const root = presentation.documentElement;
+  const list = presentation.createElementNS(
+    presentationNamespace,
+    "p:notesMasterIdLst",
+  );
+  const entry = presentation.createElementNS(
+    presentationNamespace,
+    "p:notesMasterId",
+  );
+  entry.setAttributeNS(relationshipAttributeNamespace, "r:id", relationshipId);
+  list.appendChild(entry);
+  // CT_Presentation: sldMasterIdLst, then notesMasterIdLst.
+  const slideMasters = directXmlChild(
+    root,
+    presentationNamespace,
+    "sldMasterIdLst",
+  );
+  root.insertBefore(list, slideMasters.nextSibling);
+  return {
+    [presentationPath]: serializeXml(presentation),
+    [presentationRelationshipsPath]: serializeXml(relationships),
+  };
+}
+
 function relationshipsOfType(entries, sourcePart, type) {
   const relsPath = relationshipsPath(sourcePart);
   if (!entries[relsPath])
@@ -1775,6 +1861,9 @@ export function preserveOriginalPptxParts(
     sourceOperations.length === 1 && sourceOperations[0] === "set_master_theme"
       ? mergeMasterThemeIntoOriginal(original, noEdit, edited)
       : null;
+  const notesMasterPatch = semanticMasterThemePatch
+    ? null
+    : mergeAddedNotesMaster(original, noEdit, edited);
   const paths = new Set([
     ...Object.keys(original),
     ...Object.keys(noEdit),
@@ -1892,22 +1981,24 @@ export function preserveOriginalPptxParts(
     const selected =
       semanticMasterThemePatch && Object.hasOwn(semanticMasterThemePatch, part)
         ? semanticMasterThemePatch[part]
-        : authoredChange
-          ? semanticSlideSizePatch
-            ? mergeSlideSizeIntoOriginal(original, noEdit, edited)
-            : part.endsWith(".rels")
-              ? remapAuthoredRelationships(
-                  part,
-                  edited[part],
-                  original,
-                  noEdit,
-                  sourceOperations,
-                )
-              : (relationshipRemap ??
-                semanticShapePatch ??
-                semanticTableInsetPatch ??
-                edited[part])
-          : (reboundReferences ?? original[part]);
+        : notesMasterPatch && Object.hasOwn(notesMasterPatch, part)
+          ? notesMasterPatch[part]
+          : authoredChange
+            ? semanticSlideSizePatch
+              ? mergeSlideSizeIntoOriginal(original, noEdit, edited)
+              : part.endsWith(".rels")
+                ? remapAuthoredRelationships(
+                    part,
+                    edited[part],
+                    original,
+                    noEdit,
+                    sourceOperations,
+                  )
+                : (relationshipRemap ??
+                  semanticShapePatch ??
+                  semanticTableInsetPatch ??
+                  edited[part])
+            : (reboundReferences ?? original[part]);
     if (semanticSlideSizePatch) semanticPatchedParts.push(part);
     if (
       semanticShapePatch ||
@@ -1917,8 +2008,9 @@ export function preserveOriginalPptxParts(
     )
       semanticPatchedParts.push(part);
     if (
-      semanticMasterThemePatch &&
-      Object.hasOwn(semanticMasterThemePatch, part)
+      (semanticMasterThemePatch &&
+        Object.hasOwn(semanticMasterThemePatch, part)) ||
+      (notesMasterPatch && Object.hasOwn(notesMasterPatch, part))
     )
       semanticPatchedParts.push(part);
     if (selected) merged[part] = selected;

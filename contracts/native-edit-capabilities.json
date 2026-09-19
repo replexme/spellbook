@@ -134,6 +134,7 @@
           "notes_relationships",
           "notes_master_parts",
           "notes_master_relationships",
+          "slide_relationships",
           "theme_parts"
         ]
       },
@@ -427,7 +428,7 @@
         "execution": "editor_dispatch",
         "identityEffect": "create",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 23
+        "minEnginePatch": 31
       },
       "add_table": {
         "family": "object_creation",

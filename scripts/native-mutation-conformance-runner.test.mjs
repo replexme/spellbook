@@ -171,6 +171,8 @@ test("a notes-only mutation may create the package infrastructure required by OO
   assert.ok(budget.allowedCategories.includes("notes_master_parts"));
   assert.ok(budget.allowedCategories.includes("notes_master_relationships"));
   assert.ok(budget.allowedCategories.includes("theme_parts"));
+  // A slide reaches its notes through its own relationship.
+  assert.ok(budget.allowedCategories.includes("slide_relationships"));
 });
 
 test("the public document tool implements the change-budget contract used by the runner", () => {
