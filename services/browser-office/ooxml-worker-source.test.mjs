@@ -2576,6 +2576,113 @@ test("native snapshot adds new comment authors but leaves other presentation cha
   );
 });
 
+test("native snapshot keeps the author's presentation part through the engine's notes size rewrite", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  // The engine's saves disagree only about the notes page size, which it
+  // rewrites on its own; neither save may replace the author's parts.
+  const engineSave = (notesSize) => ({
+    ...original,
+    "ppt/presentation.xml": strToU8(
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId2"/><p:sldMasterId id="2147483650" r:id="rId3"/></p:sldMasterIdLst><p:sldIdLst><p:sldId id="256" r:id="rId4"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/><p:notesSz ${notesSize}/></p:presentation>`,
+    ),
+    "ppt/_rels/presentation.xml.rels": strToU8(
+      '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster2.xml"/><Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>',
+    ),
+    "ppt/slideMasters/slideMaster2.xml":
+      original["ppt/slideMasters/slideMaster1.xml"],
+    "ppt/slideMasters/_rels/slideMaster2.xml.rels":
+      original["ppt/slideMasters/_rels/slideMaster1.xml.rels"],
+  });
+  const merged = unzipSync(
+    preserveOriginalPptxParts(
+      zipSync(original),
+      zipSync(engineSave('cx="6858000" cy="9144000"')),
+      zipSync(engineSave('cx="7772400" cy="10058400"')),
+      ["set_speaker_notes"],
+    ).bytes,
+  );
+  for (const part of [
+    "ppt/presentation.xml",
+    "ppt/_rels/presentation.xml.rels",
+  ])
+    assert.deepEqual(merged[part], original[part], part);
+});
+
+test("native snapshot pairs the engine's slides with the author's by deck position", async () => {
+  // Adding and duplicating slides leaves the author's part names out of deck
+  // order: slide1, then the duplicate slide3, then the added slide2.
+  let bytes = new Uint8Array(await readFile(fixtureUrl));
+  bytes = applyOoxmlCommand(bytes, {
+    op: "add_slide",
+    templateSlideIndex: 0,
+    insertIndex: 1,
+  }).bytes;
+  bytes = applyOoxmlCommand(bytes, {
+    op: "duplicate_slide",
+    slideIndex: 0,
+    insertIndex: 1,
+  }).bytes;
+  const original = unzipSync(bytes);
+  const order = (entries) => {
+    const presentation = strFromU8(entries["ppt/presentation.xml"]);
+    const targets = Object.fromEntries(
+      [
+        ...strFromU8(entries["ppt/_rels/presentation.xml.rels"]).matchAll(
+          /Id="([^"]+)"[^>]*Target="slides\/([^"]+)"/gu,
+        ),
+      ].map((match) => [match[1], match[2]]),
+    );
+    return [...presentation.matchAll(/<p:sldId [^>]*r:id="([^"]+)"/gu)].map(
+      (match) => targets[match[1]],
+    );
+  };
+  const authored = order(original);
+  assert.deepEqual(authored, ["slide1.xml", "slide3.xml", "slide2.xml"]);
+  // The engine saves the same deck with its slides named by position.
+  const rename = { "slide3.xml": "slide2.xml", "slide2.xml": "slide3.xml" };
+  const engineSave = (third) => {
+    const entries = {};
+    for (const [part, value] of Object.entries(original)) {
+      const match = part.match(
+        /^ppt\/slides\/(_rels\/)?(slide[23]\.xml)(\.rels)?$/u,
+      );
+      entries[
+        match
+          ? `ppt/slides/${match[1] ?? ""}${rename[match[2]]}${match[3] ?? ""}`
+          : part
+      ] = value;
+    }
+    entries["ppt/_rels/presentation.xml.rels"] = strToU8(
+      strFromU8(original["ppt/_rels/presentation.xml.rels"]).replace(
+        /slides\/slide([23])\.xml/gu,
+        (_, digit) => `slides/slide${digit === "2" ? "3" : "2"}.xml`,
+      ),
+    );
+    entries["ppt/slides/slide3.xml"] = strToU8(
+      strFromU8(original["ppt/slides/slide2.xml"]).replace(
+        "</p:cSld>",
+        `${third}</p:cSld>`,
+      ),
+    );
+    return entries;
+  };
+  const merged = unzipSync(
+    preserveOriginalPptxParts(
+      zipSync(original),
+      zipSync(engineSave("")),
+      zipSync(engineSave("<!-- edited -->")),
+      ["rename_slide"],
+    ).bytes,
+  );
+  // The third slide changed: under the author's name for it, not the engine's.
+  assert.match(strFromU8(merged["ppt/slides/slide2.xml"]), /<!-- edited -->/u);
+  assert.deepEqual(
+    merged["ppt/slides/slide3.xml"],
+    original["ppt/slides/slide3.xml"],
+  );
+  assert.deepEqual(order(merged), authored);
+});
+
 test("native snapshot ignores targets for commands that restructure the shape tree", async () => {
   const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
   const noEdit = withEngineSave(original, {

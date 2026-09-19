@@ -1006,6 +1006,94 @@ function assertChangedReferencesResolve(merged, changedParts) {
   }
 }
 
+// The engine names slide and notes slide parts after their order in the deck;
+// the author's names follow any order once slides were added, duplicated or
+// moved. Give the engine's parts the author's names for the same positions,
+// so that every comparison meets one slide under one name.
+function alignEngineSlideParts(original, engine) {
+  const authored = orderedSlidePaths(original);
+  const saved = orderedSlidePaths(engine);
+  if (
+    !authored.length ||
+    authored.length !== saved.length ||
+    authored.some((part) => !part || !original[part]) ||
+    saved.some((part) => !part || !engine[part])
+  )
+    return engine;
+  const notesOf = (entries, slide) =>
+    entries[relationshipsPath(slide)]
+      ? (relationshipsOfType(entries, slide, "notesSlide")[0]?.target ?? null)
+      : null;
+  const renames = new Map();
+  for (const [index, part] of saved.entries())
+    if (part !== authored[index]) renames.set(part, authored[index]);
+  const authoredNotes = new Set(
+    authored.map((slide) => notesOf(original, slide)).filter(Boolean),
+  );
+  for (const [index, slide] of saved.entries()) {
+    const engineNotes = notesOf(engine, slide);
+    if (!engineNotes) continue;
+    const authorNotes = notesOf(original, authored[index]);
+    if (authorNotes) {
+      if (authorNotes !== engineNotes) renames.set(engineNotes, authorNotes);
+      continue;
+    }
+    // Notes the edit added keep the engine's name unless another slide's
+    // notes have it in the author's package.
+    if (!authoredNotes.has(engineNotes)) continue;
+    let ordinal = 1;
+    const taken = new Set([...Object.keys(original), ...Object.keys(engine)]);
+    while (taken.has(`ppt/notesSlides/notesSlide${ordinal}.xml`)) ordinal += 1;
+    renames.set(engineNotes, `ppt/notesSlides/notesSlide${ordinal}.xml`);
+  }
+  if (!renames.size) return engine;
+
+  const renamedPart = (part) => {
+    if (renames.has(part)) return renames.get(part);
+    const owner = part.replace(/\/_rels\/([^/]+)\.rels$/u, "/$1");
+    return owner !== part && renames.has(owner)
+      ? relationshipsPath(renames.get(owner))
+      : part;
+  };
+  const aligned = {};
+  for (const [part, bytes] of Object.entries(engine)) {
+    const target = renamedPart(part);
+    if (Object.hasOwn(aligned, target))
+      throw new Error(`Native snapshot cannot align ${part} with ${target}.`);
+    aligned[target] = bytes;
+  }
+  for (const part of Object.keys(engine)) {
+    if (!part.endsWith(".rels")) continue;
+    const owner = part.replace(/\/_rels\/([^/]+)\.rels$/u, "/$1");
+    const source = part === "_rels/.rels" ? "" : owner;
+    const document = parseXml(engine, part);
+    let changed = false;
+    for (const relationship of relationshipElements(document)) {
+      if (relationship.getAttribute("TargetMode") === "External") continue;
+      const target = resolvePart(source, relationship.getAttribute("Target"));
+      if (!renames.has(target) && !renames.has(source)) continue;
+      relationship.setAttribute(
+        "Target",
+        relativePart(renamedPart(source), renamedPart(target)),
+      );
+      changed = true;
+    }
+    if (changed) aligned[renamedPart(part)] = serializeXml(document);
+  }
+  if (engine[contentTypesPath]) {
+    const document = parseXml(engine, contentTypesPath);
+    for (const override of [
+      ...document.getElementsByTagNameNS(contentTypeNamespace, "Override"),
+    ]) {
+      const part = override.getAttribute("PartName")?.replace(/^\//u, "");
+      if (part && renames.has(part))
+        override.setAttribute("PartName", `/${renames.get(part)}`);
+    }
+    aligned[contentTypesPath] = serializeXml(document);
+  }
+  return aligned;
+}
+
 function orderedSlidePaths(entries) {
   if (!entries[presentationPath] || !entries[presentationRelationshipsPath])
     return [];
@@ -1440,24 +1528,34 @@ function mergeThemeValues(originalBytes, noEditBytes, editedBytes, part) {
   return serializeXml(original);
 }
 
-// A deck without a notes master gets one when a slide first receives notes,
-// and one without comment authors gets that part with its first comment. The
-// engine's presentation part and its relationships differ from the author's
-// throughout (it writes one master per layout), so only what the edit added
-// joins the author's copies: the new relationship and, for a notes master,
-// its id list entry. The new parts themselves arrive with the other parts.
-// Anything else the engine changed there is left to the ordinary merge.
+// The engine's presentation part and its relationships differ from the
+// author's throughout (it writes one master per layout), so they are never
+// taken as saved. A deck without a notes master gets one when a slide first
+// receives notes, and one without comment authors gets that part with its
+// first comment: only the new relationship and, for a notes master, its id
+// list entry join the author's copies. Otherwise the author's copies stay as
+// they are. The engine also rewrites the notes page size on some saves, which
+// no edit here asks for. Any other change to the presentation part is left
+// to the ordinary merge.
 const addedPresentationRelationships = new Set([
   "notesMaster",
   "commentAuthors",
 ]);
 
-function mergeAddedPresentationParts(original, noEdit, edited) {
+function mergePresentationParts(original, noEdit, edited) {
   const hasPresentation = (entries) =>
     Boolean(
       entries[presentationPath] && entries[presentationRelationshipsPath],
     );
   if (![original, noEdit, edited].every(hasPresentation)) return null;
+  if (
+    samePartBytes(noEdit[presentationPath], edited[presentationPath]) &&
+    samePartBytes(
+      noEdit[presentationRelationshipsPath],
+      edited[presentationRelationshipsPath],
+    )
+  )
+    return null;
   const relationshipsOf = (entries) =>
     relationshipElements(parseXml(entries, presentationRelationshipsPath))
       .filter(
@@ -1483,7 +1581,6 @@ function mergeAddedPresentationParts(original, noEdit, edited) {
     (relationship) => !normalizedIdentities.has(identity(relationship)),
   );
   if (
-    !added.length ||
     normalized.some(
       (relationship) => !changedIdentities.has(identity(relationship)),
     ) ||
@@ -1495,8 +1592,8 @@ function mergeAddedPresentationParts(original, noEdit, edited) {
   )
     return null;
 
-  // The engine's presentation part may differ from its no-edit save only by
-  // the new notes master's list, with every r:id read as its target.
+  // Beyond those, the engine's two saves may differ only by the notes master
+  // list and the notes page size, with every r:id read as its target.
   const comparable = (entries, relationships) => {
     const targets = new Map(
       relationships.map((relationship) => [
@@ -1505,13 +1602,14 @@ function mergeAddedPresentationParts(original, noEdit, edited) {
       ]),
     );
     const document = parseXml(entries, presentationPath);
-    for (const list of [
-      ...document.documentElement.getElementsByTagNameNS(
-        presentationNamespace,
-        "notesMasterIdLst",
-      ),
-    ])
-      list.parentNode.removeChild(list);
+    for (const name of ["notesMasterIdLst", "notesSz"])
+      for (const element of [
+        ...document.documentElement.getElementsByTagNameNS(
+          presentationNamespace,
+          name,
+        ),
+      ])
+        element.parentNode.removeChild(element);
     for (const element of [
       document.documentElement,
       ...document.getElementsByTagName("*"),
@@ -1530,9 +1628,15 @@ function mergeAddedPresentationParts(original, noEdit, edited) {
     !samePartBytes(comparable(noEdit, normalized), comparable(edited, changed))
   )
     return null;
+  if (!added.length)
+    return {
+      [presentationPath]: original[presentationPath],
+      [presentationRelationshipsPath]: original[presentationRelationshipsPath],
+    };
 
   const relationships = parseXml(original, presentationRelationshipsPath);
   const presentation = parseXml(original, presentationPath);
+  let presentationChanged = false;
   for (const relationship of added) {
     // Every part the new one needs arrives from the engine; none may take the
     // place of one the author has.
@@ -1584,9 +1688,12 @@ function mergeAddedPresentationParts(original, noEdit, edited) {
       "sldMasterIdLst",
     );
     root.insertBefore(list, slideMasters.nextSibling);
+    presentationChanged = true;
   }
   return {
-    [presentationPath]: serializeXml(presentation),
+    [presentationPath]: presentationChanged
+      ? serializeXml(presentation)
+      : original[presentationPath],
     [presentationRelationshipsPath]: serializeXml(relationships),
   };
 }
@@ -1901,8 +2008,8 @@ export function preserveOriginalPptxParts(
     inspectZipPackage(bytes);
   }
   const original = unzipSync(originalBytes);
-  const noEdit = unzipSync(noEditBytes);
-  const edited = unzipSync(editedBytes);
+  const noEdit = alignEngineSlideParts(original, unzipSync(noEditBytes));
+  const edited = alignEngineSlideParts(original, unzipSync(editedBytes));
   const expandedBytes = [original, noEdit, edited].reduce(
     (total, entries) =>
       total +
@@ -1931,7 +2038,7 @@ export function preserveOriginalPptxParts(
       : null;
   const presentationPartsPatch = semanticMasterThemePatch
     ? null
-    : mergeAddedPresentationParts(original, noEdit, edited);
+    : mergePresentationParts(original, noEdit, edited);
   const paths = new Set([
     ...Object.keys(original),
     ...Object.keys(noEdit),
@@ -2023,7 +2130,14 @@ export function preserveOriginalPptxParts(
         )
       : null;
     let relationshipRemap = null;
-    if (authoredChange && !part.endsWith(".rels") && !semanticSlideSizePatch) {
+    const presentationPatch =
+      presentationPartsPatch && Object.hasOwn(presentationPartsPatch, part);
+    if (
+      authoredChange &&
+      !part.endsWith(".rels") &&
+      !semanticSlideSizePatch &&
+      !presentationPatch
+    ) {
       if (
         samePartBytes(noEdit[related], edited[related]) &&
         !samePartBytes(original[related], noEdit[related]) &&
