@@ -115,6 +115,10 @@ LibreOffice polygon reopened as a different object, and the browser bridge
 cannot write custom-shape geometry itself. Patch `0040` writes a table cell's
 top and bottom margins to `a:tcPr`, where import reads them; only the left and
 right margins were written, so the others changed on reopen.
+Patch `0041` keeps a comment's initials, position and text: export made the
+initials up from the author's name, wrote a missing date as zeros and the text
+unescaped, and import rounded the position through whole 1/100 mm into
+15.87 mm steps and dropped the initials.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

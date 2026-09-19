@@ -18,7 +18,7 @@
     "patchSeriesReady": true,
     "buildReady": false,
     "nativeSlideStructureReady": false,
-    "patchSeriesSha256": "217b7e28c8f1d912b5d22150f290e2ebc3bde57ee5743d94961bc97d35beb15b",
+    "patchSeriesSha256": "99018505c98fc14f38a1a638e43c995d4475d3379dff57021f88045ae1cb42eb",
     "patches": [
       "libreoffice/patches/0001-core-undo-identity.patch",
       "libreoffice/patches/0002-generic-pptx-edit-invariants.patch",
@@ -59,7 +59,8 @@
       "libreoffice/patches/0037-browser-custom-shape-type-property.patch",
       "libreoffice/patches/0038-browser-pptx-connector-keeps-its-end-points.patch",
       "libreoffice/patches/0039-browser-freeform-is-pptx-custom-geometry.patch",
-      "libreoffice/patches/0040-browser-pptx-table-cell-keeps-top-and-bottom-margins.patch"
+      "libreoffice/patches/0040-browser-pptx-table-cell-keeps-top-and-bottom-margins.patch",
+      "libreoffice/patches/0041-browser-pptx-comments-keep-initials-position-and-text.patch"
     ],
     "invariants": [
       "table-cell-native-undo",
@@ -145,7 +146,8 @@
       "CppunitTest_sd_uiimpress:testSpellbookCustomShapeTypeIsObservable",
       "CppunitTest_sd_uiimpress:testSpellbookPptxConnectorKeepsItsEndPoints",
       "CppunitTest_sd_uiimpress:testSpellbookFreeformIsPptxCustomGeometry",
-      "CppunitTest_sd_uiimpress:testSpellbookPptxTableCellKeepsTopAndBottomMargins"
+      "CppunitTest_sd_uiimpress:testSpellbookPptxTableCellKeepsTopAndBottomMargins",
+      "CppunitTest_sd_uiimpress:testSpellbookPptxCommentKeepsInitialsPositionAndText"
     ]
   },
   "toolchain": {

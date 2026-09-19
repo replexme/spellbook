@@ -1,0 +1,209 @@
+diff --git a/include/oox/ppt/comments.hxx b/include/oox/ppt/comments.hxx
+--- a/include/oox/ppt/comments.hxx
++++ b/include/oox/ppt/comments.hxx
+@@ -97,6 +97,7 @@ class Comment
+             return y.toInt32();
+         }
+         OUString getAuthor ( const CommentAuthorList& list );
++        OUString getInitials ( const CommentAuthorList& list );
+ };
+ 
+ class CommentList
+diff --git a/oox/source/ppt/comments.cxx b/oox/source/ppt/comments.cxx
+--- a/oox/source/ppt/comments.cxx
++++ b/oox/source/ppt/comments.cxx
+@@ -77,6 +77,17 @@ OUString Comment::getAuthor(const CommentAuthorList& list)
+     return "Anonymous";
+ }
+ 
++OUString Comment::getInitials(const CommentAuthorList& list)
++{
++    const sal_Int32 nId = authorId.toInt32();
++    for (auto const& author : list.cmAuthorLst)
++    {
++        if (author.id.toInt32() == nId)
++            return author.initials;
++    }
++    return OUString();
++}
++
+ const Comment& CommentList::getCommentAtIndex(int index)
+ {
+     if (index < 0 || o3tl::make_unsigned(index) >= cmLst.size())
+diff --git a/oox/source/ppt/presentationfragmenthandler.cxx b/oox/source/ppt/presentationfragmenthandler.cxx
+--- a/oox/source/ppt/presentationfragmenthandler.cxx
++++ b/oox/source/ppt/presentationfragmenthandler.cxx
+@@ -21,6 +21,7 @@
+ #include <comphelper/propertyvalue.hxx>
+ #include <comphelper/sequenceashashmap.hxx>
+ #include <o3tl/string_view.hxx>
++#include <o3tl/unit_conversion.hxx>
+ #include <sal/log.hxx>
+ #include <tools/multisel.hxx>
+ #include <comphelper/diagnose_ex.hxx>
+@@ -532,13 +533,15 @@ void PresentationFragmentHandler::importSlide(sal_uInt32 nSlide, bool bFirstPage
+                         Comment aComment = pCommentsPersistPtr->getCommentsList().getCommentAtIndex(i);
+                         uno::Reference< office::XAnnotationAccess > xAnnotationAccess( xSlide, UNO_QUERY_THROW );
+                         uno::Reference< office::XAnnotation > xAnnotation( xAnnotationAccess->createAndInsertAnnotation() );
+-                        int nPosX = aComment.getIntX();
+-                        int nPosY = aComment.getIntY();
+-                        xAnnotation->setPosition(
+-                            geometry::RealPoint2D(
+-                                ::oox::drawingml::convertEmuToHmm( nPosX ) * 15.87,
+-                                ::oox::drawingml::convertEmuToHmm( nPosY ) * 15.87 ) );
++                        // p:pos is in master units (1/576 inch), as export writes it.
++                        // Converting through whole 1/100 mm first moved every comment.
++                        xAnnotation->setPosition(geometry::RealPoint2D(
++                            o3tl::convert<double>(aComment.getIntX(), o3tl::Length::master,
++                                                  o3tl::Length::mm),
++                            o3tl::convert<double>(aComment.getIntY(), o3tl::Length::master,
++                                                  o3tl::Length::mm)));
+                         xAnnotation->setAuthor( aComment.getAuthor(maAuthorList) );
++                        xAnnotation->setInitials( aComment.getInitials(maAuthorList) );
+                         xAnnotation->setDateTime( aComment.getDateTime() );
+                         uno::Reference< text::XText > xText( xAnnotation->getTextRange() );
+                         xText->setString( aComment.get_text());
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -41,6 +41,10 @@
+ #include <com/sun/star/drawing/XDrawView.hpp>
+ #include <com/sun/star/drawing/XDrawPage.hpp>
+ #include <com/sun/star/drawing/XMasterPageTarget.hpp>
++#include <com/sun/star/geometry/RealPoint2D.hpp>
++#include <com/sun/star/office/XAnnotation.hpp>
++#include <com/sun/star/office/XAnnotationAccess.hpp>
++#include <com/sun/star/office/XAnnotationEnumeration.hpp>
+ #include <com/sun/star/table/XMergeableCell.hpp>
+ #include <com/sun/star/text/WritingMode2.hpp>
+ #include <com/sun/star/text/XText.hpp>
+@@ -3094,6 +3098,42 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxTableCellKeepsTopAndBotto
+     CPPUNIT_FAIL("table not found");
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxCommentKeepsInitialsPositionAndText)
++{
++    createSdImpressDocModelOnly();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<office::XAnnotationAccess> xAccess(
++        xPagesSupplier->getDrawPages()->getByIndex(0), uno::UNO_QUERY_THROW);
++    uno::Reference<office::XAnnotation> xAnnotation(xAccess->createAndInsertAnnotation());
++    xAnnotation->setAuthor(u"Spellbook AI"_ustr);
++    xAnnotation->setInitials(u"AI"_ustr);
++    xAnnotation->setPosition(geometry::RealPoint2D(8.0, 8.0));
++    xAnnotation->getTextRange()->setString(u"a < b & c"_ustr);
++
++    // Export made the initials up from the name, wrote the missing date as
++    // zeros and the text unescaped; import rounded the position to whole
++    // 1/100 mm steps of 15.87 mm.
++    saveAndReloadSdImpressDocModelOnly("Impress Office Open XML");
++    xmlDocUniquePtr pAuthors = parseExport("ppt/commentAuthors.xml");
++    assertXPath(pAuthors, "//p:cmAuthor[@name='Spellbook AI' and @initials='AI']", 1);
++    xmlDocUniquePtr pComments = parseExport("ppt/comments/comment1.xml");
++    assertXPath(pComments, "//p:cm[not(@dt)]/p:pos[@x='181' and @y='181']", 1);
++    xAccess.set(uno::Reference<drawing::XDrawPagesSupplier>(mxComponent, uno::UNO_QUERY_THROW)
++                    ->getDrawPages()
++                    ->getByIndex(0),
++                uno::UNO_QUERY_THROW);
++    uno::Reference<office::XAnnotationEnumeration> xAnnotations(
++        xAccess->createAnnotationEnumeration());
++    CPPUNIT_ASSERT(xAnnotations->hasMoreElements());
++    xAnnotation = xAnnotations->nextElement();
++    CPPUNIT_ASSERT_EQUAL(u"AI"_ustr, xAnnotation->getInitials());
++    CPPUNIT_ASSERT_EQUAL(u"a < b & c"_ustr, xAnnotation->getTextRange()->getString());
++    // One PPTX master unit is 1/576 inch, 0.044 mm.
++    CPPUNIT_ASSERT_DOUBLES_EQUAL(8.0, xAnnotation->getPosition().X, 0.05);
++    CPPUNIT_ASSERT_DOUBLES_EQUAL(8.0, xAnnotation->getPosition().Y, 0.05);
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxDiagramFrameKeepsShapeIdentity)
+ {
+     createSdImpressDocModelOnly("pptx/smartart-children.pptx");
+diff --git a/sd/source/filter/eppt/epptooxml.hxx b/sd/source/filter/eppt/epptooxml.hxx
+--- a/sd/source/filter/eppt/epptooxml.hxx
++++ b/sd/source/filter/eppt/epptooxml.hxx
+@@ -110,7 +110,8 @@ private:
+ 
+     sal_uInt32 GetNewSlideId() { return mnSlideIdMax ++; }
+     sal_uInt32 GetNewSlideMasterId() { return mnSlideMasterIdMax ++; }
+-    sal_Int32 GetAuthorIdAndLastIndex( const OUString& sAuthor, sal_Int32& nLastIndex );
++    sal_Int32 GetAuthorIdAndLastIndex( const OUString& sAuthor, const OUString& sInitials,
++                                       sal_Int32& nLastIndex );
+ 
+     // Write docProps/core.xml and docprops/custom.xml and docprops/app.xml
+     void writeDocumentProperties();
+@@ -163,6 +164,7 @@ private:
+     struct AuthorComments {
+         sal_Int32 nId;
+         sal_Int32 nLastIndex;
++        OUString sInitials;
+     };
+     typedef std::unordered_map< OUString, struct AuthorComments > AuthorsMap;
+     AuthorsMap maAuthors;
+diff --git a/sd/source/filter/eppt/pptx-epptooxml.cxx b/sd/source/filter/eppt/pptx-epptooxml.cxx
+--- a/sd/source/filter/eppt/pptx-epptooxml.cxx
++++ b/sd/source/filter/eppt/pptx-epptooxml.cxx
+@@ -1070,7 +1070,9 @@ void PowerPointExport::WriteAuthors()
+         pFS->singleElementNS(XML_p, XML_cmAuthor,
+                              XML_id, OString::number(i.second.nId),
+                              XML_name, i.first,
+-                             XML_initials, lcl_GetInitials(i.first),
++                             XML_initials, i.second.sInitials.isEmpty()
++                                               ? lcl_GetInitials(i.first)
++                                               : i.second.sInitials,
+                              XML_lastIdx, OString::number(i.second.nLastIndex),
+                              XML_clrIdx, OString::number(i.second.nId));
+     }
+@@ -1080,7 +1082,9 @@ void PowerPointExport::WriteAuthors()
+     pFS->endDocument();
+ }
+ 
+-sal_Int32 PowerPointExport::GetAuthorIdAndLastIndex(const OUString& sAuthor, sal_Int32& nLastIndex)
++sal_Int32 PowerPointExport::GetAuthorIdAndLastIndex(const OUString& sAuthor,
++                                                    const OUString& sInitials,
++                                                    sal_Int32& nLastIndex)
+ {
+     if (maAuthors.count(sAuthor) <= 0)
+     {
+@@ -1091,6 +1095,10 @@ sal_Int32 PowerPointExport::GetAuthorIdAndLastIndex(const OUString& sAuthor, sal
+ 
+         maAuthors[ sAuthor ] = aAuthorComments;
+     }
++    // An author's initials are the ones their comments carry, not ones made up
++    // from the name.
++    if (maAuthors[sAuthor].sInitials.isEmpty())
++        maAuthors[sAuthor].sInitials = sInitials;
+ 
+     nLastIndex = ++maAuthors[ sAuthor ].nLastIndex;
+ 
+@@ -1196,15 +1204,18 @@ bool PowerPointExport::WriteComments(sal_uInt32 nPageNum)
+                 RealPoint2D aRealPoint2D(xAnnotation->getPosition());
+                 Reference< XText > xText(xAnnotation->getTextRange());
+                 sal_Int32 nLastIndex;
+-                sal_Int32 nId = GetAuthorIdAndLastIndex(xAnnotation->getAuthor(), nLastIndex);
++                sal_Int32 nId = GetAuthorIdAndLastIndex(xAnnotation->getAuthor(),
++                                                        xAnnotation->getInitials(), nLastIndex);
+                 char cDateTime[sizeof("-32768-65535-65535T65535:65535:65535.4294967295")];
+                     // reserve enough space for hypothetical max length
+ 
+                 snprintf(cDateTime, sizeof cDateTime, "%02" SAL_PRIdINT32 "-%02" SAL_PRIuUINT32 "-%02" SAL_PRIuUINT32 "T%02" SAL_PRIuUINT32 ":%02" SAL_PRIuUINT32 ":%02" SAL_PRIuUINT32 ".%09" SAL_PRIuUINT32, sal_Int32(aDateTime.Year), sal_uInt32(aDateTime.Month), sal_uInt32(aDateTime.Day), sal_uInt32(aDateTime.Hours), sal_uInt32(aDateTime.Minutes), sal_uInt32(aDateTime.Seconds), aDateTime.NanoSeconds);
+ 
++                // A comment without a date has no dt: all-zero fields are not a date.
++                const bool bDated = aDateTime != util::DateTime();
+                 pFS->startElementNS(XML_p, XML_cm,
+                                     XML_authorId, OString::number(nId),
+-                                    XML_dt, cDateTime,
++                                    XML_dt, sax_fastparser::UseIf(OString(cDateTime), bDated),
+                                     XML_idx, OString::number(nLastIndex));
+ 
+                 pFS->singleElementNS(XML_p, XML_pos,
+@@ -1212,7 +1223,7 @@ bool PowerPointExport::WriteComments(sal_uInt32 nPageNum)
+                                      XML_y, OString::number(std::round(convertMm100ToMasterUnit(aRealPoint2D.Y * 100))));
+ 
+                 pFS->startElementNS(XML_p, XML_text);
+-                pFS->write(xText->getString());
++                pFS->writeEscaped(xText->getString());
+                 pFS->endElementNS(XML_p, XML_text);
+ 
+                 pFS->endElementNS(XML_p, XML_cm);
