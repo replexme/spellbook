@@ -253,14 +253,29 @@ function spellbookDocumentOperation(request) {
       serviceKind.endsWith("TextShape")
     )
       return "rect";
-    let geometry;
-    try {
-      geometry = Array.from(safeProperty(shape, "CustomShapeGeometry") ?? []);
-    } catch (_) {
-      return null;
+    let type;
+    // The browser bridge cannot read CustomShapeGeometry (a sequence of
+    // property sequences). Its engine exposes the custom shape type as a
+    // virtual property, absent from the property set info.
+    if (engineIdentity.engineImage === "browser-wasm") {
+      try {
+        type = shape.getPropertyValue("SpellbookCustomShapeType");
+      } catch (_) {
+        return null;
+      }
+    } else {
+      let geometry;
+      try {
+        geometry = Array.from(safeProperty(shape, "CustomShapeGeometry") ?? []);
+      } catch (_) {
+        return null;
+      }
+      type = safeMember(
+        geometry.find((entry) => safeMember(entry, "Name") === "Type"),
+        "Value",
+      );
     }
-    const type = geometry.find((entry) => safeMember(entry, "Name") === "Type");
-    const value = String(safeMember(type, "Value") ?? "")
+    const value = String(type ?? "")
       .toLowerCase()
       .replace(/^ooxml-/u, "");
     return (
@@ -1699,8 +1714,10 @@ function spellbookDocumentOperation(request) {
           const elementId = `${prefix}/${index}`;
           const children = childCount(shape);
           const shapeKind = safeCall(shape, "getShapeType", "unknown");
-          const textlessPicture =
-            String(shapeKind).endsWith("GraphicObjectShape");
+          // A PPTX picture or connector has no text body.
+          const withoutTextBody =
+            String(shapeKind).endsWith("GraphicObjectShape") ||
+            String(shapeKind).endsWith("ConnectorShape");
           const objectName = safeCall(shape, "getName", "");
           const shapeName = objectName || `unnamed-${shapeKind}`;
           const occurrence = nameOccurrences[shapeName] ?? 0;
@@ -1758,12 +1775,12 @@ function spellbookDocumentOperation(request) {
             strikethrough: safeTextProperty(shape, "CharStrikeout"),
             textShadow: safeTextProperty(shape, "CharShadowed"),
             color: safeProperty(shape, "CharColor"),
-            // UNO exposes transient text defaults on pictures, but a PPTX
-            // picture has no text body in which to persist those defaults.
-            paragraphAlignment: textlessPicture
+            // UNO exposes transient text defaults on pictures and connectors,
+            // but PPTX gives them no text body to persist those defaults in.
+            paragraphAlignment: withoutTextBody
               ? null
               : safeProperty(shape, "ParaAdjust"),
-            textVerticalAlignment: textlessPicture
+            textVerticalAlignment: withoutTextBody
               ? null
               : enumName(safeProperty(shape, "TextVerticalAdjust")),
             textAutoGrowHeight: safeProperty(shape, "TextAutoGrowHeight"),
@@ -3739,6 +3756,27 @@ function spellbookDocumentOperation(request) {
           page.add(shape);
           shape.setName(generatedObjectName);
           if (command.op === "add_text_box") shape.setString(command.text);
+          // A connector is defined by its end points; an unattached connector
+          // can ignore the size it was given before insertion.
+          if (command.op === "add_connector")
+            for (const [name, x, y] of [
+              ["StartPosition", command.x, command.y],
+              [
+                "EndPosition",
+                command.x + command.width,
+                command.y + command.height,
+              ],
+            ])
+              shape.setPropertyValue(
+                name,
+                new uno.Any(
+                  uno.type.struct(uno.idl.com.sun.star.awt.Point),
+                  new uno.idl.com.sun.star.awt.Point({
+                    X: Math.round(x),
+                    Y: Math.round(y),
+                  }),
+                ),
+              );
         } else {
           page.add(shape);
           if (command.op === "add_text_box") shape.setString(command.text);
@@ -7651,6 +7689,35 @@ function spellbookDocumentOperation(request) {
     const usesTypedTextFormatting = typedTextFormattingOperations.has(
       command.op,
     );
+    // A colour given to a fill or line that is not drawn would change nothing
+    // the user can see. The colour commands then draw a solid fill or line in
+    // that colour, as the saved package does.
+    const styleToken = (value, ordinals) => {
+      const token = enumToken(value);
+      return ordinals[token] ?? token;
+    };
+    const solidFillNeeded = (state) =>
+      ["NONE", "GRADIENT", "HATCH", "BITMAP"].includes(
+        styleToken(state?.fillStyle, {
+          0: "NONE",
+          1: "SOLID",
+          2: "GRADIENT",
+          3: "HATCH",
+          4: "BITMAP",
+        }),
+      );
+    const visibleLineNeeded = (state) =>
+      styleToken(state?.lineStyle, { 0: "NONE", 1: "SOLID", 2: "DASH" }) ===
+      "NONE";
+    if (
+      ((command.op === "fill_color" && solidFillNeeded(element)) ||
+        (command.op === "line_color" && visibleLineNeeded(element))) &&
+      !patchedObjectPropertyEngine &&
+      !runtimeSupports(
+        command.op === "fill_color" ? "set_shape_fill" : "set_line_style",
+      )
+    )
+      throw new Error("native_engine_object_property_patch_required");
     const browserShapeAppearanceOperations = new Set([
       "line_color",
       "line_width",
@@ -7737,10 +7804,12 @@ function spellbookDocumentOperation(request) {
                               ? wholeTextFormat(before)?.color ===
                                 Math.round(command.color)
                               : command.op === "fill_color"
-                                ? element.fill === Math.round(command.color)
+                                ? element.fill === Math.round(command.color) &&
+                                  !solidFillNeeded(element)
                                 : command.op === "line_color"
                                   ? element.lineColor ===
-                                    Math.round(command.color)
+                                      Math.round(command.color) &&
+                                    !visibleLineNeeded(element)
                                   : command.op === "line_width"
                                     ? element.lineWidth ===
                                       Math.round(command.size * 100)
@@ -7790,7 +7859,10 @@ function spellbookDocumentOperation(request) {
       const objectPath = command.elementId.split("/").slice(1).join("/");
       const properties =
         command.op === "line_color"
-          ? { LineColor: Math.round(command.color) }
+          ? {
+              ...(visibleLineNeeded(element) ? { LineStyle: 1 } : {}),
+              LineColor: Math.round(command.color),
+            }
           : command.op === "line_width"
             ? { LineWidth: Math.round(command.size * 100) }
             : command.op === "fill_opacity"
@@ -7842,6 +7914,19 @@ function spellbookDocumentOperation(request) {
     else if (command.op === "font_color")
       dispatch(".uno:Color", [
         prop("Color.Color", uno.type.long, Math.round(command.color)),
+      ]);
+    else if (
+      (command.op === "fill_color" && solidFillNeeded(element)) ||
+      (command.op === "line_color" && visibleLineNeeded(element))
+    )
+      transformSlides([
+        { JumpToSlide: slideIndex },
+        {
+          [`SetObjectProperties.${command.elementId.split("/").slice(1).join("/")}`]:
+            command.op === "fill_color"
+              ? { FillStyle: 1, FillColor: Math.round(command.color) }
+              : { LineStyle: 1, LineColor: Math.round(command.color) },
+        },
       ]);
     else if (command.op === "fill_color")
       dispatch(".uno:FillColor", [
@@ -7999,10 +8084,12 @@ function spellbookDocumentOperation(request) {
                               ? wholeTextFormat(after)?.color ===
                                 Math.round(command.color)
                               : command.op === "fill_color"
-                                ? target?.fill === Math.round(command.color)
+                                ? target?.fill === Math.round(command.color) &&
+                                  !solidFillNeeded(target)
                                 : command.op === "line_color"
                                   ? target?.lineColor ===
-                                    Math.round(command.color)
+                                      Math.round(command.color) &&
+                                    !visibleLineNeeded(target)
                                   : command.op === "line_width"
                                     ? target?.lineWidth ===
                                       Math.round(command.size * 100)
