@@ -231,6 +231,10 @@ function withCanonicalShapeIdentity(slides) {
   return slides;
 }
 
+// The Office bridge names an enumerator with its qualified UNO name, the
+// browser bridge with the bare member name.
+const isNoneStyle = (value) => /(?:^|\.)NONE$/u.test(String(value ?? ""));
+
 function withoutInactiveStyleValues(slides, authoredSlides = slides) {
   for (const [slideIndex, slide] of slides.entries()) {
     const authoredSlide = authoredArrayEntry(slide, authoredSlides, slideIndex);
@@ -240,11 +244,11 @@ function withoutInactiveStyleValues(slides, authoredSlides = slides) {
         authoredSlide?.elements,
         elementIndex,
       );
-      if (String(authoredElement?.fillStyle ?? "").endsWith(".NONE")) {
+      if (isNoneStyle(authoredElement?.fillStyle)) {
         delete element.fill;
         delete element.fillOpacity;
       }
-      if (String(authoredElement?.lineStyle ?? "").endsWith(".NONE")) {
+      if (isNoneStyle(authoredElement?.lineStyle)) {
         for (const field of [
           "lineColor",
           "lineWidth",

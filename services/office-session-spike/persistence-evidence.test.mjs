@@ -524,6 +524,41 @@ test("authored property masks follow uniquely named shapes after reordering", ()
   assert.equal(direct.fill, undefined);
 });
 
+test("a fill or line that is not drawn ignores its colour under either bridge's enum names", () => {
+  for (const none of ["NONE", "com.sun.star.drawing.FillStyle.NONE"]) {
+    const state = (fill, lineColor) => ({
+      masters: [],
+      slides: [
+        {
+          slideIndex: 0,
+          elements: [
+            {
+              elementId: "0/0",
+              fillStyle: none,
+              fill,
+              fillOpacity: 100,
+              lineStyle: none.replace("FillStyle", "LineStyle"),
+              lineColor,
+              lineWidth: 0,
+            },
+          ],
+        },
+      ],
+    });
+    // A new text box: the live model keeps white as its hidden fill colour,
+    // the reopened PPTX (<a:noFill/>) the engine default.
+    const normalized = normalizeDocumentPersistenceState(
+      state(7512015, 3433892),
+      { authoredBy: state(16777215, 0) },
+    );
+    const [element] = normalized.slides[0].elements;
+    assert.equal(element.fill, undefined, none);
+    assert.equal(element.fillOpacity, undefined, none);
+    assert.equal(element.lineColor, undefined, none);
+    assert.equal(element.lineWidth, undefined, none);
+  }
+});
+
 test("ambiguous named shapes retain observed values instead of borrowing a mask", () => {
   const authored = {
     masters: [],
