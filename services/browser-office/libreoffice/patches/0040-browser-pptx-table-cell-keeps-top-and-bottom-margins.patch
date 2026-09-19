@@ -1,0 +1,101 @@
+diff --git a/oox/source/export/shapes.cxx b/oox/source/export/shapes.cxx
+--- a/oox/source/export/shapes.cxx
++++ b/oox/source/export/shapes.cxx
+@@ -2350,7 +2350,7 @@ void ShapeExport::WriteTable( const Reference< XShape >& rXShape  )
+ 
+ void ShapeExport::WriteTableCellProperties(const Reference< XPropertySet>& xCellPropSet)
+ {
+-    sal_Int32 nLeftMargin(0), nRightMargin(0);
++    sal_Int32 nLeftMargin(0), nRightMargin(0), nTopMargin(0), nBottomMargin(0);
+     TextVerticalAdjust eVerticalAlignment;
+     const char* sVerticalAlignment;
+ 
+@@ -2360,6 +2360,14 @@ void ShapeExport::WriteTableCellProperties(const Reference< XPropertySet>& xCell
+     Any aRightMargin = xCellPropSet->getPropertyValue("TextRightDistance");
+     aRightMargin >>= nRightMargin;
+ 
++    // Import reads a cell's top and bottom margins from a:tcPr as well; left
++    // out, they fell back to PowerPoint's default on reopen.
++    Any aTopMargin = xCellPropSet->getPropertyValue("TextUpperDistance");
++    aTopMargin >>= nTopMargin;
++
++    Any aBottomMargin = xCellPropSet->getPropertyValue("TextLowerDistance");
++    aBottomMargin >>= nBottomMargin;
++
+     Any aVerticalAlignment = xCellPropSet->getPropertyValue("TextVerticalAdjust");
+     aVerticalAlignment >>= eVerticalAlignment;
+     sVerticalAlignment = GetTextVerticalAdjust(eVerticalAlignment);
+@@ -2386,7 +2394,9 @@ void ShapeExport::WriteTableCellProperties(const Reference< XPropertySet>& xCell
+     mpFS->startElementNS(XML_a, XML_tcPr, XML_anchor, sVerticalAlignment,
+     XML_vert, aTextVerticalValue,
+     XML_marL, sax_fastparser::UseIf(OString::number(oox::drawingml::convertHmmToEmu(nLeftMargin)), nLeftMargin > 0),
+-    XML_marR, sax_fastparser::UseIf(OString::number(oox::drawingml::convertHmmToEmu(nRightMargin)), nRightMargin > 0));
++    XML_marR, sax_fastparser::UseIf(OString::number(oox::drawingml::convertHmmToEmu(nRightMargin)), nRightMargin > 0),
++    XML_marT, OString::number(oox::drawingml::convertHmmToEmu(nTopMargin)),
++    XML_marB, OString::number(oox::drawingml::convertHmmToEmu(nBottomMargin)));
+ 
+     // Write background fill for table cell.
+     // TODO
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -3041,6 +3041,59 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookFreeformIsPptxCustomGeometry)
+     CPPUNIT_FAIL("freeform not found");
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxTableCellKeepsTopAndBottomMargins)
++{
++    createSdImpressDocModelOnly();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShape> xShape(
++        xFactory->createInstance("com.sun.star.drawing.TableShape"), uno::UNO_QUERY_THROW);
++    xShape->setPosition(awt::Point(1000, 1000));
++    xShape->setSize(awt::Size(8000, 3000));
++    xShapes->add(xShape);
++    const auto firstCell = [](const uno::Reference<drawing::XShape>& xTableShape) {
++        uno::Reference<css::table::XTable> xTable(
++            uno::Reference<beans::XPropertySet>(xTableShape, uno::UNO_QUERY_THROW)
++                ->getPropertyValue("Model"),
++            uno::UNO_QUERY_THROW);
++        return uno::Reference<beans::XPropertySet>(xTable->getCellByPosition(0, 0),
++                                                   uno::UNO_QUERY_THROW);
++    };
++    uno::Reference<beans::XPropertySet> xCell = firstCell(xShape);
++    xCell->setPropertyValue("TextUpperDistance", uno::Any(sal_Int32(100)));
++    xCell->setPropertyValue("TextLowerDistance", uno::Any(sal_Int32(200)));
++    uno::Reference<text::XTextRange>(xCell, uno::UNO_QUERY_THROW)->setString("Cell");
++
++    // Export wrote only the left and right margins to a:tcPr, where import
++    // reads all four, so the top and bottom margins changed on reopen.
++    saveAndReloadSdImpressDocModelOnly("Impress Office Open XML");
++    xmlDocUniquePtr pSlideXml = parseExport("ppt/slides/slide1.xml");
++    assertXPath(pSlideXml, "//a:tbl/a:tr[1]/a:tc[1]/a:tcPr[@marT='36000' and @marB='72000']",
++                1);
++    uno::Reference<container::XIndexAccess> xPage(
++        uno::Reference<drawing::XDrawPagesSupplier>(mxComponent, uno::UNO_QUERY_THROW)
++            ->getDrawPages()
++            ->getByIndex(0),
++        uno::UNO_QUERY_THROW);
++    for (sal_Int32 nShape = 0; nShape < xPage->getCount(); ++nShape)
++    {
++        uno::Reference<drawing::XShape> xCandidate(xPage->getByIndex(nShape),
++                                                   uno::UNO_QUERY_THROW);
++        if (xCandidate->getShapeType() != u"com.sun.star.drawing.TableShape"_ustr)
++            continue;
++        xCell = firstCell(xCandidate);
++        CPPUNIT_ASSERT_EQUAL(sal_Int32(100),
++                             xCell->getPropertyValue("TextUpperDistance").get<sal_Int32>());
++        CPPUNIT_ASSERT_EQUAL(sal_Int32(200),
++                             xCell->getPropertyValue("TextLowerDistance").get<sal_Int32>());
++        return;
++    }
++    CPPUNIT_FAIL("table not found");
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxDiagramFrameKeepsShapeIdentity)
+ {
+     createSdImpressDocModelOnly("pptx/smartart-children.pptx");

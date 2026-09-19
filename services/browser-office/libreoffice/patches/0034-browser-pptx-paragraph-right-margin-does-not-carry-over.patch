@@ -30,7 +30,7 @@ diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
  #include <com/sun/star/container/XNameAccess.hpp>
  #include <com/sun/star/container/XNameContainer.hpp>
  #include <com/sun/star/container/XNamed.hpp>
-@@ -2935,6 +2937,57 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookDuplicateObjectUsesOneNativeU
+@@ -2936,6 +2938,57 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookDuplicateObjectUsesOneNativeU
      CPPUNIT_ASSERT_EQUAL(nCount + 1, pPage->GetObjCount());
  }
  

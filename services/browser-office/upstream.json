@@ -10,11 +10,15 @@
   },
   "sourceCandidate": {
     "patchLevel": "browser-undo-v31",
-    "wasmModules": ["calc", "writer", "impress"],
+    "wasmModules": [
+      "calc",
+      "writer",
+      "impress"
+    ],
     "patchSeriesReady": true,
     "buildReady": false,
     "nativeSlideStructureReady": false,
-    "patchSeriesSha256": "6251c020af2164bdc164f37db060710619da29319c08015db05da6b67ea479c0",
+    "patchSeriesSha256": "217b7e28c8f1d912b5d22150f290e2ebc3bde57ee5743d94961bc97d35beb15b",
     "patches": [
       "libreoffice/patches/0001-core-undo-identity.patch",
       "libreoffice/patches/0002-generic-pptx-edit-invariants.patch",
@@ -50,7 +54,12 @@
       "libreoffice/patches/0032-browser-pptx-diagram-frame-keeps-shape-identity.patch",
       "libreoffice/patches/0033-browser-duplicate-object-without-clipboard.patch",
       "libreoffice/patches/0034-browser-pptx-paragraph-right-margin-does-not-carry-over.patch",
-      "libreoffice/patches/0035-browser-animation-replace-keeps-timing.patch"
+      "libreoffice/patches/0035-browser-animation-replace-keeps-timing.patch",
+      "libreoffice/patches/0036-browser-pptx-empty-text-keeps-alignment.patch",
+      "libreoffice/patches/0037-browser-custom-shape-type-property.patch",
+      "libreoffice/patches/0038-browser-pptx-connector-keeps-its-end-points.patch",
+      "libreoffice/patches/0039-browser-freeform-is-pptx-custom-geometry.patch",
+      "libreoffice/patches/0040-browser-pptx-table-cell-keeps-top-and-bottom-margins.patch"
     ],
     "invariants": [
       "table-cell-native-undo",
@@ -131,7 +140,12 @@
       "CppunitTest_sd_uiimpress:testSpellbookFontworkShapeTypeIsObservable",
       "CppunitTest_sd_uiimpress:testSpellbookPptxDiagramFrameKeepsShapeIdentity",
       "CppunitTest_sd_uiimpress:testSpellbookDuplicateObjectUsesOneNativeUndo",
-      "CppunitTest_sd_uiimpress:testSpellbookPptxParagraphRightMarginDoesNotCarryOver"
+      "CppunitTest_sd_uiimpress:testSpellbookPptxParagraphRightMarginDoesNotCarryOver",
+      "CppunitTest_sd_uiimpress:testSpellbookPptxEmptyTextKeepsShapeAlignment",
+      "CppunitTest_sd_uiimpress:testSpellbookCustomShapeTypeIsObservable",
+      "CppunitTest_sd_uiimpress:testSpellbookPptxConnectorKeepsItsEndPoints",
+      "CppunitTest_sd_uiimpress:testSpellbookFreeformIsPptxCustomGeometry",
+      "CppunitTest_sd_uiimpress:testSpellbookPptxTableCellKeepsTopAndBottomMargins"
     ]
   },
   "toolchain": {

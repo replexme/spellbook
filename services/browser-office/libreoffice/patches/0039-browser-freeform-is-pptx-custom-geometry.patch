@@ -1,0 +1,171 @@
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2980,6 +2980,67 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxConnectorKeepsItsEndPoint
+     CPPUNIT_FAIL("connector not found");
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookFreeformIsPptxCustomGeometry)
++{
++    createSdImpressDocModelOnly();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    const auto addFreeform = [&](const OUString& rName, const OUString& rProperty,
++                                 sal_Int32 nY) {
++        uno::Reference<drawing::XShape> xShape(
++            xFactory->createInstance("com.sun.star.drawing.CustomShape"), uno::UNO_QUERY_THROW);
++        xShape->setPosition(awt::Point(15000, nY));
++        xShape->setSize(awt::Size(2600, 1800));
++        xShapes->add(xShape);
++        uno::Reference<beans::XPropertySet> xProperties(xShape, uno::UNO_QUERY_THROW);
++        xProperties->setPropertyValue("Name", uno::Any(rName));
++        xProperties->setPropertyValue(
++            rProperty, uno::Any(uno::Sequence<uno::Sequence<awt::Point>>{
++                           { awt::Point(0, 1700), awt::Point(1200, 0), awt::Point(2500, 1700) } }));
++        return xProperties;
++    };
++    uno::Reference<beans::XPropertySet> xClosed
++        = addFreeform(u"Closed"_ustr, u"SpellbookFreeformPolygon"_ustr, 1000);
++    addFreeform(u"Open"_ustr, u"SpellbookFreeformPolyline"_ustr, 5000);
++    CPPUNIT_ASSERT_EQUAL(u"ooxml-non-primitive"_ustr,
++                         xClosed->getPropertyValue("SpellbookCustomShapeType").get<OUString>());
++
++    // A freeform is the custom geometry PPTX import creates for a:custGeom,
++    // so saving and reopening keeps the same kind of object.
++    saveAndReloadSdImpressDocModelOnly("Impress Office Open XML");
++    xmlDocUniquePtr pSlideXml = parseExport("ppt/slides/slide1.xml");
++    assertXPath(pSlideXml,
++                "//p:sp[p:nvSpPr/p:cNvPr/@name='Closed']/p:spPr/a:custGeom/a:pathLst/a:path/a:lnTo",
++                2);
++    assertXPath(pSlideXml,
++                "//p:sp[p:nvSpPr/p:cNvPr/@name='Closed']/p:spPr/a:custGeom/a:pathLst/a:path/a:close",
++                1);
++    assertXPath(pSlideXml,
++                "//p:sp[p:nvSpPr/p:cNvPr/@name='Open']/p:spPr/a:custGeom/a:pathLst/a:path/a:close",
++                0);
++    uno::Reference<container::XIndexAccess> xPage(
++        uno::Reference<drawing::XDrawPagesSupplier>(mxComponent, uno::UNO_QUERY_THROW)
++            ->getDrawPages()
++            ->getByIndex(0),
++        uno::UNO_QUERY_THROW);
++    for (sal_Int32 nShape = 0; nShape < xPage->getCount(); ++nShape)
++    {
++        uno::Reference<drawing::XShape> xShape(xPage->getByIndex(nShape), uno::UNO_QUERY_THROW);
++        uno::Reference<beans::XPropertySet> xProperties(xShape, uno::UNO_QUERY_THROW);
++        if (xProperties->getPropertyValue("Name").get<OUString>() != u"Closed"_ustr)
++            continue;
++        CPPUNIT_ASSERT_EQUAL(u"com.sun.star.drawing.CustomShape"_ustr, xShape->getShapeType());
++        CPPUNIT_ASSERT_EQUAL(
++            u"ooxml-non-primitive"_ustr,
++            xProperties->getPropertyValue("SpellbookCustomShapeType").get<OUString>());
++        return;
++    }
++    CPPUNIT_FAIL("freeform not found");
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxDiagramFrameKeepsShapeIdentity)
+ {
+     createSdImpressDocModelOnly("pptx/smartart-children.pptx");
+diff --git a/sd/source/ui/unoidl/unoobj.cxx b/sd/source/ui/unoidl/unoobj.cxx
+--- a/sd/source/ui/unoidl/unoobj.cxx
++++ b/sd/source/ui/unoidl/unoobj.cxx
+@@ -23,6 +23,7 @@
+ #include <optional>
+ #include <set>
+ #include <unordered_set>
++#include <vector>
+ #include <sstream>
+ #include <string_view>
+ #include <utility>
+@@ -31,7 +32,13 @@
+ #include <com/sun/star/presentation/ClickAction.hpp>
+ #include <com/sun/star/beans/PropertyAttribute.hpp>
+ #include <com/sun/star/beans/PropertyState.hpp>
++#include <com/sun/star/awt/Rectangle.hpp>
++#include <com/sun/star/awt/Size.hpp>
+ #include <com/sun/star/beans/XPropertySet.hpp>
++#include <com/sun/star/drawing/EnhancedCustomShapeParameterPair.hpp>
++#include <com/sun/star/drawing/EnhancedCustomShapeParameterType.hpp>
++#include <com/sun/star/drawing/EnhancedCustomShapeSegment.hpp>
++#include <com/sun/star/drawing/EnhancedCustomShapeSegmentCommand.hpp>
+ #include <com/sun/star/frame/XModel.hpp>
+ #include <com/sun/star/lang/XServiceInfo.hpp>
+ #include <boost/property_tree/json_parser.hpp>
+@@ -60,6 +67,7 @@
+ #include <svl/instrm.hxx>
+ #include <editeng/outlobj.hxx>
+ #include <Outliner.hxx>
++#include <comphelper/propertysequence.hxx>
+ #include <comphelper/propertyvalue.hxx>
+ #include <comphelper/sequence.hxx>
+ #include <svx/svdogrp.hxx>
+@@ -647,6 +655,50 @@ void applySpellbookObjectDuplication(SdrObject* pObject, SdDrawDocument* pDocume
+     if (pDocument->IsUndoEnabled())
+         pDocument->AddUndo(pDocument->GetSdrUndoFactory().CreateUndoNewObject(*pClone));
+ }
++
++// Gives a custom shape the geometry PPTX import creates for a freeform
++// (a:custGeom): one path through the points, which lie in the shape's own box,
++// closed or open. The browser bridge cannot write CustomShapeGeometry itself.
++void applySpellbookFreeform(SvxShape& rShape, bool bClosed, const uno::Any& rValue)
++{
++    uno::Sequence<uno::Sequence<awt::Point>> aPolygons;
++    const auto* pCustomShape = dynamic_cast<const SdrObjCustomShape*>(rShape.GetSdrObject());
++    if (!pCustomShape || !(rValue >>= aPolygons) || aPolygons.getLength() != 1
++        || aPolygons[0].getLength() < 2)
++        throw lang::IllegalArgumentException(u"Invalid freeform geometry"_ustr, nullptr, 0);
++    const awt::Size aSize = rShape.getSize();
++    std::vector<drawing::EnhancedCustomShapeParameterPair> aCoordinates;
++    for (const awt::Point& rPoint : aPolygons[0])
++    {
++        if (rPoint.X < 0 || rPoint.Y < 0 || rPoint.X > aSize.Width || rPoint.Y > aSize.Height)
++            throw lang::IllegalArgumentException(u"Freeform point outside its box"_ustr, nullptr,
++                                                  0);
++        drawing::EnhancedCustomShapeParameterPair aPair;
++        aPair.First.Value <<= rPoint.X;
++        aPair.First.Type = drawing::EnhancedCustomShapeParameterType::NORMAL;
++        aPair.Second.Value <<= rPoint.Y;
++        aPair.Second.Type = drawing::EnhancedCustomShapeParameterType::NORMAL;
++        aCoordinates.push_back(aPair);
++    }
++    std::vector<drawing::EnhancedCustomShapeSegment> aSegments{
++        { drawing::EnhancedCustomShapeSegmentCommand::MOVETO, 1 },
++        { drawing::EnhancedCustomShapeSegmentCommand::LINETO,
++          static_cast<sal_Int16>(aPolygons[0].getLength() - 1) }
++    };
++    if (bClosed)
++        aSegments.push_back({ drawing::EnhancedCustomShapeSegmentCommand::CLOSESUBPATH, 0 });
++    aSegments.push_back({ drawing::EnhancedCustomShapeSegmentCommand::ENDSUBPATH, 0 });
++    const uno::Sequence<beans::PropertyValue> aPath(comphelper::InitPropertySequence(
++        { { "Coordinates", uno::Any(comphelper::containerToSequence(aCoordinates)) },
++          { "Segments", uno::Any(comphelper::containerToSequence(aSegments)) },
++          { "SubViewSize", uno::Any(uno::Sequence<awt::Size>{ aSize }) } }));
++    rShape._setPropertyValue(
++        u"CustomShapeGeometry"_ustr,
++        uno::Any(comphelper::InitPropertySequence(
++            { { "Type", uno::Any(u"ooxml-non-primitive"_ustr) },
++              { "ViewBox", uno::Any(awt::Rectangle(0, 0, aSize.Width, aSize.Height)) },
++              { "Path", uno::Any(aPath) } })));
++}
+ }
+ 
+ #define IMPRESS_MAP_ENTRIES \
+@@ -980,6 +1032,15 @@ void SAL_CALL SdXShape::setPropertyValue( const OUString& aPropertyName, const c
+             mpModel->SetModified();
+         return;
+     }
++    if (aPropertyName == u"SpellbookFreeformPolygon"_ustr
++        || aPropertyName == u"SpellbookFreeformPolyline"_ustr)
++    {
++        applySpellbookFreeform(*mpShape, aPropertyName == u"SpellbookFreeformPolygon"_ustr,
++                               aValue);
++        if (mpModel)
++            mpModel->SetModified();
++        return;
++    }
+ 
+     const SfxItemPropertyMapEntry* pEntry = mpPropSet->getPropertyMapEntry(aPropertyName);
+ 

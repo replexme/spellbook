@@ -1,7 +1,7 @@
 diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
 --- a/sd/qa/unit/uiimpress.cxx
 +++ b/sd/qa/unit/uiimpress.cxx
-@@ -2886,6 +2886,55 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxDiagramFrameKeepsShapeIde
+@@ -2887,6 +2887,55 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxDiagramFrameKeepsShapeIde
      CPPUNIT_ASSERT_EQUAL(u"Reporting lines"_ustr, diagram()->GetName());
  }
  

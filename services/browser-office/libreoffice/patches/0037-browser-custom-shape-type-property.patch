@@ -1,0 +1,72 @@
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2890,6 +2890,40 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookFontworkShapeTypeIsObservable
+                          xProperties->getPropertyValue("SpellbookFontworkShapeType").get<OUString>());
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookCustomShapeTypeIsObservable)
++{
++    createSdImpressDocModelOnly();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShape> xRectangle(
++        xFactory->createInstance("com.sun.star.drawing.RectangleShape"), uno::UNO_QUERY_THROW);
++    xShapes->add(xRectangle);
++    uno::Reference<drawing::XShape> xShape(
++        xFactory->createInstance("com.sun.star.drawing.CustomShape"), uno::UNO_QUERY_THROW);
++    xShapes->add(xShape);
++    uno::Reference<beans::XPropertySet> xProperties(xShape, uno::UNO_QUERY_THROW);
++
++    // Not a custom shape, and a custom shape without geometry: no type.
++    CPPUNIT_ASSERT_EQUAL(OUString(), uno::Reference<beans::XPropertySet>(
++                                         xRectangle, uno::UNO_QUERY_THROW)
++                                         ->getPropertyValue("SpellbookCustomShapeType")
++                                         .get<OUString>());
++    CPPUNIT_ASSERT_EQUAL(OUString(),
++                         xProperties->getPropertyValue("SpellbookCustomShapeType").get<OUString>());
++
++    // Every custom shape reports its type, not only WordArt.
++    xProperties->setPropertyValue(
++        "CustomShapeGeometry",
++        uno::Any(comphelper::InitPropertySequence({ { "Type", uno::Any(u"ooxml-rect"_ustr) } })));
++    CPPUNIT_ASSERT_EQUAL(u"ooxml-rect"_ustr,
++                         xProperties->getPropertyValue("SpellbookCustomShapeType").get<OUString>());
++    CPPUNIT_ASSERT_EQUAL(OUString(),
++                         xProperties->getPropertyValue("SpellbookFontworkShapeType").get<OUString>());
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxDiagramFrameKeepsShapeIdentity)
+ {
+     createSdImpressDocModelOnly("pptx/smartart-children.pptx");
+diff --git a/sd/source/ui/unoidl/unoobj.cxx b/sd/source/ui/unoidl/unoobj.cxx
+--- a/sd/source/ui/unoidl/unoobj.cxx
++++ b/sd/source/ui/unoidl/unoobj.cxx
+@@ -1355,11 +1355,12 @@ css::uno::Any SAL_CALL SdXShape::getPropertyValue( const OUString& PropertyName
+ 
+     uno::Any aRet;
+ 
+-    if (PropertyName == u"SpellbookFontworkShapeType"_ustr)
++    if (PropertyName == u"SpellbookFontworkShapeType"_ustr
++        || PropertyName == u"SpellbookCustomShapeType"_ustr)
+     {
+         // The browser bridge cannot read CustomShapeGeometry, a sequence of
+-        // property sequences; expose the WordArt shape type it needs. Empty
+-        // when the shape does not draw its text along a path.
++        // property sequences; expose the shape type it needs. The WordArt
++        // variant is empty when the shape does not draw its text along a path.
+         const auto* pCustomShape = dynamic_cast<const SdrObjCustomShape*>(mpShape->GetSdrObject());
+         if (!pCustomShape)
+             return uno::Any(OUString());
+@@ -1369,6 +1370,8 @@ css::uno::Any SAL_CALL SdXShape::getPropertyValue( const OUString& PropertyName
+         bool bTextPath = false;
+         if (const uno::Any* pType = rGeometry.GetPropertyValueByName(u"Type"_ustr))
+             *pType >>= aType;
++        if (PropertyName == u"SpellbookCustomShapeType"_ustr)
++            return uno::Any(aType);
+         if (const uno::Any* pTextPath
+             = rGeometry.GetPropertyValueByName(u"TextPath"_ustr, u"TextPath"_ustr))
+             *pTextPath >>= bTextPath;

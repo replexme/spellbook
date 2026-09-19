@@ -99,6 +99,22 @@ paragraph's attributes, so its right margin carried over on import. Patch
 `0035` makes replacing an animation effect scale the new preset's animations
 to the kept duration; the effect had kept its stored duration while playing
 at the preset's own timing.
+Patch `0036` keeps the alignment of a shape without text: import holds an
+empty paragraph's alignment on the shape, and export now writes it from there
+instead of from the empty paragraph, which does not carry the shape's own
+attributes, so every empty PowerPoint shape lost its centring on save. Patch
+`0037` exposes every custom shape's type as a read-only shape property, which
+the browser needs to observe a shape's geometry at all. Patch `0038` saves a
+connector with the exact size between its end points; the box was built from
+the closed rectangle between them, so every save grew the connector by one
+unit each way.
+Patch `0039` adds the write-only shape properties `SpellbookFreeformPolygon`
+and `SpellbookFreeformPolyline`, which give a custom shape the freeform
+geometry PPTX import creates for `a:custGeom`: a freeform built as a
+LibreOffice polygon reopened as a different object, and the browser bridge
+cannot write custom-shape geometry itself. Patch `0040` writes a table cell's
+top and bottom margins to `a:tcPr`, where import reads them; only the left and
+right margins were written, so the others changed on reopen.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves
