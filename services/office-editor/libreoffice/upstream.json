@@ -13,7 +13,7 @@
   "sourcePatchSeriesReady": true,
   "sourceCandidateReady": false,
   "patchSeriesSha256": "dc710e0103d42cf4057447072747491b4a69eabb5d56b34d9117802824230a45",
-  "engineImageTag": "26.04.4.1-spellbook-undo-v31-r1-candidate",
+  "engineImageTag": "26.04.4.1-spellbook-undo-v31-r2-candidate",
   "impressUiUnoCommandCount": 725,
   "impressUiUnoCommandsSha256": "ddfe8aeb5f798b6656b22276d219311bd30e9ce5c26cdf8ffe3d321f2c2f3fbb",
   "patches": [
