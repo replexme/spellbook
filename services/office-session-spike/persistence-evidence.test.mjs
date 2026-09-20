@@ -1178,3 +1178,81 @@ test("a comment position is compared at the precision PPTX stores it", () => {
     1,
   );
 });
+
+test("a fixed slide date keeps its text and an automatic one its format", () => {
+  const footer = (values) => ({
+    slides: [
+      {
+        footer: {
+          visible: true,
+          text: "Spellbook verified",
+          dateTimeVisible: true,
+          dateTimeFixed: true,
+          dateTimeText: "2026-09-16",
+          dateTimeFormat: 4,
+          ...values,
+        },
+      },
+    ],
+    masters: [],
+  });
+  const before = footer({ dateTimeText: "2026-09-01" });
+  const expected = footer({ dateTimeFormat: 18 });
+  // PPTX writes a fixed date as its text, so its format never survives.
+  const observed = footer({ dateTimeFormat: 4 });
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({ before, expected, observed }),
+    [],
+  );
+  // An automatic date is a field, so its text is whatever the field shows.
+  const automaticBefore = footer({ dateTimeFixed: false, dateTimeFormat: 4 });
+  const automaticExpected = footer({
+    dateTimeFixed: false,
+    dateTimeFormat: 18,
+  });
+  const automaticObserved = footer({
+    dateTimeFixed: false,
+    dateTimeFormat: 18,
+    dateTimeText: "9/20/2026",
+  });
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({
+      before: automaticBefore,
+      expected: automaticExpected,
+      observed: automaticObserved,
+    }),
+    [],
+  );
+  // A format the save drops is still a failed edit.
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({
+      before: automaticBefore,
+      expected: automaticExpected,
+      observed: footer({ dateTimeFixed: false, dateTimeFormat: 4 }),
+    }),
+    [
+      {
+        path: "$.slides[0].footer.dateTimeFormat",
+        expected: 18,
+        observed: 4,
+        invariant: "intended-change",
+      },
+    ],
+  );
+  // A hidden footer or date has no placeholder to carry its values.
+  const hidden = footer({ visible: false, dateTimeVisible: false });
+  assert.throws(
+    () =>
+      intendedDocumentMutationDifferences({
+        before: hidden,
+        expected: footer({
+          visible: false,
+          dateTimeVisible: false,
+          text: "Other",
+          dateTimeText: "2026-10-01",
+        }),
+        observed: hidden,
+      }),
+    /no observable intended change/u,
+  );
+});

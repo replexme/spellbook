@@ -258,6 +258,34 @@ function withCanonicalShapeIdentity(slides) {
 // browser bridge with the bare member name.
 const isNoneStyle = (value) => /(?:^|\.)NONE$/u.test(String(value ?? ""));
 
+/**
+ * PPTX writes a footer, slide number or date placeholder only while the slide
+ * shows it, and a fixed date is written as its text with no format
+ * (PowerPointExport::WritePlaceholderReferenceShapes and the date placeholder
+ * it writes). A hidden footer's text, a fixed date's format and an automatic
+ * date's text are therefore runtime state, not persisted semantics.
+ */
+function withoutInactiveFooterValues(slides, authoredSlides = slides) {
+  for (const [slideIndex, slide] of slides.entries()) {
+    const authored = authoredArrayEntry(
+      slide,
+      authoredSlides,
+      slideIndex,
+    )?.footer;
+    if (!slide.footer || !authored) continue;
+    if (authored.visible !== true) delete slide.footer.text;
+    if (authored.dateTimeVisible !== true) {
+      for (const field of ["dateTimeFixed", "dateTimeText", "dateTimeFormat"])
+        delete slide.footer[field];
+    } else if (authored.dateTimeFixed === true) {
+      delete slide.footer.dateTimeFormat;
+    } else {
+      delete slide.footer.dateTimeText;
+    }
+  }
+  return slides;
+}
+
 function withoutInactiveStyleValues(slides, authoredSlides = slides) {
   for (const [slideIndex, slide] of slides.entries()) {
     const authoredSlide = authoredArrayEntry(slide, authoredSlides, slideIndex);
@@ -409,33 +437,39 @@ export function normalizeDocumentPersistenceState(
       return leftIdentity.localeCompare(rightIdentity, "en");
     });
   const slides = withSavedAnimationContainers(
-    withoutInactiveStyleValues(
-      withCanonicalShapeIdentity(
-        withoutTransientEmptyPlaceholderDefaults(
-          withoutMergedContinuationFormatting(
-            (state?.slides ?? []).map(
-              ({ masterIndex: _masterIndex, ...slide }, index) => {
-                const { masterIndex: _authoredMasterIndex, ...authoredSlide } =
-                  authoredArrayEntry(slide, authoredBy?.slides, index) ?? {};
-                const normalized = withoutObservationOnlyFields(
-                  withoutComputedPropertyValues(
-                    structuredClone(slide),
-                    authoredSlide,
-                  ),
-                );
-                if (normalized.transition) {
+    withoutInactiveFooterValues(
+      withoutInactiveStyleValues(
+        withCanonicalShapeIdentity(
+          withoutTransientEmptyPlaceholderDefaults(
+            withoutMergedContinuationFormatting(
+              (state?.slides ?? []).map(
+                ({ masterIndex: _masterIndex, ...slide }, index) => {
                   const {
-                    effect: _effect,
-                    speed: _speed,
-                    ...persistedTransition
-                  } = normalized.transition;
-                  normalized.transition = persistedTransition;
-                }
-                return normalized;
-              },
+                    masterIndex: _authoredMasterIndex,
+                    ...authoredSlide
+                  } =
+                    authoredArrayEntry(slide, authoredBy?.slides, index) ?? {};
+                  const normalized = withoutObservationOnlyFields(
+                    withoutComputedPropertyValues(
+                      structuredClone(slide),
+                      authoredSlide,
+                    ),
+                  );
+                  if (normalized.transition) {
+                    const {
+                      effect: _effect,
+                      speed: _speed,
+                      ...persistedTransition
+                    } = normalized.transition;
+                    normalized.transition = persistedTransition;
+                  }
+                  return normalized;
+                },
+              ),
             ),
           ),
         ),
+        authoredBy?.slides,
       ),
       authoredBy?.slides,
     ),
