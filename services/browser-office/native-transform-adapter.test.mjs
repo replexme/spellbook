@@ -119,6 +119,30 @@ function fixture() {
     const paragraphs = initialText.split("\n").map((text, index) => ({
       text,
       properties: {},
+      numberingRules: {
+        // The engine hands back each level's fields without their UNO types.
+        getByIndex: () => [
+          { Name: "NumberingType", Value: 4 },
+          { Name: "LeftMargin", Value: 800 },
+        ],
+        replaceByIndex(level, value) {
+          mutations.push([
+            `${name}-paragraph-${index}`,
+            `NumberingRules.${level}`,
+            value.type,
+            // The adapter runs in its own realm, so copy into this one.
+            Array.from(value.val, (entry) => [
+              entry.Name,
+              entry.Value.type,
+              entry.Value.val,
+            ]),
+          ]);
+        },
+      },
+      getPropertyValue(property) {
+        assert.equal(property, "NumberingRules");
+        return this.numberingRules;
+      },
       setPropertyValue(property, value) {
         this.properties[property] = value.val;
         mutations.push([
@@ -305,7 +329,16 @@ function fixture() {
     BLOCK: "justify",
     CENTER: "center",
   });
-  const style = { ParagraphAdjust };
+  const style = {
+    ParagraphAdjust,
+    NumberingType: { ARABIC: 4, CHAR_SPECIAL: 6 },
+  };
+  class PropertyValue {
+    constructor(value) {
+      Object.assign(this, value);
+    }
+  }
+  const beans = { PropertyValue };
   const LineStyle = Object.assign(function LineStyle() {}, {
     NONE: "none",
     SOLID: "solid",
@@ -334,11 +367,24 @@ function fixture() {
             : value === LineStyle
               ? "enum:LineStyle"
               : "enum:ClickAction",
-      struct: () => "struct:GraphicCrop",
+      struct: (value) =>
+        value === PropertyValue ? "struct:PropertyValue" : "struct:GraphicCrop",
+      sequence: (type) => `sequence:${type}`,
+      interface: (value) => `interface:${value}`,
     },
     idl: {
       com: {
-        sun: { star: { awt, drawing, presentation, style, text } },
+        sun: {
+          star: {
+            awt,
+            beans,
+            container: { XIndexReplace: "XIndexReplace" },
+            drawing,
+            presentation,
+            style,
+            text,
+          },
+        },
       },
     },
   };
@@ -668,6 +714,48 @@ test("browser adapter writes bounded slide metadata and paragraph formatting", (
     ["enter", "AI presentation edit"],
     ["page", "Slide 2"],
     ["leave"],
+  ]);
+});
+
+test("browser adapter sends a list level's changed fields with their UNO types", () => {
+  const runtime = fixture();
+  runtime.adapter.transformSlides({
+    commands: [
+      { JumpToSlide: 1 },
+      {
+        "SetParagraphProperties.0": {
+          Paragraph: 1,
+          ListType: "bullet",
+          Level: 2,
+          Prefix: "",
+          Suffix: "",
+          StartWith: 1,
+          BulletCharacter: "\u2022",
+        },
+      },
+    ],
+    ...runtime,
+  });
+  assert.deepEqual(runtime.mutations, [
+    [
+      "second-shape-paragraph-1",
+      "NumberingRules.2",
+      "sequence:struct:PropertyValue",
+      [
+        ["NumberingType", "short", 6],
+        ["Prefix", "string", ""],
+        ["Suffix", "string", ""],
+        ["StartWith", "short", 1],
+        ["BulletChar", "string", "\u2022"],
+      ],
+    ],
+    [
+      "second-shape-paragraph-1",
+      "NumberingRules",
+      "interface:XIndexReplace",
+      runtime.secondShape.paragraphs[1].numberingRules,
+    ],
+    ["second-shape-paragraph-1", "NumberingLevel", "short", 2],
   ]);
 });
 

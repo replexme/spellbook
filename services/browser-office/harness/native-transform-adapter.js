@@ -1142,33 +1142,21 @@
               addWrite("NumberingLevel", "short", -1);
             } else {
               const rules = paragraph.getPropertyValue("NumberingRules");
-              const entries = Array.from(rules.getByIndex(payload.Level));
-              const values = new Map(
-                entries.map((entry) => [entry.Name, entry]),
-              );
               const numberingType =
                 payload.ListType === "bullet"
                   ? css.style.NumberingType.CHAR_SPECIAL
                   : css.style.NumberingType.ARABIC;
-              values.set(
-                "NumberingType",
+              // The engine starts from the level's current format and applies
+              // only the named fields, so the untouched fields (indent, font,
+              // graphic) are not read back and resent without their types.
+              const values = [
                 propertyValue("NumberingType", "short", numberingType),
-              );
-              values.set(
-                "Prefix",
                 propertyValue("Prefix", "string", payload.Prefix),
-              );
-              values.set(
-                "Suffix",
                 propertyValue("Suffix", "string", payload.Suffix),
-              );
-              values.set(
-                "StartWith",
                 propertyValue("StartWith", "short", payload.StartWith),
-              );
+              ];
               if (payload.ListType === "bullet")
-                values.set(
-                  "BulletChar",
+                values.push(
                   propertyValue(
                     "BulletChar",
                     "string",
@@ -1176,10 +1164,7 @@
                   ),
                 );
               writes.push(() => {
-                rules.replaceByIndex(
-                  payload.Level,
-                  propertySequence([...values.values()]),
-                );
+                rules.replaceByIndex(payload.Level, propertySequence(values));
                 paragraph.setPropertyValue(
                   "NumberingRules",
                   new uno.Any(
