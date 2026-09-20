@@ -1,0 +1,222 @@
+diff --git a/oox/source/export/shapes.cxx b/oox/source/export/shapes.cxx
+--- a/oox/source/export/shapes.cxx
++++ b/oox/source/export/shapes.cxx
+@@ -328,6 +328,20 @@ uno::Reference<io::XInputStream> GetOLEObjectStream(
+ 
+ namespace oox::drawingml {
+ 
++namespace
++{
++// A connector writes its connections with the ids of the shapes it links,
++// which assigns those ids before the shapes themselves are written. Writing a
++// second id for such a shape left the connection pointing at no shape at all,
++// so PowerPoint and a reopened deck showed the connector detached. Every shape
++// keeps the id it was given.
++sal_Int32 lclShapeID(ShapeExport& rExport, const css::uno::Reference<css::drawing::XShape>& rXShape)
++{
++    const sal_Int32 nID = rExport.GetShapeID(rXShape);
++    return nID == -1 ? rExport.GetNewShapeID(rXShape) : nID;
++}
++}
++
+ ShapeExport::ShapeExport( sal_Int32 nXmlNamespace, FSHelperPtr pFS, ShapeHashMap* pShapeMap, XmlFilterBase* pFB, DocumentType eDocumentType, DMLTextExport* pTextExport, bool bUserShapes )
+     : DrawingML( std::move(pFS), pFB, eDocumentType, pTextExport )
+     , m_nEmbeddedObjects(0)
+@@ -506,7 +520,7 @@ ShapeExport& ShapeExport::WritePolyPolygonShape( const Reference< XShape >& xSha
+     if (GetDocumentType() != DOCUMENT_DOCX || mbUserShapes)
+     {
+         pFS->startElementNS(mnXmlNamespace, XML_nvSpPr);
+-        WriteNonVisualDrawingProperties(xProps, GetNewShapeID(xShape),
++        WriteNonVisualDrawingProperties(xProps, lclShapeID(*this, xShape),
+                                         GetShapeName(xShape));
+     }
+     pFS->startElementNS(mnXmlNamespace, XML_cNvSpPr);
+@@ -569,7 +583,7 @@ ShapeExport& ShapeExport::WriteGroupShape(const uno::Reference<drawing::XShape>&
+     {
+         pFS->startElementNS(mnXmlNamespace, XML_nvGrpSpPr);
+         uno::Reference<beans::XPropertySet> const xShapeProps(xShape, uno::UNO_QUERY_THROW);
+-        WriteNonVisualDrawingProperties(xShapeProps, GetNewShapeID(xShape),
++        WriteNonVisualDrawingProperties(xShapeProps, lclShapeID(*this, xShape),
+                                         GetShapeName(xShape));
+         pFS->startElementNS(mnXmlNamespace, XML_cNvGrpSpPr);
+         WriteShapeLocks(xShape, XML_grpSpLocks);
+@@ -990,7 +1004,7 @@ ShapeExport& ShapeExport::WriteCustomShape( const Reference< XShape >& xShape )
+         pFS->startElementNS( mnXmlNamespace, XML_nvSpPr );
+         WriteNonVisualDrawingProperties(
+             rXPropSet,
+-            GetShapeID(xShape) == -1 ? GetNewShapeID(xShape) : GetShapeID(xShape),
++            lclShapeID(*this, xShape),
+             GetShapeName(xShape), !isVisible);
+         pFS->startElementNS(mnXmlNamespace, XML_cNvSpPr);
+         WriteShapeLocks(xShape, XML_spLocks);
+@@ -1004,8 +1018,7 @@ ShapeExport& ShapeExport::WriteCustomShape( const Reference< XShape >& xShape )
+         if (m_xParent.is())
+         {
+             pFS->startElementNS(mnXmlNamespace, XML_cNvPr, XML_id,
+-                                OString::number(GetShapeID(xShape) == -1 ? GetNewShapeID(xShape)
+-                                                                         : GetShapeID(xShape)),
++                                OString::number(lclShapeID(*this, xShape)),
+                                 XML_name, GetShapeName(xShape));
+ 
+             if (GetProperty(rXPropSet, "Hyperlink"))
+@@ -1256,7 +1269,7 @@ ShapeExport& ShapeExport::WriteEllipseShape( const Reference< XShape >& xShape )
+     if (GetDocumentType() != DOCUMENT_DOCX || mbUserShapes)
+     {
+         pFS->startElementNS(mnXmlNamespace, XML_nvSpPr);
+-        WriteNonVisualDrawingProperties(xProps, GetNewShapeID(xShape),
++        WriteNonVisualDrawingProperties(xProps, lclShapeID(*this, xShape),
+                                         GetShapeName(xShape));
+         pFS->startElementNS(mnXmlNamespace, XML_cNvSpPr);
+         WriteShapeLocks(xShape, XML_spLocks);
+@@ -1396,7 +1409,7 @@ void ShapeExport::WriteGraphicObjectShapePart( const Reference< XShape >& xShape
+ 
+     pFS->startElementNS(mnXmlNamespace, XML_nvPicPr);
+ 
+-    WriteNonVisualDrawingProperties(xShapeProps, GetNewShapeID(xShape),
++    WriteNonVisualDrawingProperties(xShapeProps, lclShapeID(*this, xShape),
+                                     GetShapeName(xShape), false, bHasMediaURL);
+ 
+     pFS->startElementNS(mnXmlNamespace, XML_cNvPicPr);
+@@ -1864,7 +1877,7 @@ ShapeExport& ShapeExport::WriteConnectorShape( const Reference< XShape >& xShape
+     {
+         // non visual shape properties
+         pFS->startElementNS(mnXmlNamespace, XML_nvCxnSpPr);
+-        WriteNonVisualDrawingProperties(rXPropSet, GetNewShapeID(xShape),
++        WriteNonVisualDrawingProperties(rXPropSet, lclShapeID(*this, xShape),
+                                         GetShapeName(xShape));
+         // non visual connector shape drawing properties
+         pFS->startElementNS(mnXmlNamespace, XML_cNvCxnSpPr);
+@@ -1931,7 +1944,7 @@ ShapeExport& ShapeExport::WriteLineShape( const Reference< XShape >& xShape )
+     if (GetDocumentType() != DOCUMENT_DOCX || mbUserShapes)
+     {
+         pFS->startElementNS(mnXmlNamespace, XML_nvSpPr);
+-        WriteNonVisualDrawingProperties(xShapeProps, GetNewShapeID(xShape),
++        WriteNonVisualDrawingProperties(xShapeProps, lclShapeID(*this, xShape),
+                                         GetShapeName(xShape));
+     }
+     pFS->startElementNS(mnXmlNamespace, XML_cNvSpPr);
+@@ -1970,7 +1983,7 @@ ShapeExport& ShapeExport::WriteLineShape( const Reference< XShape >& xShape )
+ ShapeExport& ShapeExport::WriteNonVisualDrawingProperties( const Reference< XShape >& xShape, const char* pName )
+ {
+     Reference<XPropertySet> const xShapeProps(xShape, UNO_QUERY);
+-    WriteNonVisualDrawingProperties(xShapeProps, GetNewShapeID(xShape),
++    WriteNonVisualDrawingProperties(xShapeProps, lclShapeID(*this, xShape),
+                                     OUString::createFromAscii(pName));
+ 
+     return *this;
+@@ -2009,7 +2022,7 @@ ShapeExport& ShapeExport::WriteRectangleShape( const Reference< XShape >& xShape
+     if (GetDocumentType() == DOCUMENT_DOCX && !mbUserShapes)
+         pFS->singleElementNS(mnXmlNamespace, XML_cNvSpPr);
+     pFS->startElementNS(mnXmlNamespace, XML_nvSpPr);
+-    WriteNonVisualDrawingProperties(xShapeProps, GetNewShapeID(xShape),
++    WriteNonVisualDrawingProperties(xShapeProps, lclShapeID(*this, xShape),
+                                     GetShapeName(xShape));
+     pFS->startElementNS(mnXmlNamespace, XML_cNvSpPr);
+     WriteShapeLocks(xShape, XML_spLocks);
+@@ -2484,7 +2497,7 @@ ShapeExport& ShapeExport::WriteTableShape( const Reference< XShape >& xShape )
+     pFS->startElementNS(mnXmlNamespace, XML_nvGraphicFramePr);
+ 
+     Reference<XPropertySet> const xShapeProps(xShape, UNO_QUERY);
+-    WriteNonVisualDrawingProperties(xShapeProps, GetNewShapeID(xShape),
++    WriteNonVisualDrawingProperties(xShapeProps, lclShapeID(*this, xShape),
+                                     GetShapeName(xShape));
+ 
+     pFS->startElementNS(mnXmlNamespace, XML_cNvGraphicFramePr);
+@@ -2514,7 +2527,7 @@ ShapeExport& ShapeExport::WriteTextShape( const Reference< XShape >& xShape )
+     if (GetDocumentType() != DOCUMENT_DOCX || mbUserShapes)
+     {
+         pFS->startElementNS(mnXmlNamespace, XML_nvSpPr);
+-        WriteNonVisualDrawingProperties(xShapeProps, GetNewShapeID(xShape),
++        WriteNonVisualDrawingProperties(xShapeProps, lclShapeID(*this, xShape),
+                                         GetShapeName(xShape));
+     }
+     pFS->startElementNS(mnXmlNamespace, XML_cNvSpPr, XML_txBox, "1");
+@@ -2564,7 +2577,7 @@ void ShapeExport::WriteMathShape(Reference<XShape> const& xShape)
+         XML_Requires, "a14");
+     mpFS->startElementNS(mnXmlNamespace, XML_sp);
+     mpFS->startElementNS(mnXmlNamespace, XML_nvSpPr);
+-    WriteNonVisualDrawingProperties(xPropSet, GetNewShapeID(xShape),
++    WriteNonVisualDrawingProperties(xPropSet, lclShapeID(*this, xShape),
+                                     GetShapeName(xShape));
+     mpFS->startElementNS(mnXmlNamespace, XML_cNvSpPr, XML_txBox, "1");
+     WriteShapeLocks(xShape, XML_spLocks);
+@@ -2768,7 +2781,7 @@ ShapeExport& ShapeExport::WriteOLE2Shape( const Reference< XShape >& xShape )
+ 
+     mpFS->startElementNS(mnXmlNamespace, XML_nvGraphicFramePr);
+ 
+-    WriteNonVisualDrawingProperties(xPropSet, GetNewShapeID(xShape),
++    WriteNonVisualDrawingProperties(xPropSet, lclShapeID(*this, xShape),
+                                     GetShapeName(xShape));
+ 
+     mpFS->startElementNS(mnXmlNamespace, XML_cNvGraphicFramePr);
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -2986,6 +2986,67 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxConnectorKeepsItsEndPoint
+     CPPUNIT_FAIL("connector not found");
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxConnectorKeepsALinkedShapeConnection)
++{
++    createSdImpressDocModelOnly();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShape> xConnector(
++        xFactory->createInstance(u"com.sun.star.drawing.ConnectorShape"_ustr),
++        uno::UNO_QUERY_THROW);
++    xShapes->add(xConnector);
++    uno::Reference<drawing::XShape> xTarget(
++        xFactory->createInstance(u"com.sun.star.drawing.RectangleShape"_ustr),
++        uno::UNO_QUERY_THROW);
++    xTarget->setPosition(awt::Point(9000, 6000));
++    xTarget->setSize(awt::Size(4000, 2000));
++    xShapes->add(xTarget);
++    uno::Reference<beans::XPropertySet> xTargetProperties(xTarget, uno::UNO_QUERY_THROW);
++    xTargetProperties->setPropertyValue(u"Name"_ustr, uno::Any(u"Target"_ustr));
++    uno::Reference<beans::XPropertySet> xConnectorProperties(xConnector, uno::UNO_QUERY_THROW);
++    xConnectorProperties->setPropertyValue(u"Name"_ustr, uno::Any(u"Link"_ustr));
++    xConnectorProperties->setPropertyValue(u"StartPosition"_ustr,
++                                           uno::Any(awt::Point(2000, 2000)));
++    xConnectorProperties->setPropertyValue(u"EndPosition"_ustr, uno::Any(awt::Point(9000, 6000)));
++    // The connector is written before the shape it links, so the shape's id is
++    // assigned by the connection.
++    xConnectorProperties->setPropertyValue(u"EndShape"_ustr, uno::Any(xTarget));
++    xConnectorProperties->setPropertyValue(u"EndGluePointIndex"_ustr, uno::Any(sal_Int32(0)));
++
++    saveAndReloadSdImpressDocModelOnly("Impress Office Open XML");
++    xmlDocUniquePtr pSlideXml = parseExport("ppt/slides/slide1.xml");
++    const OUString aTargetId
++        = getXPath(pSlideXml, "//p:sp[p:nvSpPr/p:cNvPr/@name='Target']/p:nvSpPr/p:cNvPr", "id");
++    // Writing a second id for the linked shape left the connection pointing at
++    // no shape at all.
++    assertXPath(pSlideXml,
++                "//p:cxnSp[p:nvCxnSpPr/p:cNvPr/@name='Link']/p:nvCxnSpPr/p:cNvCxnSpPr/a:endCxn",
++                "id", aTargetId);
++    uno::Reference<container::XIndexAccess> xPage(
++        uno::Reference<drawing::XDrawPagesSupplier>(mxComponent, uno::UNO_QUERY_THROW)
++            ->getDrawPages()
++            ->getByIndex(0),
++        uno::UNO_QUERY_THROW);
++    for (sal_Int32 nShape = 0; nShape < xPage->getCount(); ++nShape)
++    {
++        uno::Reference<beans::XPropertySet> xReloaded(xPage->getByIndex(nShape),
++                                                      uno::UNO_QUERY_THROW);
++        if (xReloaded->getPropertyValue(u"Name"_ustr).get<OUString>() != u"Link"_ustr)
++            continue;
++        uno::Reference<drawing::XShape> xLinked(
++            xReloaded->getPropertyValue(u"EndShape"_ustr).get<uno::Reference<drawing::XShape>>());
++        CPPUNIT_ASSERT(xLinked.is());
++        uno::Reference<beans::XPropertySet> xLinkedProperties(xLinked, uno::UNO_QUERY_THROW);
++        CPPUNIT_ASSERT_EQUAL(u"Target"_ustr,
++                             xLinkedProperties->getPropertyValue(u"Name"_ustr).get<OUString>());
++        return;
++    }
++    CPPUNIT_FAIL("connector not found");
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookLinePresetsArePptxLineStyles)
+ {
+     createSdImpressDocModelOnly();

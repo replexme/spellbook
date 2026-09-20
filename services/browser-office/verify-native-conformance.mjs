@@ -35,7 +35,10 @@ const documentTool = path.join(
   repositoryRoot,
   "services/document-worker/tools/Spellbook.Document.Tool/bin/Release/net10.0/Spellbook.Document.Tool.dll",
 );
-const processTimeoutMs = 300_000;
+// A probe saves the package, preserves the author's parts and reopens it for
+// every operation and again for its Undo and Redo, so the full native surface
+// takes tens of minutes. The limit is a stuck probe, not a slow one.
+const processTimeoutMs = 5_400_000;
 
 const candidateRuntimePath = path.resolve(
   requiredFlagValue("--candidate-runtime"),

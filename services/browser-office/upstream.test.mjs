@@ -107,7 +107,7 @@ test("browser Office runtime is reproducible and remains unapproved by default",
     "CppunitTest_sd_uiimpress",
     "CppunitTest_sd_misc_tests",
   ]);
-  assert.equal(manifest.sourceCandidate.focusedCppunitTests.length, 34);
+  assert.equal(manifest.sourceCandidate.focusedCppunitTests.length, 35);
   assert.equal(
     new Set(manifest.sourceCandidate.focusedCppunitTests).size,
     manifest.sourceCandidate.focusedCppunitTests.length,

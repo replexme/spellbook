@@ -1366,3 +1366,44 @@ test("shapes a command did not name are compared as the author left them", () =>
     0,
   );
 });
+
+test("an effect keeps its preset identity, not the sidebar's editing metadata", () => {
+  const deck = (preset) => ({
+    slides: [
+      {
+        animations: {
+          effects: [{ animationId: "0:0/0", preset }],
+          roots: [{ children: [{ preset }] }],
+        },
+      },
+    ],
+    masters: [],
+  });
+  const before = deck({ id: "ooo-entrance-appear", class: 1 });
+  const expected = deck({
+    id: "ooo-entrance-wipe",
+    class: 1,
+    "sub-type": "from-bottom",
+    property: "Direction",
+  });
+  // PPTX stores the preset id, class and subtype; a reopened effect carries
+  // no sidebar property.
+  const observed = deck({
+    id: "ooo-entrance-wipe",
+    class: 1,
+    "sub-type": "from-bottom",
+  });
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({ before, expected, observed }),
+    [],
+  );
+  // A preset that did not survive the save is still a failed edit.
+  assert.equal(
+    intendedDocumentMutationDifferences({
+      before,
+      expected,
+      observed: deck({ id: "ooo-entrance-appear", class: 1 }),
+    }).length > 0,
+    true,
+  );
+});

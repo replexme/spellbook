@@ -11,8 +11,8 @@
   "runtimePatchLevel": "stock",
   "patchLevel": "undo-v31",
   "sourcePatchSeriesReady": true,
-  "sourceCandidateReady": true,
-  "patchSeriesSha256": "82d3e0a5e40a37795fb9d57382e7f2504b31e2820534b5f26c6eebf6129d0159",
+  "sourceCandidateReady": false,
+  "patchSeriesSha256": "dc710e0103d42cf4057447072747491b4a69eabb5d56b34d9117802824230a45",
   "engineImageTag": "26.04.4.1-spellbook-undo-v31-r1-candidate",
   "impressUiUnoCommandCount": 725,
   "impressUiUnoCommandsSha256": "ddfe8aeb5f798b6656b22276d219311bd30e9ce5c26cdf8ffe3d321f2c2f3fbb",
@@ -81,7 +81,8 @@
     "patches/0064-pptx-comments-keep-their-position.patch",
     "patches/0065-pptx-paragraph-direction-and-tab-stops-do-not-carry-over.patch",
     "patches/0066-line-presets-are-pptx-line-styles.patch",
-    "patches/0067-run-language-stays-with-its-text.patch"
+    "patches/0067-run-language-stays-with-its-text.patch",
+    "patches/0068-connector-keeps-a-linked-shape-connection.patch"
   ],
   "requiredCppunitTargets": [
     "CppunitTest_sd_uiimpress",
@@ -133,24 +134,7 @@
     "CppunitTest_sd_uiimpress:testPptxCommentKeepsItsPosition",
     "CppunitTest_sd_uiimpress:testPptxParagraphDirectionAndTabStopsDoNotCarryOver",
     "CppunitTest_sd_uiimpress:testLinePresetsArePptxLineStyles",
-    "CppunitTest_sd_uiimpress:testPptxRunLanguageStaysWithItsText"
-  ],
-  "sourceCandidateEvidence": {
-    "completedAt": "2026-09-20T04:11:41.108Z",
-    "spellbookSourceRevision": "0a7e8b1ea422ad8e3ebef4a480e64058f605a198",
-    "patchSeriesSha256": "82d3e0a5e40a37795fb9d57382e7f2504b31e2820534b5f26c6eebf6129d0159",
-    "engineImageDigest": "sha256:e3bb4b54526fb7ae780970c144891de1536cbbecae8e4f660ea509b324fc286d",
-    "nativeEvidenceSha256": "2fcb74924a47cf4c6ffcdc474e61a6a69e7ece6e7464035dfa1fbd46d7599db5",
-    "buildResultSha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
-    "impressCommandReportSha256": "080b5afe60cc511c2c8d16fd09ad5bc66a09414778ca62e72cd4c882988eb451",
-    "requiredCppunitStatuses": {
-      "CppunitTest_sd_uiimpress": 0,
-      "CppunitTest_sd_misc_tests": 0
-    },
-    "impressCommandSurface": {
-      "count": 725,
-      "sha256": "ddfe8aeb5f798b6656b22276d219311bd30e9ce5c26cdf8ffe3d321f2c2f3fbb",
-      "exact": true
-    }
-  }
+    "CppunitTest_sd_uiimpress:testPptxRunLanguageStaysWithItsText",
+    "CppunitTest_sd_uiimpress:testPptxConnectorKeepsALinkedShapeConnection"
+  ]
 }

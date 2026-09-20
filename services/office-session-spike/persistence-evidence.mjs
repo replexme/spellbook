@@ -346,6 +346,28 @@ const isObservedTiming = (value) =>
  * compared in that saved form; effect nodes and their animations are compared
  * as observed, except that FREEZE and HOLD both save as "hold".
  */
+/**
+ * An effect's preset carries the sidebar's own editing metadata beside the
+ * preset identity: which preset property the sidebar offers (for example
+ * "Direction"). PPTX stores the preset id, class and subtype, so a replaced
+ * effect keeps that metadata in the live model and a reopened one never has
+ * it. The preset identity is compared; the sidebar's metadata is not.
+ */
+function withoutPresetEditorMetadata(slides) {
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      for (const entry of value) visit(entry);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    if (value.preset && typeof value.preset === "object")
+      delete value.preset.property;
+    for (const entry of Object.values(value)) visit(entry);
+  };
+  for (const slide of slides) visit(slide.animations);
+  return slides;
+}
+
 function withSavedAnimationContainers(slides) {
   const visit = (node) => {
     if (!node || typeof node !== "object") return;
@@ -436,42 +458,45 @@ export function normalizeDocumentPersistenceState(
       const rightIdentity = `${right.name ?? ""}\u0000${right.layout ?? ""}\u0000${stableJson(right)}`;
       return leftIdentity.localeCompare(rightIdentity, "en");
     });
-  const slides = withSavedAnimationContainers(
-    withoutInactiveFooterValues(
-      withoutInactiveStyleValues(
-        withCanonicalShapeIdentity(
-          withoutTransientEmptyPlaceholderDefaults(
-            withoutMergedContinuationFormatting(
-              (state?.slides ?? []).map(
-                ({ masterIndex: _masterIndex, ...slide }, index) => {
-                  const {
-                    masterIndex: _authoredMasterIndex,
-                    ...authoredSlide
-                  } =
-                    authoredArrayEntry(slide, authoredBy?.slides, index) ?? {};
-                  const normalized = withoutObservationOnlyFields(
-                    withoutComputedPropertyValues(
-                      structuredClone(slide),
-                      authoredSlide,
-                    ),
-                  );
-                  if (normalized.transition) {
+  const slides = withoutPresetEditorMetadata(
+    withSavedAnimationContainers(
+      withoutInactiveFooterValues(
+        withoutInactiveStyleValues(
+          withCanonicalShapeIdentity(
+            withoutTransientEmptyPlaceholderDefaults(
+              withoutMergedContinuationFormatting(
+                (state?.slides ?? []).map(
+                  ({ masterIndex: _masterIndex, ...slide }, index) => {
                     const {
-                      effect: _effect,
-                      speed: _speed,
-                      ...persistedTransition
-                    } = normalized.transition;
-                    normalized.transition = persistedTransition;
-                  }
-                  return normalized;
-                },
+                      masterIndex: _authoredMasterIndex,
+                      ...authoredSlide
+                    } =
+                      authoredArrayEntry(slide, authoredBy?.slides, index) ??
+                      {};
+                    const normalized = withoutObservationOnlyFields(
+                      withoutComputedPropertyValues(
+                        structuredClone(slide),
+                        authoredSlide,
+                      ),
+                    );
+                    if (normalized.transition) {
+                      const {
+                        effect: _effect,
+                        speed: _speed,
+                        ...persistedTransition
+                      } = normalized.transition;
+                      normalized.transition = persistedTransition;
+                    }
+                    return normalized;
+                  },
+                ),
               ),
             ),
           ),
+          authoredBy?.slides,
         ),
         authoredBy?.slides,
       ),
-      authoredBy?.slides,
     ),
   );
   return { slides, masters };

@@ -139,6 +139,10 @@ run's text is written in, but the import read it into the locale of the
 language's own script. A Korean language on Latin text therefore came back as
 the document default, and the next save wrote that default over the language
 PowerPoint shows.
+Patch `0045` keeps a connector attached to a shape the save writes after it:
+the connection assigns that shape's id, and writing a second id for the shape
+left the connection pointing at no shape at all, so PowerPoint and a reopened
+deck showed the connector detached.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

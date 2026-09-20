@@ -226,14 +226,25 @@ try {
     },
     "Add animation effect",
   );
-  const previousAnimationIds = new Set(
-    effectsBeforeAdd.map((effect) => effect.animationId),
-  );
-  let lifecycleEffect = observedEffects(redone).find(
-    (effect) => !previousAnimationIds.has(effect.animationId),
-  );
-  if (!lifecycleEffect)
-    throw new Error("Added animation effect was not observable.");
+  // LibreOffice rebuilds the sequence it edits, so every effect can come back
+  // with a new animation id. The added effect is the one at the index the
+  // command asked for, carrying what the command asked for.
+  let lifecycleEffect = observedEffects(redone)[effectsBeforeAdd.length];
+  if (
+    !lifecycleEffect ||
+    lifecycleEffect.elementId !== effectsBeforeAdd[0].elementId ||
+    lifecycleEffect.preset?.id !== "ooo-entrance-appear"
+  )
+    throw new Error(
+      `Added animation effect was not observable: expected ooo-entrance-appear on ${effectsBeforeAdd[0].elementId} at ${effectsBeforeAdd.length}, observed ${JSON.stringify(
+        observedEffects(redone).map((effect) => ({
+          animationId: effect.animationId,
+          elementId: effect.elementId,
+          preset: effect.preset?.id ?? null,
+          sequenceIndex: effect.sequenceIndex,
+        })),
+      )}.`,
+    );
 
   const replacementPreset =
     lifecycleEffect.preset.id === "ooo-entrance-wipe"
@@ -256,7 +267,16 @@ try {
     lifecycleEffect.elementId !== effectsBeforeAdd[0].elementId ||
     lifecycleEffect.preset?.id !== replacementPreset
   )
-    throw new Error("Replaced animation effect was not observable.");
+    throw new Error(
+      `Replaced animation effect was not observable: expected ${replacementPreset} on ${effectsBeforeAdd[0].elementId} at ${replacementIndex}, observed ${JSON.stringify(
+        observedEffects(redone).map((effect) => ({
+          animationId: effect.animationId,
+          elementId: effect.elementId,
+          preset: effect.preset?.id ?? null,
+          sequenceIndex: effect.sequenceIndex,
+        })),
+      )}.`,
+    );
 
   const moveTargetIndex = lifecycleEffect.sequenceIndex === 0 ? 1 : 0;
   redone = await applyExactly(
