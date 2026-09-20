@@ -39,7 +39,7 @@ jobs:
       - run: reuse lint
       - run: pnpm verify
       - id: syft
-        uses: anchore/sbom-action/download-syft@006b7ce8314066bdf1765b4500370d40fa6917a3 # v0.24.2
+        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           syft-version: v1.51.1
       - name: Generate source SPDX SBOM
@@ -91,7 +91,7 @@ jobs:
           --tag "spellbook-${{ matrix.name }}:${GITHUB_SHA}"
           .
       - id: syft
-        uses: anchore/sbom-action/download-syft@006b7ce8314066bdf1765b4500370d40fa6917a3 # v0.24.2
+        uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           syft-version: v1.51.1
       - name: Generate runtime SPDX SBOM
