@@ -873,6 +873,45 @@ function spellbookDocumentOperation(request) {
       return null;
     }
   };
+  const paragraphMarginDetails = (paragraph) => {
+    let leftMargin = safeProperty(paragraph, "ParaLeftMargin");
+    let firstLineIndent = safeProperty(paragraph, "ParaFirstLineIndent");
+    const needLeft =
+      leftMargin === 0 || leftMargin === null || leftMargin === undefined;
+    const needIndent =
+      firstLineIndent === 0 ||
+      firstLineIndent === null ||
+      firstLineIndent === undefined;
+    if (needLeft || needIndent) {
+      const level = Number(safeProperty(paragraph, "NumberingLevel"));
+      const rules = safeProperty(paragraph, "NumberingRules");
+      if (Number.isInteger(level) && level >= 0 && rules) {
+        try {
+          const values = Array.from(rules.getByIndex(level));
+          const byName = Object.fromEntries(
+            values.map((entry) => [entry.Name, normalizeUnoValue(entry.Value)]),
+          );
+          if (
+            needLeft &&
+            byName.LeftMargin !== undefined &&
+            byName.LeftMargin !== null &&
+            byName.LeftMargin !== 0
+          ) {
+            leftMargin = byName.LeftMargin;
+          }
+          if (
+            needIndent &&
+            byName.FirstLineOffset !== undefined &&
+            byName.FirstLineOffset !== null &&
+            byName.FirstLineOffset !== 0
+          ) {
+            firstLineIndent = byName.FirstLineOffset;
+          }
+        } catch (_) {}
+      }
+    }
+    return { leftMargin, firstLineIndent };
+  };
   const textDetails = (shape, elementId) => {
     try {
       const paragraphs = [];
@@ -935,6 +974,7 @@ function spellbookDocumentOperation(request) {
             portionIndex++;
           }
         } catch (_) {}
+        const margins = paragraphMarginDetails(paragraph);
         paragraphs.push({
           paragraphId: `${elementId}:p${paragraphIndex}`,
           paragraphIndex,
@@ -942,9 +982,9 @@ function spellbookDocumentOperation(request) {
           endOffset: shapeOffset + paragraphText.length,
           text: paragraphText,
           alignment: safeProperty(paragraph, "ParaAdjust"),
-          leftMargin: safeProperty(paragraph, "ParaLeftMargin"),
+          leftMargin: margins.leftMargin,
           rightMargin: safeProperty(paragraph, "ParaRightMargin"),
-          firstLineIndent: safeProperty(paragraph, "ParaFirstLineIndent"),
+          firstLineIndent: margins.firstLineIndent,
           topMargin: safeProperty(paragraph, "ParaTopMargin"),
           bottomMargin: safeProperty(paragraph, "ParaBottomMargin"),
           lineSpacing: safeProperty(paragraph, "ParaLineSpacing"),
@@ -983,6 +1023,7 @@ function spellbookDocumentOperation(request) {
       let paragraphIndex = 0;
       while (enumeration.hasMoreElements()) {
         const paragraph = enumeration.nextElement();
+        const margins = paragraphMarginDetails(paragraph);
         paragraphs.push({
           paragraphId: `${elementId}:p${paragraphIndex}`,
           paragraphIndex,
@@ -991,9 +1032,9 @@ function spellbookDocumentOperation(request) {
           alignment: alignmentOnShape
             ? null
             : safeProperty(paragraph, "ParaAdjust"),
-          leftMargin: safeProperty(paragraph, "ParaLeftMargin"),
+          leftMargin: margins.leftMargin,
           rightMargin: safeProperty(paragraph, "ParaRightMargin"),
-          firstLineIndent: safeProperty(paragraph, "ParaFirstLineIndent"),
+          firstLineIndent: margins.firstLineIndent,
           topMargin: safeProperty(paragraph, "ParaTopMargin"),
           bottomMargin: safeProperty(paragraph, "ParaBottomMargin"),
           writingMode: writingModeName(safeProperty(paragraph, "WritingMode")),
