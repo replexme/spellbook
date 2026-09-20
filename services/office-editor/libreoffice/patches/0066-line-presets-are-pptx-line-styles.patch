@@ -45,17 +45,19 @@ diff --git a/include/oox/drawingml/shapepropertymap.hxx b/include/oox/drawingml/
 diff --git a/include/oox/export/drawingml.hxx b/include/oox/export/drawingml.hxx
 --- a/include/oox/export/drawingml.hxx
 +++ b/include/oox/export/drawingml.hxx
-@@ -573,6 +573,13 @@ public:
+@@ -573,6 +573,15 @@ public:
      static void WriteFromTo(const css::uno::Reference<css::drawing::XShape>& rXShape, const css::awt::Size& aPageSize,
                              const sax_fastparser::FSHelperPtr& pDrawing);
  
 +    /** The a:prstDash value PPTX export writes for the shape's line: a preset
 +        name, "solid", "custom" for another dash, or empty without a line. */
-+    static OUString GetPresetLineDash(const css::uno::Reference<css::beans::XPropertySet>& rXPropSet);
++    OOX_DLLPUBLIC static OUString
++    GetPresetLineDash(const css::uno::Reference<css::beans::XPropertySet>& rXPropSet);
 +    /** The line start or end PPTX export writes: "none", or
 +        "<type> <width> <length>" as in a:headEnd and a:tailEnd. */
-+    static OUString GetPresetLineArrow(const css::uno::Reference<css::beans::XPropertySet>& rXPropSet,
-+                                       bool bLineStart);
++    OOX_DLLPUBLIC static OUString
++    GetPresetLineArrow(const css::uno::Reference<css::beans::XPropertySet>& rXPropSet,
++                       bool bLineStart);
      static bool IsGroupShape( const css::uno::Reference< css::drawing::XShape >& rXShape );
      sal_Int32 getBulletMarginIndentation (const css::uno::Reference< css::beans::XPropertySet >& rXPropSet,sal_Int16 nLevel, std::u16string_view propName);
  

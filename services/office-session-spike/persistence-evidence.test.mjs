@@ -1256,3 +1256,48 @@ test("a fixed slide date keeps its text and an automatic one its format", () => 
     /no observable intended change/u,
   );
 });
+
+test("a bullet the save re-encoded through a symbol font is the same bullet", () => {
+  const list = (bulletCharacter) => ({
+    slides: [
+      {
+        elements: [
+          {
+            objectName: "Body",
+            paragraphFormats: [
+              { paragraphId: "0/0:p0", list: { level: 0, bulletCharacter } },
+            ],
+          },
+        ],
+      },
+    ],
+    masters: [],
+  });
+  const before = list(null);
+  const expected = list("•");
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({
+      before,
+      expected,
+      // PPTX stores the bullet as Symbol U+F0B7, which PowerPoint writes too.
+      observed: list(""),
+    }),
+    [],
+  );
+  // Losing the bullet is still a failed edit.
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({
+      before,
+      expected,
+      observed: list(""),
+    }),
+    [
+      {
+        path: "$.slides[0].elements[0].paragraphFormats[0].list.bulletCharacter",
+        expected: "•",
+        observed: "",
+        invariant: "intended-change",
+      },
+    ],
+  );
+});

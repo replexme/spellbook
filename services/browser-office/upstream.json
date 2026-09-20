@@ -14,7 +14,7 @@
     "patchSeriesReady": true,
     "buildReady": false,
     "nativeSlideStructureReady": false,
-    "patchSeriesSha256": "882da21bbbebe16334a30ed8f319c066e62044ad5bed7adf70bb562c3eb743f6",
+    "patchSeriesSha256": "b2b6fcf7a21133200828b7e78c24927cc26166a36ace26eb90f81c49a3369b39",
     "patches": [
       "libreoffice/patches/0001-core-undo-identity.patch",
       "libreoffice/patches/0002-generic-pptx-edit-invariants.patch",

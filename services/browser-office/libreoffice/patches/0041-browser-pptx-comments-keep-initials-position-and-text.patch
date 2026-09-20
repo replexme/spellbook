@@ -77,7 +77,7 @@ diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
  #include <com/sun/star/table/XMergeableCell.hpp>
  #include <com/sun/star/text/WritingMode2.hpp>
  #include <com/sun/star/text/XText.hpp>
-@@ -3094,6 +3098,42 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxTableCellKeepsTopAndBotto
+@@ -3094,6 +3098,49 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxTableCellKeepsTopAndBotto
      CPPUNIT_FAIL("table not found");
  }
  
@@ -108,8 +108,15 @@ diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
 +                uno::UNO_QUERY_THROW);
 +    uno::Reference<office::XAnnotationEnumeration> xAnnotations(
 +        xAccess->createAnnotationEnumeration());
-+    CPPUNIT_ASSERT(xAnnotations->hasMoreElements());
-+    xAnnotation = xAnnotations->nextElement();
++    // The deck carries a comment of its own, which stays beside this one.
++    xAnnotation.clear();
++    while (xAnnotations->hasMoreElements())
++    {
++        uno::Reference<office::XAnnotation> xCandidate(xAnnotations->nextElement());
++        if (xCandidate->getAuthor() == u"Spellbook AI"_ustr)
++            xAnnotation = xCandidate;
++    }
++    CPPUNIT_ASSERT(xAnnotation.is());
 +    CPPUNIT_ASSERT_EQUAL(u"AI"_ustr, xAnnotation->getInitials());
 +    CPPUNIT_ASSERT_EQUAL(u"a < b & c"_ustr, xAnnotation->getTextRange()->getString());
 +    // One PPTX master unit is 1/576 inch, 0.044 mm.

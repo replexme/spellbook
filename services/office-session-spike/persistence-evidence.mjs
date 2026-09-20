@@ -593,7 +593,26 @@ function characterSpacingEquivalent(expected, observed) {
   return Math.abs(mm100(expected) - mm100(observed)) <= 1;
 }
 
+// PPTX writes a symbol-font bullet as a:buFont plus a private-use code point
+// in a:buChar, which is what PowerPoint writes and what the engine reads back.
+// The model's own bullet (OpenSymbol U+2022) and the saved one (Symbol U+F0B7)
+// are the same bullet in two encodings, and the font's encoding table lives in
+// the engine, so a bullet the save re-encoded is compared as a bullet.
+function isSymbolFontBullet(value) {
+  if (typeof value !== "string" || [...value].length !== 1) return false;
+  const code = value.codePointAt(0);
+  return code >= 0xf000 && code <= 0xf0ff;
+}
+
 function isFormatCanonicalEquivalent(expected, observed, path) {
+  if (/\.list\.bulletCharacter$/.test(path))
+    return (
+      (isSymbolFontBullet(expected) || isSymbolFontBullet(observed)) &&
+      typeof expected === "string" &&
+      typeof observed === "string" &&
+      expected !== "" &&
+      observed !== ""
+    );
   const numeric =
     typeof expected === "number" &&
     typeof observed === "number" &&
