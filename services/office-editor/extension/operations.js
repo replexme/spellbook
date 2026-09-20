@@ -443,6 +443,125 @@ function spellbookDocumentOperation(request) {
     } catch (_) {}
     return states;
   };
+  // PPTX keeps one language per run, and the export writes it from the locale
+  // of the script the run's text is written in (DrawingML::GetScriptType).
+  let scriptBreakIterator;
+  const scriptOfText = (text) => {
+    try {
+      const i18n = uno.idl.com.sun.star.i18n;
+      scriptBreakIterator ??= i18n.BreakIterator.create(uno.componentContext);
+      let script = scriptBreakIterator.getScriptType(text, 0);
+      if (script === i18n.ScriptType.WEAK) {
+        const position = scriptBreakIterator.nextScript(text, 0, script);
+        if (position < text.length)
+          script = scriptBreakIterator.getScriptType(text, position);
+      }
+      return script === i18n.ScriptType.ASIAN
+        ? "asian"
+        : script === i18n.ScriptType.COMPLEX
+          ? "complex"
+          : "latin";
+    } catch (_) {
+      return "latin";
+    }
+  };
+  const runLocale = (text, readProperty) =>
+    localeDetails(
+      readProperty(
+        {
+          asian: "CharLocaleAsian",
+          complex: "CharLocaleComplex",
+          latin: "CharLocale",
+        }[scriptOfText(text)],
+      ),
+    );
+  const localeTag = (locale) =>
+    locale?.language
+      ? [locale.language, locale.country, locale.variant]
+          .filter((part) => part !== "")
+          .join("-")
+      : "";
+  // What a save keeps of the runs: the letter-case effect PPTX writes as
+  // a:rPr/@cap and the language it writes as a:rPr/@lang. The whole-text
+  // cursor reports one value for a mixed range, so both are collected as the
+  // set of values the runs actually carry.
+  const runFormatting = (shape, text) => {
+    if (text === null) return null;
+    const caseMaps = new Set();
+    const languages = new Set();
+    try {
+      const paragraphs = shape.createEnumeration();
+      while (paragraphs.hasMoreElements()) {
+        const portions = paragraphs.nextElement().createEnumeration();
+        while (portions.hasMoreElements()) {
+          const portion = portions.nextElement();
+          const portionText = portion.getString();
+          if (!portionText) continue;
+          const caseMap = safeProperty(portion, "CharCaseMap");
+          if (typeof caseMap === "number") caseMaps.add(caseMap);
+          const tag = localeTag(
+            runLocale(portionText, (name) => safeProperty(portion, name)),
+          );
+          if (tag) languages.add(tag);
+        }
+      }
+    } catch (_) {
+      return null;
+    }
+    return {
+      caseMaps: [...caseMaps].sort((left, right) => left - right),
+      languages: [...languages].sort(),
+    };
+  };
+  // PowerPoint's Change Case writes lowercase and word capitals into the
+  // characters, because PPTX stores only "all" and "small" as a letter-case
+  // effect. A word runs over letters, marks, digits and inner apostrophes, so
+  // a word split across two runs keeps one capital.
+  const isWordCharacter = (character) =>
+    /[\p{L}\p{M}\p{N}'\u2019]/u.test(character);
+  const inCase = (character, upper, languageTag) => {
+    try {
+      return upper
+        ? character.toLocaleUpperCase(languageTag)
+        : character.toLocaleLowerCase(languageTag);
+    } catch (_) {
+      return upper ? character.toUpperCase() : character.toLowerCase();
+    }
+  };
+  const textInCase = (text, mode, languageTag, continuesWord = false) => {
+    if (mode === "lowercase") return inCase(text, false, languageTag);
+    let written = "";
+    let inWord = continuesWord;
+    for (const character of text) {
+      if (!isWordCharacter(character)) {
+        written += character;
+        inWord = false;
+        continue;
+      }
+      written += inCase(character, !inWord, languageTag);
+      inWord = true;
+    }
+    return written;
+  };
+  const writeTextInCase = (shape, mode) => {
+    const paragraphs = shape.createEnumeration();
+    while (paragraphs.hasMoreElements()) {
+      const paragraph = paragraphs.nextElement();
+      const portions = paragraph.createEnumeration();
+      let continuesWord = false;
+      while (portions.hasMoreElements()) {
+        const portion = portions.nextElement();
+        const text = portion.getString();
+        if (!text) continue;
+        const languageTag = localeTag(
+          runLocale(text, (name) => safeProperty(portion, name)),
+        );
+        const written = textInCase(text, mode, languageTag, continuesWord);
+        continuesWord = isWordCharacter(text.slice(-1));
+        if (written !== text) portion.setString(written);
+      }
+    }
+  };
   const wholeTextFormatting = (shape, text) => {
     if (text === null) return null;
     try {
@@ -1819,6 +1938,7 @@ function spellbookDocumentOperation(request) {
             paragraphFormats:
               text === null ? null : paragraphFormatDetails(shape, elementId),
             wholeTextFormatting: wholeTextFormatting(shape, text),
+            runFormatting: runFormatting(shape, text),
             x: position.X,
             y: position.Y,
             width: size.Width,
@@ -5189,6 +5309,7 @@ function spellbookDocumentOperation(request) {
       if (element.text === null) throw new Error("unsupported_text_target");
       let payload;
       let matches;
+      let rewrittenCase = null;
       if (command.op === "set_text_language") {
         if (
           typeof command.languageTag !== "string" ||
@@ -5212,11 +5333,11 @@ function spellbookDocumentOperation(request) {
                 : "",
         };
         payload = { LanguageTag: command.languageTag };
-        matches = (formatting) =>
+        matches = (observed) =>
           [
-            formatting?.locale,
-            formatting?.localeAsian,
-            formatting?.localeComplex,
+            observed?.wholeTextFormatting?.locale,
+            observed?.wholeTextFormatting?.localeAsian,
+            observed?.wholeTextFormatting?.localeComplex,
           ].every((value) => stableJson(value) === stableJson(locale));
       } else {
         const caseMap = {
@@ -5227,24 +5348,47 @@ function spellbookDocumentOperation(request) {
           small_caps: 4,
         }[command.textCase];
         if (caseMap === undefined) throw new Error("invalid_text_case");
-        payload = { CaseMap: command.textCase };
-        matches = (formatting) => Number(formatting?.caseMap) === caseMap;
+        // PPTX keeps a letter-case effect in a:rPr/@cap, which has only "all"
+        // and "small". PowerPoint's own Change Case writes lowercase and word
+        // capitals into the characters instead, so those two rewrite the text
+        // and leave no effect behind.
+        rewrittenCase = ["lowercase", "title"].includes(command.textCase)
+          ? command.textCase
+          : null;
+        payload = { CaseMap: rewrittenCase ? "none" : command.textCase };
+        matches = (observed) =>
+          rewrittenCase
+            ? Number(observed?.wholeTextFormatting?.caseMap) === 0 &&
+              typeof observed?.text === "string" &&
+              observed.text === textInCase(observed.text, rewrittenCase)
+            : Number(observed?.wholeTextFormatting?.caseMap) === caseMap;
       }
-      if (matches(element.wholeTextFormatting))
-        return result(before, slideIndex);
+      if (matches(element)) return result(before, slideIndex);
       if (request.dryRun) return result(before, slideIndex);
       const undo = model.getUndoManager();
       const undoCount = undo.getAllUndoActionTitles().length;
       const objectPath = command.elementId.split("/").slice(1).join("/");
-      transformSlides([
-        { JumpToSlide: slideIndex },
-        { [`SetTextProperties.${objectPath}`]: payload },
-      ]);
+      const ownsCaseUndoContext =
+        Boolean(rewrittenCase) && !request.transactionActive;
+      if (ownsCaseUndoContext) undo.enterUndoContext("AI text case");
+      try {
+        transformSlides([
+          { JumpToSlide: slideIndex },
+          { [`SetTextProperties.${objectPath}`]: payload },
+        ]);
+        if (rewrittenCase)
+          writeTextInCase(resolveShape(command.elementId), rewrittenCase);
+      } catch (error) {
+        if (ownsCaseUndoContext) undo.leaveUndoContext();
+        while (undo.getAllUndoActionTitles().length > undoCount) undo.undo();
+        throw error;
+      }
+      if (ownsCaseUndoContext) undo.leaveUndoContext();
       const after = read(slideIndex);
       const target = after.slides[slideIndex]?.elements.find(
         (candidate) => candidate.elementId === command.elementId,
       );
-      const applied = matches(target?.wholeTextFormatting);
+      const applied = matches(target);
       if (
         !applied ||
         (!request.transactionActive &&
