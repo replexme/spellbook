@@ -55,10 +55,12 @@ pnpm test:e2e
 
 The public boundary test fails if hosted infrastructure, private identities, credentials, or private corpus paths enter this repository.
 
-The regression catalog is committed, but upstream PPTX binaries are not. Fetch the pinned, hash-checked corpus into the ignored `eval/public/downloads/` directory when you need fidelity tests:
+The regression catalog is committed, but upstream PPTX binaries are not. Fetch the pinned, hash-checked corpus into the ignored `eval/public/downloads/` directory when you need fidelity tests. The renderer image and release are recorded with the coverage report, so name the LibreOffice build the references were rendered with:
 
 ```bash
-pnpm corpus:fetch-public
+pnpm corpus:fetch-public -- \
+  --renderer-image <libreoffice-image> \
+  --renderer-version <libreoffice-release>
 ```
 
 ## License

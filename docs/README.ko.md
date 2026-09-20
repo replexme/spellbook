@@ -68,7 +68,9 @@ pnpm test:e2e
 고정된 공개 회귀 corpus가 필요하면 다음 명령으로 hash를 검증해 ignored 경로에 받는다.
 
 ```bash
-pnpm corpus:fetch-public
+pnpm corpus:fetch-public -- \
+  --renderer-image <libreoffice-image> \
+  --renderer-version <libreoffice-release>
 ```
 
 ## 라이선스

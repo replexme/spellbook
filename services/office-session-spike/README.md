@@ -5,7 +5,9 @@ This local-only harness exercises the same Collabora document, extension bridge 
 The test matrix is declared in `contracts/native-mutation-conformance.json`. Every scenario records the exact source fixture hash, engine patch level, apply probe, reopen probe and required evidence. Public fixture binaries are fetched into the ignored corpus directory:
 
 ```bash
-pnpm corpus:fetch-public
+pnpm corpus:fetch-public -- \
+  --renderer-image <libreoffice-image> \
+  --renderer-version <libreoffice-release>
 ```
 
 Build the connector and browser extension, start the candidate editor image, then start a probe for one source file and a new evidence directory:
