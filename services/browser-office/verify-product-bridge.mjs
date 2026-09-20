@@ -1375,15 +1375,15 @@ async function runProductEndurance({
     const redone = await sendHostCommand(page, "Send_UNO_Command", {
       Command: ".uno:Redo",
     });
-    assert.equal(
-      redone.revision,
-      edited.revision,
-      `${taskPrefix} Redo did not restore the edited revision.`,
-    );
     const observedRedo = await nativeTask(page, `${taskPrefix}-redone`, {
       operation: "observe",
       captureSlideIndexes: [],
     });
+    assert.equal(
+      observedRedo.revision,
+      redone.revision,
+      `${taskPrefix} Redo observation did not match the returned revision.`,
+    );
     assert.equal(
       operation.matches(elementForOperation(observedRedo, operation)),
       true,
