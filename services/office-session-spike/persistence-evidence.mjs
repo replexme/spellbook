@@ -613,7 +613,7 @@ function ooxmlAnimationTime(seconds) {
 // CharKerning in 1/100 mm. LibreOffice truncates in both directions, so one
 // save/reopen cycle can move the value by one 1/100 mm unit (~0.03 pt), below
 // PowerPoint's 0.1 pt spacing precision. A larger change remains a failure.
-function characterSpacingEquivalent(expected, observed) {
+export function characterSpacingEquivalent(expected, observed) {
   const mm100 = (points) => Math.round((points * 2540) / 72);
   return Math.abs(mm100(expected) - mm100(observed)) <= 1;
 }

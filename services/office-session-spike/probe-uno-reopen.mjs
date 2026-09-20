@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import {
   assertDocumentPersistenceDelta,
+  characterSpacingEquivalent,
   documentPersistenceDeltaDifferences,
   persistenceStateFromObservation,
 } from "./persistence-evidence.mjs";
@@ -103,6 +104,20 @@ try {
   ];
   const differences = [];
   for (const key of propertyPaths) {
+    if (key === "characterSpacing") {
+      if (
+        !characterSpacingEquivalent(
+          expected.propertyObject[key],
+          propertyObject?.[key],
+        )
+      )
+        differences.push({
+          path: `propertyObject.${key}`,
+          expected: expected.propertyObject[key],
+          actual: propertyObject?.[key],
+        });
+      continue;
+    }
     if (
       JSON.stringify(propertyObject?.[key]) !==
       JSON.stringify(expected.propertyObject[key])
@@ -149,10 +164,25 @@ try {
       reopenedFormatting,
       textRangePortion?.text,
     );
-    if (
-      JSON.stringify(reopenedActiveFormatting) !==
-      JSON.stringify(expectedActiveFormatting)
-    )
+    const activeFormattingEquivalent = (expectedFormat, actualFormat) => {
+      if (!expectedFormat && !actualFormat) return true;
+      if (!expectedFormat || !actualFormat) return false;
+      const keys = new Set([
+        ...Object.keys(expectedFormat),
+        ...Object.keys(actualFormat),
+      ]);
+      for (const key of keys) {
+        if (key === "spacing") {
+          if (!characterSpacingEquivalent(expectedFormat[key], actualFormat[key]))
+            return false;
+          continue;
+        }
+        if (JSON.stringify(expectedFormat[key]) !== JSON.stringify(actualFormat[key]))
+          return false;
+      }
+      return true;
+    };
+    if (!activeFormattingEquivalent(expectedActiveFormatting, reopenedActiveFormatting))
       differences.push({
         path: "textRange.formatting",
         expected: expectedActiveFormatting,
