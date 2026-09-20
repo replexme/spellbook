@@ -1,0 +1,173 @@
+diff --git a/oox/source/drawingml/textrun.cxx b/oox/source/drawingml/textrun.cxx
+--- a/oox/source/drawingml/textrun.cxx
++++ b/oox/source/drawingml/textrun.cxx
+@@ -24,9 +24,14 @@
+ #include <com/sun/star/text/ControlCharacter.hpp>
+ #include <com/sun/star/beans/XPropertySet.hpp>
+ #include <com/sun/star/beans/XPropertyState.hpp>
++#include <com/sun/star/i18n/BreakIterator.hpp>
++#include <com/sun/star/i18n/ScriptType.hpp>
++#include <com/sun/star/lang/Locale.hpp>
+ #include <com/sun/star/lang/XMultiServiceFactory.hpp>
+ #include <com/sun/star/text/XTextField.hpp>
+ 
++#include <comphelper/processfactory.hxx>
++#include <i18nlangtag/languagetag.hxx>
+ #include <sal/log.hxx>
+ 
+ #include <oox/helper/helper.hxx>
+@@ -43,6 +48,33 @@ using namespace ::com::sun::star::lang;
+ 
+ namespace oox::drawingml {
+ 
++namespace {
++
++// PowerPoint keeps one language per run. The export writes it from the locale
++// of the script the run's own text belongs to (DrawingML::GetScriptType), so
++// the import has to read it back into that same locale. Reading it only into
++// the locale of the language's own script loses, for example, a Korean
++// language set on Latin text: the next save would write the document default
++// back over it.
++sal_Int16 lclGetTextScriptType(const OUString& rText)
++{
++    if (rText.isEmpty())
++        return css::i18n::ScriptType::LATIN;
++    static css::uno::Reference<css::i18n::XBreakIterator> xBreakIterator
++        = css::i18n::BreakIterator::create(comphelper::getProcessComponentContext());
++    sal_Int16 nScriptType = xBreakIterator->getScriptType(rText, 0);
++    if (nScriptType == css::i18n::ScriptType::WEAK)
++    {
++        const sal_Int32 nPosition = xBreakIterator->nextScript(rText, 0, nScriptType);
++        if (nPosition < rText.getLength())
++            nScriptType = xBreakIterator->getScriptType(rText, nPosition);
++    }
++    return nScriptType == css::i18n::ScriptType::WEAK ? css::i18n::ScriptType::LATIN
++                                                      : nScriptType;
++}
++
++} // namespace
++
+ TextRun::TextRun() :
+     mbIsLineBreak( false )
+ {
+@@ -84,6 +116,29 @@ sal_Int32 TextRun::insertAt(
+             // UNO API has the character height as float, DML has it as int, but in hundreds.
+             aTextCharacterProps.moHeight = static_cast<sal_Int32>(nDefaultCharHeight * 100);
+         aTextCharacterProps.pushToPropSet( aPropSet, rFilterBase );
++        // The run states its own language: keep it in the locale its text is
++        // written in, which is the one the export reads.
++        const auto aApplyRunLanguage = [this](PropertySet& rRunProperties)
++        {
++            if (!maTextCharacterProperties.moLang.has_value()
++                || maTextCharacterProperties.moLang.value().isEmpty() || getText().isEmpty())
++                return;
++            const css::uno::Any aLocale(
++                LanguageTag(maTextCharacterProperties.moLang.value()).getLocale(false));
++            switch (lclGetTextScriptType(getText()))
++            {
++                case css::i18n::ScriptType::ASIAN:
++                    rRunProperties.setAnyProperty(PROP_CharLocaleAsian, aLocale);
++                    break;
++                case css::i18n::ScriptType::COMPLEX:
++                    rRunProperties.setAnyProperty(PROP_CharLocaleComplex, aLocale);
++                    break;
++                default:
++                    rRunProperties.setAnyProperty(PROP_CharLocale, aLocale);
++                    break;
++            }
++        };
++        aApplyRunLanguage(aPropSet);
+ 
+         if( maTextCharacterProperties.maHyperlinkPropertyMap.empty() )
+         {
+@@ -139,6 +194,7 @@ sal_Int32 TextRun::insertAt(
+                         break;
+ 
+                     aTextCharacterProps.pushToPropSet(aPropSet, rFilterBase);
++                    aApplyRunLanguage(aPropSet);
+                 }
+             }
+         }
+@@ -168,6 +224,7 @@ sal_Int32 TextRun::insertAt(
+ 
+                 PropertySet aFieldTextPropSet( xTextFieldCursor );
+                 aTextCharacterProps.pushToPropSet( aFieldTextPropSet, rFilterBase );
++                aApplyRunLanguage(aFieldTextPropSet);
+             }
+             else
+             {
+diff --git a/sd/qa/unit/uiimpress.cxx b/sd/qa/unit/uiimpress.cxx
+--- a/sd/qa/unit/uiimpress.cxx
++++ b/sd/qa/unit/uiimpress.cxx
+@@ -32,6 +32,7 @@
+ #include <com/sun/star/drawing/PolygonFlags.hpp>
+ #include <com/sun/star/drawing/XDrawPagesSupplier.hpp>
+ #include <com/sun/star/drawing/XShapes.hpp>
++#include <com/sun/star/lang/Locale.hpp>
+ #include <com/sun/star/lang/XMultiServiceFactory.hpp>
+ #include <com/sun/star/presentation/ClickAction.hpp>
+ #include <com/sun/star/presentation/XPresentationPage.hpp>
+@@ -3049,6 +3050,63 @@ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookLinePresetsArePptxLineStyles)
+     CPPUNIT_FAIL("styled line not found");
+ }
+ 
++CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookPptxRunLanguageStaysWithItsText)
++{
++    createSdImpressDocModelOnly();
++    uno::Reference<drawing::XDrawPagesSupplier> xPagesSupplier(mxComponent,
++                                                               uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShapes> xShapes(xPagesSupplier->getDrawPages()->getByIndex(0),
++                                             uno::UNO_QUERY_THROW);
++    uno::Reference<lang::XMultiServiceFactory> xFactory(mxComponent, uno::UNO_QUERY_THROW);
++    uno::Reference<drawing::XShape> xShape(
++        xFactory->createInstance(u"com.sun.star.drawing.TextShape"_ustr), uno::UNO_QUERY_THROW);
++    xShape->setPosition(awt::Point(1000, 1000));
++    xShape->setSize(awt::Size(8000, 3000));
++    xShapes->add(xShape);
++    uno::Reference<beans::XPropertySet> xShapeProperties(xShape, uno::UNO_QUERY_THROW);
++    xShapeProperties->setPropertyValue(u"Name"_ustr, uno::Any(u"Spoken"_ustr));
++    uno::Reference<text::XText> xText(xShape, uno::UNO_QUERY_THROW);
++    xText->setString(u"Spellbook"_ustr);
++    const auto aWholeText = [](const uno::Reference<text::XText>& xBody) {
++        uno::Reference<text::XTextCursor> xCursor = xBody->createTextCursor();
++        xCursor->gotoStart(false);
++        xCursor->gotoEnd(true);
++        return uno::Reference<beans::XPropertySet>(xCursor, uno::UNO_QUERY_THROW);
++    };
++    // A Korean language on Latin text is what PowerPoint stores on the run.
++    aWholeText(xText)->setPropertyValue(
++        u"CharLocale"_ustr, uno::Any(lang::Locale(u"ko"_ustr, u"KR"_ustr, OUString())));
++
++    saveAndReloadSdImpressDocModelOnly(u"Impress Office Open XML"_ustr);
++    xmlDocUniquePtr pSlideXml = parseExport(u"ppt/slides/slide1.xml"_ustr);
++    assertXPath(pSlideXml, "//*[*/p:cNvPr/@name='Spoken']/p:txBody/a:p/a:r/a:rPr", "lang",
++                u"ko-KR"_ustr);
++
++    // Reading the run's language back into the locale of the language's own
++    // script would leave Latin text at the document default, and the next save
++    // would write that default over the language PowerPoint shows.
++    uno::Reference<container::XIndexAccess> xPage(
++        uno::Reference<drawing::XDrawPagesSupplier>(mxComponent, uno::UNO_QUERY_THROW)
++            ->getDrawPages()
++            ->getByIndex(0),
++        uno::UNO_QUERY_THROW);
++    for (sal_Int32 nShape = 0; nShape < xPage->getCount(); ++nShape)
++    {
++        uno::Reference<beans::XPropertySet> xReloaded(xPage->getByIndex(nShape),
++                                                      uno::UNO_QUERY_THROW);
++        if (xReloaded->getPropertyValue(u"Name"_ustr).get<OUString>() != u"Spoken"_ustr)
++            continue;
++        uno::Reference<text::XText> xReloadedText(xPage->getByIndex(nShape), uno::UNO_QUERY_THROW);
++        CPPUNIT_ASSERT_EQUAL(u"Spellbook"_ustr, xReloadedText->getString());
++        const lang::Locale aLocale
++            = aWholeText(xReloadedText)->getPropertyValue(u"CharLocale"_ustr).get<lang::Locale>();
++        CPPUNIT_ASSERT_EQUAL(u"ko"_ustr, aLocale.Language);
++        CPPUNIT_ASSERT_EQUAL(u"KR"_ustr, aLocale.Country);
++        return;
++    }
++    CPPUNIT_FAIL("spoken text not found");
++}
++
+ CPPUNIT_TEST_FIXTURE(SdUiImpressTest, testSpellbookFreeformIsPptxCustomGeometry)
+ {
+     createSdImpressDocModelOnly();

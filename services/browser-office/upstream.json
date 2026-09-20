@@ -14,7 +14,7 @@
     "patchSeriesReady": true,
     "buildReady": false,
     "nativeSlideStructureReady": false,
-    "patchSeriesSha256": "6a8628d79b4d984a1b3f543ec03f6c2ea54113de4164ca202629033f04d32874",
+    "patchSeriesSha256": "882da21bbbebe16334a30ed8f319c066e62044ad5bed7adf70bb562c3eb743f6",
     "patches": [
       "libreoffice/patches/0001-core-undo-identity.patch",
       "libreoffice/patches/0002-generic-pptx-edit-invariants.patch",
@@ -58,7 +58,8 @@
       "libreoffice/patches/0040-browser-pptx-table-cell-keeps-top-and-bottom-margins.patch",
       "libreoffice/patches/0041-browser-pptx-comments-keep-initials-position-and-text.patch",
       "libreoffice/patches/0042-browser-pptx-paragraph-direction-and-tab-stops-do-not-carry-over.patch",
-      "libreoffice/patches/0043-browser-line-presets-are-pptx-line-styles.patch"
+      "libreoffice/patches/0043-browser-line-presets-are-pptx-line-styles.patch",
+      "libreoffice/patches/0044-browser-run-language-stays-with-its-text.patch"
     ],
     "invariants": [
       "table-cell-native-undo",
@@ -147,7 +148,8 @@
       "CppunitTest_sd_uiimpress:testSpellbookPptxTableCellKeepsTopAndBottomMargins",
       "CppunitTest_sd_uiimpress:testSpellbookPptxCommentKeepsInitialsPositionAndText",
       "CppunitTest_sd_uiimpress:testSpellbookPptxParagraphDirectionAndTabStopsDoNotCarryOver",
-      "CppunitTest_sd_uiimpress:testSpellbookLinePresetsArePptxLineStyles"
+      "CppunitTest_sd_uiimpress:testSpellbookLinePresetsArePptxLineStyles",
+      "CppunitTest_sd_uiimpress:testSpellbookPptxRunLanguageStaysWithItsText"
     ]
   },
   "toolchain": {

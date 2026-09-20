@@ -133,6 +133,12 @@ reading one reports what PPTX export writes, through the export's own dash and
 arrowhead detection. Line styles were only addressable by the document's own
 style names, which a deck without dashed lines does not have and which import
 renames.
+Patch `0044` keeps a run's language on the text it belongs to: PPTX stores one
+language per run and the export writes it from the locale of the script the
+run's text is written in, but the import read it into the locale of the
+language's own script. A Korean language on Latin text therefore came back as
+the document default, and the next save wrote that default over the language
+PowerPoint shows.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

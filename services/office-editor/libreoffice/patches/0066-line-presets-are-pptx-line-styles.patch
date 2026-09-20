@@ -358,7 +358,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
      mpFS->singleElementNS( XML_a, bLineStart ? XML_headEnd : XML_tailEnd,
                             XML_len, len,
                             XML_type, type,
-@@ -1139,71 +1236,10 @@ void DrawingML::WriteOutline( const Reference<XPropertySet>& rXPropSet, Referenc
+@@ -1139,71 +1236,11 @@ void DrawingML::WriteOutline( const Reference<XPropertySet>& rXPropSet, Referenc
          // "dot" is always the first dash and "dash" the second one. All OOXML presets linestyles
          // start with the longer one. Definitions are in OOXML part 1, 20.1.10.49
          // The tests are strict, for to not catch styles from standard.sod (as of Aug 2019).
@@ -427,6 +427,7 @@ diff --git a/oox/source/export/drawingml.cxx b/oox/source/export/drawingml.cxx
 -            else
 -                bIsConverted = false;
 -        }
++        const bool bIsRelative(aLineDash.Style == DashStyle_RECTRELATIVE || aLineDash.Style == DashStyle_ROUNDRELATIVE);
 +        const char* pPresetDash = lcl_GetPresetDash(aLineDash, aLineCap);
 +        if (pPresetDash)
 +            mpFS->singleElementNS(XML_a, XML_prstDash, XML_val, pPresetDash);

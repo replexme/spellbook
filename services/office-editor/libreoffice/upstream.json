@@ -12,7 +12,7 @@
   "patchLevel": "undo-v31",
   "sourcePatchSeriesReady": true,
   "sourceCandidateReady": false,
-  "patchSeriesSha256": "c6b313ebf3af4c06778964c88b10e61c86bdd32987b66393bbf9baea227d6221",
+  "patchSeriesSha256": "bc95aa63140a91f3c72dd808d2fc9a26de05cf5b9b44276899fedf4be48a739c",
   "engineImageTag": "26.04.4.1-spellbook-undo-v31-r1-candidate",
   "impressUiUnoCommandCount": 725,
   "impressUiUnoCommandsSha256": "ddfe8aeb5f798b6656b22276d219311bd30e9ce5c26cdf8ffe3d321f2c2f3fbb",
@@ -80,7 +80,8 @@
     "patches/0063-freeform-is-pptx-custom-geometry.patch",
     "patches/0064-pptx-comments-keep-their-position.patch",
     "patches/0065-pptx-paragraph-direction-and-tab-stops-do-not-carry-over.patch",
-    "patches/0066-line-presets-are-pptx-line-styles.patch"
+    "patches/0066-line-presets-are-pptx-line-styles.patch",
+    "patches/0067-run-language-stays-with-its-text.patch"
   ],
   "requiredCppunitTargets": [
     "CppunitTest_sd_uiimpress",
@@ -131,6 +132,7 @@
     "CppunitTest_sd_uiimpress:testFreeformIsPptxCustomGeometry",
     "CppunitTest_sd_uiimpress:testPptxCommentKeepsItsPosition",
     "CppunitTest_sd_uiimpress:testPptxParagraphDirectionAndTabStopsDoNotCarryOver",
-    "CppunitTest_sd_uiimpress:testLinePresetsArePptxLineStyles"
+    "CppunitTest_sd_uiimpress:testLinePresetsArePptxLineStyles",
+    "CppunitTest_sd_uiimpress:testPptxRunLanguageStaysWithItsText"
   ]
 }
