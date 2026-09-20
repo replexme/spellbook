@@ -11,7 +11,7 @@
   "runtimePatchLevel": "stock",
   "patchLevel": "undo-v31",
   "sourcePatchSeriesReady": true,
-  "sourceCandidateReady": false,
+  "sourceCandidateReady": true,
   "patchSeriesSha256": "dc710e0103d42cf4057447072747491b4a69eabb5d56b34d9117802824230a45",
   "engineImageTag": "26.04.4.1-spellbook-undo-v31-r2-candidate",
   "impressUiUnoCommandCount": 725,
@@ -136,5 +136,23 @@
     "CppunitTest_sd_uiimpress:testLinePresetsArePptxLineStyles",
     "CppunitTest_sd_uiimpress:testPptxRunLanguageStaysWithItsText",
     "CppunitTest_sd_uiimpress:testPptxConnectorKeepsALinkedShapeConnection"
-  ]
+  ],
+  "sourceCandidateEvidence": {
+    "completedAt": "2026-09-20T10:01:07.604Z",
+    "spellbookSourceRevision": "4260de58223bdcce96b02e0663393dc7aafabdd5",
+    "patchSeriesSha256": "dc710e0103d42cf4057447072747491b4a69eabb5d56b34d9117802824230a45",
+    "engineImageDigest": "sha256:dec199b3fafdf6d45c22cc88b165684fa2b37faf354ee012d7dd1ebb8d71c7b7",
+    "nativeEvidenceSha256": "fcb7730403553fa6f93b81ca0a56aca4acf1cb9c75887c559d7f7f68562bde1f",
+    "buildResultSha256": "9a271f2a916b0b6ee6cecb2426f0b3206ef074578be55d9bc94f6f3fe3ab86aa",
+    "impressCommandReportSha256": "080b5afe60cc511c2c8d16fd09ad5bc66a09414778ca62e72cd4c882988eb451",
+    "requiredCppunitStatuses": {
+      "CppunitTest_sd_uiimpress": 0,
+      "CppunitTest_sd_misc_tests": 0
+    },
+    "impressCommandSurface": {
+      "count": 725,
+      "sha256": "ddfe8aeb5f798b6656b22276d219311bd30e9ce5c26cdf8ffe3d321f2c2f3fbb",
+      "exact": true
+    }
+  }
 }
