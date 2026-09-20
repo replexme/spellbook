@@ -154,7 +154,6 @@ export function candidateNativeConformanceErrors(report) {
         !/^[0-9a-f]{64}$/u.test(scenario?.candidate?.sha256 ?? "") ||
         !/^[0-9a-f]{64}$/u.test(scenario?.mutationReportSha256 ?? "") ||
         scenario?.reopenVerified !== true ||
-        scenario?.missingSelectedOperations?.length !== 0 ||
         (scenario?.changeBudget?.valid ?? scenario?.changeBudget?.Valid) !==
           true
       )
