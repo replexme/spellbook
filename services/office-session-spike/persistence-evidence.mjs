@@ -1001,6 +1001,82 @@ export function documentPersistenceDeltaDifferences(report, observed, options) {
 }
 
 /**
+ * The saved candidate keeps the XML the author saved for every shape a command
+ * did not name, so a live-model change there cannot reach the file and is not
+ * part of the intended change. Those shapes are compared as the author left
+ * them: the expected state takes their values from before the command.
+ * `targets` is `slideShapeTargets`: per slide index, the names the command may
+ * change, or null for any shape on that slide.
+ */
+export function withAuthoredUntargetedShapes(before, expected, targets) {
+  if (!(targets instanceof Map)) return expected;
+  const state = structuredClone(expected);
+  for (const [slideIndex, names] of targets) {
+    if (names === null) continue;
+    const slide = state.slides?.[slideIndex];
+    const authoredSlide = before?.slides?.[slideIndex];
+    if (
+      !Array.isArray(slide?.elements) ||
+      !Array.isArray(authoredSlide?.elements)
+    )
+      continue;
+    const authoredByName = uniqueElementsByName(authoredSlide.elements);
+    const editedByName = uniqueElementsByName(slide.elements);
+    slide.elements = slide.elements.map((element) => {
+      const name = element?.name;
+      if (typeof name !== "string" || names.has(name)) return element;
+      const authored = authoredByName.get(name);
+      return authored && editedByName.get(name) === element
+        ? authoredWithCurrentIdentity(authored, element)
+        : element;
+    });
+  }
+  return state;
+}
+
+// A shape's own values as the author saved them, in the place the edited
+// document gives it: a command that adds or removes a shape renumbers the
+// others, and the saved file follows the edited document's order.
+function authoredWithCurrentIdentity(authored, element) {
+  const merged = structuredClone(authored);
+  for (const key of [
+    "elementId",
+    "stableId",
+    "parentElementId",
+    "childElementIds",
+    "zIndex",
+    "readingOrder",
+    "alignedWith",
+    "overlapsWith",
+  ]) {
+    if (key in element) merged[key] = structuredClone(element[key]);
+    else delete merged[key];
+  }
+  if (
+    Array.isArray(merged.paragraphFormats) &&
+    Array.isArray(element.paragraphFormats)
+  )
+    merged.paragraphFormats = merged.paragraphFormats.map(
+      (paragraph, index) => ({
+        ...paragraph,
+        paragraphId:
+          element.paragraphFormats[index]?.paragraphId ?? paragraph.paragraphId,
+      }),
+    );
+  return merged;
+}
+
+function uniqueElementsByName(elements) {
+  const byName = new Map();
+  for (const element of elements) {
+    const name = element?.name;
+    if (typeof name !== "string" || !name) continue;
+    byName.set(name, byName.has(name) ? null : element);
+  }
+  return byName;
+}
+
+/**
  * Product save admission has no no-op export of the user's current in-memory
  * session. Compare only the fields that the edit actually changed, using the
  * same canonical PPTX semantics as the release conformance runner. Unchanged

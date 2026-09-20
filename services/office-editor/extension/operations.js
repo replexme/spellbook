@@ -963,7 +963,20 @@ function spellbookDocumentOperation(request) {
       return null;
     }
   };
-  const paragraphFormatDetails = (shape, elementId) => {
+  // PPTX stores alignment on each paragraph. The shape's own property keeps
+  // its default until a save and reopen apply the text's alignment to it, so
+  // the paragraphs are the stable source; paragraphs that disagree have no
+  // one alignment to report.
+  const sharedParagraphAlignment = (paragraphs) => {
+    if (!Array.isArray(paragraphs) || paragraphs.length === 0) return null;
+    const [first] = paragraphs;
+    return paragraphs.every(
+      (paragraph) => paragraph.alignment === first.alignment,
+    )
+      ? first.alignment
+      : null;
+  };
+  const paragraphFormatDetails = (shape, elementId, alignmentOnShape) => {
     try {
       const paragraphs = [];
       const enumeration = shape.createEnumeration();
@@ -973,6 +986,11 @@ function spellbookDocumentOperation(request) {
         paragraphs.push({
           paragraphId: `${elementId}:p${paragraphIndex}`,
           paragraphIndex,
+          // An empty text body keeps no paragraph of its own, so the shape
+          // carries its alignment and PPTX export writes it from there.
+          alignment: alignmentOnShape
+            ? null
+            : safeProperty(paragraph, "ParaAdjust"),
           leftMargin: safeProperty(paragraph, "ParaLeftMargin"),
           rightMargin: safeProperty(paragraph, "ParaRightMargin"),
           firstLineIndent: safeProperty(paragraph, "ParaFirstLineIndent"),
@@ -1914,6 +1932,10 @@ function spellbookDocumentOperation(request) {
           try {
             text = shape.getString();
           } catch (_) {}
+          const paragraphFormats =
+            text === null
+              ? null
+              : paragraphFormatDetails(shape, elementId, text === "");
           if (selected(shape)) selectedElementIds.push(elementId);
           elements.push({
             elementId,
@@ -1935,8 +1957,7 @@ function spellbookDocumentOperation(request) {
             geometryType: shapeGeometryType(shape, shapeKind),
             propertyStates: shapePropertyStates(shape, text),
             text,
-            paragraphFormats:
-              text === null ? null : paragraphFormatDetails(shape, elementId),
+            paragraphFormats,
             wholeTextFormatting: wholeTextFormatting(shape, text),
             runFormatting: runFormatting(shape, text),
             x: position.X,
@@ -1958,11 +1979,15 @@ function spellbookDocumentOperation(request) {
             strikethrough: safeTextProperty(shape, "CharStrikeout"),
             textShadow: safeTextProperty(shape, "CharShadowed"),
             color: safeProperty(shape, "CharColor"),
-            // UNO exposes transient text defaults on pictures and connectors,
-            // but PPTX gives them no text body to persist those defaults in.
+            // PPTX stores the alignment on each paragraph, and the shape's
+            // own property keeps the default until a save and reopen apply
+            // the text's alignment to it. UNO also exposes transient text
+            // defaults on pictures and connectors, which PPTX gives no text
+            // body to persist them in.
             paragraphAlignment: withoutTextBody
               ? null
-              : safeProperty(shape, "ParaAdjust"),
+              : (sharedParagraphAlignment(paragraphFormats) ??
+                safeProperty(shape, "ParaAdjust")),
             textVerticalAlignment: withoutTextBody
               ? null
               : enumName(safeProperty(shape, "TextVerticalAdjust")),
@@ -8340,6 +8365,9 @@ function spellbookDocumentOperation(request) {
         "parentElementId",
         "childElementIds",
         "zIndex",
+        // A copy sits above its source, so its place in the shape tree and in
+        // the reading order is its own.
+        "readingOrder",
         "name",
         "objectName",
         "selected",
@@ -8347,6 +8375,10 @@ function spellbookDocumentOperation(request) {
         "overlapsWith",
       ])
         delete copy[key];
+      if (Array.isArray(copy.paragraphFormats))
+        copy.paragraphFormats = copy.paragraphFormats.map(
+          ({ paragraphId, ...paragraph }) => paragraph,
+        );
       return stableJson(copy);
     };
     const structuralOrDispatch = [

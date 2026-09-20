@@ -20,6 +20,7 @@ import {
 import {
   intendedDocumentMutationDifferences,
   persistenceStateFromObservation,
+  withAuthoredUntargetedShapes,
 } from "/harness/persistence-evidence.mjs";
 import {
   acknowledgedSaveHasLaterChanges,
@@ -710,10 +711,26 @@ function assertPersistedNativeIntent(
     ...persistenceStateFromObservation(observation),
     sections: observation?.sections,
   });
+  const beforeState = state(before);
+  // The merge keeps the author's XML for every shape the command did not
+  // name, so the saved file cannot carry a live-model change there: those
+  // shapes are compared as the author left them.
+  const scopes = Array.isArray(preservationReport?.authoredShapeScopes)
+    ? new Map(
+        preservationReport.authoredShapeScopes.map(([slideIndex, names]) => [
+          slideIndex,
+          names === null ? null : new Set(names),
+        ]),
+      )
+    : null;
   const differences = intendedDocumentMutationDifferences(
     {
-      before: state(before),
-      expected: state(expected),
+      before: beforeState,
+      expected: withAuthoredUntargetedShapes(
+        beforeState,
+        state(expected),
+        scopes,
+      ),
       observed: state(reopened),
     },
     { limit: 5 },

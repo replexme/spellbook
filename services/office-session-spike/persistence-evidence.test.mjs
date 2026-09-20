@@ -15,6 +15,7 @@ import {
   normalizeDocumentPersistenceState,
   persistenceStateFromObservation,
   persistenceDeltaDifferences,
+  withAuthoredUntargetedShapes,
 } from "./persistence-evidence.mjs";
 
 test("product persistence admission checks changed semantics across save/reopen", () => {
@@ -1299,5 +1300,69 @@ test("a bullet the save re-encoded through a symbol font is the same bullet", ()
         invariant: "intended-change",
       },
     ],
+  );
+});
+
+test("shapes a command did not name are compared as the author left them", () => {
+  const slide = (titleAlignment, bodyText) => ({
+    slides: [
+      {
+        elements: [
+          { name: "Title", paragraphAlignment: titleAlignment },
+          { name: "Body", text: bodyText },
+        ],
+      },
+    ],
+    masters: [],
+  });
+  const before = slide(3, "Before");
+  // The engine's own save dropped the inherited alignment of a shape the
+  // command never named; the merge keeps the author's XML for it.
+  const live = slide(0, "After");
+  const expected = withAuthoredUntargetedShapes(
+    before,
+    live,
+    new Map([[0, new Set(["Body"])]]),
+  );
+  assert.equal(expected.slides[0].elements[0].paragraphAlignment, 3);
+  assert.equal(expected.slides[0].elements[1].text, "After");
+  // A command that adds a shape renumbers the others, and the saved file
+  // follows the edited document's order.
+  const renumbered = withAuthoredUntargetedShapes(
+    {
+      slides: [{ elements: [{ name: "Title", elementId: "0/0", zIndex: 0 }] }],
+      masters: [],
+    },
+    {
+      slides: [
+        {
+          elements: [
+            { name: "New", elementId: "0/0", zIndex: 0 },
+            { name: "Title", elementId: "0/1", zIndex: 1 },
+          ],
+        },
+      ],
+      masters: [],
+    },
+    new Map([[0, new Set(["New"])]]),
+  );
+  assert.deepEqual(renumbered.slides[0].elements[1], {
+    name: "Title",
+    elementId: "0/1",
+    zIndex: 1,
+  });
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({
+      before,
+      expected,
+      observed: slide(3, "After"),
+    }),
+    [],
+  );
+  // A slide whose scope is any shape keeps the live state.
+  assert.equal(
+    withAuthoredUntargetedShapes(before, live, new Map([[0, null]])).slides[0]
+      .elements[0].paragraphAlignment,
+    0,
   );
 });

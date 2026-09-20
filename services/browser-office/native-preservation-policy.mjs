@@ -113,6 +113,43 @@ export function operationSlideScope(operation) {
   return operation === "set_slide_layout" ? "any_shape" : "no_shape";
 }
 
+/**
+ * Per slide index, the author's names of the shapes the commands may change
+ * there (null: any shape). Null unless every operation is confined to its
+ * slide and every target was identified; every other shape then keeps the
+ * XML the author saved, whatever the engine's own save wrote for it.
+ */
+export function slideShapeTargets(operations, targets) {
+  if (
+    !Array.isArray(operations) ||
+    !Array.isArray(targets) ||
+    targets.length === 0 ||
+    !operations.every(
+      (operation) =>
+        operationSlideScope(operation) !== null &&
+        targets.some((target) => target?.op === operation),
+    )
+  )
+    return null;
+  const scopes = new Map();
+  for (const target of targets) {
+    const scope = operations.includes(target?.op)
+      ? operationSlideScope(target.op)
+      : null;
+    if (!scope || !Number.isSafeInteger(target?.slideIndex)) return null;
+    if (scope === "any_shape") {
+      scopes.set(target.slideIndex, null);
+      continue;
+    }
+    if (!scopes.has(target.slideIndex))
+      scopes.set(target.slideIndex, new Set());
+    if (scope === "no_shape") continue;
+    if (typeof target.name !== "string" || !target.name) return null;
+    scopes.get(target.slideIndex)?.add(target.name);
+  }
+  return scopes;
+}
+
 export function nativePreservationBudget(operations) {
   if (
     !Array.isArray(operations) ||

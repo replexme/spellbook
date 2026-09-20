@@ -6,6 +6,7 @@ import {
   humanEditPreservationBudget,
   nativePreservationBudget,
   operationSlideScope,
+  slideShapeTargets,
 } from "./native-preservation-policy.mjs";
 
 test("browser package category mapping covers every native budget category", () => {
@@ -113,4 +114,44 @@ test("each command's reach on its slide comes from the contract", () => {
     "not_an_operation",
   ])
     assert.equal(operationSlideScope(operation), null, operation);
+});
+
+test("the shapes a command may change are named per slide", () => {
+  assert.deepEqual(
+    slideShapeTargets(
+      ["text_shadow"],
+      [{ op: "text_shadow", slideIndex: 1, name: "Title" }],
+    ),
+    new Map([[1, new Set(["Title"])]]),
+  );
+  // Reordering or applying a layout reaches any shape on its slide.
+  assert.deepEqual(
+    slideShapeTargets(
+      ["z_order"],
+      [{ op: "z_order", slideIndex: 0, name: "A" }],
+    ),
+    new Map([[0, null]]),
+  );
+  // Slide settings and a new object leave the existing shapes alone.
+  assert.deepEqual(
+    slideShapeTargets(
+      ["set_background"],
+      [{ op: "set_background", slideIndex: 2 }],
+    ),
+    new Map([[2, new Set()]]),
+  );
+  // Slide structure reaches beyond one slide, and an unidentified target is
+  // not a scope at all.
+  assert.equal(
+    slideShapeTargets(
+      ["insert_slide"],
+      [{ op: "insert_slide", slideIndex: 0 }],
+    ),
+    null,
+  );
+  assert.equal(
+    slideShapeTargets(["align"], [{ op: "align", slideIndex: 0 }]),
+    null,
+  );
+  assert.equal(slideShapeTargets(["text_shadow"], []), null);
 });

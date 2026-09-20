@@ -6,7 +6,7 @@ import {
   classifyNativePackagePart,
   nativePreservationBudget,
   humanEditPreservationBudget,
-  operationSlideScope,
+  slideShapeTargets,
 } from "./native-preservation-policy.mjs";
 
 const presentationNamespace =
@@ -1180,35 +1180,13 @@ function orderedSlidePaths(entries) {
 // shapes they may change there (null: any shape). Null unless every operation
 // is confined to its slide and every target was identified; the merge then
 // keeps every other slide, and every other shape, as authored.
-function shapeTargetsBySlide(original, sourceOperations, sourceTargets) {
-  if (
-    !Array.isArray(sourceTargets) ||
-    sourceTargets.length === 0 ||
-    !sourceOperations.every(
-      (operation) =>
-        operationSlideScope(operation) !== null &&
-        sourceTargets.some((target) => target?.op === operation),
-    )
-  )
-    return null;
+function shapeTargetsBySlide(original, scopes) {
   const slidePaths = orderedSlidePaths(original);
   const targets = new Map();
-  for (const target of sourceTargets) {
-    const scope = sourceOperations.includes(target?.op)
-      ? operationSlideScope(target.op)
-      : null;
-    const part = Number.isSafeInteger(target?.slideIndex)
-      ? slidePaths[target.slideIndex]
-      : null;
-    if (!scope || !part) return null;
-    if (scope === "any_shape") {
-      targets.set(part, null);
-      continue;
-    }
-    if (!targets.has(part)) targets.set(part, new Set());
-    if (scope === "no_shape") continue;
-    if (typeof target.name !== "string" || !target.name) return null;
-    targets.get(part)?.add(target.name);
+  for (const [slideIndex, names] of scopes) {
+    const part = slidePaths[slideIndex];
+    if (!part) return null;
+    targets.set(part, names);
   }
   return targets;
 }
@@ -2105,9 +2083,12 @@ export function preserveOriginalPptxParts(
       "Native snapshot comparison exceeds the browser memory limit.",
     );
 
-  const targetNamesBySlide = humanEdit
+  const shapeScopes = humanEdit
     ? null
-    : shapeTargetsBySlide(original, sourceOperations, sourceTargets);
+    : slideShapeTargets(sourceOperations, sourceTargets);
+  const targetNamesBySlide = shapeScopes
+    ? shapeTargetsBySlide(original, shapeScopes)
+    : null;
   const merged = {};
   const editedSlides = [];
   const semanticPatchedParts = [];
@@ -2331,6 +2312,14 @@ export function preserveOriginalPptxParts(
       semanticPatchedParts: [...new Set(semanticPatchedParts)],
       suppressedNoopParts,
       suppressedOutOfBudgetParts,
+      // The shapes this merge let the engine's save change, so the caller can
+      // check the saved file against what the author still owns elsewhere.
+      authoredShapeScopes: shapeScopes
+        ? [...shapeScopes].map(([slideIndex, names]) => [
+            slideIndex,
+            names ? [...names] : null,
+          ])
+        : null,
     },
   };
 }
