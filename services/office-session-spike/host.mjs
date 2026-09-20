@@ -209,6 +209,7 @@ export async function createProbe({
           const launch = JSON.stringify({
             documentId: "probe",
             fileName: path.basename(source),
+            editorKind: "wopi",
             editorUrl: editorUrl.href,
             accessToken: token,
             expiresAt,
