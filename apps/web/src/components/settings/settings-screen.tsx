@@ -154,7 +154,7 @@ export function SettingsScreen({
 
   const activeName =
     ai.activeProvider === "gemini_api"
-      ? "Google Gemini (Gemini 2.5 Flash / Pro)"
+      ? "Google Gemini (Gemini 3.8 Flash / Pro)"
       : ai.activeProvider === "openai_api"
         ? "OpenAI API (GPT-4o / o3-mini)"
         : ai.activeProvider === "anthropic_api"
@@ -164,6 +164,35 @@ export function SettingsScreen({
             : ai.activeProvider === "codex" && codexProvider?.connected
               ? `ChatGPT 구독 · Codex (${codexProvider.account?.email ?? "연결됨"})`
               : "없음 (미연결)";
+
+  if (ai.status === "loading") {
+    return (
+      <>
+        <AppTop email={email} ai={ai} />
+        <main className="app-main">
+          <div
+            style={{
+              padding: "4rem 2rem",
+              textAlign: "center",
+              color: "var(--ds-text-secondary)",
+            }}
+          >
+            <p
+              style={{
+                fontSize: "14px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "0.5rem",
+              }}
+            >
+              <Spinner /> AI 연결 상태를 확인하고 있습니다...
+            </p>
+          </div>
+        </main>
+      </>
+    );
+  }
 
   return (
     <>
@@ -227,8 +256,8 @@ export function SettingsScreen({
                   </div>
                   <small style={{ display: "block", marginTop: "0.25rem" }}>
                     {geminiProvider?.connected
-                      ? `등록된 API 키: ${geminiProvider.maskedKey} · Gemini 2.5 Flash / 2.5 Pro 사용 가능`
-                      : "Google AI Studio에서 발급받은 API 키로 초고속 멀티모달 Gemini 2.5를 사용해요."}
+                      ? `등록된 API 키: ${geminiProvider.maskedKey} · Gemini 3.8 Flash / 3.1 Pro 사용 가능`
+                      : "Google AI Studio에서 발급받은 API 키로 최신 플래그십 Gemini 3.8을 사용해요."}
                   </small>
                   <div style={{ marginTop: "0.25rem" }}>
                     <ButtonLink

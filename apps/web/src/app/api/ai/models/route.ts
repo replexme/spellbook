@@ -1,7 +1,13 @@
 import { requireSession, routeError } from "@/lib/http";
 import { callAiAccount } from "@/lib/workers";
 import { getAccountProviders } from "@/lib/provider-keys";
-import type { AvailableModel } from "@/lib/ai-models";
+import {
+  anthropicModels,
+  geminiModels,
+  openAiModels,
+  openRouterModels,
+  type AvailableModel,
+} from "@/lib/ai-models";
 
 export const dynamic = "force-dynamic";
 
@@ -33,119 +39,16 @@ export async function GET(request: Request) {
     const models: AvailableModel[] = [...workerModels];
 
     if (hasGeminiKey && !models.some((m) => m.provider === "gemini_api")) {
-      models.push(
-        {
-          provider: "gemini_api",
-          model: "gemini-2.5-flash",
-          displayName: "Gemini 2.5 Flash (Google AI)",
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "medium", description: "기본" },
-          ],
-          isDefault: models.length === 0,
-        },
-        {
-          provider: "gemini_api",
-          model: "gemini-2.5-pro",
-          displayName: "Gemini 2.5 Pro (Google AI)",
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "low", description: "빠르게" },
-            { reasoningEffort: "medium", description: "보통" },
-            { reasoningEffort: "high", description: "꼼꼼하게" },
-          ],
-          isDefault: false,
-        },
-      );
+      models.push(...geminiModels());
     }
-
-    if (hasOpenRouterKey && !models.some((m) => m.provider === "openrouter_api")) {
-      models.push(
-        {
-          provider: "openrouter_api",
-          model: "deepseek/deepseek-chat",
-          displayName: "DeepSeek V3 (OpenRouter)",
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "medium", description: "기본" },
-          ],
-          isDefault: models.length === 0,
-        },
-        {
-          provider: "openrouter_api",
-          model: "deepseek/deepseek-r1",
-          displayName: "DeepSeek R1 (OpenRouter)",
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "high", description: "심층 추론" },
-          ],
-          isDefault: false,
-        },
-      );
-    }
-
     if (hasOpenAiKey && !models.some((m) => m.provider === "openai_api")) {
-      models.push(
-        {
-          provider: "openai_api",
-          model: "gpt-4o",
-          displayName: "GPT-4o (OpenAI API)",
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "medium", description: "기본" },
-          ],
-          isDefault: models.length === 0,
-        },
-        {
-          provider: "openai_api",
-          model: "gpt-4o-mini",
-          displayName: "GPT-4o mini (OpenAI API)",
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "medium", description: "기본" },
-          ],
-          isDefault: false,
-        },
-        {
-          provider: "openai_api",
-          model: "o3-mini",
-          displayName: "o3-mini (OpenAI API)",
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "low", description: "빠르게" },
-            { reasoningEffort: "medium", description: "보통" },
-            { reasoningEffort: "high", description: "꼼꼼하게" },
-          ],
-          isDefault: false,
-        },
-      );
+      models.push(...openAiModels());
     }
-
     if (hasAnthropicKey && !models.some((m) => m.provider === "anthropic_api")) {
-      models.push(
-        {
-          provider: "anthropic_api",
-          model: "claude-3-7-sonnet-20250219",
-          displayName: "Claude 3.7 Sonnet (Anthropic API)",
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "low", description: "빠르게" },
-            { reasoningEffort: "medium", description: "보통" },
-            { reasoningEffort: "high", description: "꼼꼼하게" },
-          ],
-          isDefault: models.length === 0,
-        },
-        {
-          provider: "anthropic_api",
-          model: "claude-3-5-sonnet-20241022",
-          displayName: "Claude 3.5 Sonnet (Anthropic API)",
-          defaultReasoningEffort: "medium",
-          supportedReasoningEfforts: [
-            { reasoningEffort: "medium", description: "기본" },
-          ],
-          isDefault: false,
-        },
-      );
+      models.push(...anthropicModels());
+    }
+    if (hasOpenRouterKey && !models.some((m) => m.provider === "openrouter_api")) {
+      models.push(...openRouterModels());
     }
 
     return Response.json(

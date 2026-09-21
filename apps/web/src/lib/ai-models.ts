@@ -143,31 +143,31 @@ export function geminiModels(): AvailableModel[] {
   return [
     {
       provider: "gemini_api",
-      model: "gemini-2.0-flash",
-      displayName: "Gemini 2.0 Flash (Google AI)",
+      model: "gemini-3.8-flash",
+      displayName: "Gemini 3.8 Flash (Google AI 최신 플래그십)",
       defaultReasoningEffort: "medium",
-      supportedReasoningEfforts: [
-        { reasoningEffort: "medium", description: "기본" },
-      ],
-      isDefault: true,
-    },
-    {
-      provider: "gemini_api",
-      model: "gemini-2.0-flash-thinking-exp-01-21",
-      displayName: "Gemini 2.0 Flash Thinking (Google AI)",
-      defaultReasoningEffort: "high",
       supportedReasoningEfforts: [
         { reasoningEffort: "low", description: "빠르게" },
         { reasoningEffort: "medium", description: "보통" },
         { reasoningEffort: "high", description: "심층 추론" },
       ],
+      isDefault: true,
+    },
+    {
+      provider: "gemini_api",
+      model: "gemini-3.7-flash",
+      displayName: "Gemini 3.7 Flash (Google AI)",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "medium", description: "기본" },
+      ],
       isDefault: false,
     },
     {
       provider: "gemini_api",
-      model: "gemini-2.0-pro-exp-02-05",
-      displayName: "Gemini 2.0 Pro (Google AI)",
-      defaultReasoningEffort: "medium",
+      model: "gemini-3.1-pro",
+      displayName: "Gemini 3.1 Pro (고지능 추론/에이전트)",
+      defaultReasoningEffort: "high",
       supportedReasoningEfforts: [
         { reasoningEffort: "low", description: "빠르게" },
         { reasoningEffort: "medium", description: "보통" },
@@ -177,8 +177,8 @@ export function geminiModels(): AvailableModel[] {
     },
     {
       provider: "gemini_api",
-      model: "gemini-1.5-pro",
-      displayName: "Gemini 1.5 Pro (Google AI)",
+      model: "gemini-3.5-flash",
+      displayName: "Gemini 3.5 Flash (Google AI)",
       defaultReasoningEffort: "medium",
       supportedReasoningEfforts: [
         { reasoningEffort: "medium", description: "기본" },
@@ -192,13 +192,23 @@ export function openRouterModels(): AvailableModel[] {
   return [
     {
       provider: "openrouter_api",
+      model: "google/gemini-3.8-flash",
+      displayName: "Gemini 3.8 Flash (OpenRouter)",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "medium", description: "기본" },
+      ],
+      isDefault: true,
+    },
+    {
+      provider: "openrouter_api",
       model: "deepseek/deepseek-chat",
       displayName: "DeepSeek V3 (OpenRouter)",
       defaultReasoningEffort: "medium",
       supportedReasoningEfforts: [
         { reasoningEffort: "medium", description: "기본" },
       ],
-      isDefault: true,
+      isDefault: false,
     },
     {
       provider: "openrouter_api",

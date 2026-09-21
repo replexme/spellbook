@@ -125,7 +125,7 @@ export async function submitNativeTurn(
     if (activeCustom) {
       const defaultModel =
         activeCustom.provider === "gemini_api"
-          ? "gemini-2.5-flash"
+          ? "gemini-3.8-flash"
           : activeCustom.provider === "openai_api"
             ? "gpt-4o"
             : activeCustom.provider === "anthropic_api"
