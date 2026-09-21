@@ -9,6 +9,10 @@ import type {
   WorkerCallback,
 } from "./models";
 import {
+  anthropicModels,
+  geminiModels,
+  openAiModels,
+  openRouterModels,
   parseModelSettings,
   supportsSettings,
   type AvailableModel,
@@ -24,7 +28,7 @@ import {
 } from "./native-conversation";
 import { signNativeConnectorToken } from "./native-connector-token";
 import { aiConnectorConfig } from "./ai-connector-config";
-import { getActiveProviderKey } from "./provider-keys";
+import { getAccountProviders, getActiveProviderKey } from "./provider-keys";
 import { loadTurnSummary } from "./native-turn-summary";
 import {
   jobRedeliverySeconds,
@@ -56,9 +60,29 @@ async function ownedSession(
 
 export async function nativeModels(session: Session, documentId?: string) {
   if (documentId) await ownedSession(session, documentId);
-  return callAiAccount("/internal/models", session.email) as Promise<{
-    models: AvailableModel[];
-  }>;
+  let workerModels: AvailableModel[] = [];
+  try {
+    const res = (await callAiAccount("/internal/models", session.email)) as {
+      models?: AvailableModel[];
+    };
+    if (Array.isArray(res?.models)) workerModels = res.models;
+  } catch {}
+
+  const customProviders = await getAccountProviders(session.accountId);
+  const models: AvailableModel[] = [...workerModels];
+  if (customProviders.some((p) => p.provider === "gemini_api")) {
+    models.push(...geminiModels());
+  }
+  if (customProviders.some((p) => p.provider === "openai_api")) {
+    models.push(...openAiModels());
+  }
+  if (customProviders.some((p) => p.provider === "anthropic_api")) {
+    models.push(...anthropicModels());
+  }
+  if (customProviders.some((p) => p.provider === "openrouter_api")) {
+    models.push(...openRouterModels());
+  }
+  return { models };
 }
 
 export async function submitNativeTurn(
@@ -86,20 +110,57 @@ export async function submitNativeTurn(
     throw new HttpError(400, "invalid_native_execution");
   if (!native.graph_object)
     throw new HttpError(409, "native_document_context_not_ready");
-  if (modelSettings && execution === "internal") {
+  let effectiveModelSettings = modelSettings;
+  const keyProviders = [
+    "openai_api",
+    "anthropic_api",
+    "gemini_api",
+    "openrouter_api",
+    "custom_api",
+  ];
+
+  if (!effectiveModelSettings?.provider) {
+    const customProviders = await getAccountProviders(session.accountId);
+    const activeCustom = customProviders.find((p) => p.isActive);
+    if (activeCustom) {
+      const defaultModel =
+        activeCustom.provider === "gemini_api"
+          ? "gemini-2.5-flash"
+          : activeCustom.provider === "openai_api"
+            ? "gpt-4o"
+            : activeCustom.provider === "anthropic_api"
+              ? "claude-3-7-sonnet-20250219"
+              : activeCustom.provider === "openrouter_api"
+                ? "deepseek/deepseek-chat"
+                : "default";
+      effectiveModelSettings = {
+        provider: activeCustom.provider as any,
+        model: defaultModel,
+        effort: "medium",
+      };
+    }
+  }
+
+  if (effectiveModelSettings && execution === "internal") {
     const catalog = await nativeModels(session, documentId);
-    if (!supportsSettings(catalog.models, modelSettings))
+    if (!supportsSettings(catalog.models, effectiveModelSettings))
       throw new HttpError(400, "selected_model_unavailable");
   }
   let apiKey: string | null = null;
   if (
-    modelSettings?.provider === "openai_api" ||
-    modelSettings?.provider === "anthropic_api"
+    effectiveModelSettings?.provider &&
+    keyProviders.includes(effectiveModelSettings.provider)
   ) {
     apiKey = await getActiveProviderKey(
       session.accountId,
-      modelSettings.provider,
+      effectiveModelSettings.provider,
     );
+    if (!apiKey) {
+      throw new HttpError(
+        400,
+        `${effectiveModelSettings.provider} API 키가 설정되지 않았습니다. 설정에서 API 키를 등록해 주세요.`,
+      );
+    }
   }
   const jobId = randomUUID();
   const turnId = randomUUID();
@@ -115,7 +176,7 @@ export async function submitNativeTurn(
     permissionMode: permission,
     execution,
     ...(apiKey ? { apiKey } : {}),
-    ...(modelSettings ? { modelSettings } : {}),
+    ...(effectiveModelSettings ? { modelSettings: effectiveModelSettings } : {}),
   };
   const publicBase = execution === "local" ? publicAppBaseUrl() : null;
   const baseJobPayload = {
