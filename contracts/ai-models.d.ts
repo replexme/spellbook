@@ -2,7 +2,10 @@ export type AiProviderId =
   | "codex"
   | "claude_code"
   | "openai_api"
-  | "anthropic_api";
+  | "anthropic_api"
+  | "gemini_api"
+  | "openrouter_api"
+  | "custom_api";
 
 /** Public account-backed model catalog; supports subscriptions and user-provided API keys. */
 export interface AvailableModel {
@@ -20,4 +23,5 @@ export interface ModelSettings {
   provider?: AiProviderId;
   model: string;
   effort: string;
+  customBaseUrl?: string;
 }

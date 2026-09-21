@@ -23,8 +23,66 @@ export async function GET(request: Request) {
     const hasAnthropicKey = customProviders.some(
       (p) => p.provider === "anthropic_api",
     );
+    const hasGeminiKey = customProviders.some(
+      (p) => p.provider === "gemini_api",
+    );
+    const hasOpenRouterKey = customProviders.some(
+      (p) => p.provider === "openrouter_api",
+    );
 
     const models: AvailableModel[] = [...workerModels];
+
+    if (hasGeminiKey && !models.some((m) => m.provider === "gemini_api")) {
+      models.push(
+        {
+          provider: "gemini_api",
+          model: "gemini-2.5-flash",
+          displayName: "Gemini 2.5 Flash (Google AI)",
+          defaultReasoningEffort: "medium",
+          supportedReasoningEfforts: [
+            { reasoningEffort: "medium", description: "기본" },
+          ],
+          isDefault: models.length === 0,
+        },
+        {
+          provider: "gemini_api",
+          model: "gemini-2.5-pro",
+          displayName: "Gemini 2.5 Pro (Google AI)",
+          defaultReasoningEffort: "medium",
+          supportedReasoningEfforts: [
+            { reasoningEffort: "low", description: "빠르게" },
+            { reasoningEffort: "medium", description: "보통" },
+            { reasoningEffort: "high", description: "꼼꼼하게" },
+          ],
+          isDefault: false,
+        },
+      );
+    }
+
+    if (hasOpenRouterKey && !models.some((m) => m.provider === "openrouter_api")) {
+      models.push(
+        {
+          provider: "openrouter_api",
+          model: "deepseek/deepseek-chat",
+          displayName: "DeepSeek V3 (OpenRouter)",
+          defaultReasoningEffort: "medium",
+          supportedReasoningEfforts: [
+            { reasoningEffort: "medium", description: "기본" },
+          ],
+          isDefault: models.length === 0,
+        },
+        {
+          provider: "openrouter_api",
+          model: "deepseek/deepseek-r1",
+          displayName: "DeepSeek R1 (OpenRouter)",
+          defaultReasoningEffort: "medium",
+          supportedReasoningEfforts: [
+            { reasoningEffort: "high", description: "심층 추론" },
+          ],
+          isDefault: false,
+        },
+      );
+    }
 
     if (hasOpenAiKey && !models.some((m) => m.provider === "openai_api")) {
       models.push(

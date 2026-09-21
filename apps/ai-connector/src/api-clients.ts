@@ -1,12 +1,10 @@
-import type { ModelSettings } from "../../../contracts/ai-models.js";
-import type {
-  AgentTurnClient,
-  AgentTurnOptions,
-} from "./app-server-client.js";
+import type { AiProviderId, ModelSettings } from "../../../contracts/ai-models.js";
 import type {
   AccountReadResult,
+  AgentTurnClient,
+  AgentTurnOptions,
   AvailableModel,
-} from "./types.js";
+} from "./app-server-client.js";
 
 function openAiModels(): AvailableModel[] {
   return [
@@ -74,18 +72,105 @@ function anthropicModels(): AvailableModel[] {
   ];
 }
 
+function geminiModels(): AvailableModel[] {
+  return [
+    {
+      provider: "gemini_api",
+      model: "gemini-2.5-flash",
+      displayName: "Gemini 2.5 Flash (Google AI)",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "기본" }],
+      isDefault: true,
+    },
+    {
+      provider: "gemini_api",
+      model: "gemini-2.5-pro",
+      displayName: "Gemini 2.5 Pro (Google AI)",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [
+        { reasoningEffort: "low", description: "빠르게" },
+        { reasoningEffort: "medium", description: "보통" },
+        { reasoningEffort: "high", description: "꼼꼼하게" },
+      ],
+      isDefault: false,
+    },
+    {
+      provider: "gemini_api",
+      model: "gemini-1.5-pro",
+      displayName: "Gemini 1.5 Pro (Google AI)",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "기본" }],
+      isDefault: false,
+    },
+  ];
+}
+
+function openRouterModels(): AvailableModel[] {
+  return [
+    {
+      provider: "openrouter_api",
+      model: "deepseek/deepseek-chat",
+      displayName: "DeepSeek V3 (OpenRouter)",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "기본" }],
+      isDefault: true,
+    },
+    {
+      provider: "openrouter_api",
+      model: "deepseek/deepseek-r1",
+      displayName: "DeepSeek R1 (OpenRouter)",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [{ reasoningEffort: "high", description: "심층 추론" }],
+      isDefault: false,
+    },
+    {
+      provider: "openrouter_api",
+      model: "google/gemini-2.5-flash",
+      displayName: "Gemini 2.5 Flash (OpenRouter)",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "기본" }],
+      isDefault: false,
+    },
+    {
+      provider: "openrouter_api",
+      model: "anthropic/claude-3.7-sonnet",
+      displayName: "Claude 3.7 Sonnet (OpenRouter)",
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "기본" }],
+      isDefault: false,
+    },
+  ];
+}
+
 export class OpenAiApiClient implements AgentTurnClient {
   readonly supportsImageGeneration = false;
-  constructor(private readonly apiKey: string) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly providerId: "openai_api" | "openrouter_api" | "custom_api" = "openai_api",
+    private readonly baseUrl?: string,
+  ) {}
 
   async accountRead(): Promise<AccountReadResult> {
     return {
-      account: { type: "openai_api", email: null, planType: "API Key" },
+      account: { type: this.providerId, email: null, planType: "API Key" },
       requiresOpenaiAuth: false,
     };
   }
 
   async models(): Promise<AvailableModel[]> {
+    if (this.providerId === "openrouter_api") return openRouterModels();
+    if (this.providerId === "custom_api") {
+      return [
+        {
+          provider: "custom_api",
+          model: "custom-model",
+          displayName: "사용자 정의 모델 (OpenAI 호환)",
+          defaultReasoningEffort: "medium",
+          supportedReasoningEfforts: [{ reasoningEffort: "medium", description: "기본" }],
+          isDefault: true,
+        },
+      ];
+    }
     return openAiModels();
   }
 
@@ -95,7 +180,13 @@ export class OpenAiApiClient implements AgentTurnClient {
     _timeoutMs = 300_000,
     options?: AgentTurnOptions,
   ): Promise<string> {
-    const selectedModel = options?.modelSettings?.model || "gpt-4o";
+    const defaultModel =
+      this.providerId === "openrouter_api"
+        ? "deepseek/deepseek-chat"
+        : this.providerId === "custom_api"
+          ? "default"
+          : "gpt-4o";
+    const selectedModel = options?.modelSettings?.model || defaultModel;
     const tools = options?.tools?.map((tool) => ({
       type: "function" as const,
       function: {
@@ -111,15 +202,28 @@ export class OpenAiApiClient implements AgentTurnClient {
       messages.push({ role: "system", content: systemPrompt });
     }
 
+    const endpoint =
+      this.providerId === "openrouter_api"
+        ? "https://openrouter.ai/api/v1/chat/completions"
+        : this.providerId === "custom_api" && this.baseUrl
+          ? `${this.baseUrl.replace(/\/+$/, "")}/chat/completions`
+          : "https://api.openai.com/v1/chat/completions";
+
     let finalAnswer = "";
     for (let step = 0; step < 40; step++) {
       if (options?.signal?.aborted) throw new Error("AI turn aborted.");
 
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      const response = await fetch(endpoint, {
         method: "POST",
         headers: {
           authorization: `Bearer ${this.apiKey}`,
           "content-type": "application/json",
+          ...(this.providerId === "openrouter_api"
+            ? {
+                "HTTP-Referer": "https://spellbook.my",
+                "X-Title": "Spellbook Present",
+              }
+            : {}),
         },
         body: JSON.stringify({
           model: selectedModel,
@@ -139,24 +243,24 @@ export class OpenAiApiClient implements AgentTurnClient {
         if (response.status === 429) {
           if (errJson?.error?.code === "insufficient_quota" || /quota|billing/i.test(errorMsg)) {
             throw new Error(
-              "OpenAI API 잔액(Quota)이 부족합니다. OpenAI 대시보드(platform.openai.com)에서 크레딧 충전 및 결제 수단을 확인해 주세요.",
+              `${this.providerId} API 잔액(Quota)이 부족합니다. 결제 수단 및 잔액을 확인해 주세요.`,
             );
           }
           throw new Error(
-            "OpenAI API 사용량 한도(Rate limit)에 도달했습니다. 잠시 후 다시 시도해 주세요.",
+            `${this.providerId} API 사용량 한도(Rate limit)에 도달했습니다. 잠시 후 다시 시도해 주세요.`,
           );
         }
         if (response.status === 401) {
           throw new Error(
-            "OpenAI API 키가 올바르지 않거나 만료되었습니다. 설정에서 API 키를 다시 확인해 주세요.",
+            `${this.providerId} API 키가 올바르지 않거나 만료되었습니다. 설정에서 API 키를 다시 확인해 주세요.`,
           );
         }
-        throw new Error(`OpenAI API 오류 (${response.status}): ${errorMsg}`);
+        throw new Error(`${this.providerId} API 오류 (${response.status}): ${errorMsg}`);
       }
 
       const data = await response.json();
       const choice = data.choices?.[0];
-      if (!choice) throw new Error("OpenAI API로부터 응답을 받지 못했습니다.");
+      if (!choice) throw new Error(`${this.providerId} API로부터 응답을 받지 못했습니다.`);
 
       const message = choice.message;
       messages.push(message);
@@ -323,3 +427,135 @@ export class AnthropicApiClient implements AgentTurnClient {
     return finalAnswer;
   }
 }
+
+export class GeminiApiClient implements AgentTurnClient {
+  readonly supportsImageGeneration = false;
+  constructor(private readonly apiKey: string) {}
+
+  async accountRead(): Promise<AccountReadResult> {
+    return {
+      account: { type: "gemini_api", email: null, planType: "Google AI Studio" },
+      requiresOpenaiAuth: false,
+    };
+  }
+
+  async models(): Promise<AvailableModel[]> {
+    return geminiModels();
+  }
+
+  async runStructuredTurn(
+    input: Array<Record<string, unknown>>,
+    _outputSchema: Record<string, unknown>,
+    _timeoutMs = 300_000,
+    options?: AgentTurnOptions,
+  ): Promise<string> {
+    const selectedModel = options?.modelSettings?.model || "gemini-2.5-flash";
+    const tools = options?.tools?.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.inputSchema,
+    }));
+
+    const systemPrompt = input.find((item) => item.type === "text")?.text;
+    const contents: any[] = [
+      {
+        role: "user",
+        parts: [
+          {
+            text:
+              (typeof systemPrompt === "string" ? `${systemPrompt}\n\n` : "") +
+              "프레젠테이션 작업을 시작해 주세요.",
+          },
+        ],
+      },
+    ];
+
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${this.apiKey}`;
+
+    let finalAnswer = "";
+    for (let step = 0; step < 40; step++) {
+      if (options?.signal?.aborted) throw new Error("AI turn aborted.");
+
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contents,
+          tools: tools && tools.length > 0 ? [{ functionDeclarations: tools }] : undefined,
+        }),
+        signal: options?.signal,
+      });
+
+      if (!response.ok) {
+        let errJson: any = null;
+        try {
+          errJson = await response.json();
+        } catch {}
+        const errorMsg = errJson?.error?.message || response.statusText;
+        if (response.status === 429) {
+          throw new Error(
+            "Google Gemini API 사용량 한도(Rate limit) 또는 할당량(Quota)에 도달했습니다. 잠시 후 다시 시도해 주세요.",
+          );
+        }
+        if (response.status === 400 && /API_KEY_INVALID|key/i.test(errorMsg)) {
+          throw new Error(
+            "Google Gemini API 키가 유효하지 않습니다. Google AI Studio(aistudio.google.com)에서 발급받은 키를 확인해 주세요.",
+          );
+        }
+        throw new Error(`Google Gemini API 오류 (${response.status}): ${errorMsg}`);
+      }
+
+      const data = await response.json();
+      const candidate = data.candidates?.[0];
+      if (!candidate?.content) throw new Error("Google Gemini API로부터 응답을 받지 못했습니다.");
+
+      contents.push(candidate.content);
+
+      const parts = candidate.content.parts || [];
+      const textPart = parts.find((p: any) => p.text);
+      if (textPart?.text) {
+        finalAnswer = textPart.text;
+        options?.onText?.(textPart.text);
+      }
+
+      const functionCalls = parts.filter((p: any) => p.functionCall);
+      if (!functionCalls || functionCalls.length === 0) {
+        break;
+      }
+
+      const functionResponses: any[] = [];
+      for (const part of functionCalls) {
+        const call = part.functionCall;
+        const name = call.name;
+        const args = call.args ?? {};
+        let resultObj = { success: true };
+        try {
+          const toolResult = await options?.onTool?.(
+            name,
+            args,
+            `${name}-${step}`,
+            options.signal ?? new AbortController().signal,
+          );
+          resultObj = (toolResult as any) ?? { success: true };
+        } catch (callErr: any) {
+          resultObj = {
+            success: false,
+            error: callErr?.message ?? "tool_call_failed",
+          } as any;
+        }
+        functionResponses.push({
+          functionResponse: {
+            name,
+            response: { output: resultObj },
+          },
+        });
+      }
+
+      contents.push({ role: "function", parts: functionResponses });
+    }
+
+    return finalAnswer;
+  }
+}
+
+export { openAiModels, anthropicModels, geminiModels, openRouterModels };

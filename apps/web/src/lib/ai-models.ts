@@ -11,6 +11,9 @@ export const VALID_AI_PROVIDERS: readonly AiProviderId[] = [
   "claude_code",
   "openai_api",
   "anthropic_api",
+  "gemini_api",
+  "openrouter_api",
+  "custom_api",
 ] as const;
 
 export function parseModelSettings(value: unknown): ModelSettings | undefined {
@@ -20,7 +23,7 @@ export function parseModelSettings(value: unknown): ModelSettings | undefined {
   const input = value as Record<string, unknown>;
   if (
     Object.keys(input).some(
-      (key) => !["provider", "model", "effort"].includes(key),
+      (key) => !["provider", "model", "effort", "customBaseUrl"].includes(key),
     ) ||
     (input.provider !== undefined &&
       !VALID_AI_PROVIDERS.includes(input.provider as AiProviderId)) ||
@@ -29,7 +32,10 @@ export function parseModelSettings(value: unknown): ModelSettings | undefined {
     input.model.length > 120 ||
     typeof input.effort !== "string" ||
     !input.effort ||
-    input.effort.length > 24
+    input.effort.length > 24 ||
+    (input.customBaseUrl !== undefined &&
+      (typeof input.customBaseUrl !== "string" ||
+        input.customBaseUrl.length > 255))
   )
     throw new Error("invalid_model_settings");
   return {
@@ -38,6 +44,9 @@ export function parseModelSettings(value: unknown): ModelSettings | undefined {
       : {}),
     model: input.model,
     effort: input.effort,
+    ...(typeof input.customBaseUrl === "string" && input.customBaseUrl.trim()
+      ? { customBaseUrl: input.customBaseUrl.trim() }
+      : {}),
   };
 }
 

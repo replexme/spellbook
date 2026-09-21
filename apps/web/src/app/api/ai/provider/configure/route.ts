@@ -11,10 +11,14 @@ export async function POST(request: Request) {
       apiKey?: string;
       active?: boolean;
     };
-    if (
-      body.provider !== "openai_api" &&
-      body.provider !== "anthropic_api"
-    ) {
+    const allowed = [
+      "openai_api",
+      "anthropic_api",
+      "gemini_api",
+      "openrouter_api",
+      "custom_api",
+    ];
+    if (!allowed.includes(body.provider ?? "")) {
       return Response.json({ error: "invalid_provider" }, { status: 400 });
     }
     if (typeof body.apiKey !== "string" || !body.apiKey.trim()) {

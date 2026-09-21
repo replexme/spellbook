@@ -7,7 +7,12 @@ import {
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./http";
 
-export type ApiKeyProvider = "openai_api" | "anthropic_api";
+export type ApiKeyProvider =
+  | "openai_api"
+  | "anthropic_api"
+  | "gemini_api"
+  | "openrouter_api"
+  | "custom_api";
 
 function encryptionKey(): Buffer {
   const secret =
@@ -70,6 +75,37 @@ export async function validateApiKey(
     });
     if (!res.ok && res.status === 401) {
       throw new HttpError(400, "Anthropic API 키가 유효하지 않습니다. (401 Unauthorized)");
+    }
+  } else if (provider === "gemini_api") {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${trimmed}`,
+      { signal: AbortSignal.timeout(7000) },
+    );
+    if (!res.ok) {
+      if (res.status === 400 || res.status === 403)
+        throw new HttpError(
+          400,
+          "Google Gemini API 키가 유효하지 않습니다. Google AI Studio(aistudio.google.com)에서 발급받은 키를 확인해 주세요.",
+        );
+      if (res.status === 429)
+        throw new HttpError(
+          400,
+          "Google Gemini API 사용량 한도(Rate limit)에 도달했습니다.",
+        );
+      throw new HttpError(400, `Google Gemini API 오류 (${res.status})`);
+    }
+  } else if (provider === "openrouter_api") {
+    const res = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: { authorization: `Bearer ${trimmed}` },
+      signal: AbortSignal.timeout(7000),
+    });
+    if (!res.ok) {
+      if (res.status === 401)
+        throw new HttpError(
+          400,
+          "OpenRouter API 키가 유효하지 않습니다. (401 Unauthorized)",
+        );
+      throw new HttpError(400, `OpenRouter API 오류 (${res.status})`);
     }
   }
 }

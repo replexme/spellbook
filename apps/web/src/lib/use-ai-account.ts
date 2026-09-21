@@ -33,7 +33,14 @@ export interface RateLimitInfo {
 }
 
 export interface ProviderItem {
-  id: "codex" | "claude_code" | "openai_api" | "anthropic_api";
+  id:
+    | "codex"
+    | "claude_code"
+    | "openai_api"
+    | "anthropic_api"
+    | "gemini_api"
+    | "openrouter_api"
+    | "custom_api";
   displayName: string;
   type: "subscription" | "api_key";
   connected: boolean;
@@ -205,7 +212,12 @@ export function useAiAccount(config: AiConnectorConfig) {
 
   const configureApiKey = useCallback(
     async (
-      provider: "openai_api" | "anthropic_api",
+      provider:
+        | "openai_api"
+        | "anthropic_api"
+        | "gemini_api"
+        | "openrouter_api"
+        | "custom_api",
       apiKey: string,
       active = true,
     ) => {
@@ -273,6 +285,11 @@ export function useAiAccount(config: AiConnectorConfig) {
   const anthropicCustom = customProviders.find(
     (p) => p.provider === "anthropic_api",
   );
+  const geminiCustom = customProviders.find((p) => p.provider === "gemini_api");
+  const openRouterCustom = customProviders.find(
+    (p) => p.provider === "openrouter_api",
+  );
+  const customCustom = customProviders.find((p) => p.provider === "custom_api");
 
   const activeProvider =
     accountResponse?.activeProvider ??
@@ -280,9 +297,15 @@ export function useAiAccount(config: AiConnectorConfig) {
       ? "openai_api"
       : anthropicCustom?.isActive
         ? "anthropic_api"
-        : codexConnected
-          ? "codex"
-          : "none");
+        : geminiCustom?.isActive
+          ? "gemini_api"
+          : openRouterCustom?.isActive
+            ? "openrouter_api"
+            : customCustom?.isActive
+              ? "custom_api"
+              : codexConnected
+                ? "codex"
+                : "none");
 
   const providers: ProviderItem[] = [
     {
@@ -302,6 +325,14 @@ export function useAiAccount(config: AiConnectorConfig) {
       isActive: activeProvider === "claude_code",
     },
     {
+      id: "gemini_api",
+      displayName: "Google Gemini API 키",
+      type: "api_key",
+      connected: Boolean(geminiCustom),
+      isActive: activeProvider === "gemini_api",
+      maskedKey: geminiCustom?.maskedKey,
+    },
+    {
       id: "openai_api",
       displayName: "OpenAI API 키",
       type: "api_key",
@@ -316,6 +347,22 @@ export function useAiAccount(config: AiConnectorConfig) {
       connected: Boolean(anthropicCustom),
       isActive: activeProvider === "anthropic_api",
       maskedKey: anthropicCustom?.maskedKey,
+    },
+    {
+      id: "openrouter_api",
+      displayName: "OpenRouter API 키",
+      type: "api_key",
+      connected: Boolean(openRouterCustom),
+      isActive: activeProvider === "openrouter_api",
+      maskedKey: openRouterCustom?.maskedKey,
+    },
+    {
+      id: "custom_api",
+      displayName: "사용자 정의 OpenAI 호환 API",
+      type: "api_key",
+      connected: Boolean(customCustom),
+      isActive: activeProvider === "custom_api",
+      maskedKey: customCustom?.maskedKey,
     },
   ];
 
