@@ -26,8 +26,14 @@ body,
   font-size: 11px !important;
 }
 
+.notebookbar .ui-overflow-group-label,
+#Home-container .ui-overflow-group-label {
+  display: none !important;
+}
+
 .notebookbar button,
 .notebookbar .ui-text,
+.notebookbar span.unolabel,
 .notebookbar span,
 .notebookbar label,
 .notebookbar p {

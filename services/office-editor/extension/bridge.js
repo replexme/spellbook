@@ -327,7 +327,11 @@ function applySpellbookToolbarTypography() {
       .notebookbar, .notebookbar .ui-content {
         font-size: 11px !important;
       }
-      .notebookbar button, .notebookbar .ui-text, .notebookbar span, .notebookbar label, .notebookbar p {
+      .notebookbar .ui-overflow-group-label,
+      #Home-container .ui-overflow-group-label {
+        display: none !important;
+      }
+      .notebookbar button, .notebookbar .ui-text, .notebookbar span.unolabel, .notebookbar span, .notebookbar label, .notebookbar p {
         font-family: -apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
         font-size: 11px !important;
         font-weight: 500 !important;

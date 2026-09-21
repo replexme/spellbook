@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const session = await currentSession();
-  if (!session) redirect("/");
+  if (!session) redirect("/auth/login?redirect=/settings");
   return (
     <SettingsScreen email={session.email} aiConnector={aiConnectorConfig()} />
   );

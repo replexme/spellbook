@@ -69,6 +69,13 @@ type AccountResponse = {
   }>;
 };
 
+function bounceToLogin() {
+  if (typeof window !== "undefined") {
+    const path = window.location.pathname + window.location.search;
+    window.location.href = `/auth/login?redirect=${encodeURIComponent(path)}`;
+  }
+}
+
 export function useAiAccount(config: AiConnectorConfig) {
   const connectorOrigin = localConnectorOrigin(config);
   const [accountResponse, setAccountResponse] =
@@ -110,6 +117,10 @@ export function useAiAccount(config: AiConnectorConfig) {
       const response = await fetch("/api/ai/account/status", {
         cache: "no-store",
       });
+      if (response.status === 401) {
+        bounceToLogin();
+        return null;
+      }
       if (!response.ok) throw new Error("account_status_unavailable");
       const value = (await response.json()) as AccountResponse;
       setAccountResponse(value);
@@ -161,6 +172,10 @@ export function useAiAccount(config: AiConnectorConfig) {
         return;
       }
       const response = await fetch("/api/ai/account/login", { method: "POST" });
+      if (response.status === 401) {
+        bounceToLogin();
+        return;
+      }
       const value = (await response.json()) as AiDeviceLogin & {
         error?: string;
       };
@@ -226,6 +241,10 @@ export function useAiAccount(config: AiConnectorConfig) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ provider, apiKey, active }),
       });
+      if (res.status === 401) {
+        bounceToLogin();
+        return;
+      }
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || "API 키를 저장하지 못했습니다.");
@@ -242,6 +261,10 @@ export function useAiAccount(config: AiConnectorConfig) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ provider }),
       });
+      if (res.status === 401) {
+        bounceToLogin();
+        return;
+      }
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "API 키를 삭제하지 못했습니다.");
@@ -258,6 +281,10 @@ export function useAiAccount(config: AiConnectorConfig) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ provider }),
       });
+      if (res.status === 401) {
+        bounceToLogin();
+        return;
+      }
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "공급자를 변경하지 못했습니다.");

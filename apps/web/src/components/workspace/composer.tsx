@@ -59,14 +59,35 @@ export function ModelMenu({
       .then((body) => {
         if (!body.models?.length) throw new Error("models_empty");
         setModels(body.models);
-        if (!value) {
+
+        const effectiveProvider = activeProvider || value?.provider;
+        const currentModelValid =
+          value &&
+          body.models.some(
+            (item) =>
+              item.model === value.model &&
+              (!effectiveProvider ||
+                (item.provider ?? "codex") === effectiveProvider),
+          );
+
+        if (!currentModelValid) {
+          const providerModels = effectiveProvider
+            ? body.models.filter(
+                (item) => (item.provider ?? "codex") === effectiveProvider,
+              )
+            : body.models;
           const initial =
-            body.models.find((item) => item.isDefault) ?? body.models[0]!;
-          onChange({
-            ...(initial.provider ? { provider: initial.provider } : {}),
-            model: initial.model,
-            effort: initial.defaultReasoningEffort,
-          });
+            providerModels.find((item) => item.isDefault) ??
+            providerModels[0] ??
+            body.models.find((item) => item.isDefault) ??
+            body.models[0];
+          if (initial) {
+            onChange({
+              ...(initial.provider ? { provider: initial.provider } : {}),
+              model: initial.model,
+              effort: initial.defaultReasoningEffort,
+            });
+          }
         }
         setStatus("ready");
       })
