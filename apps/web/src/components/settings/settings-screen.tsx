@@ -201,7 +201,7 @@ export function SettingsScreen({
                 ) : (
                   <Banner tone="warn" role="status">
                     ⚠️ <strong>현재 연결된 AI가 없습니다.</strong> 아래에서
-                    <strong> Google Gemini API 키 (무료 티어 제공)</strong> 또는
+                    <strong> Google Gemini API 키</strong> 또는
                     본인의 API 키/구독을 등록해 주세요.
                   </Banner>
                 )}
@@ -223,12 +223,12 @@ export function SettingsScreen({
                 <div style={{ flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
                     <strong>Google Gemini (Google AI Studio)</strong>
-                    <Badge tone="ok">추천 · 무료 티어 제공</Badge>
+                    <Badge tone="ok">추천</Badge>
                   </div>
                   <small style={{ display: "block", marginTop: "0.25rem" }}>
                     {geminiProvider?.connected
                       ? `등록된 API 키: ${geminiProvider.maskedKey} · Gemini 2.5 Flash / 2.5 Pro 사용 가능`
-                      : "Google AI Studio에서 발급받은 무료 API 키로 초고속 멀티모달 Gemini 2.5를 사용해요."}
+                      : "Google AI Studio에서 발급받은 API 키로 초고속 멀티모달 Gemini 2.5를 사용해요."}
                   </small>
                   <div style={{ marginTop: "0.25rem" }}>
                     <ButtonLink
@@ -239,7 +239,7 @@ export function SettingsScreen({
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Google AI Studio에서 무료 키 발급받기 ↗
+                      Google AI Studio API 키 관리 ↗
                     </ButtonLink>
                   </div>
 
