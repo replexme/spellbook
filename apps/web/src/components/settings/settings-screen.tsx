@@ -153,46 +153,19 @@ export function SettingsScreen({
   };
 
   const activeName =
-    ai.activeProvider === "gemini_api"
-      ? "Google Gemini (Gemini 3.8 Flash / Pro)"
-      : ai.activeProvider === "openai_api"
-        ? "OpenAI API (GPT-4o / o3-mini)"
-        : ai.activeProvider === "anthropic_api"
-          ? "Anthropic API (Claude 3.7 Sonnet)"
-          : ai.activeProvider === "openrouter_api"
-            ? "OpenRouter (DeepSeek / Llama)"
-            : ai.activeProvider === "codex" && codexProvider?.connected
-              ? `ChatGPT 구독 · Codex (${codexProvider.account?.email ?? "연결됨"})`
-              : "없음 (미연결)";
-
-  if (ai.status === "loading") {
-    return (
-      <>
-        <AppTop email={email} ai={ai} />
-        <main className="app-main">
-          <div
-            style={{
-              padding: "4rem 2rem",
-              textAlign: "center",
-              color: "var(--ds-text-secondary)",
-            }}
-          >
-            <p
-              style={{
-                fontSize: "14px",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "0.5rem",
-              }}
-            >
-              <Spinner /> AI 연결 상태를 확인하고 있습니다...
-            </p>
-          </div>
-        </main>
-      </>
-    );
-  }
+    ai.status === "loading"
+      ? "확인 중..."
+      : ai.activeProvider === "gemini_api"
+        ? "Google Gemini (Gemini 3.8 Flash / Pro)"
+        : ai.activeProvider === "openai_api"
+          ? "OpenAI API (GPT-4o / o3-mini)"
+          : ai.activeProvider === "anthropic_api"
+            ? "Anthropic API (Claude 3.7 Sonnet)"
+            : ai.activeProvider === "openrouter_api"
+              ? "OpenRouter (DeepSeek / Llama)"
+              : ai.activeProvider === "codex" && codexProvider?.connected
+                ? `ChatGPT 구독 · Codex (${codexProvider.account?.email ?? "연결됨"})`
+                : "없음 (미연결)";
 
   return (
     <>
@@ -219,19 +192,22 @@ export function SettingsScreen({
 
               {/* ── Active Status Hero Banner ── */}
               <div style={{ marginBottom: "1.25rem" }}>
-                {ai.activeProvider !== "none" ? (
+                {ai.status === "loading" ? (
+                  <Banner tone="neutral" role="status">
+                    <Spinner /> AI 연결 상태를 확인하고 있습니다...
+                  </Banner>
+                ) : ai.activeProvider !== "none" ? (
                   <Banner tone="ok" role="status">
                     <strong>현재 사용 중인 AI:</strong> {activeName}
                     <br />
                     프레젠테이션 편집 시 이 AI가 요청을 처리합니다. 아래 목록에서
-                    원하는 AI의 <strong>[이 AI 사용하기]</strong> 버튼을 누르면 1초
-                    만에 전환됩니다.
+                    원하는 AI의 <strong>[이 AI 사용하기]</strong> 버튼을 누르면 즉시
+                    전환됩니다.
                   </Banner>
                 ) : (
                   <Banner tone="warn" role="status">
                     ⚠️ <strong>현재 연결된 AI가 없습니다.</strong> 아래에서
-                    <strong> Google Gemini API 키</strong> 또는
-                    본인의 API 키/구독을 등록해 주세요.
+                    Google Gemini, OpenAI, Claude 등의 API 키 또는 구독을 등록해 주세요.
                   </Banner>
                 )}
               </div>
