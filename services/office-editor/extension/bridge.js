@@ -310,6 +310,62 @@ window.addEventListener("message", (event) => {
   connection.postMessage({ type: "ready" });
   publishSelection();
 });
+function applySpellbookToolbarTypography() {
+  try {
+    const parentDoc = window.parent?.document;
+    if (
+      !parentDoc ||
+      parentDoc.getElementById("spellbook-injected-toolbar-style")
+    )
+      return;
+    const style = parentDoc.createElement("style");
+    style.id = "spellbook-injected-toolbar-style";
+    style.textContent = `
+      html, body, .notebookbar, .notebookbar *, .ui-content, #Home-container, #navigation-sidebar, .navigation-header, .main-nav {
+        font-family: -apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+      }
+      .notebookbar, .notebookbar .ui-content {
+        font-size: 11px !important;
+      }
+      .notebookbar button, .notebookbar .ui-text, .notebookbar span, .notebookbar label, .notebookbar p {
+        font-family: -apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+        font-size: 11px !important;
+        font-weight: 500 !important;
+        line-height: 1.25 !important;
+      }
+      .main-nav .ui-tab {
+        font-size: 12px !important;
+        font-weight: 500 !important;
+      }
+      .navigation-header {
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        height: 32px !important;
+        padding: 4px 8px !important;
+      }
+      .navigation-header .navigation-title {
+        display: none !important;
+      }
+    `;
+    parentDoc.head.appendChild(style);
+
+    const fixPaste = () => {
+      const pasteButtons = parentDoc.querySelectorAll(
+        "#Home-container button, .notebookbar button, #buttonpaste",
+      );
+      for (const btn of pasteButtons) {
+        if (btn.textContent && btn.textContent.includes("Paste")) {
+          btn.innerHTML = btn.innerHTML.replace(/\bPaste\b/g, "붙여넣기");
+        }
+      }
+    };
+    fixPaste();
+    const pasteObserver = new MutationObserver(fixPaste);
+    pasteObserver.observe(parentDoc.body, { childList: true, subtree: true });
+  } catch {}
+}
+applySpellbookToolbarTypography();
+
 const announceReady = () => {
   if (connection) {
     clearInterval(readyTimer);

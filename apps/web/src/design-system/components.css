@@ -591,6 +591,10 @@ button.ds-chip.is-ai:hover:not(:disabled) {
   z-index: var(--ds-z-menu);
   min-width: 240px;
   max-width: min(340px, calc(100vw - 24px));
+  max-height: min(380px, calc(100vh - 120px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   padding: var(--ds-space-1);
   border: 1px solid var(--ds-border);
   border-radius: var(--ds-radius-lg);

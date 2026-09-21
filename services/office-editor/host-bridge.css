@@ -9,6 +9,38 @@
  * document-type colour (orange for presentations) becomes the neutral accent
  * Spellbook passes at launch; teal stays reserved for the AI.
  */
+html,
+body,
+.notebookbar,
+.notebookbar *,
+.ui-content,
+#Home-container,
+#navigation-sidebar,
+.navigation-header,
+.main-nav {
+  font-family: -apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+}
+
+.notebookbar,
+.notebookbar .ui-content {
+  font-size: 11px !important;
+}
+
+.notebookbar button,
+.notebookbar .ui-text,
+.notebookbar span,
+.notebookbar label,
+.notebookbar p {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  line-height: 1.25 !important;
+}
+
+.main-nav .ui-tab {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+
 body[data-doctype] {
   --doc-type: var(--spellbook-editor-accent-rgb, 163, 62, 3);
 }

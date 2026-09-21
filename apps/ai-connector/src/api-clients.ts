@@ -1,10 +1,12 @@
 import type { AiProviderId, ModelSettings } from "../../../contracts/ai-models.js";
 import type {
-  AccountReadResult,
   AgentTurnClient,
   AgentTurnOptions,
-  AvailableModel,
 } from "./app-server-client.js";
+import type {
+  AccountReadResult,
+  AvailableModel,
+} from "./types.js";
 
 function openAiModels(): AvailableModel[] {
   return [

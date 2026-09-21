@@ -8,6 +8,7 @@ import {
   IconButton,
   Menu,
   MenuItem,
+  MenuSeparator,
   Segmented,
   Spinner,
 } from "@/design-system";
@@ -81,10 +82,17 @@ export function ModelMenu({
   );
   const efforts = model?.supportedReasoningEfforts ?? [];
   const label = value
-    ? `${providerName(model?.provider ?? value.provider)} · ${effortTitle(value.effort)}`
+    ? `${model?.displayName ?? value.model} · ${effortTitle(value.effort)}`
     : status === "error"
       ? "모델을 불러오지 못함"
       : "모델 확인 중";
+  const groupedProviders = [
+    { id: "gemini_api", title: "Google Gemini" },
+    { id: "openai_api", title: "OpenAI API" },
+    { id: "anthropic_api", title: "Anthropic Claude" },
+    { id: "openrouter_api", title: "OpenRouter" },
+    { id: "codex", title: "ChatGPT (Codex)" },
+  ];
   return (
     <Menu
       label="AI 모델과 생각 깊이"
@@ -131,34 +139,65 @@ export function ModelMenu({
           </div>
         ) : (
           <>
-            {models.map((item) => (
-              <MenuItem
-                key={`${item.provider ?? "codex"}:${item.model}`}
-                checked={
-                  item.model === model?.model &&
-                  (item.provider ?? "codex") === (model?.provider ?? "codex")
-                }
-                title={
-                  <>
-                    {item.displayName}
-                    {item.isDefault ? (
-                      <span className="ds-badge composer-recommended">
-                        추천
-                      </span>
-                    ) : null}
-                  </>
-                }
-                description={providerName(item.provider)}
-                onSelect={() => {
-                  onChange({
-                    ...(item.provider ? { provider: item.provider } : {}),
-                    model: item.model,
-                    effort: item.defaultReasoningEffort,
-                  });
-                  close();
-                }}
-              />
-            ))}
+            {groupedProviders.map((grp) => {
+              const groupModels = models.filter(
+                (m) => (m.provider ?? "codex") === grp.id,
+              );
+              if (groupModels.length === 0) return null;
+              return (
+                <div key={grp.id} style={{ marginBottom: "0.25rem" }}>
+                  <p
+                    className="ds-menu-title"
+                    style={{
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      margin: "6px 8px 2px",
+                    }}
+                  >
+                    {grp.title}
+                  </p>
+                  {groupModels.map((item) => (
+                    <MenuItem
+                      key={`${item.provider ?? "codex"}:${item.model}`}
+                      checked={
+                        item.model === model?.model &&
+                        (item.provider ?? "codex") ===
+                          (model?.provider ?? "codex")
+                      }
+                      title={
+                        <>
+                          {item.displayName}
+                          {item.isDefault ? (
+                            <span className="ds-badge composer-recommended">
+                              추천
+                            </span>
+                          ) : null}
+                        </>
+                      }
+                      onSelect={() => {
+                        onChange({
+                          ...(item.provider
+                            ? { provider: item.provider }
+                            : {}),
+                          model: item.model,
+                          effort: item.defaultReasoningEffort,
+                        });
+                        close();
+                      }}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+            <MenuSeparator />
+            <MenuItem
+              title="AI 공급자 관리..."
+              description="Google Gemini, API 키 등록 및 전환"
+              onSelect={() => {
+                close();
+                window.open("/settings#ai", "_self");
+              }}
+            />
             {model && efforts.length > 1 ? (
               <div className="ds-menu-section composer-effort">
                 <p className="ds-menu-title">생각 깊이</p>
