@@ -59,7 +59,12 @@ export type TurnSlideEvidence = {
   stale?: boolean;
 };
 
-export type TurnFailure = { code: string; message: string };
+export type TurnFailure = {
+  code: string;
+  message: string;
+  detail?: string | null;
+  raw?: string | null;
+};
 
 export type TurnSummary = {
   version: 1;
@@ -216,16 +221,28 @@ const failureRules: Array<{ test: RegExp; code: string; message: string }> = [
 export function nativeFailureReason(
   error: string | null | undefined,
 ): TurnFailure {
-  const text = error ?? "";
-  for (const rule of failureRules)
-    if (rule.test.test(text)) return { code: rule.code, message: rule.message };
-  if (/[가-힣]/.test(text) && text.length <= 200) {
-    return { code: "service_message", message: text };
+  const text = (error ?? "").trim();
+  if (!text) {
+    return {
+      code: "unknown",
+      message: "AI 작업이 비정상적으로 종료되었습니다.",
+    };
+  }
+  for (const rule of failureRules) {
+    if (rule.test.test(text)) {
+      return {
+        code: rule.code,
+        message: rule.message,
+        detail: text !== rule.message ? text : undefined,
+        raw: text,
+      };
+    }
   }
   return {
     code: "unknown",
-    message:
-      "AI가 요청을 끝내지 못했어요. 문서는 요청 전 상태를 유지하고 있어요.",
+    message: text,
+    detail: text,
+    raw: text,
   };
 }
 

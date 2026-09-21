@@ -390,10 +390,25 @@ export function ResultCard({
       summary?.failure?.message ??
       turn.error ??
       "AI가 요청을 끝내지 못했어요. 다시 요청해 주세요.";
+    const failureCode = summary?.failure?.code;
     const isRateLimit =
-      summary?.failure?.code === "usage_limit" ||
-      summary?.failure?.code === "quota_exhausted" ||
+      failureCode === "usage_limit" ||
+      failureCode === "quota_exhausted" ||
       /한도|rate[ _-]?limit|quota|out of codex messages/i.test(message);
+    const isAuthError =
+      failureCode === "api_key_invalid" || failureCode === "ai_not_connected";
+    const title =
+      outcome === "cancelled"
+        ? "요청 중단됨"
+        : isRateLimit
+          ? "AI 사용량 한도 도달"
+          : isAuthError
+            ? "AI 인증 실패"
+            : failureCode === "model_unavailable"
+              ? "AI 모델 사용 불가"
+              : failureCode === "timeout"
+                ? "AI 응답 시간 초과"
+                : "AI 요청 실패";
     return (
       <article
         className={`rc ${outcome === "failed" ? "is-failed" : "is-cancelled"}`}
@@ -401,13 +416,7 @@ export function ResultCard({
         <CardHead
           tone={isRateLimit ? "warn" : outcome}
           icon={outcome === "failed" ? "close" : "stop"}
-          title={
-            isRateLimit
-              ? "AI 사용량 한도 도달"
-              : outcome === "failed"
-                ? "고치지 못함"
-                : "중단됨"
-          }
+          title={title}
           time={time}
         />
         <div className="rc-section">
@@ -422,7 +431,33 @@ export function ResultCard({
           >
             {message}
           </Banner>
-          {isRateLimit ? (
+          {summary?.failure?.detail && summary.failure.detail !== message ? (
+            <details
+              style={{
+                marginTop: "0.5rem",
+                fontSize: "12px",
+                opacity: 0.85,
+              }}
+            >
+              <summary style={{ cursor: "pointer", fontWeight: 600 }}>
+                상세 에러 내용 (Technical Details)
+              </summary>
+              <pre
+                style={{
+                  margin: "0.25rem 0",
+                  padding: "0.5rem",
+                  borderRadius: "4px",
+                  fontSize: "11px",
+                  background: "var(--bg-subtle)",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-all",
+                }}
+              >
+                {summary.failure.detail}
+              </pre>
+            </details>
+          ) : null}
+          {isRateLimit || isAuthError ? (
             <div style={{ marginTop: "0.5rem" }}>
               <ButtonLink size="sm" variant="primary" href="/settings#ai">
                 설정에서 API 키 등록 또는 공급자 전환
