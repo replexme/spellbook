@@ -2086,6 +2086,7 @@ export function NativeWorkspace({
                       inputRef={input}
                       selection={selection}
                       rateLimitWarning={rateLimitWarning}
+                      activeProvider={ai.activeProvider}
                     />
                   </>
                 ) : (

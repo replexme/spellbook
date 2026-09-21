@@ -39,11 +39,13 @@ export function ModelMenu({
   onChange,
   disabled,
   loadModels,
+  activeProvider,
 }: {
   value: ModelSettings | undefined;
   onChange: (value: ModelSettings | undefined) => void;
   disabled: boolean;
   loadModels: (signal: AbortSignal) => Promise<{ models: AvailableModel[] }>;
+  activeProvider?: string;
 }) {
   const [models, setModels] = useState<AvailableModel[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">(
@@ -93,11 +95,17 @@ export function ModelMenu({
     { id: "openrouter_api", title: "OpenRouter" },
     { id: "codex", title: "ChatGPT (Codex)" },
   ];
+  const effectiveProvider = value?.provider || activeProvider || "codex";
+  const activeModels = models.filter(
+    (m) => (m.provider ?? "codex") === effectiveProvider,
+  );
+  const displayModels = activeModels.length > 0 ? activeModels : models;
+
   return (
     <Menu
       label="AI 모델과 생각 깊이"
       title={
-        model ? `AI 모델 · ${providerName(model.provider)} 구독` : "AI 모델"
+        model ? `AI 모델 · ${providerName(model.provider)}` : "AI 모델"
       }
       placement="above-start"
       width={300}
@@ -121,7 +129,7 @@ export function ModelMenu({
       {(close) =>
         status === "loading" ? (
           <p className="ds-menu-section composer-menu-note">
-            <Spinner /> 구독에서 쓸 수 있는 모델을 확인하고 있어요.
+            <Spinner /> 쓸 수 있는 모델을 확인하고 있어요.
           </p>
         ) : status === "error" ? (
           <div className="ds-menu-section composer-menu-note">
@@ -139,60 +147,48 @@ export function ModelMenu({
           </div>
         ) : (
           <>
-            {groupedProviders.map((grp) => {
-              const groupModels = models.filter(
-                (m) => (m.provider ?? "codex") === grp.id,
-              );
-              if (groupModels.length === 0) return null;
-              return (
-                <div key={grp.id} style={{ marginBottom: "0.25rem" }}>
-                  <p
-                    className="ds-menu-title"
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      margin: "6px 8px 2px",
-                    }}
-                  >
-                    {grp.title}
-                  </p>
-                  {groupModels.map((item) => (
-                    <MenuItem
-                      key={`${item.provider ?? "codex"}:${item.model}`}
-                      checked={
-                        item.model === model?.model &&
-                        (item.provider ?? "codex") ===
-                          (model?.provider ?? "codex")
-                      }
-                      title={
-                        <>
-                          {item.displayName}
-                          {item.isDefault ? (
-                            <span className="ds-badge composer-recommended">
-                              추천
-                            </span>
-                          ) : null}
-                        </>
-                      }
-                      onSelect={() => {
-                        onChange({
-                          ...(item.provider
-                            ? { provider: item.provider }
-                            : {}),
-                          model: item.model,
-                          effort: item.defaultReasoningEffort,
-                        });
-                        close();
-                      }}
-                    />
-                  ))}
-                </div>
-              );
-            })}
+            <p
+              className="ds-menu-title"
+              style={{
+                fontSize: "11px",
+                fontWeight: 700,
+                margin: "6px 8px 2px",
+              }}
+            >
+              {providerName(effectiveProvider as AvailableModel["provider"])}
+            </p>
+            {displayModels.map((item) => (
+              <MenuItem
+                key={`${item.provider ?? "codex"}:${item.model}`}
+                checked={
+                  item.model === model?.model &&
+                  (item.provider ?? "codex") ===
+                    (model?.provider ?? "codex")
+                }
+                title={
+                  <>
+                    {item.displayName}
+                    {item.isDefault ? (
+                      <span className="ds-badge composer-recommended">
+                        추천
+                      </span>
+                    ) : null}
+                  </>
+                }
+                onSelect={() => {
+                  onChange({
+                    ...(item.provider ? { provider: item.provider } : {}),
+                    model: item.model,
+                    effort: item.defaultReasoningEffort,
+                  });
+                  close();
+                }}
+              />
+            ))}
             <MenuSeparator />
             <MenuItem
-              title="AI 공급자 관리..."
-              description="Google Gemini, API 키 등록 및 전환"
+              title="AI 공급자 관리 및 전환..."
+              description="Google Gemini, OpenAI, Claude 연결"
               onSelect={() => {
                 close();
                 window.open("/settings#ai", "_self");
@@ -307,6 +303,7 @@ export function Composer({
   placeholder,
   selection = null,
   rateLimitWarning,
+  activeProvider,
 }: {
   text: string;
   onText: (value: string) => void;
@@ -325,6 +322,7 @@ export function Composer({
   placeholder?: string;
   selection?: EditorSelection | null;
   rateLimitWarning?: { message: string; resetAt?: number | null } | null;
+  activeProvider?: string;
 }) {
   const local = useRef<HTMLTextAreaElement>(null);
   const textarea = inputRef ?? local;
@@ -390,6 +388,7 @@ export function Composer({
           onChange={onModel}
           disabled={busy}
           loadModels={loadModels}
+          activeProvider={activeProvider}
         />
         {busy ? (
           <IconButton

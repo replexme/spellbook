@@ -531,6 +531,7 @@ export default function NativeDocument({
               onAttach={noop}
               attaching
               inputRef={input}
+              activeProvider={ai.activeProvider}
               rateLimitWarning={
                 ai.rateLimitInfo?.isRateLimited && ai.activeProvider === "codex"
                   ? {
