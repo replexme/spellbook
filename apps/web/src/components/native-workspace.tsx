@@ -262,7 +262,24 @@ export function NativeWorkspace({
     busy: boolean;
   } | null>(null);
   const ai = useAiAccount(launch.aiConnector);
-  const aiConnected = Boolean(ai.account);
+  const aiConnected = Boolean(ai.hasAnyConnection || ai.account);
+  const isRateLimited = Boolean(
+    ai.rateLimitInfo?.isRateLimited && ai.activeProvider === "codex",
+  );
+  const rateLimitWarning = isRateLimited
+    ? {
+        message: `OpenAI Codex 사용량 한도에 도달했습니다.${
+          ai.rateLimitInfo?.resetAt
+            ? ` (${new Intl.DateTimeFormat("ko-KR", {
+                month: "long",
+                day: "numeric",
+                hour: "numeric",
+                minute: "numeric",
+              }).format(new Date(ai.rateLimitInfo.resetAt * 1000))} 리셋)`
+            : ""
+        }`,
+      }
+    : null;
   const origin = new URL(launch.editorUrl).origin;
   const documentBase = `/api/documents/${launch.documentId}`;
   const api = useCallback(
@@ -2068,6 +2085,7 @@ export function NativeWorkspace({
                       attaching={uploadingAsset}
                       inputRef={input}
                       selection={selection}
+                      rateLimitWarning={rateLimitWarning}
                     />
                   </>
                 ) : (

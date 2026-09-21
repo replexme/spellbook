@@ -507,7 +507,7 @@ export default function NativeDocument({
           )}
         </div>
         <footer className="ws-panel-footer">
-          {ai.account ? (
+          {ai.hasAnyConnection || ai.account ? (
             <Composer
               text={text}
               onText={setText}
@@ -531,6 +531,24 @@ export default function NativeDocument({
               onAttach={noop}
               attaching
               inputRef={input}
+              rateLimitWarning={
+                ai.rateLimitInfo?.isRateLimited && ai.activeProvider === "codex"
+                  ? {
+                      message: `OpenAI Codex 사용량 한도에 도달했습니다.${
+                        ai.rateLimitInfo?.resetAt
+                          ? ` (${new Intl.DateTimeFormat("ko-KR", {
+                              month: "long",
+                              day: "numeric",
+                              hour: "numeric",
+                              minute: "numeric",
+                            }).format(
+                              new Date(ai.rateLimitInfo.resetAt * 1000),
+                            )} 리셋)`
+                          : ""
+                      }`,
+                    }
+                  : null
+              }
             />
           ) : (
             <p className="composer-hint">

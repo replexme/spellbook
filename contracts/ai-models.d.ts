@@ -1,6 +1,12 @@
-/** Public account-backed model catalog; no API catalog or static model IDs. */
+export type AiProviderId =
+  | "codex"
+  | "claude_code"
+  | "openai_api"
+  | "anthropic_api";
+
+/** Public account-backed model catalog; supports subscriptions and user-provided API keys. */
 export interface AvailableModel {
-  provider?: "codex" | "claude_code";
+  provider?: AiProviderId;
   model: string;
   displayName: string;
   defaultReasoningEffort: string;
@@ -11,7 +17,7 @@ export interface AvailableModel {
   isDefault: boolean;
 }
 export interface ModelSettings {
-  provider?: "codex" | "claude_code";
+  provider?: AiProviderId;
   model: string;
   effort: string;
 }

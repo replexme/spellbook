@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import {
   Banner,
   Button,
+  ButtonLink,
   CheckList,
   Icon,
   SlideImage,
@@ -389,20 +390,45 @@ export function ResultCard({
       summary?.failure?.message ??
       turn.error ??
       "AI가 요청을 끝내지 못했어요. 다시 요청해 주세요.";
+    const isRateLimit =
+      summary?.failure?.code === "usage_limit" ||
+      summary?.failure?.code === "quota_exhausted" ||
+      /한도|rate[ _-]?limit|quota|out of codex messages/i.test(message);
     return (
       <article
         className={`rc ${outcome === "failed" ? "is-failed" : "is-cancelled"}`}
       >
         <CardHead
-          tone={outcome}
+          tone={isRateLimit ? "warn" : outcome}
           icon={outcome === "failed" ? "close" : "stop"}
-          title={outcome === "failed" ? "고치지 못함" : "중단됨"}
+          title={
+            isRateLimit
+              ? "AI 사용량 한도 도달"
+              : outcome === "failed"
+                ? "고치지 못함"
+                : "중단됨"
+          }
           time={time}
         />
         <div className="rc-section">
-          <Banner tone={outcome === "failed" ? "danger" : "neutral"}>
+          <Banner
+            tone={
+              isRateLimit
+                ? "warn"
+                : outcome === "failed"
+                  ? "danger"
+                  : "neutral"
+            }
+          >
             {message}
           </Banner>
+          {isRateLimit ? (
+            <div style={{ marginTop: "0.5rem" }}>
+              <ButtonLink size="sm" variant="primary" href="/settings#ai">
+                설정에서 API 키 등록 또는 공급자 전환
+              </ButtonLink>
+            </div>
+          ) : null}
           {summary?.scopeRejected ? (
             <p className="rc-quote">
               지금 범위는 ‘{scopeTitle(turn.permission)}’예요. 범위 밖의 요소가

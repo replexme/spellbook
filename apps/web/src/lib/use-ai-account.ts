@@ -25,9 +25,27 @@ export interface AiDeviceLogin {
   userCode: string;
 }
 
+export interface RateLimitInfo {
+  isRateLimited: boolean;
+  resetAt: number | null;
+  title: string | null;
+  description: string | null;
+}
+
+export interface ProviderItem {
+  id: "codex" | "claude_code" | "openai_api" | "anthropic_api";
+  displayName: string;
+  type: "subscription" | "api_key";
+  connected: boolean;
+  isActive: boolean;
+  account?: AiAccount | null;
+  maskedKey?: string | null;
+  rateLimitInfo?: RateLimitInfo | null;
+}
+
 type AccountResponse = {
   account?: { account?: AiAccount | null } | null;
-  /** When the subscription was connected through this service; null if unknown. */
+  activeProvider?: string;
   connectedAt?: string | null;
   runtime?: {
     provider: string;
@@ -35,6 +53,13 @@ type AccountResponse = {
     runtime: string;
     version: string;
   };
+  rateLimits?: any;
+  rateLimitInfo?: RateLimitInfo | null;
+  customProviders?: Array<{
+    provider: string;
+    isActive: boolean;
+    maskedKey: string | null;
+  }>;
 };
 
 export function useAiAccount(config: AiConnectorConfig) {
@@ -88,10 +113,10 @@ export function useAiAccount(config: AiConnectorConfig) {
       }
       return value;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "";
+      const msg = error instanceof Error ? error.message : "";
       if (
         connectorOrigin &&
-        /connector_(?:session|required)|invalid_connector_session/.test(message)
+        /connector_(?:session|required)|invalid_connector_session/.test(msg)
       ) {
         window.sessionStorage.removeItem(LOCAL_CONNECTOR_SESSION_KEY);
         setLocalSession(null);
@@ -178,6 +203,58 @@ export function useAiAccount(config: AiConnectorConfig) {
     await load();
   }, [connectorOrigin, localSession, load]);
 
+  const configureApiKey = useCallback(
+    async (
+      provider: "openai_api" | "anthropic_api",
+      apiKey: string,
+      active = true,
+    ) => {
+      const res = await fetch("/api/ai/provider/configure", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider, apiKey, active }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "API 키를 저장하지 못했습니다.");
+      }
+      await load();
+    },
+    [load],
+  );
+
+  const deleteApiKey = useCallback(
+    async (provider: string) => {
+      const res = await fetch("/api/ai/provider/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "API 키를 삭제하지 못했습니다.");
+      }
+      await load();
+    },
+    [load],
+  );
+
+  const selectProvider = useCallback(
+    async (provider: string) => {
+      const res = await fetch("/api/ai/provider/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "공급자를 변경하지 못했습니다.");
+      }
+      await load();
+    },
+    [load],
+  );
+
   const localRequest = useCallback(
     async <T>(path: string, body?: unknown): Promise<T> => {
       if (!connectorOrigin || !localSession)
@@ -187,10 +264,66 @@ export function useAiAccount(config: AiConnectorConfig) {
     [connectorOrigin, localSession],
   );
 
-  const account = accountResponse?.account?.account ?? null;
+  const codexAccount = accountResponse?.account?.account ?? null;
+  const codexConnected = Boolean(codexAccount);
+  const rateLimitInfo = accountResponse?.rateLimitInfo ?? null;
+
+  const customProviders = accountResponse?.customProviders ?? [];
+  const openAiCustom = customProviders.find((p) => p.provider === "openai_api");
+  const anthropicCustom = customProviders.find(
+    (p) => p.provider === "anthropic_api",
+  );
+
+  const activeProvider =
+    accountResponse?.activeProvider ??
+    (openAiCustom?.isActive
+      ? "openai_api"
+      : anthropicCustom?.isActive
+        ? "anthropic_api"
+        : codexConnected
+          ? "codex"
+          : "none");
+
+  const providers: ProviderItem[] = [
+    {
+      id: "codex",
+      displayName: "ChatGPT 구독 (Codex)",
+      type: "subscription",
+      connected: codexConnected,
+      isActive: activeProvider === "codex",
+      account: codexAccount,
+      rateLimitInfo,
+    },
+    {
+      id: "claude_code",
+      displayName: "Claude 구독 (Claude Code)",
+      type: "subscription",
+      connected: false,
+      isActive: activeProvider === "claude_code",
+    },
+    {
+      id: "openai_api",
+      displayName: "OpenAI API 키",
+      type: "api_key",
+      connected: Boolean(openAiCustom),
+      isActive: activeProvider === "openai_api",
+      maskedKey: openAiCustom?.maskedKey,
+    },
+    {
+      id: "anthropic_api",
+      displayName: "Anthropic API 키",
+      type: "api_key",
+      connected: Boolean(anthropicCustom),
+      isActive: activeProvider === "anthropic_api",
+      maskedKey: anthropicCustom?.maskedKey,
+    },
+  ];
+
+  const hasAnyConnection = providers.some((p) => p.connected);
+
   return {
-    account,
-    connectedAt: account ? (accountResponse?.connectedAt ?? null) : null,
+    account: codexAccount,
+    connectedAt: codexAccount ? (accountResponse?.connectedAt ?? null) : null,
     codeCopied,
     connect,
     connecting,
@@ -203,5 +336,13 @@ export function useAiAccount(config: AiConnectorConfig) {
     mode: connectorOrigin ? ("local" as const) : ("internal" as const),
     runtime: accountResponse?.runtime ?? null,
     status,
+    // Multi-provider & rate limits
+    providers,
+    activeProvider,
+    rateLimitInfo,
+    hasAnyConnection,
+    configureApiKey,
+    deleteApiKey,
+    selectProvider,
   };
 }

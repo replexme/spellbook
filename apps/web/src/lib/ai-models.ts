@@ -1,9 +1,17 @@
 import type {
+  AiProviderId,
   AvailableModel,
   ModelSettings,
 } from "../../../../contracts/ai-models";
 
-export type { AvailableModel, ModelSettings };
+export type { AiProviderId, AvailableModel, ModelSettings };
+
+export const VALID_AI_PROVIDERS: readonly AiProviderId[] = [
+  "codex",
+  "claude_code",
+  "openai_api",
+  "anthropic_api",
+] as const;
 
 export function parseModelSettings(value: unknown): ModelSettings | undefined {
   if (value === undefined) return undefined;
@@ -15,7 +23,7 @@ export function parseModelSettings(value: unknown): ModelSettings | undefined {
       (key) => !["provider", "model", "effort"].includes(key),
     ) ||
     (input.provider !== undefined &&
-      !["codex", "claude_code"].includes(String(input.provider))) ||
+      !VALID_AI_PROVIDERS.includes(input.provider as AiProviderId)) ||
     typeof input.model !== "string" ||
     !input.model ||
     input.model.length > 120 ||

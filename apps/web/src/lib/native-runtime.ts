@@ -24,6 +24,7 @@ import {
 } from "./native-conversation";
 import { signNativeConnectorToken } from "./native-connector-token";
 import { aiConnectorConfig } from "./ai-connector-config";
+import { getActiveProviderKey } from "./provider-keys";
 import { loadTurnSummary } from "./native-turn-summary";
 import {
   jobRedeliverySeconds,
@@ -90,6 +91,16 @@ export async function submitNativeTurn(
     if (!supportsSettings(catalog.models, modelSettings))
       throw new HttpError(400, "selected_model_unavailable");
   }
+  let apiKey: string | null = null;
+  if (
+    modelSettings?.provider === "openai_api" ||
+    modelSettings?.provider === "anthropic_api"
+  ) {
+    apiKey = await getActiveProviderKey(
+      session.accountId,
+      modelSettings.provider,
+    );
+  }
   const jobId = randomUUID();
   const turnId = randomUUID();
   const basePayload = {
@@ -103,6 +114,7 @@ export async function submitNativeTurn(
     requestText: text,
     permissionMode: permission,
     execution,
+    ...(apiKey ? { apiKey } : {}),
     ...(modelSettings ? { modelSettings } : {}),
   };
   const publicBase = execution === "local" ? publicAppBaseUrl() : null;
@@ -659,8 +671,12 @@ export async function failNativeTurn(jobId: string, error: string) {
       where id=${jobId} and status in ('queued','running')`;
     if (turn) {
       const summary = await storeTurnSummary(sql, turn.id);
+      const errorMessage =
+        summary?.failure?.message ||
+        error ||
+        "AI가 요청을 끝내지 못했어요. 다시 요청해 주세요.";
       await sql`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
-      values (${turn.session_id},${turn.id},'error',${sql.json({ error: summary?.failure?.message ?? "AI가 요청을 끝내지 못했어요. 다시 요청해 주세요.", turnId: turn.id, summary } as never)})`;
+      values (${turn.session_id},${turn.id},'error',${sql.json({ error: errorMessage, turnId: turn.id, summary } as never)})`;
     }
   });
 }

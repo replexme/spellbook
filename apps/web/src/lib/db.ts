@@ -279,6 +279,15 @@ export async function runMigrations(): Promise<void> {
       supported_operations jsonb not null default '[]'::jsonb,
       seen_at timestamptz not null default now()
     );
+    create table if not exists spellbook_account_providers (
+      account_id text not null,
+      provider text not null,
+      api_key_encrypted text,
+      is_active boolean not null default false,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now(),
+      primary key (account_id, provider)
+    );
   `);
 }
 

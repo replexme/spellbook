@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  Banner,
   Chip,
   Icon,
   IconButton,
@@ -25,7 +26,10 @@ import {
 } from "./request-scope";
 
 function providerName(provider: AvailableModel["provider"]) {
-  return provider === "claude_code" ? "Claude Code" : "Codex";
+  if (provider === "claude_code") return "Claude Code (구독)";
+  if (provider === "openai_api") return "OpenAI API (직접 키)";
+  if (provider === "anthropic_api") return "Anthropic API (직접 키)";
+  return "ChatGPT Codex (구독)";
 }
 
 /** Model and thinking depth. Closes on choice, outside click and Escape. */
@@ -130,7 +134,10 @@ export function ModelMenu({
             {models.map((item) => (
               <MenuItem
                 key={`${item.provider ?? "codex"}:${item.model}`}
-                checked={item === model}
+                checked={
+                  item.model === model?.model &&
+                  (item.provider ?? "codex") === (model?.provider ?? "codex")
+                }
                 title={
                   <>
                     {item.displayName}
@@ -260,6 +267,7 @@ export function Composer({
   inputRef,
   placeholder,
   selection = null,
+  rateLimitWarning,
 }: {
   text: string;
   onText: (value: string) => void;
@@ -277,6 +285,7 @@ export function Composer({
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   placeholder?: string;
   selection?: EditorSelection | null;
+  rateLimitWarning?: { message: string; resetAt?: number | null } | null;
 }) {
   const local = useRef<HTMLTextAreaElement>(null);
   const textarea = inputRef ?? local;
@@ -288,6 +297,22 @@ export function Composer({
   }, [text, textarea]);
   return (
     <div className="composer">
+      {rateLimitWarning ? (
+        <div style={{ marginBottom: "0.5rem" }}>
+          <Banner tone="warn">
+            ⚠️ {rateLimitWarning.message}{" "}
+            <a
+              href="/settings#ai"
+              style={{
+                fontWeight: 600,
+                textDecoration: "underline",
+              }}
+            >
+              API 키 등록 / 공급자 전환
+            </a>
+          </Banner>
+        </div>
+      ) : null}
       <div className="composer-scope">
         <ScopeMenu
           value={permission}

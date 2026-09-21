@@ -54,6 +54,7 @@ export interface AgentTurnOptions {
     signal: AbortSignal,
   ) => Promise<ToolResult>;
   onEvent?: (event: RpcNotification) => void;
+  onText?: (delta: string) => void;
   signal?: AbortSignal;
   threadId?: string;
   conversationKey?: string;

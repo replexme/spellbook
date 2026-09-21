@@ -165,9 +165,22 @@ const failureRules: Array<{ test: RegExp; code: string; message: string }> = [
       "선택한 AI 모델을 지금 쓸 수 없어요. 모델을 바꿔 다시 요청해 주세요.",
   },
   {
-    test: /rate[ _-]?limit|quota|usage limit|\b429\b|사용 한도/i,
+    test: /rate[ _-]?limit|out of codex messages|usage limit|\b429\b|사용 한도/i,
     code: "usage_limit",
-    message: "AI 구독의 사용 한도에 걸렸어요. 잠시 뒤 다시 요청해 주세요.",
+    message:
+      "AI 사용량 한도(Rate limit)에 도달했어요. 잠시 뒤 다시 요청하거나, 설정에서 API 키 또는 다른 AI로 전환해 주세요.",
+  },
+  {
+    test: /quota|insufficient_quota|잔액|크레딧|billing/i,
+    code: "quota_exhausted",
+    message:
+      "API 계정의 잔액(크레딧)이 부족해요. OpenAI/Anthropic 결제 상태를 확인하거나 다른 공급자로 전환해 주세요.",
+  },
+  {
+    test: /invalid_api_key|api_key_required|api key.*(invalid|required|missing)|API 키/i,
+    code: "api_key_invalid",
+    message:
+      "API 키가 올바르지 않거나 설정되지 않았어요. 설정에서 API 키를 확인해 주세요.",
   },
   {
     test: /unauthori[sz]ed|\b401\b|not logged in|login required|auth(entication)? (failed|required|expired)|ai_account_not_connected/i,
@@ -206,6 +219,9 @@ export function nativeFailureReason(
   const text = error ?? "";
   for (const rule of failureRules)
     if (rule.test.test(text)) return { code: rule.code, message: rule.message };
+  if (/[가-힣]/.test(text) && text.length <= 200) {
+    return { code: "service_message", message: text };
+  }
   return {
     code: "unknown",
     message:
