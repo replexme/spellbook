@@ -5,6 +5,7 @@ import {
   randomBytes,
 } from "node:crypto";
 import { db, ensureSchema } from "./db";
+import { HttpError } from "./http";
 
 export type ApiKeyProvider = "openai_api" | "anthropic_api";
 
@@ -45,30 +46,30 @@ export async function validateApiKey(
   apiKey: string,
 ): Promise<void> {
   const trimmed = apiKey.trim();
-  if (!trimmed) throw new Error("API 키를 입력해 주세요.");
+  if (!trimmed) throw new HttpError(400, "API 키를 입력해 주세요.");
   if (provider === "openai_api") {
     if (!trimmed.startsWith("sk-"))
-      throw new Error("OpenAI API 키는 'sk-'로 시작해야 합니다.");
+      throw new HttpError(400, "OpenAI API 키는 'sk-'로 시작해야 합니다.");
     const res = await fetch("https://api.openai.com/v1/models", {
       headers: { authorization: `Bearer ${trimmed}` },
       signal: AbortSignal.timeout(7000),
     });
     if (!res.ok) {
       if (res.status === 401)
-        throw new Error("OpenAI API 키가 유효하지 않습니다. (401 Unauthorized)");
+        throw new HttpError(400, "OpenAI API 키가 유효하지 않습니다. (401 Unauthorized)");
       if (res.status === 429)
-        throw new Error("OpenAI API 잔액(Quota)이 부족하거나 사용량 한도에 도달했습니다.");
-      throw new Error(`OpenAI API 오류 (${res.status})`);
+        throw new HttpError(400, "OpenAI API 잔액(Quota)이 부족하거나 사용량 한도에 도달했습니다.");
+      throw new HttpError(400, `OpenAI API 오류 (${res.status})`);
     }
   } else if (provider === "anthropic_api") {
     if (!trimmed.startsWith("sk-ant-"))
-      throw new Error("Anthropic API 키는 'sk-ant-'로 시작해야 합니다.");
+      throw new HttpError(400, "Anthropic API 키는 'sk-ant-'로 시작해야 합니다.");
     const res = await fetch("https://api.anthropic.com/v1/models", {
       headers: { "x-api-key": trimmed, "anthropic-version": "2023-06-01" },
       signal: AbortSignal.timeout(7000),
     });
     if (!res.ok && res.status === 401) {
-      throw new Error("Anthropic API 키가 유효하지 않습니다. (401 Unauthorized)");
+      throw new HttpError(400, "Anthropic API 키가 유효하지 않습니다. (401 Unauthorized)");
     }
   }
 }
