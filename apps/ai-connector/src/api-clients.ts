@@ -530,6 +530,10 @@ export class GeminiApiClient implements AgentTurnClient {
       description: tool.description,
       parameters: cleanGeminiSchema(tool.inputSchema),
     }));
+    const combinedTools: any[] = [{ googleSearch: {} }];
+    if (tools && tools.length > 0) {
+      combinedTools.push({ functionDeclarations: tools });
+    }
 
     const systemPrompt = input.find((item) => item.type === "text")?.text;
     const contents: any[] = [
@@ -556,7 +560,10 @@ export class GeminiApiClient implements AgentTurnClient {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           contents,
-          tools: tools && tools.length > 0 ? [{ functionDeclarations: tools }] : undefined,
+          tools: combinedTools,
+          tool_config: {
+            include_server_side_tool_invocations: true,
+          },
         }),
         signal: options?.signal,
       });

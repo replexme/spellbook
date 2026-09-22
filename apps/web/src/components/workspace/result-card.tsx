@@ -70,11 +70,49 @@ export function outcomeOf(turn: CardTurn): Outcome {
   return "answered";
 }
 
-function Answer({ text }: { text: string }) {
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {}
+  };
+  return (
+    <Button
+      size="sm"
+      variant="quiet"
+      icon={copied ? "check" : "copy"}
+      onClick={handleCopy}
+    >
+      {copied ? "복사됨" : "복사"}
+    </Button>
+  );
+}
+
+function Answer({
+  text,
+  allowCopy = false,
+}: {
+  text: string;
+  allowCopy?: boolean;
+}) {
   if (!text.trim()) return null;
   return (
     <div className="msg-answer">
       <ReactMarkdown>{normalizeQuotedStrongMarkdown(text)}</ReactMarkdown>
+      {allowCopy ? (
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            marginTop: "var(--ds-space-1)",
+          }}
+        >
+          <CopyButton text={text} />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -367,7 +405,7 @@ export function ResultCard({
   if (outcome === "answered")
     return (
       <div className="rc-answered">
-        <Answer text={turn.text} />
+        <Answer text={turn.text} allowCopy />
         <p className="rc-note">
           <Icon name="dash" size={13} /> 문서는 바뀌지 않았어요
         </p>
@@ -710,6 +748,7 @@ export function RunningCard({
   onStop: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
+  const [activityExpanded, setActivityExpanded] = useState(false);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
@@ -720,6 +759,9 @@ export function RunningCard({
     turn.permission === "read_only",
     Boolean(turn.text.trim()),
   );
+  const latestTool =
+    turn.tools.length > 0 ? turn.tools[turn.tools.length - 1] : null;
+
   return (
     <section className="run" aria-live="polite" aria-label="AI 작업 중">
       <header className="run-head">
@@ -727,6 +769,14 @@ export function RunningCard({
         <span>작업 중</span>
         <span className="ds-tabular">{elapsed(started, now)}</span>
       </header>
+
+      {latestTool ? (
+        <div className="run-active-action">
+          <span className="run-pulse-dot" aria-hidden="true" />
+          <span className="run-active-text">{latestTool}</span>
+        </div>
+      ) : null}
+
       {lookingAt ? (
         <figure className="run-look">
           <SlideImage
@@ -740,6 +790,7 @@ export function RunningCard({
           </figcaption>
         </figure>
       ) : null}
+
       <StepList
         steps={stages.map((stage) => ({
           label: stage.detail
@@ -749,7 +800,39 @@ export function RunningCard({
         }))}
         label="진행 단계"
       />
-      {turn.text.trim() ? <Answer text={turn.text} /> : null}
+
+      {turn.tools.length > 1 ? (
+        <div className="run-history-toggle">
+          <Button
+            size="sm"
+            variant="quiet"
+            icon={activityExpanded ? "chevronUp" : "chevronDown"}
+            onClick={() => setActivityExpanded((v) => !v)}
+          >
+            실행 세부 기록 ({turn.tools.length}단계)
+          </Button>
+          {activityExpanded ? (
+            <ul className="run-activity-stream">
+              {turn.tools.map((item, idx) => (
+                <li key={idx} className="run-activity-step">
+                  <span className="run-step-bullet">✓</span>
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+
+      {turn.text.trim() ? (
+        <div className="run-streaming-answer">
+          <Answer text={turn.text} />
+          <span className="run-cursor" aria-hidden="true">
+            ▊
+          </span>
+        </div>
+      ) : null}
+
       <p className="run-hint">
         작업 중에 문서를 직접 고치면 AI가 바뀐 문서를 다시 확인해야 해서
         늦어지거나 멈출 수 있어요.

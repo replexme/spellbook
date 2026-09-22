@@ -342,6 +342,7 @@ export async function runNativeTurn(
             "You are editing the SAME open PowerPoint document as the user. Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
             `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
             "Observe returns live element structure, a revision, deterministic layout findings, and slide screenshots. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Inspect introducedIssues and the fresh screenshot after edits, correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
+            "Web search and webpage reading are fully supported via web_search and fetch_web_page. When the user asks for real-world knowledge, recent news, industry statistics, domain references, or provides a URL, proactively use web_search and fetch_web_page to obtain accurate, up-to-date facts and cite sources. NEVER claim that you cannot access the internet or that browsing is disabled.",
             `Coordinates are 1/100 mm. IDs refer to the last observed revision; the editor rebinds batch targets to the same live objects before every command. ${nativeEditContract.transaction.ordering} Do not change original text or geometry merely to hide font/rendering differences. Answer in Korean.`,
             prompt,
           ].join("\n"),
@@ -390,6 +391,39 @@ export async function runNativeTurn(
                 },
               },
               required: ["approved", "problems", "reviewedSlideIndexes"],
+            },
+          },
+          {
+            type: "function",
+            name: "web_search",
+            description:
+              "Search the web for up-to-date real-world facts, recent news, industry statistics, domain references, or company information to create or enrich presentation slides. Returns top search results with titles, snippets, and source URLs.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: {
+                  type: "string",
+                  description:
+                    "The search query (e.g., '2026 AI industry trends', 'Apple latest financial report').",
+                },
+              },
+              required: ["query"],
+            },
+          },
+          {
+            type: "function",
+            name: "fetch_web_page",
+            description:
+              "Fetch and read the text content of any web page URL provided by the user or found via search, extracting clean text to summarize or incorporate into the presentation.",
+            inputSchema: {
+              type: "object",
+              properties: {
+                url: {
+                  type: "string",
+                  description: "The full HTTP or HTTPS URL to read.",
+                },
+              },
+              required: ["url"],
             },
           },
         ],
@@ -647,6 +681,30 @@ export async function runNativeTurn(
                 ],
               };
             }
+            if (name === "web_search") {
+              const query = String((args as { query?: string })?.query ?? "").trim();
+              if (!query) throw new Error("Search query is required.");
+              input.onTool(`웹 검색: "${query}"`);
+              const results = await performWebSearch(query, signal);
+              return {
+                success: true,
+                contentItems: [
+                  { type: "inputText", text: JSON.stringify(results) },
+                ],
+              };
+            }
+            if (name === "fetch_web_page") {
+              const url = String((args as { url?: string })?.url ?? "").trim();
+              if (!url) throw new Error("URL is required.");
+              input.onTool(`웹페이지 읽기: ${url}`);
+              const pageText = await fetchWebPageText(url, signal);
+              return {
+                success: true,
+                contentItems: [
+                  { type: "inputText", text: pageText },
+                ],
+              };
+            }
             throw new Error("Unknown tool.");
           });
           toolTail = work.catch(() => undefined);
@@ -684,4 +742,129 @@ export async function runNativeTurn(
     reviewed,
     status: changed && !reviewed ? "needs_review" : "completed",
   };
+}
+
+function isSafePublicUrl(url: URL): boolean {
+  if (!["http:", "https:"].includes(url.protocol)) return false;
+  const host = url.hostname.toLowerCase();
+  if (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host === "::1" ||
+    host.endsWith(".local") ||
+    host.endsWith(".internal") ||
+    host.startsWith("10.") ||
+    host.startsWith("192.168.") ||
+    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
+    host === "metadata.google.internal"
+  ) {
+    return false;
+  }
+  return true;
+}
+
+async function fetchWebPageText(
+  rawUrl: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+    if (!isSafePublicUrl(parsed)) {
+      return "Error: Access to private or internal network addresses is prohibited.";
+    }
+  } catch (err) {
+    return `Error: Invalid URL format (${err instanceof Error ? err.message : "invalid_url"}).`;
+  }
+  try {
+    const httpTransport = { download: globalThis.fetch };
+    const response = await httpTransport.download(parsed.href, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,text/plain;q=0.9",
+      },
+      signal: signal ?? AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) {
+      return `Failed to fetch webpage (HTTP ${response.status} ${response.statusText}).`;
+    }
+    const html = await response.text();
+    const cleanText = html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
+      .replace(/<svg\b[^<]*(?:(?!<\/svg>)<[^<]*)*<\/svg>/gi, "")
+      .replace(/<nav\b[^<]*(?:(?!<\/nav>)<[^<]*)*<\/nav>/gi, "")
+      .replace(/<footer\b[^<]*(?:(?!<\/footer>)<[^<]*)*<\/footer>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/\s+/g, " ")
+      .trim();
+    return cleanText.slice(0, 10_000) || "The webpage content is empty.";
+  } catch (err) {
+    return `Webpage fetch error: ${err instanceof Error ? err.message : "network_error"}`;
+  }
+}
+
+async function performWebSearch(
+  query: string,
+  signal?: AbortSignal,
+): Promise<Array<{ title: string; snippet: string; url?: string }>> {
+  const results: Array<{ title: string; snippet: string; url?: string }> = [];
+  try {
+    const wikiUrl = `https://ko.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&utf8=1`;
+    const wikiRes = await fetch(wikiUrl, {
+      headers: { "User-Agent": "Spellbook-AI-Agent/1.0" },
+      signal: signal ?? AbortSignal.timeout(10_000),
+    });
+    if (wikiRes.ok) {
+      const data = (await wikiRes.json()) as any;
+      const items = data.query?.search ?? [];
+      for (const item of items.slice(0, 5)) {
+        results.push({
+          title: item.title,
+          snippet: item.snippet
+            .replace(/<[^>]+>/g, "")
+            .replace(/&quot;/g, '"'),
+          url: `https://ko.wikipedia.org/wiki/${encodeURIComponent(item.title)}`,
+        });
+      }
+    }
+  } catch {
+    // continue
+  }
+  if (results.length === 0) {
+    try {
+      const enWikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&utf8=1`;
+      const enRes = await fetch(enWikiUrl, {
+        headers: { "User-Agent": "Spellbook-AI-Agent/1.0" },
+        signal: signal ?? AbortSignal.timeout(10_000),
+      });
+      if (enRes.ok) {
+        const data = (await enRes.json()) as any;
+        const items = data.query?.search ?? [];
+        for (const item of items.slice(0, 5)) {
+          results.push({
+            title: item.title,
+            snippet: item.snippet.replace(/<[^>]+>/g, ""),
+            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title)}`,
+          });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return results.length > 0
+    ? results
+    : [
+        {
+          title: query,
+          snippet:
+            "검색 결과를 찾지 못했습니다. 보다 구체적인 검색어로 다시 시도해 주세요.",
+        },
+      ];
 }

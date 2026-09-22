@@ -9,6 +9,7 @@ const iconPaths = {
   check: ["m5 12 4 4L19 6"],
   chevronDown: ["m7 10 5 5 5-5"],
   chevronRight: ["m10 7 5 5-5 5"],
+  chevronUp: ["m7 14 5-5 5 5"],
   clock: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z", "M12 7v5l3 2"],
   close: ["M6 6l12 12M18 6 6 18"],
   compare: ["M4 5h6.5v14H4z", "M13.5 5H20v14h-6.5z"],
