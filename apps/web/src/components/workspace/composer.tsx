@@ -104,8 +104,14 @@ export function ModelMenu({
       (!value?.provider || item.provider === value.provider),
   );
   const efforts = model?.supportedReasoningEfforts ?? [];
+  const rawTitle = model?.displayName ?? value?.model ?? "";
+  const cleanModelTitle = rawTitle.replace(/\s*\([^)]*\)/, "");
+  const effortSuffix =
+    value?.effort && efforts.length > 1
+      ? ` · ${effortTitle(value.effort)}`
+      : "";
   const label = value
-    ? `${model?.displayName ?? value.model} · ${effortTitle(value.effort)}`
+    ? `${cleanModelTitle}${effortSuffix}`
     : status === "error"
       ? "모델을 불러오지 못함"
       : "모델 확인 중";

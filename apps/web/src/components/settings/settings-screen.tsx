@@ -258,6 +258,7 @@ export function SettingsScreen({
                   >
                     <input
                       type="password"
+                      className="ds-input"
                       placeholder={
                         geminiProvider?.connected
                           ? "새 API 키 입력 (변경 시)"
@@ -272,11 +273,6 @@ export function SettingsScreen({
                         if (e.key === "Enter") void handleSaveGemini();
                       }}
                       style={{
-                        padding: "0.375rem 0.75rem",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border)",
-                        fontFamily: "monospace",
-                        fontSize: "13px",
                         width: "320px",
                         maxWidth: "100%",
                       }}
@@ -293,8 +289,8 @@ export function SettingsScreen({
                   {geminiError ? (
                     <p
                       style={{
-                        color: "var(--danger)",
-                        fontSize: "12px",
+                        color: "var(--ds-danger)",
+                        fontSize: "var(--ds-text-xs)",
                         marginTop: "0.375rem",
                         fontWeight: 500,
                       }}
@@ -369,6 +365,7 @@ export function SettingsScreen({
                   >
                     <input
                       type="password"
+                      className="ds-input"
                       placeholder={
                         openAiProvider?.connected
                           ? "새 API 키 입력 (변경 시)"
@@ -383,11 +380,6 @@ export function SettingsScreen({
                         if (e.key === "Enter") void handleSaveOpenAi();
                       }}
                       style={{
-                        padding: "0.375rem 0.75rem",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border)",
-                        fontFamily: "monospace",
-                        fontSize: "13px",
                         width: "320px",
                         maxWidth: "100%",
                       }}
@@ -404,8 +396,8 @@ export function SettingsScreen({
                   {openAiError ? (
                     <p
                       style={{
-                        color: "var(--danger)",
-                        fontSize: "12px",
+                        color: "var(--ds-danger)",
+                        fontSize: "var(--ds-text-xs)",
                         marginTop: "0.375rem",
                         fontWeight: 500,
                       }}
@@ -480,6 +472,7 @@ export function SettingsScreen({
                   >
                     <input
                       type="password"
+                      className="ds-input"
                       placeholder={
                         anthropicProvider?.connected
                           ? "새 API 키 입력 (변경 시)"
@@ -494,11 +487,6 @@ export function SettingsScreen({
                         if (e.key === "Enter") void handleSaveAnthropic();
                       }}
                       style={{
-                        padding: "0.375rem 0.75rem",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border)",
-                        fontFamily: "monospace",
-                        fontSize: "13px",
                         width: "320px",
                         maxWidth: "100%",
                       }}
@@ -515,8 +503,8 @@ export function SettingsScreen({
                   {anthropicError ? (
                     <p
                       style={{
-                        color: "var(--danger)",
-                        fontSize: "12px",
+                        color: "var(--ds-danger)",
+                        fontSize: "var(--ds-text-xs)",
                         marginTop: "0.375rem",
                         fontWeight: 500,
                       }}
@@ -591,6 +579,7 @@ export function SettingsScreen({
                   >
                     <input
                       type="password"
+                      className="ds-input"
                       placeholder={
                         openRouterProvider?.connected
                           ? "새 API 키 입력 (변경 시)"
@@ -605,11 +594,6 @@ export function SettingsScreen({
                         if (e.key === "Enter") void handleSaveOpenRouter();
                       }}
                       style={{
-                        padding: "0.375rem 0.75rem",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border)",
-                        fontFamily: "monospace",
-                        fontSize: "13px",
                         width: "320px",
                         maxWidth: "100%",
                       }}
@@ -626,8 +610,8 @@ export function SettingsScreen({
                   {openRouterError ? (
                     <p
                       style={{
-                        color: "var(--danger)",
-                        fontSize: "12px",
+                        color: "var(--ds-danger)",
+                        fontSize: "var(--ds-text-xs)",
                         marginTop: "0.375rem",
                         fontWeight: 500,
                       }}
@@ -695,11 +679,7 @@ export function SettingsScreen({
                   {isCodexRateLimited ? (
                     <div style={{ marginTop: "0.5rem" }}>
                       <Banner tone="warn" role="status">
-                        ⚠️ <strong>OpenAI Codex 사용량 한도 도달</strong>: 이번
-                        주기 메시지 한도를 모두 소모했습니다.
-                        {codexResetTime ? ` (${codexResetTime} 리셋 예정)` : ""}
-                        <br />
-                        위의 <strong>Google Gemini</strong>나 <strong>API 키</strong>를 등록하여 즉시 작업을 이어갈 수 있습니다.
+                        ⚠️ <strong>OpenAI Codex 사용량 한도 도달</strong>: 이번 주기 메시지 한도를 모두 소모했습니다.{codexResetTime ? ` (${codexResetTime} 리셋 예정)` : ""} 위의 Google Gemini나 다른 공급자 API 키를 등록하여 즉시 작업을 이어갈 수 있습니다.
                       </Banner>
                     </div>
                   ) : null}
