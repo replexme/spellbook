@@ -496,7 +496,13 @@ export async function completeNativeTask(
     where id=${input.id} and session_id=${native.id} and status in ('queued','delivered')
       and expires_at > now() returning id
   `;
-  if (!updated) throw new HttpError(409, "native_task_inactive");
+  if (!updated) {
+    const [existing] = await db()`
+      select status from spellbook_native_tasks where id=${input.id} and session_id=${native.id}
+    `;
+    if (existing?.status === "completed") return { ok: true };
+    throw new HttpError(409, "native_task_inactive");
+  }
   if (value)
     await recordEditorEngine(
       native.editor_mode,
