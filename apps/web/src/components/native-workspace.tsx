@@ -1292,8 +1292,10 @@ export function NativeWorkspace({
               if (turnRequested.current && typeof event.turnId === "string")
                 setFreshTurns((current) => new Set(current).add(event.turnId));
               const firstChanged = event.summary?.changedSlides?.[0];
-              if (turnRequested.current && Number.isInteger(firstChanged))
-                setPhoneSlide(firstChanged);
+              if (Number.isInteger(firstChanged)) {
+                if (turnRequested.current) setPhoneSlide(firstChanged);
+                sendOffice("Action_GoToPage", { Page: firstChanged + 1 });
+              }
               turnRequested.current = false;
             }
             setMessages((items) => {
@@ -1757,9 +1759,8 @@ export function NativeWorkspace({
       setPhoneSlide(slideIndex);
       return;
     }
-    void callEditor({ operation: "reveal", slideIndex, elementId }).catch(() =>
-      setError("편집기에서 그 슬라이드를 열지 못했어요."),
-    );
+    sendOffice("Action_GoToPage", { Page: slideIndex + 1 });
+    void callEditor({ operation: "reveal", slideIndex, elementId }).catch(() => undefined);
   }
 
   /* ── Keyboard: ⌘S saves; ⌘Z / ⇧⌘Z undo and redo outside text fields ─ */

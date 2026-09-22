@@ -2868,6 +2868,16 @@ function spellbookDocumentOperation(request) {
         request.suppressCapture,
       ),
     });
+    if (request.operation === "reveal") {
+      if (Number.isInteger(request.slideIndex)) activateSlide(request.slideIndex);
+      if (typeof request.elementId === "string") {
+        try {
+          const shape = resolveShape(request.elementId);
+          if (shape) controller.select(shape);
+        } catch (_) {}
+      }
+      return { ok: true, slideIndex: request.slideIndex };
+    }
     if (request.operation === "observe") {
       if (request.captureSlideIndexes !== undefined) {
         if (
@@ -6544,9 +6554,16 @@ function spellbookDocumentOperation(request) {
       const undo = model.getUndoManager();
       const undoCount = undo.getAllUndoActionTitles().length;
       activateSlide(slideIndex);
-      table
-        .getCellByPosition(command.column, command.row)
-        .setString(command.text);
+      const cell = table.getCellByPosition(command.column, command.row);
+      const topBdr = safeProperty(cell, "TopBorder");
+      const bottomBdr = safeProperty(cell, "BottomBorder");
+      const leftBdr = safeProperty(cell, "LeftBorder");
+      const rightBdr = safeProperty(cell, "RightBorder");
+      cell.setString(command.text);
+      if (topBdr) try { cell.setPropertyValue("TopBorder", topBdr); } catch (_) {}
+      if (bottomBdr) try { cell.setPropertyValue("BottomBorder", bottomBdr); } catch (_) {}
+      if (leftBdr) try { cell.setPropertyValue("LeftBorder", leftBdr); } catch (_) {}
+      if (rightBdr) try { cell.setPropertyValue("RightBorder", rightBdr); } catch (_) {}
       const after = read();
       const target = after.slides[slideIndex].elements.find(
         (candidate) => candidate.elementId === command.elementId,

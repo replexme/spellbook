@@ -149,8 +149,56 @@
     );
   }
 
+  function disarmIdleHandler() {
+    const idle = globalThis.app?.idleHandler;
+    if (idle) {
+      idle._dim = function () {};
+      idle._activate = function () {};
+      idle._deactivate = function () {};
+      if (typeof idle.notifyActive === "function") {
+        idle.notifyActive();
+      }
+    }
+  }
+  setInterval(disarmIdleHandler, 1000);
+  disarmIdleHandler();
+
+  const observer = new MutationObserver(() => {
+    const dim = document.getElementById("cool-dim");
+    if (dim) dim.remove();
+    const vex = document.querySelector(".vex-dialog-form");
+    if (vex && vex.textContent && vex.textContent.includes("대기중인 문서")) {
+      const ok = vex.querySelector(".vex-dialog-button-primary");
+      if (ok instanceof HTMLElement) ok.click();
+      else vex.remove();
+    }
+  });
+  if (document.body) {
+    observer.observe(document.body, { childList: true, subtree: true });
+  } else {
+    document.addEventListener("DOMContentLoaded", () => {
+      if (document.body) {
+        observer.observe(document.body, { childList: true, subtree: true });
+      }
+    });
+  }
+
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent) return;
+
+    if (
+      event.data?.type === "Action_GoToPage" ||
+      event.data?.MessageId === "Action_GoToPage"
+    ) {
+      const page = Number(event.data?.Values?.Page ?? event.data?.Page);
+      if (Number.isInteger(page) && page >= 1 && globalThis.app?.map) {
+        if (typeof globalThis.app.map.setPart === "function") {
+          globalThis.app.map.setPart(page - 1);
+        }
+      }
+      return;
+    }
+
     const expectedOrigin = globalThis.app?.map?.wopi?.PostMessageOrigin;
     if (expectedOrigin && event.origin !== expectedOrigin) return;
     if (event.data?.type === "spellbook.ensure-edit") {
