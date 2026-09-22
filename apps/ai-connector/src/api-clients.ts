@@ -530,7 +530,7 @@ export class GeminiApiClient implements AgentTurnClient {
       description: tool.description,
       parameters: cleanGeminiSchema(tool.inputSchema),
     }));
-    const combinedTools: any[] = [{ googleSearch: {} }];
+    const combinedTools: any[] = [];
     if (tools && tools.length > 0) {
       combinedTools.push({ functionDeclarations: tools });
     }
@@ -560,10 +560,7 @@ export class GeminiApiClient implements AgentTurnClient {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           contents,
-          tools: combinedTools,
-          tool_config: {
-            include_server_side_tool_invocations: true,
-          },
+          tools: combinedTools.length > 0 ? combinedTools : undefined,
         }),
         signal: options?.signal,
       });
@@ -589,7 +586,11 @@ export class GeminiApiClient implements AgentTurnClient {
 
       const data = await response.json();
       const candidate = data.candidates?.[0];
-      if (!candidate?.content) throw new Error("Google Gemini API로부터 응답을 받지 못했습니다.");
+      if (!candidate?.content) {
+        console.error("[GEMINI CANDIDATE FAILURE]", JSON.stringify(data));
+        const reason = candidate?.finishReason || data.promptFeedback?.blockReason || "no_content";
+        throw new Error(`Google Gemini API 응답 거부 또는 비어있음 (${reason})`);
+      }
 
       contents.push(candidate.content);
 

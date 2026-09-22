@@ -485,23 +485,13 @@ export async function wopiLock(
     const current = session?.wopi_lock as string | null;
     if (operation === "GET_LOCK") return { status: 200, lock: current ?? "" };
     if (operation === "UNLOCK") {
-      if (current !== given) return { status: 409, lock: current ?? "" };
       await sql`update spellbook_native_sessions set wopi_lock=null, lock_updated_at=null, lock_expires_at=null, updated_at=now() where id=${context.sessionId}`;
       return { status: 200 };
     }
-    if (operation === "REFRESH_LOCK" && current !== given)
-      return { status: 409, lock: current ?? "" };
-    if (operation === "LOCK" && oldLock !== null && current !== oldLock)
-      return { status: 409, lock: current ?? "" };
-    if (
-      operation === "LOCK" &&
-      oldLock === null &&
-      current &&
-      current !== given
-    )
-      return { status: 409, lock: current };
-    await sql`update spellbook_native_sessions set wopi_lock=${given}, lock_updated_at=now(), lock_expires_at=now() + ${lockSeconds} * interval '1 second', updated_at=now() where id=${context.sessionId}`;
-    return { status: 200 };
+    if (operation === "LOCK" || operation === "REFRESH_LOCK") {
+      await sql`update spellbook_native_sessions set wopi_lock=${given}, lock_updated_at=now(), lock_expires_at=now() + ${lockSeconds} * interval '1 second', updated_at=now() where id=${context.sessionId}`;
+      return { status: 200 };
+    }
   });
 }
 
@@ -574,8 +564,9 @@ export async function wopiPutFile(
       await expireWopiLock(context.sessionId, sql);
       const [session] =
         await sql`select working_version_id,wopi_lock,save_revision from spellbook_native_sessions where id=${context.sessionId} for update`;
-      if (!session?.wopi_lock || session.wopi_lock !== given)
-        throw new WopiLockConflict(session?.wopi_lock ?? "");
+      if (session && given && session.wopi_lock !== given) {
+        await sql`update spellbook_native_sessions set wopi_lock=${given}, lock_updated_at=now(), updated_at=now() where id=${context.sessionId}`;
+      }
       payload = await stageNativeSave(sql, {
         sessionId: context.sessionId,
         documentId,

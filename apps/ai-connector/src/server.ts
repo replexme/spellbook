@@ -274,6 +274,7 @@ async function executeNativeJob(
       error: message,
     };
   } finally {
+    host.stop();
     controller.abort();
     await heartbeat?.catch(() => undefined);
   }

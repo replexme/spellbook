@@ -231,6 +231,9 @@ func startOffice(internalPort int, fileServerRoot string) (*exec.Cmd, *io.PipeRe
 		"--o:logging.color=false",
 		"--o:logging.level_startup=trace",
 		"--o:stop_on_config_change=true",
+		"--o:per_document.idle_timeout_secs=86400",
+		"--o:per_view.idle_timeout_secs=86400",
+		"--o:per_view.out_of_focus_timeout_secs=86400",
 	}
 	command := exec.Command("/usr/bin/coolwsd", arguments...)
 	reader, writer := io.Pipe()

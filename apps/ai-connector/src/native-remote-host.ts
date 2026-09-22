@@ -8,6 +8,8 @@ interface Identity {
 }
 
 export class NativeRemoteHost implements NativeHost {
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+
   constructor(
     private readonly url: string,
     private readonly identity: Identity,
@@ -16,9 +18,19 @@ export class NativeRemoteHost implements NativeHost {
 
   async start(signal: AbortSignal): Promise<void> {
     await this.post({ operation: "start" }, signal);
+    this.heartbeatTimer = setInterval(() => {
+      this.post({ operation: "heartbeat" }).catch(() => undefined);
+    }, 15_000);
   }
 
-  async heartbeat(signal: AbortSignal): Promise<void> {
+  stop(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  async heartbeat(signal?: AbortSignal): Promise<void> {
     await this.post({ operation: "heartbeat" }, signal);
   }
 
@@ -31,7 +43,7 @@ export class NativeRemoteHost implements NativeHost {
       signal,
     )) as { taskId?: string };
     if (!created.taskId) throw new Error("native_task_not_created");
-    const deadline = Date.now() + 25_000;
+    const deadline = Date.now() + 120_000;
     while (Date.now() < deadline) {
       const task = (await this.post(
         { operation: "task_status", taskId: created.taskId },
@@ -63,7 +75,7 @@ export class NativeRemoteHost implements NativeHost {
     await this.post({ operation: "event", type, value }, signal);
   }
 
-  private async post(body: Record<string, unknown>, signal: AbortSignal) {
+  private async post(body: Record<string, unknown>, signal?: AbortSignal) {
     const response = await fetch(this.url, {
       method: "POST",
       headers: {

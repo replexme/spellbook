@@ -612,7 +612,7 @@ export async function executeNativeTool(input: Record<string, unknown>) {
     if (!input.request || typeof input.request !== "object")
       throw new HttpError(400, "invalid_native_request");
     const serialized = JSON.stringify(input.request);
-    if (serialized.length > 200_000)
+    if (serialized.length > 5_000_000)
       throw new HttpError(400, "native_request_too_large");
     const id = randomUUID();
     const [created] = await db()`
