@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { AppServerClient, type AgentTurnClient } from "./app-server-client.js";
+import { PiAgentClient } from "./pi-agent-client.js";
 import { activeAiRuntime } from "./ai-runtime-contract.js";
 import { ClaudeCodeClient, isClaudeModel } from "./claude-code-client.js";
 import type { ModelSettings } from "../../../contracts/ai-models.js";
@@ -134,7 +135,23 @@ export class SessionManager {
   async client(
     rawEmail: string,
     modelSettings?: ModelSettings,
+    apiKey?: string,
   ): Promise<AgentTurnClient> {
+    if (modelSettings?.provider === "openai_api") {
+      return new PiAgentClient(apiKey || "", "openai_api");
+    }
+    if (modelSettings?.provider === "openrouter_api") {
+      return new PiAgentClient(apiKey || "", "openrouter_api");
+    }
+    if (modelSettings?.provider === "custom_api") {
+      return new PiAgentClient(apiKey || "", "custom_api", modelSettings.customBaseUrl);
+    }
+    if (modelSettings?.provider === "anthropic_api") {
+      return new PiAgentClient(apiKey || "", "anthropic_api");
+    }
+    if (modelSettings?.provider === "gemini_api") {
+      return new PiAgentClient(apiKey || "", "gemini_api");
+    }
     if (selectedProvider(modelSettings) === "claude_code") {
       if ((await this.claude.accountRead()).account?.type !== "claude")
         throw new Error("Claude subscription is not connected in Claude Code.");
