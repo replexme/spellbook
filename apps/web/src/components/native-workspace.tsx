@@ -971,8 +971,16 @@ export function NativeWorkspace({
         if (value.Values?.Status === "Document_Loaded") setEngineReady(true);
       }
       if (value?.MessageId === "Action_Save_Resp") {
-        if (value.Values?.success) setSaveState("저장 확인 중…");
-        else {
+        if (value.Values?.success) {
+          setSaveState("저장 확인 중…");
+          if (pendingTurn.current && !editorModified.current) {
+            const waiting = pendingTurn.current;
+            pendingTurn.current = null;
+            pendingSaveRevision.current = null;
+            setSaveState("저장됨");
+            void dispatchTurn(waiting);
+          }
+        } else {
           const waiting = pendingTurn.current;
           pendingTurn.current = null;
           pendingSaveRevision.current = null;
@@ -1381,12 +1389,7 @@ export function NativeWorkspace({
       // with different chart ids and layout numbers, which the server's
       // edit-scope check would count as changes the AI made. So the first
       // request of every editor load saves first.
-      if (
-        editorModified.current ||
-        (launch.editorKind === "wopi" && !baselineSaved.current) ||
-        saveStateRef.current !== "저장됨"
-      ) {
-        baselineSaved.current = true;
+      if (editorModified.current) {
         pendingTurn.current = pending;
         requestSave("AI 작업 전 저장 중…");
         return;
