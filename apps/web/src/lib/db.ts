@@ -284,10 +284,16 @@ export async function runMigrations(): Promise<void> {
       provider text not null,
       api_key_encrypted text,
       is_active boolean not null default false,
+      models_cache jsonb,
+      custom_model text,
+      custom_base_url text,
       created_at timestamptz not null default now(),
       updated_at timestamptz not null default now(),
       primary key (account_id, provider)
     );
+    alter table spellbook_account_providers add column if not exists models_cache jsonb;
+    alter table spellbook_account_providers add column if not exists custom_model text;
+    alter table spellbook_account_providers add column if not exists custom_base_url text;
   `);
 }
 

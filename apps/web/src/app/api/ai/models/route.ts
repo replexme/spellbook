@@ -20,35 +20,34 @@ export async function GET(request: Request) {
         models?: AvailableModel[];
       };
       if (Array.isArray(res?.models)) workerModels = res.models;
-    } catch {}
+    } catch (caught) {
+      console.error("Failed to fetch worker models:", caught);
+    }
 
     const customProviders = await getAccountProviders(session.accountId);
-    const hasOpenAiKey = customProviders.some(
-      (p) => p.provider === "openai_api",
-    );
-    const hasAnthropicKey = customProviders.some(
-      (p) => p.provider === "anthropic_api",
-    );
-    const hasGeminiKey = customProviders.some(
-      (p) => p.provider === "gemini_api",
-    );
-    const hasOpenRouterKey = customProviders.some(
-      (p) => p.provider === "openrouter_api",
-    );
-
     const models: AvailableModel[] = [...workerModels];
 
-    if (hasGeminiKey && !models.some((m) => m.provider === "gemini_api")) {
-      models.push(...geminiModels());
-    }
-    if (hasOpenAiKey && !models.some((m) => m.provider === "openai_api")) {
-      models.push(...openAiModels());
-    }
-    if (hasAnthropicKey && !models.some((m) => m.provider === "anthropic_api")) {
-      models.push(...anthropicModels());
-    }
-    if (hasOpenRouterKey && !models.some((m) => m.provider === "openrouter_api")) {
-      models.push(...openRouterModels());
+    for (const p of customProviders) {
+      if (Array.isArray(p.modelsCache) && p.modelsCache.length > 0) {
+        for (const m of p.modelsCache) {
+          if (!models.some((ex) => ex.model === m.model && ex.provider === m.provider)) {
+            models.push(m);
+          }
+        }
+      } else {
+        if (p.provider === "gemini_api" && !models.some((m) => m.provider === "gemini_api")) {
+          models.push(...geminiModels());
+        }
+        if (p.provider === "openai_api" && !models.some((m) => m.provider === "openai_api")) {
+          models.push(...openAiModels());
+        }
+        if (p.provider === "anthropic_api" && !models.some((m) => m.provider === "anthropic_api")) {
+          models.push(...anthropicModels());
+        }
+        if (p.provider === "openrouter_api" && !models.some((m) => m.provider === "openrouter_api")) {
+          models.push(...openRouterModels());
+        }
+      }
     }
 
     return Response.json(
