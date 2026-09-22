@@ -421,6 +421,13 @@ export function NativeWorkspace({
     },
     [sendOffice],
   );
+  useEffect(() => {
+    if (!engineReady) return;
+    const heartbeat = setInterval(() => {
+      sendOffice("User_Active");
+    }, 20_000);
+    return () => clearInterval(heartbeat);
+  }, [engineReady, sendOffice]);
   /** Runs one editor operation for this page (not for the AI) and waits for it. */
   const callEditor = useCallback(
     (request: Record<string, unknown>, timeoutMs = 15_000) =>
@@ -1347,6 +1354,7 @@ export function NativeWorkspace({
     async (pending: PendingTurn) => {
       setError("");
       setBusy(true);
+      sendOffice("User_Active");
       setMessages((items) => [
         ...items,
         {
