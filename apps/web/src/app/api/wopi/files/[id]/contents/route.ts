@@ -47,6 +47,15 @@ export async function POST(
         status: 409,
         headers: { "x-wopi-lock": error.lock },
       });
+    if (
+      error instanceof Error &&
+      error.message === "native_ai_change_review_pending"
+    ) {
+      return Response.json({
+        LastModifiedTime: new Date().toISOString(),
+        Unchanged: true,
+      });
+    }
     return routeError(error);
   }
 }
