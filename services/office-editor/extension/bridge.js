@@ -321,6 +321,16 @@ function applySpellbookToolbarTypography() {
     const style = parentDoc.createElement("style");
     style.id = "spellbook-injected-toolbar-style";
     style.textContent = `
+      :root {
+        --header-font-size: 11px !important;
+        --default-font-size: 11px !important;
+        --medium-font-size: 11px !important;
+        --overflow-group-font-size: 10px !important;
+        --header-height: 28px !important;
+        --sidebar-header-height: 28px !important;
+        --notebookbar-element-height: 48px !important;
+        --btn-size: 24px !important;
+      }
       html, body, .notebookbar, .notebookbar *, .ui-content, #Home-container, #navigation-sidebar, .navigation-header, .main-nav {
         font-family: -apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
       }
@@ -329,7 +339,9 @@ function applySpellbookToolbarTypography() {
         height: 28px !important;
         min-height: 28px !important;
       }
-      .main-nav .ui-tab {
+      .main-nav .ui-tab,
+      .ui-tab.jsdialog,
+      .ui-tab.notebookbar {
         font-size: 11px !important;
         font-weight: 500 !important;
         height: 28px !important;
@@ -341,10 +353,20 @@ function applySpellbookToolbarTypography() {
         font-size: 10px !important;
       }
       .notebookbar .ui-overflow-group-label,
-      #Home-container .ui-overflow-group-label {
+      #Home-container .ui-overflow-group-label,
+      .ui-overflow-group-label {
         display: none !important;
       }
-      .notebookbar button, .notebookbar .ui-text, .notebookbar span.unolabel, .notebookbar span, .notebookbar label, .notebookbar p {
+      .unotoolbutton.notebookbar .unolabel,
+      .has-label.has-dropdown:not(.inline) .unolabel,
+      .unotoolbutton.notebookbar.has-label,
+      .menubutton.has-label button,
+      .notebookbar button,
+      .notebookbar .ui-text,
+      .notebookbar span.unolabel,
+      .notebookbar span,
+      .notebookbar label,
+      .notebookbar p {
         font-family: -apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
         font-size: 10px !important;
         font-weight: 500 !important;

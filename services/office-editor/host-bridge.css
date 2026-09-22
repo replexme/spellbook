@@ -9,6 +9,17 @@
  * document-type colour (orange for presentations) becomes the neutral accent
  * Spellbook passes at launch; teal stays reserved for the AI.
  */
+:root {
+  --header-font-size: 11px !important;
+  --default-font-size: 11px !important;
+  --medium-font-size: 11px !important;
+  --overflow-group-font-size: 10px !important;
+  --header-height: 28px !important;
+  --sidebar-header-height: 28px !important;
+  --notebookbar-element-height: 48px !important;
+  --btn-size: 24px !important;
+}
+
 html,
 body,
 .notebookbar,
@@ -27,7 +38,9 @@ body,
   min-height: 28px !important;
 }
 
-.main-nav .ui-tab {
+.main-nav .ui-tab,
+.ui-tab.jsdialog,
+.ui-tab.notebookbar {
   font-size: 11px !important;
   font-weight: 500 !important;
   height: 28px !important;
@@ -42,10 +55,15 @@ body,
 }
 
 .notebookbar .ui-overflow-group-label,
-#Home-container .ui-overflow-group-label {
+#Home-container .ui-overflow-group-label,
+.ui-overflow-group-label {
   display: none !important;
 }
 
+.unotoolbutton.notebookbar .unolabel,
+.has-label.has-dropdown:not(.inline) .unolabel,
+.unotoolbutton.notebookbar.has-label,
+.menubutton.has-label button,
 .notebookbar button,
 .notebookbar .ui-text,
 .notebookbar span.unolabel,

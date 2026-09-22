@@ -39,5 +39,13 @@ export function collaboraCssVariables() {
     // Read by services/office-editor/host-bridge.css for the editor's
     // document-type accent (tab underline, current slide, selection).
     `--spellbook-editor-accent-rgb=${rgbTriplet(t.accent.value)}`,
+    "--header-font-size=11px",
+    "--default-font-size=11px",
+    "--medium-font-size=11px",
+    "--overflow-group-font-size=10px",
+    "--header-height=28px",
+    "--sidebar-header-height=28px",
+    "--notebookbar-element-height=48px",
+    "--btn-size=24px",
   ].join(";");
 }
