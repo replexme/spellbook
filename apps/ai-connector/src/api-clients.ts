@@ -451,25 +451,45 @@ export type GeminiParameterSchema = Record<string, unknown>;
 function cleanGeminiSchema(
   schema: Record<string, unknown>,
 ): GeminiParameterSchema {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) {
+    return schema as any;
+  }
   const copy: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(schema)) {
-    if (k === "additionalProperties" || k === "$schema" || k === "default")
-      continue;
     if (k === "type") {
       if (Array.isArray(v)) {
         const nonNull = v.find((t) => t !== "null") || "string";
         copy.type = String(nonNull).toUpperCase();
+        if (v.includes("null")) {
+          copy.nullable = true;
+        }
       } else if (typeof v === "string") {
         copy.type = v.toUpperCase();
       } else {
         copy.type = v;
       }
-      continue;
-    }
-    if (v && typeof v === "object" && !Array.isArray(v)) {
-      copy[k] = cleanGeminiSchema(v as Record<string, unknown>);
-    } else {
-      copy[k] = v;
+    } else if (k === "properties" && v && typeof v === "object" && !Array.isArray(v)) {
+      const cleanedProps: Record<string, unknown> = {};
+      for (const [propKey, propVal] of Object.entries(v as Record<string, unknown>)) {
+        if (propVal && typeof propVal === "object" && !Array.isArray(propVal)) {
+          cleanedProps[propKey] = cleanGeminiSchema(propVal as Record<string, unknown>);
+        } else {
+          cleanedProps[propKey] = propVal;
+        }
+      }
+      copy.properties = cleanedProps;
+    } else if (k === "items" && v && typeof v === "object" && !Array.isArray(v)) {
+      copy.items = cleanGeminiSchema(v as Record<string, unknown>);
+    } else if (k === "required" && Array.isArray(v)) {
+      copy.required = v.filter((item) => typeof item === "string");
+    } else if (k === "enum" && Array.isArray(v)) {
+      copy.enum = v.map((item) => String(item));
+    } else if (k === "description" && typeof v === "string") {
+      copy.description = v;
+    } else if (k === "format" && typeof v === "string") {
+      copy.format = v;
+    } else if (k === "nullable" && typeof v === "boolean") {
+      copy.nullable = v;
     }
   }
   return copy;
@@ -598,7 +618,7 @@ export class GeminiApiClient implements AgentTurnClient {
         });
       }
 
-      contents.push({ role: "function", parts: functionResponses });
+      contents.push({ role: "user", parts: functionResponses });
     }
 
     return finalAnswer;

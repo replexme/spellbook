@@ -354,7 +354,11 @@ func (g *gateway) serveStatic(response http.ResponseWriter, request *http.Reques
 	}
 	response.Header().Set("Vary", "Accept-Encoding")
 	response.Header().Set("X-Content-Type-Options", "nosniff")
-	response.Header().Set("Cache-Control", "public, max-age=11059200, immutable")
+	if relative == "spellbook-host.css" || relative == "spellbook-host.js" {
+		response.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	} else {
+		response.Header().Set("Cache-Control", "public, max-age=11059200, immutable")
+	}
 	etagVersion := version + ":" + g.assetVersion
 	etag := strconv.Quote(etagVersion + ":" + relative + ":" + strconv.FormatInt(servedInfo.Size(), 10))
 	response.Header().Set("ETag", etag)

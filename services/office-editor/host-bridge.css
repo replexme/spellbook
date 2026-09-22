@@ -21,9 +21,24 @@ body,
   font-family: -apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
 }
 
+.main-nav,
+.main-nav.hasnotebookbar {
+  height: 28px !important;
+  min-height: 28px !important;
+}
+
+.main-nav .ui-tab {
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  padding: 0 10px !important;
+  letter-spacing: -0.01em !important;
+}
+
 .notebookbar,
 .notebookbar .ui-content {
-  font-size: 11px !important;
+  font-size: 10px !important;
 }
 
 .notebookbar .ui-overflow-group-label,
@@ -37,14 +52,10 @@ body,
 .notebookbar span,
 .notebookbar label,
 .notebookbar p {
-  font-size: 11px !important;
+  font-size: 10px !important;
   font-weight: 500 !important;
-  line-height: 1.25 !important;
-}
-
-.main-nav .ui-tab {
-  font-size: 12px !important;
-  font-weight: 500 !important;
+  line-height: 1.2 !important;
+  letter-spacing: -0.01em !important;
 }
 
 body[data-doctype] {

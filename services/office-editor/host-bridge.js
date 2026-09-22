@@ -9,8 +9,21 @@
       html, body, .notebookbar, .notebookbar *, .ui-content, #Home-container, #navigation-sidebar, .navigation-header, .main-nav {
         font-family: -apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
       }
-      .notebookbar, .notebookbar .ui-content {
+      .main-nav,
+      .main-nav.hasnotebookbar {
+        height: 28px !important;
+        min-height: 28px !important;
+      }
+      .main-nav .ui-tab {
         font-size: 11px !important;
+        font-weight: 500 !important;
+        height: 28px !important;
+        line-height: 28px !important;
+        padding: 0 10px !important;
+        letter-spacing: -0.01em !important;
+      }
+      .notebookbar, .notebookbar .ui-content {
+        font-size: 10px !important;
       }
       .notebookbar .ui-overflow-group-label,
       #Home-container .ui-overflow-group-label {
@@ -18,18 +31,15 @@
       }
       .notebookbar button, .notebookbar .ui-text, .notebookbar span.unolabel, .notebookbar span, .notebookbar label, .notebookbar p {
         font-family: -apple-system, BlinkMacSystemFont, "Pretendard Variable", Pretendard, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
-        font-size: 11px !important;
+        font-size: 10px !important;
         font-weight: 500 !important;
-        line-height: 1.25 !important;
-      }
-      .main-nav .ui-tab {
-        font-size: 12px !important;
-        font-weight: 500 !important;
+        line-height: 1.2 !important;
+        letter-spacing: -0.01em !important;
       }
       .navigation-header {
-        font-size: 12px !important;
+        font-size: 11px !important;
         font-weight: 600 !important;
-        height: 32px !important;
+        height: 28px !important;
         padding: 4px 8px !important;
       }
       .navigation-header .navigation-title {
