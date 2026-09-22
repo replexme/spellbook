@@ -776,8 +776,27 @@ async function fetchWebPageText(
   } catch (err) {
     return `Error: Invalid URL format (${err instanceof Error ? err.message : "invalid_url"}).`;
   }
+  const httpTransport = { download: globalThis.fetch };
   try {
-    const httpTransport = { download: globalThis.fetch };
+    const readerUrl = `https://r.jina.ai/${parsed.href}`;
+    const readerResponse = await httpTransport.download(readerUrl, {
+      headers: {
+        "User-Agent": "Spellbook-AI-Agent/1.0",
+        Accept: "text/plain",
+      },
+      signal: signal ?? AbortSignal.timeout(12_000),
+    });
+    if (readerResponse.ok) {
+      const markdown = await readerResponse.text();
+      if (markdown && markdown.length > 50) {
+        return markdown.slice(0, 15_000);
+      }
+    }
+  } catch {
+    // Fall back to direct fetch
+  }
+
+  try {
     const response = await httpTransport.download(parsed.href, {
       headers: {
         "User-Agent":

@@ -606,6 +606,7 @@ export class GeminiApiClient implements AgentTurnClient {
       }
 
       const functionResponses: any[] = [];
+      const imageParts: any[] = [];
       for (const part of functionCalls) {
         const call = part.functionCall;
         const name = call.name;
@@ -625,15 +626,44 @@ export class GeminiApiClient implements AgentTurnClient {
             error: callErr?.message ?? "tool_call_failed",
           } as any;
         }
+
+        let cleanOutput: any = { success: true };
+        if (resultObj && typeof resultObj === "object") {
+          const items = (resultObj as any).contentItems;
+          if (Array.isArray(items)) {
+            for (const item of items) {
+              if (item.type === "inputText" && typeof item.text === "string") {
+                try {
+                  cleanOutput = JSON.parse(item.text);
+                } catch {
+                  cleanOutput = { text: item.text };
+                }
+              } else if (item.type === "inputImage" && item.imageBytes) {
+                const b64 = Buffer.isBuffer(item.imageBytes)
+                  ? item.imageBytes.toString("base64")
+                  : Buffer.from(item.imageBytes).toString("base64");
+                imageParts.push({
+                  inlineData: {
+                    mimeType: item.mediaType || "image/png",
+                    data: b64,
+                  },
+                });
+              }
+            }
+          } else {
+            cleanOutput = resultObj;
+          }
+        }
+
         functionResponses.push({
           functionResponse: {
             name,
-            response: { output: resultObj },
+            response: { output: cleanOutput },
           },
         });
       }
 
-      contents.push({ role: "user", parts: functionResponses });
+      contents.push({ role: "user", parts: [...functionResponses, ...imageParts] });
     }
 
     return finalAnswer;
