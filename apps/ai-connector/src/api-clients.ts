@@ -492,6 +492,14 @@ function cleanGeminiSchema(
       copy.nullable = v;
     }
   }
+  if (copy.required && Array.isArray(copy.required)) {
+    if (copy.properties && typeof copy.properties === "object") {
+      const validProps = new Set(Object.keys(copy.properties));
+      copy.required = (copy.required as string[]).filter((p) => validProps.has(p));
+    } else {
+      delete copy.required;
+    }
+  }
   return copy;
 }
 
