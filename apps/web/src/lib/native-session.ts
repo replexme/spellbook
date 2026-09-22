@@ -492,6 +492,7 @@ export async function wopiLock(
       await sql`update spellbook_native_sessions set wopi_lock=${given}, lock_updated_at=now(), lock_expires_at=now() + ${lockSeconds} * interval '1 second', updated_at=now() where id=${context.sessionId}`;
       return { status: 200 };
     }
+    return { status: 400 };
   });
 }
 
