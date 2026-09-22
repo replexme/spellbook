@@ -71,7 +71,7 @@ export class NativeRemoteHost implements NativeHost {
     )) as { assetId: string };
   }
 
-  async event(type: "delta" | "tool", value: string, signal: AbortSignal) {
+  async event(type: "delta" | "tool" | "thinking", value: string, signal: AbortSignal) {
     await this.post({ operation: "event", type, value }, signal);
   }
 

@@ -115,12 +115,14 @@ export async function runNativeTurn(
     modelSettings?: ModelSettings;
     permission: NativePermission;
     host: NativeHost;
+    initialObservation?: NativeObservation;
     signal: AbortSignal;
     onText: (delta: string) => void;
+    onThinking?: (delta: string) => void;
     onTool: (label: string) => void;
   },
 ) {
-  let observed: NativeObservation | undefined;
+  let observed: NativeObservation | undefined = input.initialObservation;
   let pendingReview:
     | {
         revision: string;
@@ -339,7 +341,9 @@ export async function runNativeTurn(
         {
           type: "text",
           text: [
-            "You are editing the SAME open PowerPoint document as the user. Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
+            observed
+              ? `Live document structure is ALREADY observed (Revision: ${observed.revision}, Active slide: ${observed.activeSlide + 1}번). Elements: ${JSON.stringify(observed.slides.find((s) => s.slideIndex === observed?.activeSlide)?.elements?.map((e) => ({ id: e.elementId, name: e.name, text: e.text, table: e.table })) ?? [])}. You do NOT need to call native_observe. You can immediately call native_batch_edit to apply the changes.`
+              : "You are editing the SAME open PowerPoint document as the user. Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
             `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
             "Observe returns live element structure, a revision, deterministic layout findings, and slide screenshots. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Inspect introducedIssues and the fresh screenshot after edits, correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
             "Web search and webpage reading are fully supported via web_search and fetch_web_page. When the user asks for real-world knowledge, recent news, industry statistics, domain references, or provides a URL, proactively use web_search and fetch_web_page to obtain accurate, up-to-date facts and cite sources. NEVER claim that you cannot access the internet or that browsing is disabled.",
@@ -354,6 +358,7 @@ export async function runNativeTurn(
       {
         modelSettings: input.modelSettings,
         signal: input.signal,
+        onThinking: input.onThinking,
         tools: [
           {
             type: "function",

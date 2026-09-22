@@ -93,6 +93,7 @@ export async function submitNativeTurn(
     permission?: unknown;
     modelSettings?: unknown;
     execution?: unknown;
+    initialObservation?: unknown;
   },
 ) {
   const native = await ownedSession(session, documentId);
@@ -175,6 +176,7 @@ export async function submitNativeTurn(
     requestText: text,
     permissionMode: permission,
     execution,
+    ...(input.initialObservation ? { initialObservation: input.initialObservation } : {}),
     ...(apiKey ? { apiKey } : {}),
     ...(effectiveModelSettings ? { modelSettings: effectiveModelSettings } : {}),
   };
@@ -199,7 +201,14 @@ export async function submitNativeTurn(
       select id from spellbook_native_turns where session_id=${native.id}
         and status in ('queued','running') for update
     `;
-    if (active) throw new HttpError(409, "native_turn_already_running");
+    if (active) {
+      await sql`update spellbook_native_turns set status='cancelled', updated_at=now() where id=${active.id}`;
+      if (active.job_id) {
+        await sql`update spellbook_jobs set status='failed', error='cancelled_by_new_turn', updated_at=now() where id=${active.job_id} and status in ('queued','running')`;
+      }
+      await sql`insert into spellbook_native_events (session_id, turn_id, event_type, payload)
+        values (${native.id}, ${active.id}, 'done', ${sql.json({ text: "새 요청으로 인해 이전 작업을 중단했습니다.", status: "cancelled", changed: false, reviewed: false })})`;
+    }
     const history = boundedNativeConversationHistory(
       await sql`
         select request_text, assistant_text, status

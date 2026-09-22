@@ -189,6 +189,7 @@ export function NativeWorkspace({
   const [engineReady, setEngineReady] = useState(false),
     [bridgeReady, setBridgeReady] = useState(false),
     [sessionObserved, setSessionObserved] = useState(false);
+  const latestObservation = useRef<Record<string, unknown> | null>(null);
   const [phone, setPhone] = useState(
     () =>
       typeof window !== "undefined" && window.matchMedia(PHONE_QUERY).matches,
@@ -382,6 +383,9 @@ export function NativeWorkspace({
           permission: pending.permission,
           modelSettings: pending.model,
           execution: ai.mode,
+          initialObservation: !editorModified.current
+            ? (latestObservation.current ?? undefined)
+            : undefined,
         });
         if (submitted.localJob) await dispatchLocalJob(submitted.localJob);
       } catch (cause) {
@@ -924,9 +928,19 @@ export function NativeWorkspace({
           }
           if (result.data?.type === "ready") {
             setBridgeReady(true);
+            port.current?.postMessage({
+              id: "warmup-observe",
+              request: { operation: "observe" },
+            });
             return;
           }
           if (typeof result.data?.id === "string") {
+            if (result.data?.value && typeof result.data.value === "object") {
+              latestObservation.current = result.data.value as Record<string, unknown>;
+            }
+            if (result.data.id === "warmup-observe") {
+              return;
+            }
             const list = result.data?.value?.images;
             if (Array.isArray(list) && list.length) {
               const url = rememberImages(result.data.id, list);

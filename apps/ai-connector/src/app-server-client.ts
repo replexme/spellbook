@@ -55,6 +55,7 @@ export interface AgentTurnOptions {
   ) => Promise<ToolResult>;
   onEvent?: (event: RpcNotification) => void;
   onText?: (delta: string) => void;
+  onThinking?: (delta: string) => void;
   signal?: AbortSignal;
   threadId?: string;
   conversationKey?: string;

@@ -5,7 +5,7 @@ import { EditRunner } from "./edit-runner.js";
 import { SessionManager } from "./session-manager.js";
 import { JobResultStore } from "./job-result-store.js";
 import type { AiJob, AiWorkerCallback, NativeJob } from "./types.js";
-import { runNativeTurn } from "./native-agent.js";
+import { runNativeTurn, type NativeObservation } from "./native-agent.js";
 import {
   maintainNativeRemoteLease,
   NativeRemoteHost,
@@ -204,19 +204,23 @@ async function executeNativeJob(
         }
       },
     );
-    const initial = await host.call(
-      { operation: "observe" },
-      controller.signal,
-    );
+    const initial: NativeObservation =
+      (job as any).initialObservation && typeof (job as any).initialObservation === "object"
+        ? ((job as any).initialObservation as NativeObservation)
+        : await host.call({ operation: "observe" }, controller.signal);
+    const effectiveMode =
+      job.permissionMode === "selection" && initial.selectedElementIds.length === 0
+        ? ("slides" as const)
+        : job.permissionMode;
     const permission = {
       mode:
-        job.permissionMode === "slides"
+        effectiveMode === "slides"
           ? ("slides" as const)
-          : job.permissionMode,
+          : effectiveMode,
       slideIndexes:
-        job.permissionMode === "slides" ? [initial.activeSlide] : [],
+        effectiveMode === "slides" ? [initial.activeSlide] : [],
       elementIds:
-        job.permissionMode === "selection" ? initial.selectedElementIds : [],
+        effectiveMode === "selection" ? initial.selectedElementIds : [],
     };
     const client = await sessions.client(job.email, job.modelSettings);
     const result = await runNativeTurn(client, {
@@ -225,10 +229,16 @@ async function executeNativeJob(
       modelSettings: job.modelSettings,
       permission,
       host,
+      initialObservation: initial,
       signal: controller.signal,
       onText: (delta) => {
         events = events.then(() =>
           host.event("delta", delta, controller.signal),
+        );
+      },
+      onThinking: (delta) => {
+        events = events.then(() =>
+          host.event("thinking", delta, controller.signal),
         );
       },
       onTool: (label) => {
