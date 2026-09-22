@@ -494,6 +494,10 @@ button.ws-save:hover {
   border-bottom: 1px solid var(--ds-border-subtle);
 }
 
+.rc-answer-wrapper {
+  margin-top: var(--ds-space-2);
+}
+
 .rc-section > h4 {
   margin: var(--ds-space-1) 0 0;
   color: var(--ds-text-tertiary);

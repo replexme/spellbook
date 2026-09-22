@@ -583,10 +583,9 @@ export function ResultCard({
               이번 요청으로 바뀐 것은 없어요.
             </p>
             {turn.text.trim() ? (
-              <details className="rc-more">
-                <summary>AI의 답 보기</summary>
-                <Answer text={turn.text} />
-              </details>
+              <div className="rc-answer-wrapper">
+                <Answer text={turn.text} allowCopy />
+              </div>
             ) : null}
           </div>
           <footer className="rc-foot">
@@ -612,10 +611,9 @@ export function ResultCard({
         <div className="rc-section">
           <Banner>편집기 기록으로는 문서가 바뀌지 않았어요.</Banner>
           {turn.text.trim() ? (
-            <details className="rc-more">
-              <summary>AI의 답 보기</summary>
-              <Answer text={turn.text} />
-            </details>
+            <div className="rc-answer-wrapper">
+              <Answer text={turn.text} allowCopy />
+            </div>
           ) : null}
         </div>
         <footer className="rc-foot">
@@ -723,9 +721,9 @@ export function ResultCard({
       ) : null}
       {turn.text.trim() ? (
         <div className="rc-section">
-          <details className="rc-more">
+          <details className="rc-more" open>
             <summary>AI의 설명</summary>
-            <Answer text={turn.text} />
+            <Answer text={turn.text} allowCopy />
           </details>
         </div>
       ) : null}
