@@ -446,6 +446,35 @@ export class AnthropicApiClient implements AgentTurnClient {
   }
 }
 
+export type GeminiParameterSchema = Record<string, unknown>;
+
+function cleanGeminiSchema(
+  schema: Record<string, unknown>,
+): GeminiParameterSchema {
+  const copy: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema)) {
+    if (k === "additionalProperties" || k === "$schema" || k === "default")
+      continue;
+    if (k === "type") {
+      if (Array.isArray(v)) {
+        const nonNull = v.find((t) => t !== "null") || "string";
+        copy.type = String(nonNull).toUpperCase();
+      } else if (typeof v === "string") {
+        copy.type = v.toUpperCase();
+      } else {
+        copy.type = v;
+      }
+      continue;
+    }
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      copy[k] = cleanGeminiSchema(v as Record<string, unknown>);
+    } else {
+      copy[k] = v;
+    }
+  }
+  return copy;
+}
+
 export class GeminiApiClient implements AgentTurnClient {
   readonly supportsImageGeneration = false;
   constructor(private readonly apiKey: string) {}
@@ -471,7 +500,7 @@ export class GeminiApiClient implements AgentTurnClient {
     const tools = options?.tools?.map((tool) => ({
       name: tool.name,
       description: tool.description,
-      parameters: tool.inputSchema,
+      parameters: cleanGeminiSchema(tool.inputSchema),
     }));
 
     const systemPrompt = input.find((item) => item.type === "text")?.text;
