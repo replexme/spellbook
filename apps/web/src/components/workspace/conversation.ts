@@ -14,6 +14,7 @@ export type LiveMessage = {
   id: number;
   role: "user" | "assistant" | "system";
   text: string;
+  thinking?: string;
   tools: string[];
   status: "running" | "done" | "error" | "review";
   turnId?: string;
@@ -80,6 +81,7 @@ function withLive(card: CardTurn, message: LiveMessage): CardTurn {
     permission: message.permission ?? card.permission,
     status,
     text: message.text || card.text,
+    thinking: message.thinking ?? card.thinking,
     tools: message.tools.length ? message.tools : card.tools,
     summary: message.summary ?? card.summary,
     changed: message.changed ?? card.changed,

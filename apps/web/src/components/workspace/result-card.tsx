@@ -2,6 +2,9 @@
 
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import {
   Banner,
   Button,
@@ -34,6 +37,7 @@ export type CardTurn = {
   permission: string;
   status: "running" | "done" | "error";
   text: string;
+  thinking?: string;
   tools: string[];
   summary: TurnSummary | null;
   changed?: boolean;
@@ -91,6 +95,28 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+const sanitizeSchema = {
+  ...defaultSchema,
+  tagNames: [
+    ...(defaultSchema.tagNames ?? []),
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "br",
+    "span",
+  ],
+  attributes: {
+    ...defaultSchema.attributes,
+    span: ["className", "style"],
+    table: ["className"],
+    th: ["align"],
+    td: ["align"],
+  },
+};
+
 function Answer({
   text,
   allowCopy = false,
@@ -101,7 +127,12 @@ function Answer({
   if (!text.trim()) return null;
   return (
     <div className="msg-answer">
-      <ReactMarkdown>{normalizeQuotedStrongMarkdown(text)}</ReactMarkdown>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, sanitizeSchema]]}
+      >
+        {normalizeQuotedStrongMarkdown(text)}
+      </ReactMarkdown>
       {allowCopy ? (
         <div
           style={{
@@ -770,7 +801,24 @@ export function RunningCard({
         <span className="ds-tabular">{elapsed(started, now)}</span>
       </header>
 
-      {latestTool ? (
+      {turn.thinking ? (
+        <details className="run-thinking" open={!turn.text.trim()}>
+          <summary className="run-thinking-summary">
+            <span className="run-pulse-dot is-thinking" aria-hidden="true" />
+            <span>AI 생각 중 ({Math.max(1, Math.round((now - started) / 1000))}초)</span>
+          </summary>
+          <div className="run-thinking-content">
+            <pre>{turn.thinking}</pre>
+          </div>
+        </details>
+      ) : null}
+
+      {!latestTool && !turn.thinking ? (
+        <div className="run-active-action">
+          <span className="run-pulse-dot" aria-hidden="true" />
+          <span className="run-active-text">슬라이드 상태 확인 및 분석 준비 중…</span>
+        </div>
+      ) : latestTool ? (
         <div className="run-active-action">
           <span className="run-pulse-dot" aria-hidden="true" />
           <span className="run-active-text">{latestTool}</span>

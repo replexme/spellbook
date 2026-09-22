@@ -716,6 +716,83 @@ button.ws-save:hover {
   animation: ds-pulse 1.4s ease-in-out infinite;
 }
 
+.run-pulse-dot.is-thinking {
+  background: var(--ds-ai);
+  opacity: 0.85;
+}
+
+.run-thinking {
+  margin: var(--ds-space-2) 0;
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-bg-subtle);
+  border: 1px solid var(--ds-border-subtle);
+  overflow: hidden;
+}
+
+.run-thinking-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--ds-space-2);
+  padding: var(--ds-space-2) var(--ds-space-3);
+  font-size: var(--ds-text-xs);
+  font-weight: var(--ds-weight-medium);
+  color: var(--ds-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.run-thinking-content {
+  padding: var(--ds-space-2) var(--ds-space-3);
+  border-top: 1px solid var(--ds-border-subtle);
+  background: var(--ds-bg-base);
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.run-thinking-content pre {
+  margin: 0;
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-text-xs);
+  line-height: 1.5;
+  color: var(--ds-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg-answer table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--ds-space-2) 0;
+  font-size: var(--ds-text-xs);
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--ds-radius-sm);
+  overflow: hidden;
+}
+
+.msg-answer th,
+.msg-answer td {
+  border: 1px solid var(--ds-border-subtle);
+  padding: 6px 10px;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.msg-answer th {
+  background: var(--ds-bg-subtle);
+  font-weight: var(--ds-weight-semibold);
+  color: var(--ds-text-primary);
+}
+
+.msg-answer tr:nth-child(even) td {
+  background: var(--ds-bg-subtle);
+}
+
+.msg-answer br {
+  display: block;
+  content: "";
+  margin-top: 6px;
+}
+
 .run-active-text {
   flex: 1;
   min-width: 0;

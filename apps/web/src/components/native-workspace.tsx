@@ -223,7 +223,7 @@ export function NativeWorkspace({
   const [uploadingAsset, setUploadingAsset] = useState(false),
     [assetNotice, setAssetNotice] = useState("");
   const [permission, setPermission] = useState<PermissionMode>(
-    initialQueued?.permission ?? "selection",
+    initialQueued?.permission ?? "document",
   );
   const [model, setModel] = useState<ModelSettings>();
   const [lookingAt, setLookingAt] = useState<{
@@ -1256,7 +1256,7 @@ export function NativeWorkspace({
             setUndone((current) =>
               new Map(current).set(event.turnId, event.at),
             );
-          } else if (["delta", "tool", "done"].includes(event.type)) {
+          } else if (["delta", "tool", "thinking", "done"].includes(event.type)) {
             if (event.type === "done") {
               finishedTurn = true;
               setBusy(false);
@@ -1282,6 +1282,8 @@ export function NativeWorkspace({
                   ? m
                   : event.type === "delta"
                     ? { ...m, text: m.text + event.delta }
+                    : event.type === "thinking"
+                      ? { ...m, thinking: (m.thinking ?? "") + (event.thinking ?? "") }
                     : event.type === "tool"
                       ? { ...m, tools: [...m.tools, event.label] }
                       : {
