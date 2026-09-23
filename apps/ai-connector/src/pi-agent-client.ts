@@ -1,3 +1,4 @@
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -120,17 +121,12 @@ export class PiAgentClient implements AgentTurnClient {
     const modelId =
       options?.modelSettings?.model || defaultModelForProvider(this.providerId);
 
-    if (piProvider === "google") {
-      process.env.GEMINI_API_KEY = this.apiKey;
-    } else if (piProvider === "anthropic") {
-      process.env.ANTHROPIC_API_KEY = this.apiKey;
-    } else if (piProvider === "openai") {
-      process.env.OPENAI_API_KEY = this.apiKey;
-    } else if (piProvider === "openrouter") {
-      process.env.OPENROUTER_API_KEY = this.apiKey;
-    }
-
-    const modelRuntime = await ModelRuntime.create();
+    // API-key turns are tenant-scoped. Never mutate process.env or load the
+    // connector's home-directory credentials: concurrent turns must not
+    // inherit another tenant's key or any interactive login on the instance.
+    const modelRuntime = await ModelRuntime.create({
+      credentials: new InMemoryCredentialStore(),
+    });
     await modelRuntime.setRuntimeApiKey(piProvider, this.apiKey);
 
     let model = modelRuntime.getModel(piProvider, modelId);
