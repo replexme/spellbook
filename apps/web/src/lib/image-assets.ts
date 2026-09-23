@@ -196,6 +196,15 @@ export async function saveImageAsset(
   );
 }
 
+// Ownership is decided before anything about the upload, so a caller who does
+// not own the document learns nothing from validation errors.
+async function requireOwnedDocument(accountId: string, documentId: string) {
+  await ensureSchema();
+  const [document] =
+    await db()`select id from spellbook_documents where id = ${documentId} and account_id = ${accountId}`;
+  if (!document) throw new HttpError(404, "document_not_found");
+}
+
 export async function saveAsset(
   accountId: string,
   documentId: string,
@@ -203,10 +212,7 @@ export async function saveAsset(
   fileName: string,
   claimedType: string,
 ) {
-  await ensureSchema();
-  const [document] =
-    await db()`select id from spellbook_documents where id = ${documentId} and account_id = ${accountId}`;
-  if (!document) throw new HttpError(404, "document_not_found");
+  await requireOwnedDocument(accountId, documentId);
   if (data.length > ASSET_UPLOAD_MAX_BYTES)
     throw new HttpError(413, "asset_too_large");
   const info = assetInfo(data, claimedType);
@@ -242,6 +248,7 @@ export async function uploadImage(
   documentId: string,
   file: File,
 ) {
+  await requireOwnedDocument(session.accountId, documentId);
   if (!normalizedClaimedType(file.type).startsWith("image/"))
     throw new HttpError(400, "image_requires_png_or_jpeg_under_5mb_and_16mp");
   return uploadAsset(session, documentId, file);
