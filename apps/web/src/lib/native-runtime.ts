@@ -37,6 +37,30 @@ import {
 
 type PermissionMode = "read_only" | "selection" | "slides" | "document";
 
+const KEY_PROVIDERS = new Set([
+  "openai_api",
+  "anthropic_api",
+  "gemini_api",
+  "openrouter_api",
+  "custom_api",
+]);
+
+// Provider API keys are attached only to the copy handed to a worker or to the
+// user's connector. Stored jobs keep no key, so the jobs table, its backups and
+// redelivery never hold a usable credential.
+async function withProviderKey(
+  payload: Record<string, unknown>,
+  accountId: string,
+): Promise<Record<string, unknown>> {
+  const provider = (payload.modelSettings as { provider?: unknown } | undefined)
+    ?.provider;
+  if (typeof provider !== "string" || !KEY_PROVIDERS.has(provider))
+    return payload;
+  const apiKey = await getActiveProviderKey(accountId, provider);
+  if (!apiKey) throw new HttpError(400, "provider_key_missing");
+  return { ...payload, apiKey };
+}
+
 async function ownedSession(
   session: Session,
   documentId: string,
@@ -112,13 +136,6 @@ export async function submitNativeTurn(
   if (!native.graph_object)
     throw new HttpError(409, "native_document_context_not_ready");
   let effectiveModelSettings = modelSettings;
-  const keyProviders = [
-    "openai_api",
-    "anthropic_api",
-    "gemini_api",
-    "openrouter_api",
-    "custom_api",
-  ];
 
   if (!effectiveModelSettings?.provider) {
     const customProviders = await getAccountProviders(session.accountId);
@@ -150,7 +167,7 @@ export async function submitNativeTurn(
   let apiKey: string | null = null;
   if (
     effectiveModelSettings?.provider &&
-    keyProviders.includes(effectiveModelSettings.provider)
+    KEY_PROVIDERS.has(effectiveModelSettings.provider)
   ) {
     apiKey = await getActiveProviderKey(
       session.accountId,
@@ -179,7 +196,6 @@ export async function submitNativeTurn(
     ...(input.initialObservation
       ? { initialObservation: input.initialObservation }
       : {}),
-    ...(apiKey ? { apiKey } : {}),
     ...(effectiveModelSettings
       ? { modelSettings: effectiveModelSettings }
       : {}),
@@ -239,18 +255,19 @@ export async function submitNativeTurn(
       values (${native.id},${turnId},'start',${sql.json({ text, permission, turnId })})
     `;
   });
+  const deliverable = apiKey ? { ...payload, apiKey } : payload;
   if (execution === "local")
     return {
       accepted: true,
       turnId,
       localJob: localConnectorJob(
-        payload,
+        deliverable,
         session.accountId,
         native.expires_at,
       ),
     };
   try {
-    await enqueueWorkerJob(jobId, "ai", "/internal/jobs/native", payload);
+    await enqueueWorkerJob(jobId, "ai", "/internal/jobs/native", deliverable);
     await db()`update spellbook_jobs set dispatched_at=now() where id=${jobId}`;
   } catch (descobrir) {
     const error =
@@ -291,7 +308,14 @@ export async function pollNativeSession(
         ? "/internal/jobs/native"
         : "/internal/jobs/scan-render";
     try {
-      await enqueueWorkerJob(job.id, target, path, job.payload);
+      await enqueueWorkerJob(
+        job.id,
+        target,
+        path,
+        job.job_type === "native_turn"
+          ? await withProviderKey(job.payload, native.account_id)
+          : job.payload,
+      );
       await db()`update spellbook_jobs set dispatched_at=now(),error=null,updated_at=now()
         where id=${job.id} and status='queued'
           and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second')`;
@@ -327,15 +351,22 @@ export async function pollNativeSession(
       and payload->>'sessionId'=${native.id}
     order by created_at limit 1
   `;
+  let localJob: ReturnType<typeof localConnectorJob> | null = null;
+  if (localPending) {
+    try {
+      localJob = localConnectorJob(
+        await withProviderKey(localPending.payload, native.account_id),
+        native.account_id,
+        native.expires_at,
+      );
+    } catch (error) {
+      if (!(error instanceof HttpError)) throw error;
+      await failNativeTurn(String(localPending.payload.jobId), error.message);
+    }
+  }
   return {
     task,
-    localJob: localPending
-      ? localConnectorJob(
-          localPending.payload,
-          native.account_id,
-          native.expires_at,
-        )
-      : null,
+    localJob,
     events: events.map((event) => ({
       id: Number(event.id),
       type: event.type,

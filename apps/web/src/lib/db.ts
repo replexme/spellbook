@@ -322,6 +322,7 @@ export async function runMigrations(): Promise<void> {
     alter table spellbook_account_providers add column if not exists models_cache jsonb;
     alter table spellbook_account_providers add column if not exists custom_model text;
     alter table spellbook_account_providers add column if not exists custom_base_url text;
+    update spellbook_jobs set payload = payload - 'apiKey' where payload ? 'apiKey';
   `);
 }
 

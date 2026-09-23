@@ -71,6 +71,7 @@ import { POST as postNativeConnectorTool } from "../app/api/native/jobs/[jobId]/
 import { POST as postNativeConnectorCallback } from "../app/api/native/jobs/[jobId]/callback/route";
 import { GET as getNativeStream } from "../app/api/documents/[id]/native/stream/route";
 import { consumeNativeStream } from "./native-stream-client";
+import { encryptApiKey } from "./provider-keys";
 
 const enabled = process.env.SPELLBOOK_NATIVE_INTEGRATION === "1";
 const schema = `spellbook_native_${randomUUID().replaceAll("-", "")}`;
@@ -1252,6 +1253,81 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     expect(versions.map((version) => version.id)).toEqual(
       expect.arrayContaining([f.versionId, restored.versionId]),
     );
+  });
+
+  it("keeps provider API keys out of stored jobs while handing them to the worker", async () => {
+    const f = await fixture();
+    const apiKey = "gemini-integration-key";
+    await db()`insert into spellbook_account_providers
+      (account_id, provider, api_key_encrypted, is_active)
+      values (${accountId}, 'gemini_api', ${encryptApiKey(apiKey)}, true)`;
+    try {
+      workers.enqueueWorkerJob.mockClear();
+      const submitted = await submitNativeTurn(session, f.documentId, {
+        text: "제목 변경",
+        permission: "selection",
+      });
+      expect(workers.enqueueWorkerJob).toHaveBeenCalledWith(
+        expect.any(String),
+        "ai",
+        "/internal/jobs/native",
+        expect.objectContaining({
+          apiKey,
+          modelSettings: expect.objectContaining({ provider: "gemini_api" }),
+        }),
+      );
+      const [turn] =
+        await db()`select job_id from spellbook_native_turns where id=${submitted.turnId}`;
+      const [stored] =
+        await db()`select payload from spellbook_jobs where id=${turn.job_id}`;
+      expect(stored.payload).not.toHaveProperty("apiKey");
+      expect(JSON.stringify(stored.payload)).not.toContain(apiKey);
+
+      await db()`update spellbook_jobs set dispatched_at=now()-interval '1 hour' where id=${turn.job_id}`;
+      workers.enqueueWorkerJob.mockClear();
+      await pollNativeSession(session, f.documentId, 0);
+      expect(workers.enqueueWorkerJob).toHaveBeenCalledWith(
+        turn.job_id,
+        "ai",
+        "/internal/jobs/native",
+        expect.objectContaining({ apiKey }),
+      );
+      const [redelivered] =
+        await db()`select payload from spellbook_jobs where id=${turn.job_id}`;
+      expect(redelivered.payload).not.toHaveProperty("apiKey");
+
+      const previousMode = process.env.SPELLBOOK_AI_CONNECTOR_MODE;
+      process.env.SPELLBOOK_AI_CONNECTOR_MODE = "local";
+      try {
+        const local = await fixture();
+        const localTurn = await submitNativeTurn(session, local.documentId, {
+          text: "제목 변경",
+          permission: "selection",
+          execution: "local",
+        });
+        expect(localTurn.localJob).toMatchObject({ apiKey });
+        const polled = await pollNativeSession(session, local.documentId, 0);
+        expect(polled.localJob).toMatchObject({ apiKey });
+        const [localStored] =
+          await db()`select payload from spellbook_jobs where id=${String(localTurn.localJob?.jobId)}`;
+        expect(localStored.payload).not.toHaveProperty("apiKey");
+      } finally {
+        if (previousMode === undefined)
+          delete process.env.SPELLBOOK_AI_CONNECTOR_MODE;
+        else process.env.SPELLBOOK_AI_CONNECTOR_MODE = previousMode;
+      }
+
+      const legacyJob = randomUUID();
+      await db()`insert into spellbook_jobs (id,job_type,document_id,version_id,status,payload)
+        values (${legacyJob},'native_turn',${f.documentId},${f.versionId},'succeeded',${db().json({ apiKey, historical: true })})`;
+      const actual = await vi.importActual<typeof import("./db")>("./db");
+      await actual.runMigrations();
+      const [cleaned] =
+        await db()`select payload from spellbook_jobs where id=${legacyJob}`;
+      expect(cleaned.payload).toEqual({ historical: true });
+    } finally {
+      await db()`delete from spellbook_account_providers where account_id=${accountId}`;
+    }
   });
 
   it("hands a local subscription turn to the connector with only a job-scoped capability", async () => {
