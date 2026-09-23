@@ -1198,6 +1198,44 @@ public sealed class DocumentEngineTests : IDisposable
         Assert.Contains("collides with candidate content", error.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void UnsupportedFeaturePreserverRestoresUntouchedSlidesAndReconcilesTableBorders()
+    {
+        XNamespace a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+        var baseline = TestPresentationFactory.Create(directory);
+        var candidate = Path.Combine(directory, "candidate-degraded.pptx");
+        File.Copy(baseline, candidate);
+
+        // Simulate LibreOffice corruption on candidate: modify slide 1 XML
+        using (var archive = ZipFile.Open(candidate, ZipArchiveMode.Update))
+        {
+            var entry = archive.GetEntry("ppt/slides/slide1.xml")!;
+            var doc = ReadXml(archive, "ppt/slides/slide1.xml");
+            // Add a corrupted table border #BFBFBF
+            var tc = doc.Descendants(a + "tcPr").FirstOrDefault();
+            if (tc != null)
+            {
+                tc.Add(new XElement(a + "lnL",
+                    new XAttribute("w", "6480"),
+                    new XElement(a + "solidFill",
+                        new XElement(a + "srgbClr", new XAttribute("val", "BFBFBF")))));
+            }
+            entry.Delete();
+            using var stream = archive.CreateEntry("ppt/slides/slide1.xml").Open();
+            doc.Save(stream);
+        }
+
+        var output = Path.Combine(directory, "output-reconciled.pptx");
+        var report = new PptxUnsupportedFeaturePreserver().Preserve(baseline, candidate, output);
+
+        using (var archive = ZipFile.OpenRead(output))
+        {
+            var doc = ReadXml(archive, "ppt/slides/slide1.xml");
+            var hasBfbfbf = doc.ToString().Contains("BFBFBF", StringComparison.OrdinalIgnoreCase);
+            Assert.False(hasBfbfbf);
+        }
+    }
+
     public void Dispose()
     {
         Directory.Delete(directory, true);
