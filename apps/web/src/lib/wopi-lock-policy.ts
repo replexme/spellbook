@@ -7,7 +7,11 @@ export function wopiLockConflict(
   given: string,
   oldLock: string | null,
 ): string | null {
-  if (operation === "LOCK")
-    return current && current !== given && current !== oldLock ? current : null;
+  if (operation === "LOCK") {
+    // X-WOPI-OldLock changes LOCK into atomic UnlockAndRelock. Even if the
+    // new lock matches, an absent/mismatched old lock is a conflict.
+    if (oldLock !== null) return current === oldLock ? null : (current ?? "");
+    return current && current !== given ? current : null;
+  }
   return current === given ? null : (current ?? "");
 }

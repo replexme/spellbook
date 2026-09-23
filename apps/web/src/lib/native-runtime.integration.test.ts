@@ -372,6 +372,9 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       where id=${f.nativeSessionId}
     `;
     await expect(lock("GET_LOCK")).resolves.toEqual({ status: 200, lock: "" });
+    await expect(
+      lock("LOCK", "third", { "x-wopi-oldlock": "second" }),
+    ).resolves.toEqual({ status: 409, lock: "" });
     const contentsUrl = new URL(url);
     contentsUrl.pathname += "/contents";
     await expect(

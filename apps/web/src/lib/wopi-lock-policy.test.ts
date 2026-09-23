@@ -12,6 +12,8 @@ describe("WOPI lock transitions", () => {
   it("returns the exact existing lock on every mismatch (including unlocked files)", () => {
     expect(wopiLockConflict("LOCK", "a", "b", null)).toBe("a");
     expect(wopiLockConflict("LOCK", "a", "b", "wrong")).toBe("a");
+    expect(wopiLockConflict("LOCK", "a", "a", "wrong")).toBe("a");
+    expect(wopiLockConflict("LOCK", null, "b", "a")).toBe("");
     expect(wopiLockConflict("REFRESH_LOCK", "a", "b", null)).toBe("a");
     expect(wopiLockConflict("UNLOCK", "a", "b", null)).toBe("a");
     expect(wopiLockConflict("REFRESH_LOCK", null, "a", null)).toBe("");
