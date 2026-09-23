@@ -23,16 +23,23 @@ export type ApiKeyProvider =
 
 function encryptionKey(): Buffer {
   const secret =
-    process.env.SPELLBOOK_INTERNAL_TOKEN ||
-    process.env.PRESENT_INTERNAL_TOKEN ||
-    "spellbook-default-token-secret-32b";
+    process.env.SPELLBOOK_INTERNAL_TOKEN?.trim() ||
+    process.env.PRESENT_INTERNAL_TOKEN?.trim();
+  // A built-in fallback would let anyone who reads the source forge or decrypt.
+  if (!secret)
+    throw new Error(
+      "SPELLBOOK_INTERNAL_TOKEN is required for provider key encryption.",
+    );
   return createHash("sha256").update(secret).digest();
 }
 
 export function encryptApiKey(text: string): string {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(text, "utf8"), cipher.final()]);
+  const encrypted = Buffer.concat([
+    cipher.update(text, "utf8"),
+    cipher.final(),
+  ]);
   const tag = cipher.getAuthTag();
   return `${iv.toString("base64url")}.${encrypted.toString("base64url")}.${tag.toString("base64url")}`;
 }
@@ -47,7 +54,9 @@ export function decryptApiKey(token: string): string {
     authTagLength: 16,
   });
   decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
+  return Buffer.concat([decipher.update(data), decipher.final()]).toString(
+    "utf8",
+  );
 }
 
 export function maskApiKey(key: string): string {
@@ -347,9 +356,7 @@ export async function selectActiveProvider(
   });
 }
 
-export async function getAccountProviders(
-  accountId: string,
-): Promise<
+export async function getAccountProviders(accountId: string): Promise<
   Array<{
     provider: string;
     isActive: boolean;
