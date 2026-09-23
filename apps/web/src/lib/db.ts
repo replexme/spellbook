@@ -264,6 +264,34 @@ export async function runMigrations(): Promise<void> {
       created_at timestamptz not null default now()
     );
     create index if not exists spellbook_native_events_session_idx on spellbook_native_events(session_id, id);
+    -- One notification per committed session change, never event contents. A
+    -- listener re-reads durable rows, so reconnects cannot lose the payload.
+    create or replace function spellbook_notify_native_change() returns trigger
+      language plpgsql as $$
+      begin
+        if TG_TABLE_NAME = 'spellbook_native_sessions' then
+          perform pg_notify('spellbook_native_changed', NEW.id::text);
+        else
+          perform pg_notify('spellbook_native_changed', NEW.session_id::text);
+        end if;
+        return NEW;
+      end;
+    $$;
+    drop trigger if exists spellbook_native_events_notify on spellbook_native_events;
+    create trigger spellbook_native_events_notify after insert on spellbook_native_events
+      for each row execute function spellbook_notify_native_change();
+    drop trigger if exists spellbook_native_tasks_notify on spellbook_native_tasks;
+    create trigger spellbook_native_tasks_notify after insert or update of status on spellbook_native_tasks
+      for each row execute function spellbook_notify_native_change();
+    drop trigger if exists spellbook_native_sessions_notify on spellbook_native_sessions;
+    create trigger spellbook_native_sessions_notify
+      after update of status, save_revision, last_error, working_version_id on spellbook_native_sessions
+      for each row when (
+        OLD.status is distinct from NEW.status or
+        OLD.save_revision is distinct from NEW.save_revision or
+        OLD.last_error is distinct from NEW.last_error or
+        OLD.working_version_id is distinct from NEW.working_version_id
+      ) execute function spellbook_notify_native_change();
     alter table spellbook_native_turns add column if not exists summary jsonb;
     alter table spellbook_versions add column if not exists restored_from_version_id uuid references spellbook_versions(id);
     alter table spellbook_versions add column if not exists editor_modified boolean;

@@ -176,9 +176,13 @@ export async function submitNativeTurn(
     requestText: text,
     permissionMode: permission,
     execution,
-    ...(input.initialObservation ? { initialObservation: input.initialObservation } : {}),
+    ...(input.initialObservation
+      ? { initialObservation: input.initialObservation }
+      : {}),
     ...(apiKey ? { apiKey } : {}),
-    ...(effectiveModelSettings ? { modelSettings: effectiveModelSettings } : {}),
+    ...(effectiveModelSettings
+      ? { modelSettings: effectiveModelSettings }
+      : {}),
   };
   const publicBase = execution === "local" ? publicAppBaseUrl() : null;
   const baseJobPayload = {
@@ -255,6 +259,13 @@ export async function submitNativeTurn(
     throw new HttpError(503, "native_ai_unavailable");
   }
   return { accepted: true, turnId };
+}
+
+export async function nativeSessionSignalId(
+  session: Session,
+  documentId: string,
+): Promise<string> {
+  return (await ownedSession(session, documentId, undefined, true)).id;
 }
 
 export async function pollNativeSession(
@@ -655,7 +666,10 @@ export async function executeNativeTool(input: Record<string, unknown>) {
   if (input.operation === "event") {
     const type = input.type;
     const value = typeof input.value === "string" ? input.value : "";
-    if (!["delta", "tool", "thinking"].includes(String(type)) || value.length > 4_000)
+    if (
+      !["delta", "tool", "thinking"].includes(String(type)) ||
+      value.length > 4_000
+    )
       throw new HttpError(400, "invalid_native_event");
     await db()`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
       values (${sessionId},${turnId},${String(type)},${db().json({ [type === "delta" ? "delta" : type === "thinking" ? "thinking" : "label"]: value })})`;

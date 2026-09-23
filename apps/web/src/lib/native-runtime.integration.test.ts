@@ -69,6 +69,8 @@ import { authorizeNativeConnectorJob } from "./native-connector-auth";
 import { getImageAsset } from "./image-assets";
 import { POST as postNativeConnectorTool } from "../app/api/native/jobs/[jobId]/tools/route";
 import { POST as postNativeConnectorCallback } from "../app/api/native/jobs/[jobId]/callback/route";
+import { GET as getNativeStream } from "../app/api/documents/[id]/native/stream/route";
+import { consumeNativeStream } from "./native-stream-client";
 
 const enabled = process.env.SPELLBOOK_NATIVE_INTEGRATION === "1";
 const schema = `spellbook_native_${randomUUID().replaceAll("-", "")}`;
@@ -153,6 +155,244 @@ const observation = {
 };
 
 describe.skipIf(!enabled)("durable native editor orchestration", () => {
+  it("streams committed events without idle polling and resumes from a durable cursor", async () => {
+    const f = await fixture();
+    const token = signWopiToken({
+      version: 1,
+      sessionId: f.nativeSessionId,
+      documentId: f.documentId,
+      accountId,
+      expiresAt: Date.now() + 60_000,
+    });
+    const url = `https://spellbook.integration.invalid/api/documents/${f.documentId}/native/stream`;
+    const abort = new AbortController();
+    const request = new Request(`${url}?after=0`, {
+      headers: { authorization: `Bearer ${token}` },
+      signal: abort.signal,
+    });
+    const response = await getNativeStream(request, {
+      params: Promise.resolve({ id: f.documentId }),
+    });
+    expect(response.status).toBe(200);
+    let snapshots = 0;
+    let initial!: () => void;
+    let delivered!: (id: number) => void;
+    const first = new Promise<void>((resolve) => {
+      initial = resolve;
+    });
+    const next = new Promise<number>((resolve) => {
+      delivered = resolve;
+    });
+    let eventId = 0;
+    const reading = consumeNativeStream(
+      url,
+      token,
+      0,
+      abort.signal,
+      (snapshot) => {
+        snapshots++;
+        if (snapshots === 1) initial();
+        const matching = snapshot.events.find(
+          (event) => event.type === "delta",
+        );
+        if (matching) delivered(matching.id);
+      },
+      (async () => response) as typeof fetch,
+    );
+    try {
+      await Promise.race([
+        first,
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error("initial snapshot timeout")),
+            2_000,
+          ),
+        ),
+      ]);
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      expect(snapshots).toBe(1);
+      await db()`insert into spellbook_native_events (session_id,event_type,payload)
+        values (${f.nativeSessionId},'delta',${db().json({ delta: "hello" })})`;
+      eventId = await Promise.race([
+        next,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("notification timeout")), 2_000),
+        ),
+      ]);
+      expect(eventId).toBeGreaterThan(0);
+    } finally {
+      abort.abort();
+      await reading.catch((error) => {
+        if (error?.name !== "AbortError") throw error;
+      });
+    }
+    const reconnect = new AbortController();
+    const resumed = await getNativeStream(
+      new Request(`${url}?after=${eventId}`, {
+        headers: { authorization: `Bearer ${token}` },
+        signal: reconnect.signal,
+      }),
+      { params: Promise.resolve({ id: f.documentId }) },
+    );
+    let firstResume!: (events: unknown[]) => void;
+    const initialResume = new Promise<unknown[]>((resolve) => {
+      firstResume = resolve;
+    });
+    const resumedReading = consumeNativeStream(
+      url,
+      token,
+      eventId,
+      reconnect.signal,
+      (snapshot) => {
+        firstResume(snapshot.events);
+      },
+      (async () => resumed) as typeof fetch,
+    );
+    try {
+      expect(
+        await Promise.race([
+          initialResume,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("resume timeout")), 2_000),
+          ),
+        ]),
+      ).toEqual([]);
+    } finally {
+      reconnect.abort();
+      await resumedReading.catch((error) => {
+        if (error?.name !== "AbortError") throw error;
+      });
+    }
+  });
+  it.skipIf(process.env.SPELLBOOK_NATIVE_BENCH !== "1")(
+    "compares committed-event latency and snapshot reads for SSE and adaptive polling",
+    async () => {
+      const [streamFixture, activeFixture, idleFixture] = await Promise.all([
+        fixture(),
+        fixture(),
+        fixture(),
+      ]);
+      const produced = new Map<number, number>();
+      const samples: Record<string, number[]> = {
+        stream: [],
+        active: [],
+        idle: [],
+      };
+      const reads: Record<string, number> = { stream: 0, active: 0, idle: 0 };
+      const seen: Record<string, Set<number>> = {
+        stream: new Set(),
+        active: new Set(),
+        idle: new Set(),
+      };
+      const record = (
+        mode: keyof typeof samples,
+        events: Array<{ seq?: number }>,
+      ) => {
+        for (const event of events) {
+          if (typeof event.seq !== "number" || seen[mode].has(event.seq))
+            continue;
+          seen[mode].add(event.seq);
+          samples[mode].push(
+            performance.now() - (produced.get(event.seq) ?? performance.now()),
+          );
+        }
+      };
+      const abort = new AbortController();
+      const token = signWopiToken({
+        version: 1,
+        sessionId: streamFixture.nativeSessionId,
+        documentId: streamFixture.documentId,
+        accountId,
+        expiresAt: Date.now() + 60_000,
+      });
+      const url = `https://spellbook.integration.invalid/api/documents/${streamFixture.documentId}/native/stream`;
+      const response = await getNativeStream(
+        new Request(`${url}?after=0`, {
+          headers: { authorization: `Bearer ${token}` },
+          signal: abort.signal,
+        }),
+        { params: Promise.resolve({ id: streamFixture.documentId }) },
+      );
+      expect(response.status).toBe(200);
+      let ready!: () => void;
+      const connected = new Promise<void>((resolve) => {
+        ready = resolve;
+      });
+      const consuming = consumeNativeStream(
+        url,
+        token,
+        0,
+        abort.signal,
+        (snapshot) => {
+          reads.stream++;
+          if (reads.stream === 1) ready();
+          record("stream", snapshot.events);
+        },
+        (async () => response) as typeof fetch,
+      );
+      await connected;
+      let running = true;
+      const poll = async (
+        mode: "active" | "idle",
+        documentId: string,
+        interval: number,
+      ) => {
+        let cursor = 0;
+        while (running) {
+          const result = await pollNativeSession(session, documentId, cursor);
+          reads[mode]++;
+          record(mode, result.events);
+          for (const event of result.events)
+            cursor = Math.max(cursor, event.id);
+          await new Promise((resolve) => setTimeout(resolve, interval));
+        }
+      };
+      const active = poll("active", activeFixture.documentId, 250);
+      const idle = poll("idle", idleFixture.documentId, 1_500);
+      try {
+        for (let seq = 0; seq < 6; seq++) {
+          await new Promise((resolve) => setTimeout(resolve, 950));
+          produced.set(seq, performance.now());
+          await db().begin(async (sql) => {
+            for (const f of [streamFixture, activeFixture, idleFixture])
+              await sql`insert into spellbook_native_events (session_id,event_type,payload)
+                values (${f.nativeSessionId},'delta',${sql.json({ seq, delta: "x" })})`;
+          });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1_650));
+      } finally {
+        running = false;
+        abort.abort();
+        await Promise.all([
+          active,
+          idle,
+          consuming.catch((error) => {
+            if (error?.name !== "AbortError") throw error;
+          }),
+        ]);
+      }
+      const percentile = (values: number[], p: number) => {
+        const sorted = [...values].sort((a, b) => a - b);
+        return Math.round(sorted[Math.ceil(p * sorted.length) - 1] ?? NaN);
+      };
+      const report = Object.fromEntries(
+        Object.entries(samples).map(([mode, values]) => [
+          mode,
+          {
+            delivered: values.length,
+            reads: reads[mode],
+            p50ms: percentile(values, 0.5),
+            p95ms: percentile(values, 0.95),
+          },
+        ]),
+      );
+      console.log(`NATIVE_TRANSPORT_BENCH=${JSON.stringify(report)}`);
+      expect(samples.stream).toHaveLength(6);
+      expect(samples.active).toHaveLength(6);
+      expect(samples.idle).toHaveLength(6);
+    },
+    25_000,
+  );
   it("keeps document-scoped editor requests alive without the broader login cookie", async () => {
     const f = await fixture();
     const token = signWopiToken({

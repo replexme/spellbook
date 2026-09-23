@@ -10,6 +10,8 @@ import type {
   VersionHistoryItem,
 } from "@/lib/history-types";
 import { compactNativeTaskResultForTransport } from "@/lib/native-image-transport";
+import { consumeNativeStream } from "@/lib/native-stream-client";
+import type { pollNativeSession } from "@/lib/native-runtime";
 import type { TurnSummary } from "@/lib/native-turn-summary";
 import { uploadImageAsset, uploadMediaAsset } from "@/lib/upload-image";
 import { useAiAccount } from "@/lib/use-ai-account";
@@ -164,6 +166,7 @@ export function NativeWorkspace({
       revision: string | null;
       acknowledgementSent: boolean;
     } | null>(null);
+  const lastEventRef = useRef(0);
   const dispatchedLocalJobs = useRef(new Set<string>());
   const assetPayloads = useRef(
     new Map<
@@ -936,7 +939,10 @@ export function NativeWorkspace({
           }
           if (typeof result.data?.id === "string") {
             if (result.data?.value && typeof result.data.value === "object") {
-              latestObservation.current = result.data.value as Record<string, unknown>;
+              latestObservation.current = result.data.value as Record<
+                string,
+                unknown
+              >;
             }
             if (result.data.id === "warmup-observe") {
               return;
@@ -1087,227 +1093,232 @@ export function NativeWorkspace({
     void refreshSummary();
   }, [saveState, refreshHistory, refreshSummary, refreshVersions]);
   useEffect(() => {
+    lastEventRef.current = 0;
+  }, [launch.documentId]);
+  useEffect(() => {
     if (!bridgeReady) return;
     let stopped = false,
-      lastEvent = 0,
+      lastEvent = lastEventRef.current,
       timer: ReturnType<typeof setTimeout>;
     const abort = new AbortController();
     void refreshHistory();
-    const poll = async () => {
-      try {
-        const response = await api(
-          `poll?after=${lastEvent}`,
-          undefined,
-          abort.signal,
-        );
-        if (stopped) return;
-        if (response.localJob && ai.mode === "local" && aiConnected)
-          await dispatchLocalJob(response.localJob);
-        saveRevision.current =
-          response.session?.saveRevision ?? saveRevision.current;
-        setSessionObserved(true);
-        if (response.session?.status === "validating")
-          setSaveState("저장 검사 중…");
-        else if (response.session?.status === "active") {
-          const completedRevision = pendingSaveRevision.current;
-          if (
-            completedRevision !== null &&
-            saveRevision.current >= completedRevision
-          ) {
-            const browserSave = pendingBrowserSave.current;
-            if (browserSave?.revision) {
-              if (!browserSave.acknowledgementSent) {
-                browserSave.acknowledgementSent = true;
-                port.current?.postMessage({
-                  type: "save-result",
-                  requestId: browserSave.requestId,
-                  ok: true,
-                  revision: browserSave.revision,
-                });
-              }
-              setSaveState("저장 확인 중…");
-            }
-            if (browserSave && !browserSave.revision) {
-              setSaveState("저장 검사 중…");
-              timer = setTimeout(poll, 500);
-              return;
-            }
-            if (!browserSave) {
-              pendingSaveRevision.current = null;
-              setSaveState("저장됨");
-              const waiting = pendingTurn.current;
-              if (waiting) {
-                if (editorModified.current) {
-                  pendingSaveRevision.current = saveRevision.current + 1;
-                  setSaveState("AI 작업 전 저장 중…");
-                  sendOffice("Action_Save", {
-                    Notify: true,
-                    DontSaveIfUnmodified: false,
-                  });
-                } else {
-                  pendingTurn.current = null;
-                  void dispatchTurn(waiting);
-                }
-              }
-            }
-          } else if (
-            pendingSaveRevision.current === null &&
-            !editorModified.current
-          ) {
-            setSaveState("저장됨");
-          }
-          if (
-            pendingBrowserSave.current === null &&
-            pendingSaveRevision.current === null &&
-            !editorModified.current &&
-            downloadAfterRevision.current !== null &&
-            saveRevision.current >= downloadAfterRevision.current
-          ) {
-            downloadAfterRevision.current = null;
-            setDownload(null);
-            window.location.assign(
-              `/api/documents/${launch.documentId}/download`,
-            );
-          }
-        } else if (response.session?.status === "failed") {
-          const waiting = pendingTurn.current;
+    // A long-lived Cloud Run response is billable for its entire duration.
+    // Stream only while an AI turn needs low latency; idle sessions poll.
+    const useStream =
+      process.env.NEXT_PUBLIC_NATIVE_EVENTS_MODE !== "poll" &&
+      busy &&
+      Boolean(launch.accessToken);
+    const handleSnapshot = async (
+      response: Awaited<ReturnType<typeof pollNativeSession>>,
+    ) => {
+      if (stopped) return;
+      if (response.localJob && ai.mode === "local" && aiConnected)
+        await dispatchLocalJob(response.localJob);
+      saveRevision.current =
+        response.session?.saveRevision ?? saveRevision.current;
+      setSessionObserved(true);
+      if (response.session?.status === "validating")
+        setSaveState("저장 검사 중…");
+      else if (response.session?.status === "active") {
+        const completedRevision = pendingSaveRevision.current;
+        if (
+          completedRevision !== null &&
+          saveRevision.current >= completedRevision
+        ) {
           const browserSave = pendingBrowserSave.current;
-          if (browserSave) {
-            pendingBrowserSave.current = null;
-            editorModified.current = true;
-            port.current?.postMessage({
-              type: "save-result",
-              requestId: browserSave.requestId,
-              ok: false,
-              error:
-                response.session.error ?? "browser_document_validation_failed",
-            });
+          if (browserSave?.revision) {
+            if (!browserSave.acknowledgementSent) {
+              browserSave.acknowledgementSent = true;
+              port.current?.postMessage({
+                type: "save-result",
+                requestId: browserSave.requestId,
+                ok: true,
+                revision: browserSave.revision,
+              });
+            }
+            setSaveState("저장 확인 중…");
           }
-          pendingTurn.current = null;
-          pendingSaveRevision.current = null;
-          setSaveState("저장 실패");
-          setError(
-            response.session.error ?? "저장한 파일을 검사하지 못했어요.",
-          );
-          if (waiting) {
-            setBusy(false);
-            setText(waiting.draft);
+          if (browserSave && !browserSave.revision) {
+            setSaveState("저장 검사 중…");
+            return;
           }
-        }
-        if (response.task) deliverTask(response.task);
-        let finishedTurn = false;
-        for (const event of response.events) {
-          lastEvent = event.id;
-          if (event.type === "start")
-            setMessages((items) => {
-              const pending = items.at(-1);
-              const assistant: Message = {
-                id: event.id,
-                role: "assistant",
-                text: "",
-                tools: [],
-                status: "running",
-                turnId: event.turnId,
-                permission: event.permission ?? pending?.permission,
-                at: event.at,
-              };
-              // The request this page just sent gets its turn id.
-              if (
-                pending?.role === "user" &&
-                !pending.turnId &&
-                pending.text === event.text
-              )
-                return [
-                  ...items.slice(0, -1),
-                  { ...pending, turnId: event.turnId, at: event.at },
-                  assistant,
-                ];
-              return [
-                ...items,
-                {
-                  id: -event.id,
-                  role: "user",
-                  text: event.text,
-                  tools: [],
-                  status: "done",
-                  permission: event.permission,
-                  turnId: event.turnId,
-                  at: event.at,
-                },
-                assistant,
-              ];
-            });
-          else if (event.type === "error") {
-            turnRequested.current = false;
-            finishedTurn = true;
-            setBusy(false);
-            // A turn failure belongs on its card; only errors without a turn
-            // (older events) fall back to the panel alert.
-            if (!event.turnId) setError(event.error);
-            setMessages((items) => {
-              const index = lastAssistantIndex(items);
-              if (index < 0) return items;
-              return items.map((m, i) =>
-                i === index
-                  ? {
-                      ...m,
-                      status: "error",
-                      error: event.error,
-                      summary: event.summary ?? m.summary,
-                      finishedAt: event.at,
-                    }
-                  : m,
-              );
-            });
-          } else if (event.type === "restored") {
-            setMessages((items) => [
-              ...items,
-              {
-                id: event.id,
-                role: "system",
-                text: `${when(event.at)} 이전 버전으로 돌아갔어요`,
-                tools: [],
-                status: "done",
-                at: event.at,
-              },
-            ]);
-          } else if (
-            event.type === "undone" &&
-            typeof event.turnId === "string"
-          ) {
-            setUndone((current) =>
-              new Map(current).set(event.turnId, event.at),
-            );
-          } else if (["delta", "tool", "thinking", "done"].includes(event.type)) {
-            if (event.type === "done") {
-              finishedTurn = true;
-              setBusy(false);
-              if (event.changed && turnRequested.current) {
-                setSaveState("저장 중…");
+          if (!browserSave) {
+            pendingSaveRevision.current = null;
+            setSaveState("저장됨");
+            const waiting = pendingTurn.current;
+            if (waiting) {
+              if (editorModified.current) {
+                pendingSaveRevision.current = saveRevision.current + 1;
+                setSaveState("AI 작업 전 저장 중…");
                 sendOffice("Action_Save", {
                   Notify: true,
                   DontSaveIfUnmodified: false,
                 });
+              } else {
+                pendingTurn.current = null;
+                void dispatchTurn(waiting);
               }
-              if (turnRequested.current && typeof event.turnId === "string")
-                setFreshTurns((current) => new Set(current).add(event.turnId));
-              const firstChanged = event.summary?.changedSlides?.[0];
-              if (Number.isInteger(firstChanged)) {
-                if (turnRequested.current) setPhoneSlide(firstChanged);
-                sendOffice("Action_GoToPage", { Page: firstChanged + 1 });
-              }
-              turnRequested.current = false;
             }
-            setMessages((items) => {
-              const index = lastAssistantIndex(items);
-              if (index < 0) return items;
-              return items.map((m, i) =>
-                i !== index
-                  ? m
-                  : event.type === "delta"
-                    ? { ...m, text: m.text + event.delta }
-                    : event.type === "thinking"
-                      ? { ...m, thinking: (m.thinking ?? "") + (event.thinking ?? "") }
+          }
+        } else if (
+          pendingSaveRevision.current === null &&
+          !editorModified.current
+        ) {
+          setSaveState("저장됨");
+        }
+        if (
+          pendingBrowserSave.current === null &&
+          pendingSaveRevision.current === null &&
+          !editorModified.current &&
+          downloadAfterRevision.current !== null &&
+          saveRevision.current >= downloadAfterRevision.current
+        ) {
+          downloadAfterRevision.current = null;
+          setDownload(null);
+          window.location.assign(
+            `/api/documents/${launch.documentId}/download`,
+          );
+        }
+      } else if (response.session?.status === "failed") {
+        const waiting = pendingTurn.current;
+        const browserSave = pendingBrowserSave.current;
+        if (browserSave) {
+          pendingBrowserSave.current = null;
+          editorModified.current = true;
+          port.current?.postMessage({
+            type: "save-result",
+            requestId: browserSave.requestId,
+            ok: false,
+            error:
+              response.session.error ?? "browser_document_validation_failed",
+          });
+        }
+        pendingTurn.current = null;
+        pendingSaveRevision.current = null;
+        setSaveState("저장 실패");
+        setError(response.session.error ?? "저장한 파일을 검사하지 못했어요.");
+        if (waiting) {
+          setBusy(false);
+          setText(waiting.draft);
+        }
+      }
+      if (response.task) deliverTask(response.task);
+      let finishedTurn = false;
+      for (const event of response.events) {
+        lastEvent = event.id;
+        lastEventRef.current = lastEvent;
+        if (event.type === "start") {
+          setBusy(true);
+          setMessages((items) => {
+            const pending = items.at(-1);
+            const assistant: Message = {
+              id: event.id,
+              role: "assistant",
+              text: "",
+              tools: [],
+              status: "running",
+              turnId: event.turnId,
+              permission: event.permission ?? pending?.permission,
+              at: event.at,
+            };
+            // The request this page just sent gets its turn id.
+            if (
+              pending?.role === "user" &&
+              !pending.turnId &&
+              pending.text === event.text
+            )
+              return [
+                ...items.slice(0, -1),
+                { ...pending, turnId: event.turnId, at: event.at },
+                assistant,
+              ];
+            return [
+              ...items,
+              {
+                id: -event.id,
+                role: "user",
+                text: event.text,
+                tools: [],
+                status: "done",
+                permission: event.permission,
+                turnId: event.turnId,
+                at: event.at,
+              },
+              assistant,
+            ];
+          });
+        } else if (event.type === "error") {
+          turnRequested.current = false;
+          finishedTurn = true;
+          setBusy(false);
+          // A turn failure belongs on its card; only errors without a turn
+          // (older events) fall back to the panel alert.
+          if (!event.turnId) setError(event.error);
+          setMessages((items) => {
+            const index = lastAssistantIndex(items);
+            if (index < 0) return items;
+            return items.map((m, i) =>
+              i === index
+                ? {
+                    ...m,
+                    status: "error",
+                    error: event.error,
+                    summary: event.summary ?? m.summary,
+                    finishedAt: event.at,
+                  }
+                : m,
+            );
+          });
+        } else if (event.type === "restored") {
+          setMessages((items) => [
+            ...items,
+            {
+              id: event.id,
+              role: "system",
+              text: `${when(event.at)} 이전 버전으로 돌아갔어요`,
+              tools: [],
+              status: "done",
+              at: event.at,
+            },
+          ]);
+        } else if (
+          event.type === "undone" &&
+          typeof event.turnId === "string"
+        ) {
+          setUndone((current) => new Map(current).set(event.turnId, event.at));
+        } else if (["delta", "tool", "thinking", "done"].includes(event.type)) {
+          if (event.type === "done") {
+            finishedTurn = true;
+            setBusy(false);
+            if (event.changed && turnRequested.current) {
+              setSaveState("저장 중…");
+              sendOffice("Action_Save", {
+                Notify: true,
+                DontSaveIfUnmodified: false,
+              });
+            }
+            if (turnRequested.current && typeof event.turnId === "string")
+              setFreshTurns((current) => new Set(current).add(event.turnId));
+            const firstChanged = event.summary?.changedSlides?.[0];
+            if (Number.isInteger(firstChanged)) {
+              if (turnRequested.current) setPhoneSlide(firstChanged);
+              sendOffice("Action_GoToPage", { Page: firstChanged + 1 });
+            }
+            turnRequested.current = false;
+          }
+          setMessages((items) => {
+            const index = lastAssistantIndex(items);
+            if (index < 0) return items;
+            return items.map((m, i) =>
+              i !== index
+                ? m
+                : event.type === "delta"
+                  ? { ...m, text: m.text + event.delta }
+                  : event.type === "thinking"
+                    ? {
+                        ...m,
+                        thinking: (m.thinking ?? "") + (event.thinking ?? ""),
+                      }
                     : event.type === "tool"
                       ? { ...m, tools: [...m.tools, event.label] }
                       : {
@@ -1321,28 +1332,56 @@ export function NativeWorkspace({
                           turnId: event.turnId ?? m.turnId,
                           finishedAt: event.at,
                         },
-              );
-            });
-          }
+            );
+          });
         }
-        if (finishedTurn) {
-          void refreshHistory();
-          void refreshVersions();
-        }
+      }
+      if (finishedTurn) {
+        void refreshHistory();
+        void refreshVersions();
+      }
+    };
+    const poll = async () => {
+      try {
+        await handleSnapshot(
+          await api(`poll?after=${lastEvent}`, undefined, abort.signal),
+        );
       } catch (e) {
         if (!stopped)
           setError(e instanceof Error ? e.message : "연결을 확인하세요.");
       }
       // The UI polls quickly only while a turn or save is active. An idle
       // document need not keep a Cloud SQL connection hot four times a second.
-      if (!stopped) timer = setTimeout(
-        poll,
-        turnRequested.current || pendingTurn.current ||
-          pendingSaveRevision.current !== null || pendingBrowserSave.current
-          ? 250 : 1_500,
-      );
+      if (!stopped)
+        timer = setTimeout(
+          poll,
+          turnRequested.current ||
+            pendingTurn.current ||
+            pendingSaveRevision.current !== null ||
+            pendingBrowserSave.current
+            ? 250
+            : 1_500,
+        );
     };
-    void poll();
+    const stream = async () => {
+      try {
+        await consumeNativeStream(
+          `${launch.apiBase}/stream`,
+          launch.accessToken,
+          lastEvent,
+          abort.signal,
+          handleSnapshot,
+        );
+        if (!stopped) timer = setTimeout(stream, 250);
+      } catch (e) {
+        if (stopped) return;
+        setError(e instanceof Error ? e.message : String(e));
+        // A failed subscription must not strand saves or tool deliveries.
+        void poll();
+      }
+    };
+    if (useStream) void stream();
+    else void poll();
     return () => {
       stopped = true;
       abort.abort();
@@ -1350,11 +1389,13 @@ export function NativeWorkspace({
     };
   }, [
     bridgeReady,
+    busy,
     api,
     deliverTask,
     sendOffice,
     requestSave,
     launch.apiBase,
+    launch.accessToken,
     launch.documentId,
     ai.mode,
     aiConnected,
@@ -1767,7 +1808,9 @@ export function NativeWorkspace({
       return;
     }
     sendOffice("Action_GoToPage", { Page: slideIndex + 1 });
-    void callEditor({ operation: "reveal", slideIndex, elementId }).catch(() => undefined);
+    void callEditor({ operation: "reveal", slideIndex, elementId }).catch(
+      () => undefined,
+    );
   }
 
   /* ── Keyboard: ⌘S saves; ⌘Z / ⇧⌘Z undo and redo outside text fields ─ */
