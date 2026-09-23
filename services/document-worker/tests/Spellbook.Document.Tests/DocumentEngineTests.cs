@@ -1199,41 +1199,34 @@ public sealed class DocumentEngineTests : IDisposable
     }
 
     [Fact]
-    public void UnsupportedFeaturePreserverRestoresUntouchedSlidesAndReconcilesTableBorders()
+    public void UnsupportedFeaturePreserverNeverDiscardsFormattingOnlyEdits()
     {
         XNamespace a = "http://schemas.openxmlformats.org/drawingml/2006/main";
         var baseline = TestPresentationFactory.Create(directory);
-        var candidate = Path.Combine(directory, "candidate-degraded.pptx");
+        var candidate = Path.Combine(directory, "format-only-candidate.pptx");
         File.Copy(baseline, candidate);
-
-        // Simulate LibreOffice corruption on candidate: modify slide 1 XML
         using (var archive = ZipFile.Open(candidate, ZipArchiveMode.Update))
         {
-            var entry = archive.GetEntry("ppt/slides/slide1.xml")!;
             var doc = ReadXml(archive, "ppt/slides/slide1.xml");
-            // Add a corrupted table border #BFBFBF
-            var tc = doc.Descendants(a + "tcPr").FirstOrDefault();
-            if (tc != null)
-            {
-                tc.Add(new XElement(a + "lnL",
-                    new XAttribute("w", "6480"),
-                    new XElement(a + "solidFill",
-                        new XElement(a + "srgbClr", new XAttribute("val", "BFBFBF")))));
-            }
-            entry.Delete();
+            // No text changes: an intentional BFBFBF border is still an edit.
+            var shape = doc.Descendants(a + "solidFill").FirstOrDefault();
+            Assert.NotNull(shape);
+            shape.ReplaceWith(new XElement(a + "solidFill",
+                new XElement(a + "srgbClr", new XAttribute("val", "BFBFBF"))));
+            archive.GetEntry("ppt/slides/slide1.xml")!.Delete();
             using var stream = archive.CreateEntry("ppt/slides/slide1.xml").Open();
             doc.Save(stream);
         }
 
-        var output = Path.Combine(directory, "output-reconciled.pptx");
-        var report = new PptxUnsupportedFeaturePreserver().Preserve(baseline, candidate, output);
-
-        using (var archive = ZipFile.OpenRead(output))
-        {
-            var doc = ReadXml(archive, "ppt/slides/slide1.xml");
-            var hasBfbfbf = doc.ToString().Contains("BFBFBF", StringComparison.OrdinalIgnoreCase);
-            Assert.False(hasBfbfbf);
-        }
+        var output = Path.Combine(directory, "format-only-preserved.pptx");
+        new PptxUnsupportedFeaturePreserver().Preserve(baseline, candidate, output);
+        using var source = ZipFile.OpenRead(candidate);
+        using var result = ZipFile.OpenRead(output);
+        using var sourceBytes = new MemoryStream();
+        using var resultBytes = new MemoryStream();
+        source.GetEntry("ppt/slides/slide1.xml")!.Open().CopyTo(sourceBytes);
+        result.GetEntry("ppt/slides/slide1.xml")!.Open().CopyTo(resultBytes);
+        Assert.Equal(sourceBytes.ToArray(), resultBytes.ToArray());
     }
 
     public void Dispose()

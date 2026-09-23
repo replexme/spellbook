@@ -3,6 +3,7 @@ import type {
   GeneratedImage,
   ToolResult,
 } from "./app-server-client.js";
+import { fetchPublicPage } from "./safe-web-fetch.js";
 import type { ModelSettings } from "../../../contracts/ai-models.js";
 import {
   nativeBatchEditSchema,
@@ -750,71 +751,9 @@ export async function runNativeTurn(
   };
 }
 
-function isSafePublicUrl(url: URL): boolean {
-  if (!["http:", "https:"].includes(url.protocol)) return false;
-  const host = url.hostname.toLowerCase();
-  if (
-    host === "localhost" ||
-    host === "127.0.0.1" ||
-    host === "::1" ||
-    host.endsWith(".local") ||
-    host.endsWith(".internal") ||
-    host.startsWith("10.") ||
-    host.startsWith("192.168.") ||
-    /^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) ||
-    host === "metadata.google.internal"
-  ) {
-    return false;
-  }
-  return true;
-}
-
-async function fetchWebPageText(
-  rawUrl: string,
-  signal?: AbortSignal,
-): Promise<string> {
-  let parsed: URL;
+async function fetchWebPageText(rawUrl: string, signal?: AbortSignal): Promise<string> {
   try {
-    parsed = new URL(rawUrl);
-    if (!isSafePublicUrl(parsed)) {
-      return "Error: Access to private or internal network addresses is prohibited.";
-    }
-  } catch (err) {
-    return `Error: Invalid URL format (${err instanceof Error ? err.message : "invalid_url"}).`;
-  }
-  const httpTransport = { download: globalThis.fetch };
-  try {
-    const readerUrl = `https://r.jina.ai/${parsed.href}`;
-    const readerResponse = await httpTransport.download(readerUrl, {
-      headers: {
-        "User-Agent": "Spellbook-AI-Agent/1.0",
-        Accept: "text/plain",
-      },
-      signal: signal ?? AbortSignal.timeout(12_000),
-    });
-    if (readerResponse.ok) {
-      const markdown = await readerResponse.text();
-      if (markdown && markdown.length > 50) {
-        return markdown.slice(0, 15_000);
-      }
-    }
-  } catch {
-    // Fall back to direct fetch
-  }
-
-  try {
-    const response = await httpTransport.download(parsed.href, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        Accept: "text/html,application/xhtml+xml,text/plain;q=0.9",
-      },
-      signal: signal ?? AbortSignal.timeout(15_000),
-    });
-    if (!response.ok) {
-      return `Failed to fetch webpage (HTTP ${response.status} ${response.statusText}).`;
-    }
-    const html = await response.text();
+    const html = await fetchPublicPage(rawUrl, signal);
     const cleanText = html
       .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
       .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
@@ -829,8 +768,8 @@ async function fetchWebPageText(
       .replace(/\s+/g, " ")
       .trim();
     return cleanText.slice(0, 10_000) || "The webpage content is empty.";
-  } catch (err) {
-    return `Webpage fetch error: ${err instanceof Error ? err.message : "network_error"}`;
+  } catch (error) {
+    return `Webpage fetch error: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
 
@@ -838,58 +777,23 @@ async function performWebSearch(
   query: string,
   signal?: AbortSignal,
 ): Promise<Array<{ title: string; snippet: string; url?: string }>> {
-  const results: Array<{ title: string; snippet: string; url?: string }> = [];
-  try {
-    const wikiUrl = `https://ko.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&utf8=1`;
-    const wikiRes = await fetch(wikiUrl, {
-      headers: { "User-Agent": "Spellbook-AI-Agent/1.0" },
-      signal: signal ?? AbortSignal.timeout(10_000),
-    });
-    if (wikiRes.ok) {
-      const data = (await wikiRes.json()) as any;
-      const items = data.query?.search ?? [];
-      for (const item of items.slice(0, 5)) {
-        results.push({
-          title: item.title,
-          snippet: item.snippet
-            .replace(/<[^>]+>/g, "")
-            .replace(/&quot;/g, '"'),
-          url: `https://ko.wikipedia.org/wiki/${encodeURIComponent(item.title)}`,
-        });
-      }
-    }
-  } catch {
-    // continue
-  }
-  if (results.length === 0) {
+  const failures: string[] = [];
+  for (const language of ["ko", "en"]) {
     try {
-      const enWikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&utf8=1`;
-      const enRes = await fetch(enWikiUrl, {
-        headers: { "User-Agent": "Spellbook-AI-Agent/1.0" },
-        signal: signal ?? AbortSignal.timeout(10_000),
-      });
-      if (enRes.ok) {
-        const data = (await enRes.json()) as any;
-        const items = data.query?.search ?? [];
-        for (const item of items.slice(0, 5)) {
-          results.push({
-            title: item.title,
-            snippet: item.snippet.replace(/<[^>]+>/g, ""),
-            url: `https://en.wikipedia.org/wiki/${encodeURIComponent(item.title)}`,
-          });
-        }
-      }
-    } catch {
-      // ignore
+      const wikiUrl = `https://${language}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&utf8=1`;
+      const data = JSON.parse(await fetchPublicPage(wikiUrl, signal)) as {
+        query?: { search?: Array<{ title: string; snippet: string }> };
+      };
+      const results = (data.query?.search ?? []).slice(0, 5).map((item) => ({
+        title: item.title,
+        snippet: item.snippet.replace(/<[^>]+>/g, "").replace(/&quot;/g, '"'),
+        url: `https://${language}.wikipedia.org/wiki/${encodeURIComponent(item.title)}`,
+      }));
+      if (results.length) return results;
+    } catch (error) {
+      failures.push(`${language}.wikipedia.org: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  return results.length > 0
-    ? results
-    : [
-        {
-          title: query,
-          snippet:
-            "검색 결과를 찾지 못했습니다. 보다 구체적인 검색어로 다시 시도해 주세요.",
-        },
-      ];
+  if (failures.length === 2) throw new Error(`web_search_failed: ${failures.join("; ")}`);
+  return [];
 }

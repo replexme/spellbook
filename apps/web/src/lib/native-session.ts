@@ -8,6 +8,7 @@ import { accountPrefix, deleteObject, getObject, putObject } from "./storage";
 import { dispatchNativeSave, stageNativeSave } from "./native-save-stage";
 import { signWopiToken, verifyWopiToken, type WopiClaims } from "./wopi-token";
 import { currentPresentationFormat } from "./document-formats";
+import { wopiLockConflict, type WopiMutation } from "./wopi-lock-policy";
 import { internalAppBaseUrl } from "./runtime-urls";
 import {
   aiConnectorConfig,
@@ -484,6 +485,8 @@ export async function wopiLock(
       await sql`select wopi_lock from spellbook_native_sessions where id=${context.sessionId} for update`;
     const current = session?.wopi_lock as string | null;
     if (operation === "GET_LOCK") return { status: 200, lock: current ?? "" };
+    const conflict = wopiLockConflict(operation as WopiMutation, current, given, oldLock);
+    if (conflict !== null) return { status: 409, lock: conflict };
     if (operation === "UNLOCK") {
       await sql`update spellbook_native_sessions set wopi_lock=null, lock_updated_at=null, lock_expires_at=null, updated_at=now() where id=${context.sessionId}`;
       return { status: 200 };
@@ -565,9 +568,10 @@ export async function wopiPutFile(
       await expireWopiLock(context.sessionId, sql);
       const [session] =
         await sql`select working_version_id,wopi_lock,save_revision from spellbook_native_sessions where id=${context.sessionId} for update`;
-      if (session && given && session.wopi_lock !== given) {
-        await sql`update spellbook_native_sessions set wopi_lock=${given}, lock_updated_at=now(), updated_at=now() where id=${context.sessionId}`;
-      }
+      if (!session?.wopi_lock || session.wopi_lock !== given)
+        throw new WopiLockConflict(session?.wopi_lock ?? "");
+      if (session.working_version_id !== context.versionId)
+        throw new HttpError(409, "wopi_session_changed");
       payload = await stageNativeSave(sql, {
         sessionId: context.sessionId,
         documentId,

@@ -21,8 +21,6 @@ public sealed class PptxUnsupportedFeaturePreserver
         };
     private static readonly XNamespace PresentationNamespace =
         "http://schemas.openxmlformats.org/presentationml/2006/main";
-    private static readonly XNamespace DrawingNamespace =
-        "http://schemas.openxmlformats.org/drawingml/2006/main";
     private static readonly XNamespace OfficeRelationshipNamespace =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
     private static readonly XNamespace PackageRelationshipNamespace =
@@ -134,7 +132,6 @@ public sealed class PptxUnsupportedFeaturePreserver
                 WriteXml(output, candidateRelationships.Path, candidateRelationships.Document);
                 restoredSlides.Add(slideIndex);
             }
-            PreserveSlideContentAndBorders(baseline, output, baselineSlides, candidateSlides);
             PreservePresentationPackageFeatures(baseline, output, copiedParts);
             EnsureContentTypes(baseline, output, copiedParts);
         }
@@ -221,101 +218,6 @@ public sealed class PptxUnsupportedFeaturePreserver
         if (changed)
             WriteXml(output, candidateRelationships.Path, candidateRelationships.Document);
     }
-
-    private static void PreserveSlideContentAndBorders(
-        ZipArchive baseline,
-        ZipArchive output,
-        IReadOnlyList<string> baselineSlides,
-        IReadOnlyList<string> candidateSlides)
-    {
-        if (baselineSlides.Count != candidateSlides.Count) return;
-        for (var i = 0; i < baselineSlides.Count; i++)
-        {
-            var baseSlidePath = baselineSlides[i];
-            var candSlidePath = candidateSlides[i];
-            var baseSlide = ReadXml(baseline, baseSlidePath);
-            var candSlide = ReadXml(output, candSlidePath);
-
-            if (IsSlideSemanticallyUntouched(baseSlide, candSlide))
-            {
-                WriteXml(output, candSlidePath, baseSlide);
-            }
-            else
-            {
-                ReconcileTableBorders(baseSlide, candSlide);
-                WriteXml(output, candSlidePath, candSlide);
-            }
-        }
-    }
-
-    private static bool IsSlideSemanticallyUntouched(XDocument baseline, XDocument candidate)
-    {
-        var baseText = string.Concat(baseline.Descendants(DrawingNamespace + "t").Select(e => e.Value));
-        var candText = string.Concat(candidate.Descendants(DrawingNamespace + "t").Select(e => e.Value));
-        if (string.IsNullOrWhiteSpace(baseText) && string.IsNullOrWhiteSpace(candText))
-        {
-            var baseNames = baseline.Descendants().Attributes("name").Select(a => a.Value).Order().ToList();
-            var candNames = candidate.Descendants().Attributes("name").Select(a => a.Value).Order().ToList();
-            return baseNames.SequenceEqual(candNames);
-        }
-        return string.Equals(baseText, candText, StringComparison.Ordinal);
-    }
-
-    private static void ReconcileTableBorders(XDocument baselineSlide, XDocument candidateSlide)
-    {
-        var baselineTables = baselineSlide.Descendants(DrawingNamespace + "tbl").ToList();
-        var candidateTables = candidateSlide.Descendants(DrawingNamespace + "tbl").ToList();
-        for (var t = 0; t < Math.Min(baselineTables.Count, candidateTables.Count); t++)
-        {
-            var baseRows = baselineTables[t].Elements(DrawingNamespace + "tr").ToList();
-            var candRows = candidateTables[t].Elements(DrawingNamespace + "tr").ToList();
-            if (baseRows.Count != candRows.Count) continue;
-            for (var r = 0; r < baseRows.Count; r++)
-            {
-                var baseCells = baseRows[r].Elements(DrawingNamespace + "tc").ToList();
-                var candCells = candRows[r].Elements(DrawingNamespace + "tc").ToList();
-                if (baseCells.Count != candCells.Count) continue;
-                for (var c = 0; c < baseCells.Count; c++)
-                {
-                    var baseTcPr = baseCells[c].Element(DrawingNamespace + "tcPr");
-                    var candTcPr = candCells[c].Element(DrawingNamespace + "tcPr");
-                    if (baseTcPr == null || candTcPr == null) continue;
-
-                    var candLines = candTcPr.Elements()
-                        .Where(e => e.Name.Namespace == DrawingNamespace && LineTagNames.Contains(e.Name.LocalName))
-                        .ToList();
-                    var hasBfbfbf = candLines.Any(l => l.ToString().Contains("BFBFBF", StringComparison.OrdinalIgnoreCase));
-                    if (!hasBfbfbf) continue;
-
-                    var baseLines = baseTcPr.Elements()
-                        .Where(e => e.Name.Namespace == DrawingNamespace && LineTagNames.Contains(e.Name.LocalName))
-                        .Select(e => new XElement(e))
-                        .ToList();
-                    if (baseLines.Count == 0) continue;
-
-                    foreach (var line in candLines)
-                        line.Remove();
-
-                    var firstNonLine = candTcPr.Elements().FirstOrDefault();
-                    if (firstNonLine != null)
-                    {
-                        foreach (var line in baseLines)
-                            firstNonLine.AddBeforeSelf(line);
-                    }
-                    else
-                    {
-                        foreach (var line in baseLines)
-                            candTcPr.Add(line);
-                    }
-                }
-            }
-        }
-    }
-
-    private static readonly HashSet<string> LineTagNames = new(StringComparer.Ordinal)
-    {
-        "lnL", "lnR", "lnT", "lnB", "lnTlToBr", "lnBlToTr"
-    };
 
     private static IReadOnlyList<string> OrderedSlideParts(ZipArchive archive)
     {

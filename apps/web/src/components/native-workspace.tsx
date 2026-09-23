@@ -1333,7 +1333,14 @@ export function NativeWorkspace({
         if (!stopped)
           setError(e instanceof Error ? e.message : "연결을 확인하세요.");
       }
-      if (!stopped) timer = setTimeout(poll, 250);
+      // The UI polls quickly only while a turn or save is active. An idle
+      // document need not keep a Cloud SQL connection hot four times a second.
+      if (!stopped) timer = setTimeout(
+        poll,
+        turnRequested.current || pendingTurn.current ||
+          pendingSaveRevision.current !== null || pendingBrowserSave.current
+          ? 250 : 1_500,
+      );
     };
     void poll();
     return () => {
