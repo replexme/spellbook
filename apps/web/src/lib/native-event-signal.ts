@@ -23,12 +23,17 @@ export async function subscribeNativeChanges(
   } catch (error) {
     listening = null;
     callbacks.delete(wake);
-    if (!callbacks.size) subscribers.delete(sessionId);
+    if (!callbacks.size && subscribers.get(sessionId) === callbacks)
+      subscribers.delete(sessionId);
     throw error;
   }
+  let active = true;
   return () => {
+    if (!active) return;
+    active = false;
     callbacks.delete(wake);
-    if (!callbacks.size) subscribers.delete(sessionId);
+    if (!callbacks.size && subscribers.get(sessionId) === callbacks)
+      subscribers.delete(sessionId);
     if (!subscribers.size && listening) {
       const current = listening;
       listening = null;

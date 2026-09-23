@@ -226,6 +226,10 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
         if (error?.name !== "AbortError") throw error;
       });
     }
+    // A notification sent while no browser is subscribed must still be
+    // recovered from the persisted event cursor on the next connection.
+    await db()`insert into spellbook_native_events (session_id,event_type,payload)
+      values (${f.nativeSessionId},'delta',${db().json({ delta: "after-reconnect" })})`;
     const reconnect = new AbortController();
     const resumed = await getNativeStream(
       new Request(`${url}?after=${eventId}`, {
@@ -256,7 +260,12 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
             setTimeout(() => reject(new Error("resume timeout")), 2_000),
           ),
         ]),
-      ).toEqual([]);
+      ).toEqual([
+        expect.objectContaining({
+          id: expect.any(Number),
+          delta: "after-reconnect",
+        }),
+      ]);
     } finally {
       reconnect.abort();
       await resumedReading.catch((error) => {

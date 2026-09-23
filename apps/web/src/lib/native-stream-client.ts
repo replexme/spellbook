@@ -2,6 +2,14 @@ import type { pollNativeSession } from "./native-runtime";
 
 type NativeSnapshot = Awaited<ReturnType<typeof pollNativeSession>>;
 
+export function shouldStreamNativeEvents(
+  busy: boolean,
+  capability: string,
+  mode?: string,
+): boolean {
+  return mode !== "poll" && busy && Boolean(capability);
+}
+
 // Fetch streaming is used rather than EventSource: the editor's document-scoped
 // capability belongs in an Authorization header, never in a logged URL.
 export async function consumeNativeStream(

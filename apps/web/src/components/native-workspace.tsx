@@ -10,7 +10,10 @@ import type {
   VersionHistoryItem,
 } from "@/lib/history-types";
 import { compactNativeTaskResultForTransport } from "@/lib/native-image-transport";
-import { consumeNativeStream } from "@/lib/native-stream-client";
+import {
+  consumeNativeStream,
+  shouldStreamNativeEvents,
+} from "@/lib/native-stream-client";
 import type { pollNativeSession } from "@/lib/native-runtime";
 import type { TurnSummary } from "@/lib/native-turn-summary";
 import { uploadImageAsset, uploadMediaAsset } from "@/lib/upload-image";
@@ -1104,10 +1107,11 @@ export function NativeWorkspace({
     void refreshHistory();
     // A long-lived Cloud Run response is billable for its entire duration.
     // Stream only while an AI turn needs low latency; idle sessions poll.
-    const useStream =
-      process.env.NEXT_PUBLIC_NATIVE_EVENTS_MODE !== "poll" &&
-      busy &&
-      Boolean(launch.accessToken);
+    const useStream = shouldStreamNativeEvents(
+      busy,
+      launch.accessToken,
+      process.env.NEXT_PUBLIC_NATIVE_EVENTS_MODE,
+    );
     const handleSnapshot = async (
       response: Awaited<ReturnType<typeof pollNativeSession>>,
     ) => {

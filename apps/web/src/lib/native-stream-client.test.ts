@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { consumeNativeStream } from "./native-stream-client";
+import {
+  consumeNativeStream,
+  shouldStreamNativeEvents,
+} from "./native-stream-client";
 
 const encoder = new TextEncoder();
 function chunked(parts: string[]) {
@@ -12,6 +15,12 @@ function chunked(parts: string[]) {
 }
 
 describe("authenticated native SSE transport", () => {
+  it("streams only busy turns and preserves an explicit polling rollback", () => {
+    expect(shouldStreamNativeEvents(true, "capability")).toBe(true);
+    expect(shouldStreamNativeEvents(false, "capability")).toBe(false);
+    expect(shouldStreamNativeEvents(true, "")).toBe(false);
+    expect(shouldStreamNativeEvents(true, "capability", "poll")).toBe(false);
+  });
   it("parses split CRLF frames and never places the capability in the URL", async () => {
     const fetcher = vi.fn(
       async () =>
