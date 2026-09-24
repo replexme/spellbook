@@ -93,7 +93,14 @@ type AccountResponse = {
   rateLimitInfo?: RateLimitInfo | null;
   /** The account the browser's API keys are stored under. */
   keyScope?: string;
+  /** The Claude subscription connected on the server, if any. */
+  claude?: { account?: AiAccount | null } | null;
 };
+
+export interface ClaudeSignIn {
+  verificationUrl: string;
+  loginReference: string;
+}
 
 function bounceToLogin() {
   if (typeof window !== "undefined") {
@@ -117,6 +124,8 @@ export function useAiAccount(config: AiConnectorConfig) {
     useState<LocalConnectorSession | null>(null);
   const [waitingForBrowserLogin, setWaitingForBrowserLogin] = useState(false);
   const [keyScope, setKeyScope] = useState<string | null>(null);
+  const [claudeSignIn, setClaudeSignIn] = useState<ClaudeSignIn | null>(null);
+  const [claudeMessage, setClaudeMessage] = useState("");
   const [browserKeys, setBrowserKeys] = useState<BrowserKeys>(() =>
     readBrowserKeys(null),
   );
@@ -323,7 +332,12 @@ export function useAiAccount(config: AiConnectorConfig) {
       const current = readBrowserKeys(scope);
       storeKeys(scope, {
         ...current,
-        active: isBrowserKeyProvider(provider) ? provider : null,
+        active:
+          isBrowserKeyProvider(provider) ||
+          provider === "codex" ||
+          provider === "claude_code"
+            ? provider
+            : null,
       });
     },
     [accountScope, storeKeys],
@@ -340,6 +354,67 @@ export function useAiAccount(config: AiConnectorConfig) {
     [browserKeys],
   );
 
+  // Claude's sign-in page shows a code that the person pastes back here.
+  const connectClaude = useCallback(async () => {
+    setClaudeMessage("");
+    const response = await fetch("/api/ai/account/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "claude_code" }),
+    });
+    if (response.status === 401) {
+      bounceToLogin();
+      return;
+    }
+    const value = (await response.json()) as Partial<ClaudeSignIn> & {
+      error?: string;
+    };
+    if (!response.ok || !value.verificationUrl || !value.loginReference) {
+      setClaudeMessage(
+        "Claude 로그인을 시작하지 못했어요. 다시 시도해 주세요.",
+      );
+      return;
+    }
+    setClaudeSignIn({
+      verificationUrl: value.verificationUrl,
+      loginReference: value.loginReference,
+    });
+  }, []);
+
+  const completeClaude = useCallback(
+    async (code: string) => {
+      if (!claudeSignIn) return;
+      setClaudeMessage("");
+      const response = await fetch("/api/ai/account/login/complete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          code: code.trim(),
+          loginReference: claudeSignIn.loginReference,
+        }),
+      });
+      if (!response.ok) {
+        setClaudeMessage(
+          "코드를 확인하지 못했어요. Claude 로그인을 다시 시작해 주세요.",
+        );
+        setClaudeSignIn(null);
+        return;
+      }
+      setClaudeSignIn(null);
+      await load();
+    },
+    [claudeSignIn, load],
+  );
+
+  const disconnectClaude = useCallback(async () => {
+    await fetch("/api/ai/account/logout", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "claude_code" }),
+    });
+    await load();
+  }, [load]);
+
   const localRequest = useCallback(
     async <T>(path: string, body?: unknown): Promise<T> => {
       if (!connectorOrigin || !localSession)
@@ -353,8 +428,21 @@ export function useAiAccount(config: AiConnectorConfig) {
   const codexConnected = Boolean(codexAccount);
   const rateLimitInfo = accountResponse?.rateLimitInfo ?? null;
 
+  const claudeAccount = accountResponse?.claude?.account ?? null;
+  const claudeConnected = Boolean(claudeAccount);
+  // A choice this browser made wins while that connection still exists;
+  // otherwise the connected subscription.
+  const chosen = browserKeys.active;
   const activeProvider: string =
-    browserKeys.active ?? (codexConnected ? "codex" : "none");
+    chosen && isBrowserKeyProvider(chosen)
+      ? chosen
+      : chosen === "claude_code" && claudeConnected
+        ? "claude_code"
+        : codexConnected
+          ? "codex"
+          : claudeConnected
+            ? "claude_code"
+            : "none";
   const keyItem = (provider: BrowserKeyProvider) => ({
     connected: Boolean(browserKeys.keys[provider]),
     isActive: activeProvider === provider,
@@ -377,8 +465,9 @@ export function useAiAccount(config: AiConnectorConfig) {
       id: "claude_code",
       displayName: "Claude 구독 (Claude Code)",
       type: "subscription",
-      connected: false,
+      connected: claudeConnected,
       isActive: activeProvider === "claude_code",
+      account: claudeAccount,
     },
     {
       id: "gemini_api",
@@ -438,5 +527,10 @@ export function useAiAccount(config: AiConnectorConfig) {
     selectProvider,
     browserKey,
     withBrowserModels,
+    claudeSignIn,
+    claudeMessage,
+    connectClaude,
+    completeClaude,
+    disconnectClaude,
   };
 }

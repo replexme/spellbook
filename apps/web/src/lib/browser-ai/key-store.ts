@@ -20,9 +20,12 @@ export const BROWSER_KEY_PROVIDERS = [
 ] as const;
 export type BrowserKeyProvider = (typeof BROWSER_KEY_PROVIDERS)[number];
 
+/** A subscription connected on the server, chosen in this browser. */
+export type SubscriptionChoice = "codex" | "claude_code";
+
 export interface BrowserKeys {
-  /** The key provider the next request uses; null means the subscription. */
-  active: BrowserKeyProvider | null;
+  /** What the next request uses; null means the connected subscription. */
+  active: BrowserKeyProvider | SubscriptionChoice | null;
   keys: Partial<Record<BrowserKeyProvider, string>>;
 }
 
@@ -47,9 +50,11 @@ export function readBrowserKeys(scope: string | null): BrowserKeys {
       if (typeof key === "string" && key) keys[provider] = key;
     }
     const active =
-      isBrowserKeyProvider(value?.active) && keys[value.active]
+      value?.active === "codex" || value?.active === "claude_code"
         ? value.active
-        : null;
+        : isBrowserKeyProvider(value?.active) && keys[value.active]
+          ? value.active
+          : null;
     return { active, keys };
   } catch {
     return EMPTY;

@@ -15,19 +15,36 @@ export async function enqueueWorkerJob(
     throw new Error(`Local worker request failed: ${response.status}`);
 }
 
-/** Asks the AI worker about one account's subscription connection. */
+/**
+ * Asks the AI worker about one account's subscription connection. A Claude
+ * sign-in waits in one worker instance for its code, so the instance's
+ * routing cookie is handed out and sent back with the code.
+ */
 export async function callAiAccount(
   path: string,
   account: { accountId: string; email: string },
+  options: {
+    body?: Record<string, unknown>;
+    cookie?: string;
+    onCookie?: (cookie: string) => void;
+    timeoutMs?: number;
+  } = {},
 ): Promise<unknown> {
   const response = await internalFetch(`${workerUrl("ai")}${path}`, {
     method: "POST",
+    headers: options.cookie ? { cookie: options.cookie } : undefined,
     body: JSON.stringify({
+      ...options.body,
       accountId: account.accountId,
       email: account.email,
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
   });
+  const cookie = response.headers
+    .getSetCookie()
+    .map((value) => value.split(";", 1)[0])
+    .join("; ");
+  if (cookie) options.onCookie?.(cookie);
   const body = (await response.json()) as unknown;
   if (!response.ok)
     throw new Error(

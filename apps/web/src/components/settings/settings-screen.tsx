@@ -1,7 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { Badge, Banner, Button, ButtonLink, Icon, Spinner } from "@/design-system";
+import {
+  Badge,
+  Banner,
+  Button,
+  ButtonLink,
+  Icon,
+  Spinner,
+} from "@/design-system";
 import type { AiConnectorConfig } from "@/lib/ai-connector-config";
 import { useAiAccount } from "@/lib/use-ai-account";
 import { AppTop } from "../app-top";
@@ -61,10 +68,14 @@ export function SettingsScreen({
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
   const codexProvider = ai.providers.find((p) => p.id === "codex");
+  const claudeProvider = ai.providers.find((p) => p.id === "claude_code");
+  const [claudeCode, setClaudeCode] = useState("");
   const geminiProvider = ai.providers.find((p) => p.id === "gemini_api");
   const openAiProvider = ai.providers.find((p) => p.id === "openai_api");
   const anthropicProvider = ai.providers.find((p) => p.id === "anthropic_api");
-  const openRouterProvider = ai.providers.find((p) => p.id === "openrouter_api");
+  const openRouterProvider = ai.providers.find(
+    (p) => p.id === "openrouter_api",
+  );
 
   const isCodexRateLimited = Boolean(
     codexProvider?.rateLimitInfo?.isRateLimited,
@@ -79,7 +90,9 @@ export function SettingsScreen({
   const handleSaveGemini = async () => {
     const val = geminiKeyInput.trim();
     if (!val) {
-      setGeminiError("Google Gemini API 키를 입력해 주세요. (AIzaSy로 시작하는 키)");
+      setGeminiError(
+        "Google Gemini API 키를 입력해 주세요. (AIzaSy로 시작하는 키)",
+      );
       return;
     }
     setGeminiSaving(true);
@@ -89,7 +102,9 @@ export function SettingsScreen({
       setGeminiKeyInput("");
       notify("Google Gemini 2.5가 성공적으로 연결 및 활성화되었습니다!");
     } catch (e: any) {
-      setGeminiError(e.message || "Google Gemini API 키를 검증하지 못했습니다.");
+      setGeminiError(
+        e.message || "Google Gemini API 키를 검증하지 못했습니다.",
+      );
     } finally {
       setGeminiSaving(false);
     }
@@ -117,7 +132,9 @@ export function SettingsScreen({
   const handleSaveAnthropic = async () => {
     const val = anthropicKeyInput.trim();
     if (!val) {
-      setAnthropicError("Anthropic API 키를 입력해 주세요. (sk-ant-로 시작하는 키)");
+      setAnthropicError(
+        "Anthropic API 키를 입력해 주세요. (sk-ant-로 시작하는 키)",
+      );
       return;
     }
     setAnthropicSaving(true);
@@ -146,7 +163,9 @@ export function SettingsScreen({
       setOpenRouterKeyInput("");
       notify("OpenRouter가 성공적으로 연결 및 활성화되었습니다!");
     } catch (e: any) {
-      setOpenRouterError(e.message || "OpenRouter API 키를 검증하지 못했습니다.");
+      setOpenRouterError(
+        e.message || "OpenRouter API 키를 검증하지 못했습니다.",
+      );
     } finally {
       setOpenRouterSaving(false);
     }
@@ -165,7 +184,10 @@ export function SettingsScreen({
               ? "OpenRouter (DeepSeek / Llama)"
               : ai.activeProvider === "codex" && codexProvider?.connected
                 ? `ChatGPT 구독 · Codex (${codexProvider.account?.email ?? "연결됨"})`
-                : "없음 (미연결)";
+                : ai.activeProvider === "claude_code" &&
+                    claudeProvider?.connected
+                  ? `Claude 구독 (${claudeProvider.account?.email ?? "연결됨"})`
+                  : "없음 (미연결)";
 
   return (
     <>
@@ -204,14 +226,15 @@ export function SettingsScreen({
                   <Banner tone="ok" role="status">
                     <strong>현재 사용 중인 AI:</strong> {activeName}
                     <br />
-                    프레젠테이션 편집 시 이 AI가 요청을 처리합니다. 아래 목록에서
-                    원하는 AI의 <strong>[이 AI 사용하기]</strong> 버튼을 누르면 즉시
-                    전환됩니다.
+                    프레젠테이션 편집 시 이 AI가 요청을 처리합니다. 아래
+                    목록에서 원하는 AI의 <strong>[이 AI 사용하기]</strong>{" "}
+                    버튼을 누르면 즉시 전환됩니다.
                   </Banner>
                 ) : (
                   <Banner tone="warn" role="status">
                     ⚠️ <strong>현재 연결된 AI가 없습니다.</strong> 아래에서
-                    Google Gemini, OpenAI, Claude 등의 API 키 또는 구독을 등록해 주세요.
+                    Google Gemini, OpenAI, Claude 등의 API 키 또는 구독을 등록해
+                    주세요.
                   </Banner>
                 )}
               </div>
@@ -230,7 +253,14 @@ export function SettingsScreen({
                   <Icon name="sparkles" size={18} />
                 </span>
                 <div style={{ flex: 1 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.5rem",
+                      flexWrap: "wrap",
+                    }}
+                  >
                     <strong>Google Gemini (Google AI Studio)</strong>
                     <Badge tone="ok">추천</Badge>
                   </div>
@@ -287,7 +317,9 @@ export function SettingsScreen({
                       loading={geminiSaving}
                       onClick={() => void handleSaveGemini()}
                     >
-                      {geminiProvider?.connected ? "키 변경" : "키 등록 및 활성화"}
+                      {geminiProvider?.connected
+                        ? "키 변경"
+                        : "키 등록 및 활성화"}
                     </Button>
                   </div>
                   {geminiError ? (
@@ -394,7 +426,9 @@ export function SettingsScreen({
                       loading={openAiSaving}
                       onClick={() => void handleSaveOpenAi()}
                     >
-                      {openAiProvider?.connected ? "키 변경" : "키 등록 및 활성화"}
+                      {openAiProvider?.connected
+                        ? "키 변경"
+                        : "키 등록 및 활성화"}
                     </Button>
                   </div>
                   {openAiError ? (
@@ -501,7 +535,9 @@ export function SettingsScreen({
                       loading={anthropicSaving}
                       onClick={() => void handleSaveAnthropic()}
                     >
-                      {anthropicProvider?.connected ? "키 변경" : "키 등록 및 활성화"}
+                      {anthropicProvider?.connected
+                        ? "키 변경"
+                        : "키 등록 및 활성화"}
                     </Button>
                   </div>
                   {anthropicError ? (
@@ -608,7 +644,9 @@ export function SettingsScreen({
                       loading={openRouterSaving}
                       onClick={() => void handleSaveOpenRouter()}
                     >
-                      {openRouterProvider?.connected ? "키 변경" : "키 등록 및 활성화"}
+                      {openRouterProvider?.connected
+                        ? "키 변경"
+                        : "키 등록 및 활성화"}
                     </Button>
                   </div>
                   {openRouterError ? (
@@ -683,7 +721,11 @@ export function SettingsScreen({
                   {isCodexRateLimited ? (
                     <div style={{ marginTop: "0.5rem" }}>
                       <Banner tone="warn" role="status">
-                        ⚠️ <strong>OpenAI Codex 사용량 한도 도달</strong>: 이번 주기 메시지 한도를 모두 소모했습니다.{codexResetTime ? ` (${codexResetTime} 리셋 예정)` : ""} 위의 Google Gemini나 다른 공급자 API 키를 등록하여 즉시 작업을 이어갈 수 있습니다.
+                        ⚠️ <strong>OpenAI Codex 사용량 한도 도달</strong>: 이번
+                        주기 메시지 한도를 모두 소모했습니다.
+                        {codexResetTime ? ` (${codexResetTime} 리셋 예정)` : ""}{" "}
+                        위의 Google Gemini나 다른 공급자 API 키를 등록하여 즉시
+                        작업을 이어갈 수 있습니다.
                       </Banner>
                     </div>
                   ) : null}
@@ -722,6 +764,121 @@ export function SettingsScreen({
                     <ConnectSteps ai={ai} />
                   </div>
                 )}
+              </div>
+
+              {/* ── 6. Claude Subscription (Claude Code) ── */}
+              <div
+                className={`conn-card ${claudeProvider?.connected ? "" : "is-expanded"}`}
+                style={{ marginBottom: "1rem" }}
+              >
+                <span className="conn-mark" aria-hidden="true">
+                  <Icon name="sparkles" size={18} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <strong>Claude 구독 · Claude Code</strong>
+                  <small style={{ display: "block", marginTop: "0.25rem" }}>
+                    {claudeProvider?.connected
+                      ? [
+                          claudeProvider.account?.email ?? "Claude 계정",
+                          planLabel(claudeProvider.account?.planType),
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
+                      : "내 Claude(Pro/Max) 구독으로 로그인해요. Claude 로그인 페이지에 나온 코드를 여기에 붙여 넣으면 연결돼요."}
+                  </small>
+                  {!claudeProvider?.connected && ai.claudeSignIn ? (
+                    <div
+                      style={{
+                        marginTop: "0.75rem",
+                        display: "flex",
+                        gap: "0.5rem",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <input
+                        className="ds-input"
+                        placeholder="Claude 로그인 뒤 나온 코드"
+                        aria-label="Claude 로그인 코드"
+                        value={claudeCode}
+                        onChange={(event) => setClaudeCode(event.target.value)}
+                        style={{ flex: 1, minWidth: "12rem" }}
+                      />
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        disabled={!claudeCode.trim()}
+                        onClick={async () => {
+                          await ai.completeClaude(claudeCode);
+                          setClaudeCode("");
+                        }}
+                      >
+                        연결하기
+                      </Button>
+                    </div>
+                  ) : null}
+                  {ai.claudeMessage ? (
+                    <p
+                      style={{
+                        color: "var(--ds-danger)",
+                        fontSize: "var(--ds-text-xs)",
+                        marginTop: "0.375rem",
+                      }}
+                    >
+                      {ai.claudeMessage}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="conn-card-actions">
+                  {claudeProvider?.connected ? (
+                    <>
+                      {claudeProvider.isActive ? (
+                        <Badge tone="ok" dot>
+                          현재 사용 중
+                        </Badge>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={async () => {
+                            await ai.selectProvider("claude_code");
+                            notify("Claude 구독으로 전환되었습니다!");
+                          }}
+                        >
+                          이 AI 사용하기
+                        </Button>
+                      )}
+                      <Button
+                        variant="danger-quiet"
+                        size="sm"
+                        onClick={async () => {
+                          await ai.disconnectClaude();
+                          notify("Claude 구독 연결이 해제되었습니다.");
+                        }}
+                      >
+                        연결 해제
+                      </Button>
+                    </>
+                  ) : ai.claudeSignIn ? (
+                    <ButtonLink
+                      size="sm"
+                      variant="quiet"
+                      icon="external"
+                      href={ai.claudeSignIn.verificationUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Claude 로그인 페이지 열기
+                    </ButtonLink>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => void ai.connectClaude()}
+                    >
+                      Claude 로그인 시작
+                    </Button>
+                  )}
+                </div>
               </div>
             </section>
 

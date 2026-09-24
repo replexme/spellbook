@@ -121,6 +121,7 @@ export function ModelMenu({
     { id: "anthropic_api", title: "Anthropic Claude" },
     { id: "openrouter_api", title: "OpenRouter" },
     { id: "codex", title: "ChatGPT (Codex)" },
+    { id: "claude_code", title: "Claude (구독)" },
   ];
   const effectiveProvider = value?.provider || activeProvider || "codex";
   const activeModels = models.filter(
@@ -131,9 +132,7 @@ export function ModelMenu({
   return (
     <Menu
       label="AI 모델과 생각 깊이"
-      title={
-        model ? `AI 모델 · ${providerName(model.provider)}` : "AI 모델"
-      }
+      title={model ? `AI 모델 · ${providerName(model.provider)}` : "AI 모델"}
       placement="above-start"
       width={300}
       trigger={({ open, toggle, ref, menuId }) => (
@@ -189,8 +188,7 @@ export function ModelMenu({
                 key={`${item.provider ?? "codex"}:${item.model}`}
                 checked={
                   item.model === model?.model &&
-                  (item.provider ?? "codex") ===
-                    (model?.provider ?? "codex")
+                  (item.provider ?? "codex") === (model?.provider ?? "codex")
                 }
                 title={
                   <>
