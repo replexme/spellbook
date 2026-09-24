@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ModelSettings } from "./ai-models";
 
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./http";
@@ -60,7 +61,8 @@ export async function listNativeTurns(
   await ownedDocument(session, documentId);
   const turns = await db()`
     select t.id, t.request_text, t.permission_mode, t.status, t.assistant_text,
-      t.created_at, t.updated_at, t.summary, t.undone_at, j.version_id as before_version_id
+      t.created_at, t.updated_at, t.summary, t.undone_at, t.model_settings,
+      j.version_id as before_version_id
     from spellbook_native_turns t
     join spellbook_jobs j on j.id=t.job_id
     where t.document_id=${documentId} and t.account_id=${session.accountId}
@@ -139,6 +141,7 @@ export async function listNativeTurns(
       afterVersionId,
       savedPreviews,
       undoneAt: turn.undone_at ? new Date(turn.undone_at).toISOString() : null,
+      modelSettings: (turn.model_settings as ModelSettings | null) ?? null,
     });
   }
   return items;

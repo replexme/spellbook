@@ -23,6 +23,7 @@ function saved(
     afterVersionId: null,
     savedPreviews: [],
     undoneAt: null,
+    modelSettings: null,
   };
 }
 

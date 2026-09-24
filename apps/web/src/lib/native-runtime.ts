@@ -143,7 +143,10 @@ export async function submitNativeTurn(
     throw new HttpError(409, "native_document_context_not_ready");
   let effectiveModelSettings = modelSettings;
 
-  if (!effectiveModelSettings?.provider) {
+  // Fall back to the active API-key provider only when the user chose no
+  // model. Subscription models carry no provider field, so a missing
+  // provider on a chosen model must not be read as "no choice".
+  if (!effectiveModelSettings) {
     const customProviders = await getAccountProviders(session.accountId);
     const activeCustom = customProviders.find((p) => p.isActive);
     if (activeCustom) {
@@ -254,7 +257,7 @@ export async function submitNativeTurn(
     await sql`
       insert into spellbook_native_turns
         (id,session_id,document_id,account_id,job_id,request_text,permission_mode,model_settings,status)
-      values (${turnId},${native.id},${documentId},${session.accountId},${jobId},${text},${permission},${modelSettings ? sql.json(modelSettings as any) : null},'queued')
+      values (${turnId},${native.id},${documentId},${session.accountId},${jobId},${text},${permission},${effectiveModelSettings ? sql.json(effectiveModelSettings as any) : null},'queued')
     `;
     await sql`
       insert into spellbook_native_events (session_id,turn_id,event_type,payload)

@@ -1342,6 +1342,45 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
         else process.env.SPELLBOOK_AI_CONNECTOR_MODE = previousMode;
       }
 
+      // A subscription model chosen by the user wins over the active key.
+      workers.callAiAccount.mockResolvedValueOnce({
+        models: [
+          {
+            model: "gpt-subscription",
+            displayName: "Subscription",
+            defaultReasoningEffort: "medium",
+            supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+            isDefault: true,
+          },
+        ],
+      } as never);
+      const chosen = await fixture();
+      workers.enqueueWorkerJob.mockClear();
+      const chosenTurn = await submitNativeTurn(session, chosen.documentId, {
+        text: "제목 변경",
+        permission: "selection",
+        modelSettings: { model: "gpt-subscription", effort: "medium" },
+      });
+      const chosenPayload = workers.enqueueWorkerJob.mock.calls.at(-1)?.[3] as
+        | Record<string, unknown>
+        | undefined;
+      expect(chosenPayload).not.toHaveProperty("apiKey");
+      expect(chosenPayload?.modelSettings).toEqual({
+        model: "gpt-subscription",
+        effort: "medium",
+      });
+      const [recorded] =
+        await db()`select model_settings from spellbook_native_turns where id=${chosenTurn.turnId}`;
+      expect(recorded.model_settings).toEqual({
+        model: "gpt-subscription",
+        effort: "medium",
+      });
+      const [defaulted] =
+        await db()`select model_settings from spellbook_native_turns where id=${submitted.turnId}`;
+      expect(defaulted.model_settings).toMatchObject({
+        provider: "gemini_api",
+      });
+
       const legacyJob = randomUUID();
       await db()`insert into spellbook_jobs (id,job_type,document_id,version_id,status,payload)
         values (${legacyJob},'native_turn',${f.documentId},${f.versionId},'succeeded',${db().json({ apiKey, historical: true })})`;

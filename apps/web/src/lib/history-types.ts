@@ -1,6 +1,7 @@
 /* Client-safe shapes for history, versions and document summaries. */
 import type { AiEditLimit } from "./ai-edit-limits";
 import type { TurnSummary } from "./native-turn-summary";
+import type { ModelSettings } from "./ai-models";
 
 export type TurnHistoryItem = {
   id: string;
@@ -21,6 +22,8 @@ export type TurnHistoryItem = {
   }>;
   /** When the request was undone in the editor; null if it was not. */
   undoneAt: string | null;
+  /** The model the request actually ran with; null when none was recorded. */
+  modelSettings: ModelSettings | null;
 };
 
 /**
