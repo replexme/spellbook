@@ -1,5 +1,6 @@
 "use client";
 
+import { userFacingError } from "@/lib/user-errors";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Banner, Icon, IconButton, Tabs } from "@/design-system";
 import { collaboraCssVariables } from "@/design-system/editor-theme";
@@ -401,7 +402,10 @@ export function NativeWorkspace({
         setBusy(false);
         setText(pending.draft);
         setError(
-          cause instanceof Error ? cause.message : "요청을 보내지 못했어요.",
+          userFacingError(
+            cause instanceof Error ? cause.message : null,
+            "요청을 보내지 못했어요.",
+          ),
         );
       }
     },

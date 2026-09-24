@@ -28,6 +28,7 @@ import {
 } from "./native-conversation";
 import { signNativeConnectorToken } from "./native-connector-token";
 import { aiConnectorConfig } from "./ai-connector-config";
+import { aiTurnLimit, assertWithinAiTurnLimit } from "./ai-turn-limit";
 import { getAccountProviders, getActiveProviderKey } from "./provider-keys";
 import { loadTurnSummary } from "./native-turn-summary";
 import {
@@ -141,6 +142,20 @@ export async function submitNativeTurn(
     throw new HttpError(400, "invalid_native_execution");
   if (!native.graph_object)
     throw new HttpError(409, "native_document_context_not_ready");
+  const limit = aiTurnLimit();
+  if (limit.perHour !== null || limit.perDay !== null) {
+    const [used] = await db()`
+      select
+        count(*) filter (where created_at > now() - interval '1 hour')::int as "lastHour",
+        count(*)::int as "lastDay"
+      from spellbook_native_turns
+      where account_id=${session.accountId} and created_at > now() - interval '1 day'
+    `;
+    assertWithinAiTurnLimit(
+      limit,
+      used as { lastHour: number; lastDay: number },
+    );
+  }
   let effectiveModelSettings = modelSettings;
 
   // Fall back to the active API-key provider only when the user chose no

@@ -1394,6 +1394,29 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     }
   });
 
+  it("refuses AI requests beyond the configured per-account limit", async () => {
+    const f = await fixture();
+    const previous = process.env.SPELLBOOK_AI_TURNS_PER_HOUR;
+    await db()`delete from spellbook_native_turns where account_id=${accountId} and created_at > now() - interval '1 day'`;
+    process.env.SPELLBOOK_AI_TURNS_PER_HOUR = "1";
+    try {
+      await submitNativeTurn(session, f.documentId, {
+        text: "첫 요청",
+        permission: "read_only",
+      });
+      await expect(
+        submitNativeTurn(session, f.documentId, {
+          text: "두 번째 요청",
+          permission: "read_only",
+        }),
+      ).rejects.toThrow("ai_rate_limited");
+    } finally {
+      if (previous === undefined)
+        delete process.env.SPELLBOOK_AI_TURNS_PER_HOUR;
+      else process.env.SPELLBOOK_AI_TURNS_PER_HOUR = previous;
+    }
+  });
+
   it("hands a local subscription turn to the connector with only a job-scoped capability", async () => {
     const previousMode = process.env.SPELLBOOK_AI_CONNECTOR_MODE;
     process.env.SPELLBOOK_AI_CONNECTOR_MODE = "local";
