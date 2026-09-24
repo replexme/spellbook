@@ -28,6 +28,7 @@ import {
   journalSnapshotFromSavedBase,
   journalRecoveryDisposition,
 } from "/harness/save-transaction.mjs";
+import { installTextInputBridge } from "/harness/text-input-bridge.mjs";
 import "/harness/runtime-admission.js";
 
 const body = document.body;
@@ -3064,6 +3065,10 @@ ooxmlWorker.onerror = (event) => {
   body.dataset.error = event.message;
   setState("error", event.message);
 };
+installTextInputBridge({
+  canvas,
+  compositionBox: document.querySelector("#composition"),
+});
 globalThis.Module = {
   canvas,
   uno_scripts: [

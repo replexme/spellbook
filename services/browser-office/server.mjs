@@ -69,6 +69,13 @@ export function buildRoutes(
       ),
     ],
     [
+      "/harness/text-input-bridge.mjs",
+      route(
+        path.join(root, "text-input-bridge.mjs"),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
       "/harness/product-history.mjs",
       route(
         path.join(root, "product-history.mjs"),
