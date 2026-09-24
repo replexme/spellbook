@@ -2936,11 +2936,16 @@ async function browserProbeHistory(direction = null) {
       values: { Command: direction === "undo" ? ".uno:Undo" : ".uno:Redo" },
       requestId,
     });
-    await waitForBrowserProbeEvent({
-      type: "command-complete",
-      messageId: "Send_UNO_Command",
-      requestId,
-    });
+    // Undo may reopen the package when native history cannot reach the
+    // recorded revision, which takes as long as the edit itself.
+    await waitForBrowserProbeEvent(
+      {
+        type: "command-complete",
+        messageId: "Send_UNO_Command",
+        requestId,
+      },
+      120_000,
+    );
   }
   return {
     undo: Array.from(
