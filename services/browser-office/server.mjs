@@ -229,6 +229,50 @@ export function buildRoutes(
       },
     ),
   );
+  // Korean fonts and font rules the engine does not carry. The page writes
+  // them into the engine's file system before it starts (fonts.json).
+  const fonts = JSON.parse(readFileSync(path.join(root, "fonts.json"), "utf8"));
+  const install = [];
+  for (const font of fonts.fonts) {
+    routes.set(
+      `/runtime/fonts/${font.file}`,
+      route(
+        path.join(root, "runtime", "fonts", font.file),
+        "font/otf",
+        upstream.requiredAssetHeaders,
+      ),
+    );
+    install.push({
+      url: `fonts/${font.file}`,
+      directory: "/instdir/share/fonts/spellbook",
+      name: font.file,
+    });
+  }
+  fonts.fontconfig.forEach((file, index) => {
+    // Before the stock 60-/65- rules, in the listed order.
+    const name = `${57 + index}-${path.basename(file)}`;
+    routes.set(
+      `/runtime/fonts/${name}`,
+      route(
+        path.join(root, file),
+        "application/xml; charset=utf-8",
+        upstream.requiredAssetHeaders,
+      ),
+    );
+    install.push({
+      url: `fonts/${name}`,
+      directory: "/instdir/share/fontconfig/conf.d",
+      name,
+    });
+  });
+  routes.set(
+    "/runtime/fonts.json",
+    inlineRoute(
+      JSON.stringify(install),
+      "application/json",
+      upstream.requiredAssetHeaders,
+    ),
+  );
   return routes;
 }
 

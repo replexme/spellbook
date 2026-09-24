@@ -56,6 +56,7 @@ const LICENSE_TEXTS = Object.freeze([
   ["MPL-2.0.txt", "../../LICENSES/MPL-2.0.txt"],
   ["emscripten-LICENSE.txt", "licenses/emscripten-LICENSE.txt"],
   ["zetajs-LICENSE.txt", "licenses/zetajs-LICENSE.txt"],
+  ["NotoSansKR-OFL.txt", "licenses/NotoSansKR-OFL.txt"],
 ]);
 
 function escapeHtml(value) {
@@ -79,6 +80,7 @@ function escapeHtml(value) {
  */
 export function licensePage({
   upstream,
+  fonts,
   publicCommit,
   receiptSha256,
   contact,
@@ -111,6 +113,12 @@ export function licensePage({
       "MIT",
       `https://github.com/allotropia/zetajs commit ${zetajsCommit}`,
       `https://github.com/allotropia/zetajs/tree/${zetajsCommit}`,
+    ],
+    [
+      "Noto Sans KR (Korean font)",
+      "OFL-1.1",
+      `${fonts.source.repository} commit ${fonts.source.commit}`,
+      `${fonts.source.repository}/tree/${fonts.source.commit}/Sans/SubsetOTF/KR`,
     ],
     [
       "Spellbook editor shell",
@@ -297,6 +305,9 @@ export async function exportStatic({
     documentHeaders: admitted.upstream.requiredDocumentHeaders,
     licenses: licensePage({
       upstream: admitted.upstream,
+      fonts: JSON.parse(
+        await readFile(path.join(serviceRoot, "fonts.json"), "utf8"),
+      ),
       publicCommit: admitted.receipt.spellbookSourceRevision,
       receiptSha256: admitted.receiptSha256,
       contact: "hello@replex.me",

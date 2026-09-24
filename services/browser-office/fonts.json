@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "description": "Korean fonts written into the browser engine's file system before it starts. Same design as the server editor's Noto Sans CJK KR, so line breaks match.",
+  "source": {
+    "repository": "https://github.com/notofonts/noto-cjk",
+    "commit": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+    "license": "OFL-1.1"
+  },
+  "fonts": [
+    {
+      "file": "NotoSansKR-Regular.otf",
+      "path": "Sans/SubsetOTF/KR/NotoSansKR-Regular.otf",
+      "bytes": 4644748,
+      "sha256": "69975a0ac8472717870aefeab0a4d52739308d90856b9955313b2ad5e0148d68"
+    },
+    {
+      "file": "NotoSansKR-Bold.otf",
+      "path": "Sans/SubsetOTF/KR/NotoSansKR-Bold.otf",
+      "bytes": 4816044,
+      "sha256": "5a6ceb287ed2fc6cfc6213144ebea68cbd94b20fc9eb873d8486493bf02d9bda"
+    }
+  ],
+  "fontconfig": [
+    "../fonts/spellbook-font-aliases.conf",
+    "../fonts/spellbook-korean-fallback.conf",
+    "fonts/spellbook-browser-korean.conf"
+  ]
+}

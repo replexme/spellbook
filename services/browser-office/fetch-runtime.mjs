@@ -13,13 +13,24 @@ const outputRoot = path.resolve(
   process.argv[2] ?? path.join(serviceRoot, "runtime"),
 );
 
-await mkdir(outputRoot, { recursive: true });
+const fonts = JSON.parse(
+  await readFile(path.join(serviceRoot, "fonts.json"), "utf8"),
+);
+const fontSource = new URL(fonts.source.repository).pathname;
+await mkdir(path.join(outputRoot, "fonts"), { recursive: true });
 const downloadableAssets = [
   ...manifest.runtimeAssets.map((asset) => ({
     ...asset,
     url: new URL(asset.path, manifest.runtimeBaseUrl),
   })),
   manifest.javascriptBridge.runtimeAsset,
+  // Korean fonts the engine does not carry (see fonts.json).
+  ...fonts.fonts.map((font) => ({
+    ...font,
+    storedPath: `fonts/${font.file}`,
+    url: `https://raw.githubusercontent.com${fontSource}/${fonts.source.commit}/${font.path}`,
+    requestEncoding: "identity",
+  })),
 ];
 
 for (const asset of downloadableAssets) {

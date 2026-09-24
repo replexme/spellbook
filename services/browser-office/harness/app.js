@@ -2390,9 +2390,21 @@ async function handleProductHostMessage(message) {
       });
       return;
     }
+    if (message.messageId === "Action_GoToPage") {
+      // The product shows the slide an AI request changed, or the one a
+      // person picked from a result card.
+      const page = Number(message.values?.Page);
+      if (!Number.isSafeInteger(page) || page < 1)
+        throw new Error("Browser Office page is invalid.");
+      if (engineDocumentOpen)
+        await request("show-slide", { slideIndex: page - 1 });
+      return;
+    }
+    // Server-editor housekeeping with no browser counterpart.
     if (
       message.messageId === "welcome-close" ||
-      message.messageId === "Host_PostmessageReady"
+      message.messageId === "Host_PostmessageReady" ||
+      message.messageId === "User_Active"
     )
       return;
     throw new Error("Browser Office host command is not supported.");
@@ -3151,7 +3163,43 @@ globalThis.Module = {
     new URL("/harness/office-thread.js", location.href).href,
   ],
   locateFile: (path, prefix) => (prefix || runtimeBase) + path,
+  preRun: [installRuntimeFonts],
 };
+
+// The engine carries no Korean fonts. Write them, with the font rules, into
+// its file system before it starts; runtime/fonts.json lists the files.
+function installRuntimeFonts() {
+  Module.addRunDependency("spellbook-fonts");
+  (async () => {
+    const listing = await networkFetch(new URL("fonts.json", runtimeBase));
+    if (!listing.ok) throw new Error("The editor font list failed to load.");
+    const files = await Promise.all(
+      (await listing.json()).map(async (file) => {
+        const response = await networkFetch(new URL(file.url, runtimeBase));
+        if (!response.ok)
+          throw new Error(`The editor font ${file.name} failed to load.`);
+        return { ...file, bytes: new Uint8Array(await response.arrayBuffer()) };
+      }),
+    );
+    for (const file of files) {
+      Module.FS_createPath("/", file.directory.slice(1), true, true);
+      Module.FS_createDataFile(
+        file.directory,
+        file.name,
+        file.bytes,
+        true,
+        false,
+        true,
+      );
+    }
+  })().then(
+    () => Module.removeRunDependency("spellbook-fonts"),
+    (error) => {
+      body.dataset.error = error.message;
+      setState("error", error.message);
+    },
+  );
+}
 Module.mainScriptUrlOrBlob = new Blob(
   [
     `importScripts(${JSON.stringify(new URL("soffice.js", runtimeBase).href)});`,

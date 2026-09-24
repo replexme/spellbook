@@ -117,8 +117,12 @@ test("refuses a host origin that is not an https origin", () => {
 });
 
 test("the license notice names the exact source of every shipped component", () => {
+  const fonts = JSON.parse(
+    readFileSync(new URL("./fonts.json", import.meta.url), "utf8"),
+  );
   const page = licensePage({
     upstream,
+    fonts,
     publicCommit: "a".repeat(40),
     receiptSha256: "b".repeat(64),
     contact: "hello@replex.me",
@@ -130,6 +134,7 @@ test("the license notice names the exact source of every shipped component", () 
   assert.ok(page.includes(upstream.source.candidateCommit));
   assert.ok(page.includes(`tree/${"a".repeat(40)}/services/browser-office`));
   assert.ok(page.includes("mailto:hello@replex.me"));
+  assert.ok(page.includes(fonts.source.commit));
   const site = plan();
   const headers = headersFor(site, "/licenses");
   assert.equal(headers["Document-Isolation-Policy"], undefined);
@@ -137,4 +142,35 @@ test("the license notice names the exact source of every shipped component", () 
     file.startsWith("licenses/"),
   ))
     assert.ok(existsSync(source.file), `${file} has its text`);
+});
+
+test("Korean fonts and font rules ship in the versioned runtime folder", () => {
+  const site = plan();
+  const written = new Set(site.files.map(({ file }) => file));
+  for (const name of [
+    "fonts.json",
+    "fonts/NotoSansKR-Regular.otf",
+    "fonts/NotoSansKR-Bold.otf",
+    "fonts/57-spellbook-font-aliases.conf",
+    "fonts/58-spellbook-korean-fallback.conf",
+    "fonts/59-spellbook-browser-korean.conf",
+  ])
+    assert.ok(
+      written.has(`runtime/${version}/${name}`),
+      `${name} is published`,
+    );
+  const listing = JSON.parse(
+    site.files.find(({ file }) => file === `runtime/${version}/fonts.json`)
+      .source.body,
+  );
+  assert.deepEqual(
+    listing.map(({ directory }) => directory),
+    [
+      "/instdir/share/fonts/spellbook",
+      "/instdir/share/fonts/spellbook",
+      "/instdir/share/fontconfig/conf.d",
+      "/instdir/share/fontconfig/conf.d",
+      "/instdir/share/fontconfig/conf.d",
+    ],
+  );
 });
