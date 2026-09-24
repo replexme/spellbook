@@ -155,6 +155,7 @@ export function NativeWorkspace({
   const turnRequested = useRef(false),
     /** This editor load saved once before AI edits, so they are checked against its own export. */
     baselineSaved = useRef(false),
+    baselineSaveCount = useRef<number | null>(null),
     saveRevision = useRef(0),
     pendingSaveRevision = useRef<number | null>(null),
     pendingTurn = useRef<PendingTurn | null>(null),
@@ -996,31 +997,47 @@ export function NativeWorkspace({
       if (value?.MessageId === "Action_Save_Resp") {
         if (value.Values?.success) {
           setSaveState("저장 확인 중…");
-          if (pendingTurn.current && !editorModified.current) {
-            // Collabora has written the file. A save identical to the
-            // working version leaves the server revision unchanged, so no
-            // poll will ever release the request: release it here. A new
+          if (
+            pendingTurn.current &&
+            !editorModified.current &&
+            baselineSaveCount.current !== null
+          ) {
+            // Collabora answers before its upload reaches the server, so
+            // wait until the server has counted this save. A save identical
+            // to the working version leaves the revision unchanged and no
+            // poll would release the request: release it here. A new
             // revision is still being checked, and the poll releases the
             // request once that check finishes.
             const expected = pendingSaveRevision.current;
-            void api("state")
-              .then((state) => {
-                const saved = state as { saveRevision?: number };
-                if (
-                  expected !== null &&
-                  typeof saved.saveRevision === "number" &&
-                  saved.saveRevision >= expected
-                )
+            const before = baselineSaveCount.current;
+            baselineSaveCount.current = null;
+            void (async () => {
+              const deadline = Date.now() + 90_000;
+              while (Date.now() < deadline) {
+                const saved = (await api("state")) as {
+                  saveRevision?: number;
+                  editorSaveCount?: number;
+                };
+                if ((saved.editorSaveCount ?? 0) > before) {
+                  if (
+                    expected !== null &&
+                    typeof saved.saveRevision === "number" &&
+                    saved.saveRevision >= expected
+                  )
+                    return;
+                  const waiting = pendingTurn.current;
+                  if (!waiting || pendingSaveRevision.current !== expected)
+                    return;
+                  pendingTurn.current = null;
+                  pendingSaveRevision.current = null;
+                  setSaveState("저장됨");
+                  void dispatchTurn(waiting);
                   return;
-                const waiting = pendingTurn.current;
-                if (!waiting || pendingSaveRevision.current !== expected)
-                  return;
-                pendingTurn.current = null;
-                pendingSaveRevision.current = null;
-                setSaveState("저장됨");
-                void dispatchTurn(waiting);
-              })
-              .catch((cause) => setError(cause.message));
+                }
+                await new Promise((resolve) => setTimeout(resolve, 500));
+              }
+              throw new Error("editor_save_not_received");
+            })().catch((cause) => setError(cause.message));
           }
         } else {
           const waiting = pendingTurn.current;
@@ -1482,12 +1499,16 @@ export function NativeWorkspace({
       ) {
         baselineSaved.current = true;
         pendingTurn.current = pending;
+        if (!editorModified.current) {
+          const state = (await api("state")) as { editorSaveCount?: number };
+          baselineSaveCount.current = state.editorSaveCount ?? 0;
+        }
         requestSave("AI 작업 전 저장 중…");
         return;
       }
       await dispatchTurn(pending);
     },
-    [dispatchTurn, launch.editorKind, requestSave],
+    [api, dispatchTurn, launch.editorKind, requestSave],
   );
   function submit() {
     if (!text.trim() || busy || queued || !aiConnected) return;

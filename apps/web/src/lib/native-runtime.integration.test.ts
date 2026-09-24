@@ -50,6 +50,7 @@ import {
   failNativeScan,
   markNativeUndo,
   NATIVE_TASK_TTL_SECONDS,
+  nativeSessionState,
   pollNativeSession,
   submitNativeTurn,
 } from "./native-runtime";
@@ -547,6 +548,22 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     expect(document.current_version_id).toBe(f.versionId);
     expect(native).toMatchObject({ status: "validating" });
     expect(native.working_version_id).not.toBe(f.versionId);
+
+    // The page waits for the server to count its save; an identical save
+    // must be counted too, without a new revision.
+    const afterChanged = await nativeSessionState(session, f.documentId);
+    expect(afterChanged.editorSaveCount).toBe(1);
+    await wopiPutFile(
+      new Request(contentsUrl, {
+        method: "POST",
+        headers: { "x-wopi-lock": "editor-lock" },
+        body: savedBytes,
+      }),
+      f.documentId,
+    );
+    const afterIdentical = await nativeSessionState(session, f.documentId);
+    expect(afterIdentical.editorSaveCount).toBe(2);
+    expect(afterIdentical.saveRevision).toBe(afterChanged.saveRevision);
   });
 
   it("implements WOPI lock transitions, expiry, and extended lock limits", async () => {

@@ -300,6 +300,7 @@ export async function runMigrations(): Promise<void> {
     alter table spellbook_native_turns add column if not exists undone_at timestamptz;
     alter table spellbook_native_sessions add column if not exists pending_undo_turn_id uuid;
     alter table spellbook_native_sessions add column if not exists pending_undo_at timestamptz;
+    alter table spellbook_native_sessions add column if not exists wopi_put_count integer not null default 0;
     alter table spellbook_documents add column if not exists failure_code text;
     create table if not exists spellbook_editor_engines (
       editor_mode text primary key check (editor_mode in ('wopi','browser')),

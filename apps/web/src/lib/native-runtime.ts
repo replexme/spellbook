@@ -403,6 +403,7 @@ export async function nativeSessionState(session: Session, documentId: string) {
   return {
     status: native.status as string,
     saveRevision: native.save_revision as number,
+    editorSaveCount: Number(native.wopi_put_count ?? 0),
     workingVersionId: native.working_version_id as string,
     editorLocked: Boolean(
       native.wopi_lock &&

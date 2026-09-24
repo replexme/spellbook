@@ -485,7 +485,12 @@ export async function wopiLock(
       await sql`select wopi_lock from spellbook_native_sessions where id=${context.sessionId} for update`;
     const current = session?.wopi_lock as string | null;
     if (operation === "GET_LOCK") return { status: 200, lock: current ?? "" };
-    const conflict = wopiLockConflict(operation as WopiMutation, current, given, oldLock);
+    const conflict = wopiLockConflict(
+      operation as WopiMutation,
+      current,
+      given,
+      oldLock,
+    );
     if (conflict !== null) return { status: 409, lock: conflict };
     if (operation === "UNLOCK") {
       await sql`update spellbook_native_sessions set wopi_lock=null, lock_updated_at=null, lock_expires_at=null, updated_at=now() where id=${context.sessionId}`;
@@ -551,7 +556,7 @@ export async function wopiPutFile(
     if (!current?.wopi_lock || current.wopi_lock !== given)
       throw new WopiLockConflict(current?.wopi_lock ?? "");
     if (current.working_sha256 !== digest) return null;
-    await sql`update spellbook_native_sessions set last_seen_at=now(),updated_at=now() where id=${context.sessionId}`;
+    await sql`update spellbook_native_sessions set last_seen_at=now(),updated_at=now(),wopi_put_count=wopi_put_count+1 where id=${context.sessionId}`;
     return current.working_version_id as string;
   });
   if (unchangedVersion) return { version: unchangedVersion, unchanged: true };
@@ -572,6 +577,9 @@ export async function wopiPutFile(
         throw new WopiLockConflict(session?.wopi_lock ?? "");
       if (session.working_version_id !== context.versionId)
         throw new HttpError(409, "wopi_session_changed");
+      // Every accepted editor save is counted, including one identical to the
+      // working version, so the page can tell that its save has landed.
+      await sql`update spellbook_native_sessions set wopi_put_count=wopi_put_count+1 where id=${context.sessionId}`;
       payload = await stageNativeSave(sql, {
         sessionId: context.sessionId,
         documentId,
