@@ -289,9 +289,9 @@ export function HomeScreen({
               </ol>
             </div>
             <aside className="side-card" aria-label="AI 연결">
-              {ai.account ? (
+              {ai.connectionName ? (
                 <>
-                  <strong>AI 연결됨 · {ai.runtime?.displayName ?? "AI"}</strong>
+                  <strong>AI 연결됨 · {ai.connectionName}</strong>
                   <p>파일을 열고 오른쪽 AI 패널에서 바꿀 내용을 부탁하세요.</p>
                 </>
               ) : (

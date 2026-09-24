@@ -32,6 +32,25 @@ export interface RateLimitInfo {
   description: string | null;
 }
 
+// Name of the AI the user can use right now: the active connected provider,
+// otherwise any connected one. API-key connections count, not only a
+// subscription account.
+export function connectedAiName(
+  providers: Pick<
+    ProviderItem,
+    "id" | "displayName" | "connected" | "isActive"
+  >[],
+  subscriptionRuntimeName?: string | null,
+): string | null {
+  const connection =
+    providers.find((provider) => provider.connected && provider.isActive) ??
+    providers.find((provider) => provider.connected);
+  if (!connection) return null;
+  return connection.id === "codex" && subscriptionRuntimeName
+    ? subscriptionRuntimeName
+    : connection.displayName;
+}
+
 export interface ProviderItem {
   id:
     | "codex"
@@ -394,6 +413,10 @@ export function useAiAccount(config: AiConnectorConfig) {
   ];
 
   const hasAnyConnection = providers.some((p) => p.connected);
+  const connectionName = connectedAiName(
+    providers,
+    accountResponse?.runtime?.displayName,
+  );
 
   return {
     account: codexAccount,
@@ -411,6 +434,7 @@ export function useAiAccount(config: AiConnectorConfig) {
     runtime: accountResponse?.runtime ?? null,
     status,
     // Multi-provider & rate limits
+    connectionName,
     providers,
     activeProvider,
     rateLimitInfo,

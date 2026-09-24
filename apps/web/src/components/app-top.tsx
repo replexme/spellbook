@@ -15,10 +15,10 @@ export function AiStatusChip({ ai }: { ai: Ai }) {
         AI 연결 확인 필요
       </Chip>
     );
-  if (ai.account)
+  if (ai.connectionName)
     return (
       <Chip dot="ok" href="/settings">
-        AI 연결됨 · {ai.runtime?.displayName ?? "AI"}
+        AI 연결됨 · {ai.connectionName}
       </Chip>
     );
   return (
