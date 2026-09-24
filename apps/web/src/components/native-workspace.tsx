@@ -997,11 +997,30 @@ export function NativeWorkspace({
         if (value.Values?.success) {
           setSaveState("저장 확인 중…");
           if (pendingTurn.current && !editorModified.current) {
-            const waiting = pendingTurn.current;
-            pendingTurn.current = null;
-            pendingSaveRevision.current = null;
-            setSaveState("저장됨");
-            void dispatchTurn(waiting);
+            // Collabora has written the file. A save identical to the
+            // working version leaves the server revision unchanged, so no
+            // poll will ever release the request: release it here. A new
+            // revision is still being checked, and the poll releases the
+            // request once that check finishes.
+            const expected = pendingSaveRevision.current;
+            void api("state")
+              .then((state) => {
+                const saved = state as { saveRevision?: number };
+                if (
+                  expected !== null &&
+                  typeof saved.saveRevision === "number" &&
+                  saved.saveRevision >= expected
+                )
+                  return;
+                const waiting = pendingTurn.current;
+                if (!waiting || pendingSaveRevision.current !== expected)
+                  return;
+                pendingTurn.current = null;
+                pendingSaveRevision.current = null;
+                setSaveState("저장됨");
+                void dispatchTurn(waiting);
+              })
+              .catch((cause) => setError(cause.message));
           }
         } else {
           const waiting = pendingTurn.current;
@@ -1456,8 +1475,12 @@ export function NativeWorkspace({
       // is open now: a file the editor wrote earlier and opened again exports
       // with different chart ids and layout numbers, which the server's
       // edit-scope check would count as changes the AI made. So the first
-      // request of every editor load saves first.
-      if (editorModified.current) {
+      // request of every editor load saves first, even when nothing changed.
+      if (
+        editorModified.current ||
+        (launch.editorKind === "wopi" && !baselineSaved.current)
+      ) {
+        baselineSaved.current = true;
         pendingTurn.current = pending;
         requestSave("AI 작업 전 저장 중…");
         return;
