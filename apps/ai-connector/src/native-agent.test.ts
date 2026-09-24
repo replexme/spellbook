@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentTurnOptions, AppServerClient } from "./app-server-client.js";
 import {
   runNativeTurn,
+  UNREVIEWED_EDIT_NOTICE,
   type NativeObservation,
   type NativePermission,
 } from "./native-agent.js";
@@ -67,7 +68,9 @@ function fixture(
   scope = permission,
   mutationState: NativeObservation = changedState,
   initialState: NativeObservation = state,
+  followUp: (options: AgentTurnOptions) => Promise<void> = async () => {},
 ) {
+  let turns = 0;
   let current = structuredClone(initialState);
   const call = vi.fn(
     async (request: Record<string, unknown>, _signal: AbortSignal) => {
@@ -84,12 +87,16 @@ function fixture(
       _c: unknown,
       options: AgentTurnOptions,
     ) => {
-      await work(options);
+      turns += 1;
+      // The first turn answers the request; later turns are the agent's
+      // follow-up (for example the enforced post-edit review).
+      await (turns === 1 ? work : followUp)(options);
       return "result";
     },
   } as unknown as AppServerClient;
   return {
     call,
+    turns: () => turns,
     run: () =>
       runNativeTurn(client, {
         requestText: "Change title",
@@ -705,6 +712,88 @@ describe("shared open document agent", () => {
       reviewed: true,
       status: "completed",
     });
+  });
+  it("asks a model that edited and stopped to look at the result", async () => {
+    const f = fixture(
+      async (o) => {
+        await o.onTool(
+          "native_observe",
+          { detailSlideIndex: null },
+          "1",
+          f.signal,
+        );
+        await o.onTool(
+          "native_edit",
+          { op: "replace_text", elementId: "0/0", text: "After" },
+          "2",
+          f.signal,
+        );
+      },
+      permission,
+      changedState,
+      state,
+      async (o) => {
+        await o.onTool(
+          "native_observe",
+          { detailSlideIndex: null },
+          "3",
+          f.signal,
+        );
+        expect(
+          (
+            await o.onTool(
+              "native_review",
+              { approved: true, problems: [], reviewedSlideIndexes: [0] },
+              "4",
+              f.signal,
+            )
+          ).success,
+        ).toBe(true);
+      },
+    );
+    const result = await f.run();
+    expect(f.turns()).toBe(2);
+    expect(result).toMatchObject({
+      changed: true,
+      reviewed: true,
+      status: "completed",
+    });
+    expect(result.text).not.toContain(UNREVIEWED_EDIT_NOTICE);
+  });
+  it("says plainly that an edit is unconfirmed when the review never happens", async () => {
+    const f = fixture(async (o) => {
+      await o.onTool(
+        "native_observe",
+        { detailSlideIndex: null },
+        "1",
+        f.signal,
+      );
+      await o.onTool(
+        "native_edit",
+        { op: "replace_text", elementId: "0/0", text: "After" },
+        "2",
+        f.signal,
+      );
+    });
+    const result = await f.run();
+    expect(f.turns()).toBe(2);
+    expect(result).toMatchObject({ reviewed: false, status: "needs_review" });
+    expect(result.text).toContain(UNREVIEWED_EDIT_NOTICE);
+  });
+  it("does not ask for a review when nothing changed", async () => {
+    const f = fixture(async (o) => {
+      await o.onTool(
+        "native_observe",
+        { detailSlideIndex: null },
+        "1",
+        f.signal,
+      );
+    });
+    expect(await f.run()).toMatchObject({
+      changed: false,
+      status: "completed",
+    });
+    expect(f.turns()).toBe(1);
   });
   it("cannot approve a mutation with a newly introduced layout issue", async () => {
     const issueState: NativeObservation = {

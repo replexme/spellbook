@@ -104,6 +104,9 @@ interface NativeEditCommand {
 
 // The same subscription client used by the current product; only the document
 // tool transport changes from offline PPTX patch jobs to the open editor session.
+export const UNREVIEWED_EDIT_NOTICE =
+  "수정 뒤 화면 재검토가 끝나지 않아 이 결과는 아직 확인되지 않았습니다. 결과를 직접 확인해 주세요.";
+
 export async function runNativeTurn(
   client: AgentTurnClient,
   input: {
@@ -689,7 +692,9 @@ export async function runNativeTurn(
               };
             }
             if (name === "web_search") {
-              const query = String((args as { query?: string })?.query ?? "").trim();
+              const query = String(
+                (args as { query?: string })?.query ?? "",
+              ).trim();
               if (!query) throw new Error("Search query is required.");
               input.onTool(`웹 검색: "${query}"`);
               const results = await performWebSearch(query, signal);
@@ -707,9 +712,7 @@ export async function runNativeTurn(
               const pageText = await fetchWebPageText(url, signal);
               return {
                 success: true,
-                contentItems: [
-                  { type: "inputText", text: pageText },
-                ],
+                contentItems: [{ type: "inputText", text: pageText }],
               };
             }
             throw new Error("Unknown tool.");
@@ -735,14 +738,20 @@ export async function runNativeTurn(
     ["slides", "document"].includes(input.permission.mode) &&
       client.supportsImageGeneration !== false,
   );
-  if (generatedImageInserted && !reviewed) {
+  // Looking at the result after an edit is the product contract, not a hint.
+  // A model that edits and stops is asked once more to observe and review.
+  if (changed && !reviewed) {
     const review = await turn(
-      "The requested generated image is now an editable picture object in the open presentation. Observe the fresh slide, correct its position or size if needed, then call native_review. Do not generate another image.",
+      generatedImageInserted
+        ? "The requested generated image is now an editable picture object in the open presentation. Observe the fresh slide, correct its position or size if needed, then call native_review. Do not generate another image."
+        : "This request changed the open presentation, but native_review has not approved a fresh screenshot of the changed slides. Observe the changed slides now, correct only regressions this request introduced, then call native_review with every changed slide. Do not make unrelated edits and do not claim the result was checked before native_review approves it.",
       false,
       180000,
     );
     if (review.trim()) text = review;
   }
+  if (changed && !reviewed)
+    text = `${text.trim()}\n\n${UNREVIEWED_EDIT_NOTICE}`;
   return {
     text,
     changed,
@@ -751,7 +760,10 @@ export async function runNativeTurn(
   };
 }
 
-async function fetchWebPageText(rawUrl: string, signal?: AbortSignal): Promise<string> {
+async function fetchWebPageText(
+  rawUrl: string,
+  signal?: AbortSignal,
+): Promise<string> {
   try {
     const html = await fetchPublicPage(rawUrl, signal);
     const cleanText = html
@@ -791,9 +803,12 @@ async function performWebSearch(
       }));
       if (results.length) return results;
     } catch (error) {
-      failures.push(`${language}.wikipedia.org: ${error instanceof Error ? error.message : String(error)}`);
+      failures.push(
+        `${language}.wikipedia.org: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
-  if (failures.length === 2) throw new Error(`web_search_failed: ${failures.join("; ")}`);
+  if (failures.length === 2)
+    throw new Error(`web_search_failed: ${failures.join("; ")}`);
   return [];
 }
