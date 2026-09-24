@@ -847,7 +847,13 @@ export function NativeWorkspace({
       const wopiBridge =
         launch.editorKind === "wopi" &&
         event.data?.type === "spellbook.extension-ready";
-      if ((browserBridge || wopiBridge) && event.source) {
+      // The browser editor is this page's own frame; accept its handshake
+      // only from that window.
+      if (
+        ((browserBridge && event.source === office.current?.contentWindow) ||
+          wopiBridge) &&
+        event.source
+      ) {
         const sessionId = browserBridge
           ? event.data.bridgeSessionId
           : typeof event.data.bridgeSessionId === "string"

@@ -7,8 +7,8 @@
   if (!mutationContracts || typeof mutationContracts !== "object")
     throw new Error("Browser native mutation contract is unavailable.");
   // Format-excluded operations are never offered; operations the contract
-  // marks unavailable in the browser runtime (for example media, whose avmedia
-  // module the WASM build compiles out) are not advertised by this engine.
+  // marks unavailable in the browser runtime are not advertised by this
+  // engine (none today: patch 0048 keeps avmedia in the WASM build).
   const candidateOperations = Object.freeze(
     Object.entries(mutationContracts)
       .filter(

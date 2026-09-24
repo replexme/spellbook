@@ -1,9 +1,8 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 
-// LibreOffice's GraphicExportFilter is not packaged in the browser runtime.
-// A browser observation therefore captures the actual canvas after the UNO
-// operation has returned. Keep capture selection and completion semantics
-// separate from the editor's PPTX mutation transaction.
+// Which slides a browser observation shows the AI, and whether every changed
+// slide was shown. The engine renders each one (harness "render-slide");
+// keep selection and completion separate from the PPTX mutation transaction.
 export function browserCaptureTargets(request, observation) {
   if (request?.suppressCapture === true) return [];
   const slideCount = observation?.slides?.length;
