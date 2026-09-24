@@ -417,7 +417,7 @@ export default function NativeDocument({
     <main className={`ws has-panel ${phone ? "is-phone" : ""}`}>
       <WorkspaceTopBar
         fileName={summary?.fileName ?? ""}
-        save={saveView("", false, null)}
+        save={problem ? null : saveView("", false, null)}
         onSave={noop}
         editorReady={false}
         onUndo={noop}

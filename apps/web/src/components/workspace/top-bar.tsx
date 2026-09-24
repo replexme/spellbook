@@ -40,7 +40,8 @@ export function WorkspaceTopBar({
   disabled = false,
 }: {
   fileName: string;
-  save: SaveView;
+  /** Hidden when the editor cannot open (a failure screen says why). */
+  save: SaveView | null;
   onSave: () => void;
   editorReady: boolean;
   onUndo: () => void;
@@ -55,7 +56,7 @@ export function WorkspaceTopBar({
 }) {
   const baseName = fileName.replace(/\.pptx$/i, "");
   const extension = fileName.slice(baseName.length);
-  const actionable = save.kind === "dirty" || save.kind === "error";
+  const actionable = save?.kind === "dirty" || save?.kind === "error";
   return (
     <header className="ws-topbar">
       <a className="ws-back" href="/" aria-label="파일 목록으로">
@@ -68,7 +69,7 @@ export function WorkspaceTopBar({
           <span>{baseName}</span>
           <span>{extension}</span>
         </span>
-        {actionable ? (
+        {!save ? null : actionable ? (
           <button
             type="button"
             className={`ws-save is-${save.kind}`}
