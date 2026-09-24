@@ -767,10 +767,7 @@ export function SettingsScreen({
               </div>
 
               {/* ── 6. Claude Subscription (Claude Code) ── */}
-              <div
-                className={`conn-card ${claudeProvider?.connected ? "" : "is-expanded"}`}
-                style={{ marginBottom: "1rem" }}
-              >
+              <div className="conn-card" style={{ marginBottom: "1rem" }}>
                 <span className="conn-mark" aria-hidden="true">
                   <Icon name="sparkles" size={18} />
                 </span>

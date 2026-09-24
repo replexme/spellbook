@@ -141,6 +141,7 @@ export function NativeWorkspace({
   initialHistory = [],
   initialQueued = null,
   onReload,
+  onUnsupported,
 }: {
   launch: NativeLaunch;
   openingPreview?: string | null;
@@ -151,6 +152,8 @@ export function NativeWorkspace({
   /** A request written on the opening screen, sent once the editor is ready. */
   initialQueued?: PendingTurn | null;
   onReload?: () => void;
+  /** The browser editor frame found this browser cannot run it. */
+  onUnsupported?: () => void;
 }) {
   const office = useRef<HTMLIFrameElement>(null),
     form = useRef<HTMLFormElement>(null);
@@ -828,6 +831,13 @@ export function NativeWorkspace({
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== origin) return;
+      if (
+        launch.editorKind === "browser" &&
+        event.data?.type === "spellbook.browser-office-unsupported"
+      ) {
+        onUnsupported?.();
+        return;
+      }
       const browserBridge =
         launch.editorKind === "browser" &&
         event.data?.type === "spellbook.browser-office-ready" &&
@@ -1111,6 +1121,7 @@ export function NativeWorkspace({
     launch.documentId,
     editorMounted,
     rememberImages,
+    onUnsupported,
   ]);
   useEffect(() => {
     if (launch.editorKind !== "wopi" || !engineReady || bridgeReady) return;

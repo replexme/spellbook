@@ -3109,7 +3109,22 @@ window.addEventListener("error", (event) => {
   setState("error", event.message);
 });
 
-const runtimeBase = new URL("/runtime/", location.href).href;
+// The engine's threads need an isolated frame. A browser that cannot isolate
+// it is told apart from a failure so the product can refuse the browser.
+if (productMode && !globalThis.crossOriginIsolated) {
+  window.parent.postMessage(
+    { type: "spellbook.browser-office-unsupported", protocolVersion: 1 },
+    requireProductHostOrigin(),
+  );
+  throw new Error("This browser cannot isolate the editor frame.");
+}
+
+// A static host serves each runtime build under its own folder so browsers
+// can keep the large engine files; the runtime identity script names it.
+const runtimeBase = new URL(
+  globalThis.spellbookBrowserRuntimeBase ?? "/runtime/",
+  location.href,
+).href;
 const ooxmlWorker = new Worker(new URL("ooxml-worker.js", runtimeBase), {
   type: "module",
 });

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Banner, Button, ButtonLink, Tabs } from "@/design-system";
 import type { AiConnectorConfig } from "@/lib/ai-connector-config";
 import type { AvailableModel, ModelSettings } from "@/lib/ai-models";
+import { browserEngineSupported } from "@/lib/browser-engine-support";
 import type { DocumentSummary, TurnHistoryItem } from "@/lib/history-types";
 import { uploadFailure } from "@/lib/upload-reasons";
 import { useAiAccount } from "@/lib/use-ai-account";
@@ -52,6 +53,12 @@ const failures: Record<string, Failure> = {
     title: "브라우저 편집기가 아직 설정되지 않았어요",
     body: "파일은 안전하게 저장돼 있어요. 서버 설정을 마친 뒤 다시 시도해 주세요.",
     retry: true,
+    download: "current",
+  },
+  browser_unsupported: {
+    title: "이 브라우저에서는 편집기를 열 수 없어요",
+    body: "편집기는 PC의 최신 Chrome·Edge나 Android의 최신 Chrome에서 열려요. 파일은 안전하게 저장돼 있어요.",
+    retry: false,
     download: "current",
   },
   network: {
@@ -197,7 +204,17 @@ export default function NativeDocument({
     },
     [documentId, launchMode],
   );
+  const refuseBrowser = useCallback(() => {
+    setLaunch(null);
+    setPhase("failed");
+    setFailure("browser_unsupported");
+  }, []);
   useEffect(() => {
+    // Checked before anything is downloaded or a session is opened.
+    if (launchMode === "browser" && !browserEngineSupported()) {
+      refuseBrowser();
+      return;
+    }
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     const check = async () => {
@@ -223,7 +240,7 @@ export default function NativeDocument({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [load, attempt]);
+  }, [load, attempt, launchMode, refuseBrowser]);
   useEffect(() => {
     const startedAt = Date.now();
     setElapsedSeconds(0);
@@ -339,6 +356,7 @@ export default function NativeDocument({
         initialHistory={history}
         initialQueued={queued}
         onReload={retry}
+        onUnsupported={refuseBrowser}
       />
     );
   const reason =
