@@ -660,87 +660,84 @@ export async function executeNativeTool(input: Record<string, unknown>) {
       values (${sessionId},${turnId},${String(type)},${db().json({ [type === "delta" ? "delta" : type === "thinking" ? "thinking" : "label"]: value })})`;
     return { accepted: true };
   }
-  if (input.operation === "record_tasks") {
-    // A request run in the browser called its editor directly. Its editor
-    // calls are recorded once, before completion, so the result card, undo
-    // and the save's change budget read them like any other request's.
-    const tasks = browserTaskRecords(input.tasks);
-    const recorded = await db().begin(async (sql) => {
-      const [context] = await sql`
-        select s.save_revision from spellbook_native_sessions s
-        join spellbook_native_turns t on t.id=${turnId} and t.session_id=s.id
-        where s.id=${sessionId} and s.status='active' and s.expires_at > now()
-          and t.status='running'
-        for update of s
-      `;
-      if (!context) return false;
-      for (const [index, task] of tasks.entries())
-        await sql`
-          insert into spellbook_native_tasks
-            (id,session_id,turn_id,request,status,result,error,save_revision_at_create,expires_at,created_at,updated_at)
-          values (${task.id},${sessionId},${turnId},${sql.json(task.request as never)},${task.status},
-            ${task.result === null ? null : sql.json(task.result as never)},${task.error},${context.save_revision},
-            now(),now() + ${index} * interval '1 millisecond',now())
-          on conflict (id) do nothing
-        `;
-      return true;
-    });
-    if (!recorded) throw new HttpError(409, "native_session_not_active");
-    return { accepted: true, recorded: tasks.length };
+  if (input.operation === "task_begin") {
+    // A request run in the browser calls its editor directly, but records
+    // each call first, as the worker path does: an edit that lands while the
+    // page is closed or the request is stopped is then still known, and the
+    // save's change budget refuses it until it is reviewed. The row expires
+    // at once so the page is never asked to run it again.
+    const task = browserTaskRecord(input);
+    const [created] = await db()`
+      insert into spellbook_native_tasks
+        (id,session_id,turn_id,request,status,delivered_at,save_revision_at_create,expires_at)
+      select ${task.id},s.id,${turnId},${db().json(task.request as never)},'delivered',now(),s.save_revision,now()
+      from spellbook_native_sessions s
+      join spellbook_native_turns t on t.id=${turnId} and t.session_id=s.id
+      where s.id=${sessionId} and s.status='active' and s.expires_at > now()
+        and t.status='running'
+      on conflict (id) do nothing
+      returning id
+    `;
+    if (!created) throw new HttpError(409, "native_session_not_active");
+    return { accepted: true };
+  }
+  if (input.operation === "task_end") {
+    const task = browserTaskRecord(input);
+    if (task.status !== "completed" && task.status !== "failed")
+      throw new HttpError(400, "invalid_native_task_record");
+    const [updated] = await db()`
+      update spellbook_native_tasks set status=${task.status},
+        result=${task.result === null ? null : db().json(task.result as never)},
+        error=${task.error},updated_at=now()
+      where id=${task.id} and session_id=${sessionId} and turn_id=${turnId}
+      returning id
+    `;
+    if (!updated) throw new HttpError(404, "native_task_not_found");
+    return { accepted: true };
   }
   throw new HttpError(400, "invalid_native_tool_operation");
 }
 
-const BROWSER_TASK_LIMIT = 200;
-const BROWSER_TASKS_BYTE_LIMIT = 8_000_000;
+const BROWSER_TASK_BYTE_LIMIT = 5_000_000;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Editor calls reported by a browser-run request. Screenshots stay in the
+ * One editor call reported by a browser-run request. Screenshots stay in the
  * page; only which slide each one showed is kept for the result card.
  */
-export function browserTaskRecords(value: unknown) {
+export function browserTaskRecord(input: Record<string, unknown>) {
+  const request = input.request as Record<string, unknown> | undefined;
+  const result = input.result as Record<string, unknown> | null | undefined;
   if (
-    !Array.isArray(value) ||
-    value.length > BROWSER_TASK_LIMIT ||
-    JSON.stringify(value).length > BROWSER_TASKS_BYTE_LIMIT
+    typeof input.taskId !== "string" ||
+    !UUID.test(input.taskId) ||
+    (input.request !== undefined &&
+      (!request ||
+        typeof request !== "object" ||
+        typeof request.operation !== "string")) ||
+    (result !== null && result !== undefined && typeof result !== "object") ||
+    (input.error !== null &&
+      input.error !== undefined &&
+      typeof input.error !== "string") ||
+    JSON.stringify(input).length > BROWSER_TASK_BYTE_LIMIT
   )
-    throw new HttpError(400, "invalid_native_task_records");
-  return value.map((raw) => {
-    const task = raw as Record<string, unknown> | null;
-    const request = task?.request as Record<string, unknown> | undefined;
-    const result = task?.result as Record<string, unknown> | null | undefined;
-    if (
-      typeof task?.id !== "string" ||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        task.id,
-      ) ||
-      !request ||
-      typeof request !== "object" ||
-      typeof request.operation !== "string" ||
-      !["completed", "failed"].includes(String(task.status)) ||
-      (result !== null && result !== undefined && typeof result !== "object") ||
-      (task.error !== null &&
-        task.error !== undefined &&
-        typeof task.error !== "string")
-    )
-      throw new HttpError(400, "invalid_native_task_records");
-    return {
-      id: task.id,
-      request,
-      status: task.status as "completed" | "failed",
-      result: result
-        ? {
-            ...result,
-            images: Array.isArray(result.images)
-              ? result.images.map((image) => ({
-                  slideIndex: (image as { slideIndex?: unknown })?.slideIndex,
-                }))
-              : undefined,
-          }
-        : null,
-      error: typeof task.error === "string" ? task.error.slice(0, 1_000) : null,
-    };
-  });
+    throw new HttpError(400, "invalid_native_task_record");
+  return {
+    id: input.taskId,
+    request: request ?? {},
+    status: String(input.status ?? ""),
+    result: result
+      ? {
+          ...result,
+          images: Array.isArray(result.images)
+            ? result.images.map((image) => ({
+                slideIndex: (image as { slideIndex?: unknown })?.slideIndex,
+              }))
+            : undefined,
+        }
+      : null,
+    error: typeof input.error === "string" ? input.error.slice(0, 1_000) : null,
+  };
 }
 
 function localConnectorJob(

@@ -1357,44 +1357,60 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
 
     const observeId = randomUUID();
     const editId = randomUUID();
-    const recorded = await tool({
-      operation: "record_tasks",
-      tasks: [
+    const png = { slideIndex: 0, pngBase64: "iVBORw0KGgo=" };
+    for (const [taskId, request, result] of [
+      [
+        observeId,
+        { operation: "observe", detailSlideIndex: null },
         {
-          id: observeId,
-          request: { operation: "observe", detailSlideIndex: null },
-          status: "completed",
-          result: {
-            revision: "r1",
-            slides: [{ slideIndex: 0, elements: [] }],
-            images: [{ slideIndex: 0, pngBase64: "iVBORw0KGgo=" }],
-          },
-          error: null,
-        },
-        {
-          id: editId,
-          request: {
-            operation: "edit",
-            command: { op: "set_text", elementId: "title" },
-          },
-          status: "completed",
-          result: {
-            revision: "r2",
-            changedSlideIndexes: [0],
-            slides: [{ slideIndex: 0, elements: [] }],
-            images: [{ slideIndex: 0, pngBase64: "iVBORw0KGgo=" }],
-          },
-          error: null,
+          revision: "r1",
+          slides: [{ slideIndex: 0, elements: [] }],
+          images: [png],
         },
       ],
-    });
-    expect(recorded.status).toBe(200);
+      [
+        editId,
+        {
+          operation: "edit",
+          command: { op: "replace_text", elementId: "title" },
+        },
+        {
+          revision: "r2",
+          changedSlideIndexes: [0],
+          slides: [{ slideIndex: 0, elements: [] }],
+          images: [png],
+        },
+      ],
+    ] as const) {
+      expect(
+        (await tool({ operation: "task_begin", taskId, request })).status,
+      ).toBe(200);
+      // A recorded call is never handed to the page to run again.
+      await db()`update spellbook_native_tasks set delivered_at=now()-interval '1 hour' where id=${taskId}`;
+      expect(
+        (await pollNativeSession(session, f.documentId, 0)).task,
+      ).toBeNull();
+      expect(
+        (
+          await tool({
+            operation: "task_end",
+            taskId,
+            status: "completed",
+            result,
+          })
+        ).status,
+      ).toBe(200);
+    }
     const tasks = await db()`
-      select id::text, request, result, save_revision_at_create
+      select id::text, status, result, save_revision_at_create
       from spellbook_native_tasks where turn_id=${submitted.turnId}
       order by created_at, id
     `;
     expect(tasks.map((task) => task.id)).toEqual([observeId, editId]);
+    expect(tasks.map((task) => task.status)).toEqual([
+      "completed",
+      "completed",
+    ]);
     // Screenshots stay in the page; only the slide they showed is kept.
     expect(tasks[1]!.result.images).toEqual([{ slideIndex: 0 }]);
     expect(tasks[1]!.save_revision_at_create).toBe(0);
@@ -1479,6 +1495,53 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     const [cleaned] =
       await db()`select payload from spellbook_jobs where id=${legacyJob}`;
     expect(cleaned.payload).toEqual({ historical: true });
+  });
+
+  it("holds the save when a browser-run request is stopped after an edit landed", async () => {
+    const f = await fixture();
+    const submitted = await submitNativeTurn(session, f.documentId, {
+      text: "제목 변경",
+      permission: "document",
+      modelSettings: {
+        provider: "gemini_api",
+        model: "gemini-3.8-flash",
+        effort: "medium",
+      },
+      execution: "browser",
+    });
+    const job = submitted.browserJob as Record<string, unknown>;
+    const identity = {
+      jobId: String(job.jobId),
+      sessionId: f.nativeSessionId,
+      executionToken: "browser-stop",
+    };
+    await executeNativeTool({ ...identity, operation: "start" });
+    // The edit is recorded, reaches the editor, and the page stops before
+    // it can report the result.
+    await executeNativeTool({
+      ...identity,
+      operation: "task_begin",
+      taskId: randomUUID(),
+      request: {
+        operation: "edit",
+        command: { op: "replace_text", elementId: "title" },
+      },
+    });
+    await cancelNativeTurn(session, f.documentId);
+    await expect(
+      db().begin((sql) =>
+        loadNativeSaveChangePolicy(sql, f.nativeSessionId, 0),
+      ),
+    ).rejects.toThrow("native_ai_change_review_pending");
+    // A stopped request records nothing more.
+    await expect(
+      executeNativeTool({
+        ...identity,
+        operation: "task_begin",
+        taskId: randomUUID(),
+        request: { operation: "observe" },
+      }),
+    ).rejects.toMatchObject({ status: 409 });
   });
 
   it("refuses AI requests beyond the configured per-account limit", async () => {

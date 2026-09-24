@@ -11,8 +11,8 @@ import { browserWebTools } from "./web-tools";
 
 /*
  * Runs one API-key request in this page. The server only hands out the job
- * (with a job-scoped capability) and records its start, heartbeat, editor
- * calls and result; the model and every editor call run here.
+ * (with a job-scoped capability) and records its start, heartbeat, each
+ * editor call and the result; the model and every editor call run here.
  */
 
 export interface BrowserJob {
@@ -29,14 +29,6 @@ export interface BrowserJob {
     response: string | null;
     status: "completed" | "failed" | "cancelled";
   }>;
-}
-
-interface TaskRecord {
-  id: string;
-  request: Record<string, unknown>;
-  status: "completed" | "failed";
-  result: unknown;
-  error: string | null;
 }
 
 const ASSET_OPERATIONS = new Set([
@@ -97,18 +89,13 @@ export async function runBrowserTurn(
     lastBeat = Date.now();
     post("tools", { operation: "heartbeat" }).catch(() => undefined);
   };
-  const records: TaskRecord[] = [];
   const host = {
     async call(request: Record<string, unknown>) {
-      const id = crypto.randomUUID();
-      const record: TaskRecord = {
-        id,
-        request,
-        status: "failed",
-        result: null,
-        error: null,
-      };
-      records.push(record);
+      if (deps.signal.aborted) throw new Error("cancelled");
+      const taskId = crypto.randomUUID();
+      // Recorded before the editor sees it: an edit that lands while the page
+      // closes or the request stops is still known, and holds the save.
+      await post("tools", { operation: "task_begin", taskId, request });
       try {
         let message = request;
         const transfer: Transferable[] = [];
@@ -130,21 +117,30 @@ export async function runBrowserTurn(
           EDITOR_CALL_TIMEOUT_MS,
           transfer,
         )) as NativeObservation;
-        record.status = "completed";
-        // Screenshots stay in this page; the record keeps which slide each showed.
-        record.result = {
-          ...observation,
-          images: (observation.images ?? []).map(({ slideIndex }) => ({
-            slideIndex,
-          })),
-        };
-        deps.onObservation(id, observation);
+        deps.onObservation(taskId, observation);
+        await post("tools", {
+          operation: "task_end",
+          taskId,
+          status: "completed",
+          // Screenshots stay in this page; the record keeps which slide each showed.
+          result: {
+            ...observation,
+            images: (observation.images ?? []).map(({ slideIndex }) => ({
+              slideIndex,
+            })),
+          },
+        }).catch(() => undefined);
         return observation;
       } catch (error) {
-        record.error =
-          error instanceof Error
-            ? error.message
-            : "native_document_operation_failed";
+        await post("tools", {
+          operation: "task_end",
+          taskId,
+          status: "failed",
+          error:
+            error instanceof Error
+              ? error.message
+              : "native_document_operation_failed",
+        }).catch(() => undefined);
         throw error;
       } finally {
         beat();
@@ -189,7 +185,6 @@ export async function runBrowserTurn(
         onTool: deps.onTool,
       },
     );
-    await post("tools", { operation: "record_tasks", tasks: records });
     await post("callback", {
       status: "succeeded",
       mode: "native",
@@ -198,9 +193,6 @@ export async function runBrowserTurn(
   } catch (error) {
     // A cancelled request was already closed by the server.
     if (deps.signal.aborted) return;
-    await post("tools", { operation: "record_tasks", tasks: records }).catch(
-      () => undefined,
-    );
     await post("callback", {
       status: "failed",
       error: error instanceof Error ? error.message : "native_worker_failed",
