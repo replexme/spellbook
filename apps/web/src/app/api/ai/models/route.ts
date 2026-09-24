@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     const session = await requireSession(request);
     let models: AvailableModel[] = [];
     try {
-      const res = (await callAiAccount("/internal/models", session.email)) as {
+      const res = (await callAiAccount("/internal/models", session)) as {
         models?: AvailableModel[];
       };
       if (Array.isArray(res?.models)) models = res.models;

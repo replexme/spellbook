@@ -10,7 +10,7 @@ export async function GET(request: Request) {
     try {
       rawStatus = (await callAiAccount(
         "/internal/account/status",
-        session.email,
+        session,
       )) as any;
     } catch {
       rawStatus = { account: null, rateLimits: null };

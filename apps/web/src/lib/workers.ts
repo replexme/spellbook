@@ -15,13 +15,17 @@ export async function enqueueWorkerJob(
     throw new Error(`Local worker request failed: ${response.status}`);
 }
 
+/** Asks the AI worker about one account's subscription connection. */
 export async function callAiAccount(
   path: string,
-  email: string,
+  account: { accountId: string; email: string },
 ): Promise<unknown> {
   const response = await internalFetch(`${workerUrl("ai")}${path}`, {
     method: "POST",
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({
+      accountId: account.accountId,
+      email: account.email,
+    }),
     signal: AbortSignal.timeout(30_000),
   });
   const body = (await response.json()) as unknown;

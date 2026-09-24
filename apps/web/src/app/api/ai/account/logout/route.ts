@@ -5,7 +5,7 @@ export async function POST(request: Request) {
   try {
     const session = await requireSession(request);
     return Response.json(
-      await callAiAccount("/internal/account/logout", session.email),
+      await callAiAccount("/internal/account/logout", session),
     );
   } catch (error) {
     return routeError(error);

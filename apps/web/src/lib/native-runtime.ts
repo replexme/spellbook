@@ -73,7 +73,7 @@ export async function nativeModels(session: Session, documentId?: string) {
   if (documentId) await ownedSession(session, documentId);
   let models: AvailableModel[] = [];
   try {
-    const res = (await callAiAccount("/internal/models", session.email)) as {
+    const res = (await callAiAccount("/internal/models", session)) as {
       models?: AvailableModel[];
     };
     if (Array.isArray(res?.models)) models = res.models;

@@ -617,10 +617,9 @@ export async function createEdit(
   );
   const modelSettings = parseModelSettings(input.modelSettings);
   if (modelSettings) {
-    const catalog = (await callAiAccount(
-      "/internal/models",
-      session.email,
-    )) as { models: AvailableModel[] };
+    const catalog = (await callAiAccount("/internal/models", session)) as {
+      models: AvailableModel[];
+    };
     if (!supportsSettings(catalog.models, modelSettings))
       throw new HttpError(
         400,

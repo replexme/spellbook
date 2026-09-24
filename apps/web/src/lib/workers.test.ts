@@ -45,7 +45,10 @@ describe("self-hosted worker transport", () => {
         .mockResolvedValue(Response.json({ account: { type: "chatgpt" } })),
     );
     await expect(
-      callAiAccount("/internal/account/status", "owner@test"),
+      callAiAccount("/internal/account/status", {
+        accountId: "owner",
+        email: "owner@test",
+      }),
     ).resolves.toMatchObject({ account: { type: "chatgpt" } });
   });
 });
