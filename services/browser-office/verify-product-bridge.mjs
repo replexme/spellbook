@@ -15,12 +15,13 @@ import { applyOoxmlCommand } from "./ooxml-worker-source.mjs";
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
 const repositoryIdentity = readRepositoryIdentity(repositoryRoot);
-const rendererCallTimeoutMs = 10_000;
 // One engine step (an edit, its checkpoint, a save). A slower machine, such
-// as a build machine drawing with software graphics, may raise it.
+// as a build machine drawing with software graphics, may raise it; single
+// renderer calls get a third of it, never less than ten seconds.
 const stepTimeoutMs = Number(
   process.env.SPELLBOOK_BROWSER_VERIFY_STEP_TIMEOUT_MS ?? 30_000,
 );
+const rendererCallTimeoutMs = Math.max(10_000, Math.round(stepTimeoutMs / 3));
 if (!Number.isSafeInteger(stepTimeoutMs) || stepTimeoutMs < 30_000)
   throw new Error(
     "SPELLBOOK_BROWSER_VERIFY_STEP_TIMEOUT_MS must be at least 30000.",

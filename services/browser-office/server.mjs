@@ -245,9 +245,11 @@ export function buildRoutes(
         upstream.requiredAssetHeaders,
       ),
     );
+    // The engine's own font folder: its Qt drawing layer only lists fonts
+    // found there (another folder was written but never drawn with).
     install.push({
       url: `fonts/${font.file}`,
-      directory: "/instdir/share/fonts/spellbook",
+      directory: "/instdir/share/fonts/truetype",
       name: font.file,
     });
   }

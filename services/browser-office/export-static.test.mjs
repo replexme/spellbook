@@ -167,8 +167,8 @@ test("Korean fonts, font rules and the Korean UI ship in the runtime folder", ()
   assert.deepEqual(
     listing.map(({ directory }) => directory),
     [
-      "/instdir/share/fonts/spellbook",
-      "/instdir/share/fonts/spellbook",
+      "/instdir/share/fonts/truetype",
+      "/instdir/share/fonts/truetype",
       "/instdir/share/fontconfig/conf.d",
       "/instdir/share/fontconfig/conf.d",
       "/instdir/share/fontconfig/conf.d",
