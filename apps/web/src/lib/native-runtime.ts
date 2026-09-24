@@ -9,10 +9,6 @@ import type {
   WorkerCallback,
 } from "./models";
 import {
-  anthropicModels,
-  geminiModels,
-  openAiModels,
-  openRouterModels,
   parseModelSettings,
   supportsSettings,
   type AvailableModel,
@@ -29,7 +25,6 @@ import {
 import { signNativeConnectorToken } from "./native-connector-token";
 import { aiConnectorConfig } from "./ai-connector-config";
 import { aiTurnLimit, assertWithinAiTurnLimit } from "./ai-turn-limit";
-import { getAccountProviders, getActiveProviderKey } from "./provider-keys";
 import { loadTurnSummary } from "./native-turn-summary";
 import {
   jobRedeliverySeconds,
@@ -44,29 +39,14 @@ type PermissionMode = "read_only" | "selection" | "slides" | "document";
 // the AI worker waits up to 120s for a task.
 export const NATIVE_TASK_TTL_SECONDS = 120;
 
-const KEY_PROVIDERS = new Set([
+// API-key requests run in the user's browser, which calls the provider with
+// a key Spellbook's servers never receive. The server only records them.
+const BROWSER_KEY_PROVIDERS = new Set([
   "openai_api",
   "anthropic_api",
   "gemini_api",
   "openrouter_api",
-  "custom_api",
 ]);
-
-// Provider API keys are attached only to the copy handed to a worker or to the
-// user's connector. Stored jobs keep no key, so the jobs table, its backups and
-// redelivery never hold a usable credential.
-async function withProviderKey(
-  payload: Record<string, unknown>,
-  accountId: string,
-): Promise<Record<string, unknown>> {
-  const provider = (payload.modelSettings as { provider?: unknown } | undefined)
-    ?.provider;
-  if (typeof provider !== "string" || !KEY_PROVIDERS.has(provider))
-    return payload;
-  const apiKey = await getActiveProviderKey(accountId, provider);
-  if (!apiKey) throw new HttpError(400, "provider_key_missing");
-  return { ...payload, apiKey };
-}
 
 async function ownedSession(
   session: Session,
@@ -91,28 +71,14 @@ async function ownedSession(
 
 export async function nativeModels(session: Session, documentId?: string) {
   if (documentId) await ownedSession(session, documentId);
-  let workerModels: AvailableModel[] = [];
+  let models: AvailableModel[] = [];
   try {
     const res = (await callAiAccount("/internal/models", session.email)) as {
       models?: AvailableModel[];
     };
-    if (Array.isArray(res?.models)) workerModels = res.models;
+    if (Array.isArray(res?.models)) models = res.models;
   } catch {}
-
-  const customProviders = await getAccountProviders(session.accountId);
-  const models: AvailableModel[] = [...workerModels];
-  if (customProviders.some((p) => p.provider === "gemini_api")) {
-    models.push(...geminiModels());
-  }
-  if (customProviders.some((p) => p.provider === "openai_api")) {
-    models.push(...openAiModels());
-  }
-  if (customProviders.some((p) => p.provider === "anthropic_api")) {
-    models.push(...anthropicModels());
-  }
-  if (customProviders.some((p) => p.provider === "openrouter_api")) {
-    models.push(...openRouterModels());
-  }
+  // Models for API keys are added by the browser that holds the keys.
   return { models };
 }
 
@@ -137,7 +103,10 @@ export async function submitNativeTurn(
   if (!["read_only", "selection", "slides", "document"].includes(permission))
     throw new HttpError(400, "invalid_native_permission");
   const modelSettings = parseModelSettings(input.modelSettings);
-  const execution = aiConnectorConfig().mode;
+  const execution =
+    modelSettings?.provider && BROWSER_KEY_PROVIDERS.has(modelSettings.provider)
+      ? "browser"
+      : aiConnectorConfig().mode;
   if (input.execution !== undefined && input.execution !== execution)
     throw new HttpError(400, "invalid_native_execution");
   if (!native.graph_object)
@@ -156,53 +125,11 @@ export async function submitNativeTurn(
       used as { lastHour: number; lastDay: number },
     );
   }
-  let effectiveModelSettings = modelSettings;
-
-  // Fall back to the active API-key provider only when the user chose no
-  // model. Subscription models carry no provider field, so a missing
-  // provider on a chosen model must not be read as "no choice".
-  if (!effectiveModelSettings) {
-    const customProviders = await getAccountProviders(session.accountId);
-    const activeCustom = customProviders.find((p) => p.isActive);
-    if (activeCustom) {
-      const defaultModel =
-        activeCustom.provider === "gemini_api"
-          ? "gemini-3.8-flash"
-          : activeCustom.provider === "openai_api"
-            ? "gpt-4o"
-            : activeCustom.provider === "anthropic_api"
-              ? "claude-3-7-sonnet-20250219"
-              : activeCustom.provider === "openrouter_api"
-                ? "deepseek/deepseek-chat"
-                : "default";
-      effectiveModelSettings = {
-        provider: activeCustom.provider as any,
-        model: defaultModel,
-        effort: "medium",
-      };
-    }
-  }
-
+  const effectiveModelSettings = modelSettings;
   if (effectiveModelSettings && execution === "internal") {
     const catalog = await nativeModels(session, documentId);
     if (!supportsSettings(catalog.models, effectiveModelSettings))
       throw new HttpError(400, "selected_model_unavailable");
-  }
-  let apiKey: string | null = null;
-  if (
-    effectiveModelSettings?.provider &&
-    KEY_PROVIDERS.has(effectiveModelSettings.provider)
-  ) {
-    apiKey = await getActiveProviderKey(
-      session.accountId,
-      effectiveModelSettings.provider,
-    );
-    if (!apiKey) {
-      throw new HttpError(
-        400,
-        `${effectiveModelSettings.provider} API 키가 설정되지 않았습니다. 설정에서 API 키를 등록해 주세요.`,
-      );
-    }
   }
   const jobId = randomUUID();
   const turnId = randomUUID();
@@ -224,17 +151,17 @@ export async function submitNativeTurn(
       ? { modelSettings: effectiveModelSettings }
       : {}),
   };
-  const publicBase = execution === "local" ? publicAppBaseUrl() : null;
+  // A request run outside the worker (the user's browser or connector)
+  // reports through the job's public, capability-protected routes.
+  const publicBase = execution !== "internal" ? publicAppBaseUrl() : null;
   const baseJobPayload = {
     ...basePayload,
-    callbackUrl:
-      execution === "local"
-        ? `${publicBase}/api/native/jobs/${jobId}/callback`
-        : `${internalAppBaseUrl()}/api/internal/jobs/callback`,
-    toolUrl:
-      execution === "local"
-        ? `${publicBase}/api/native/jobs/${jobId}/tools`
-        : `${internalAppBaseUrl()}/api/internal/native/tools`,
+    callbackUrl: publicBase
+      ? `${publicBase}/api/native/jobs/${jobId}/callback`
+      : `${internalAppBaseUrl()}/api/internal/jobs/callback`,
+    toolUrl: publicBase
+      ? `${publicBase}/api/native/jobs/${jobId}/tools`
+      : `${internalAppBaseUrl()}/api/internal/native/tools`,
   };
   let payload: typeof baseJobPayload & {
     conversationHistory?: NativeConversationTurn[];
@@ -279,19 +206,28 @@ export async function submitNativeTurn(
       values (${native.id},${turnId},'start',${sql.json({ text, permission, turnId })})
     `;
   });
-  const deliverable = apiKey ? { ...payload, apiKey } : payload;
   if (execution === "local")
     return {
       accepted: true,
       turnId,
       localJob: localConnectorJob(
-        deliverable,
+        payload,
+        session.accountId,
+        native.expires_at,
+      ),
+    };
+  if (execution === "browser")
+    return {
+      accepted: true,
+      turnId,
+      browserJob: localConnectorJob(
+        payload,
         session.accountId,
         native.expires_at,
       ),
     };
   try {
-    await enqueueWorkerJob(jobId, "ai", "/internal/jobs/native", deliverable);
+    await enqueueWorkerJob(jobId, "ai", "/internal/jobs/native", payload);
     await db()`update spellbook_jobs set dispatched_at=now() where id=${jobId}`;
   } catch (descobrir) {
     const error =
@@ -323,7 +259,7 @@ export async function pollNativeSession(
     where document_id=${documentId} and status='queued'
       and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second')
       and job_type in ('native_turn','scan_render')
-      and (job_type <> 'native_turn' or payload->>'execution' is distinct from 'local')
+      and (job_type <> 'native_turn' or coalesce(payload->>'execution','internal') = 'internal')
     order by created_at limit 2`;
   for (const job of pending) {
     const target = job.job_type === "native_turn" ? "ai" : "document";
@@ -332,14 +268,7 @@ export async function pollNativeSession(
         ? "/internal/jobs/native"
         : "/internal/jobs/scan-render";
     try {
-      await enqueueWorkerJob(
-        job.id,
-        target,
-        path,
-        job.job_type === "native_turn"
-          ? await withProviderKey(job.payload, native.account_id)
-          : job.payload,
-      );
+      await enqueueWorkerJob(job.id, target, path, job.payload);
       await db()`update spellbook_jobs set dispatched_at=now(),error=null,updated_at=now()
         where id=${job.id} and status='queued'
           and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second')`;
@@ -379,7 +308,7 @@ export async function pollNativeSession(
   if (localPending) {
     try {
       localJob = localConnectorJob(
-        await withProviderKey(localPending.payload, native.account_id),
+        localPending.payload,
         native.account_id,
         native.expires_at,
       );
@@ -731,7 +660,87 @@ export async function executeNativeTool(input: Record<string, unknown>) {
       values (${sessionId},${turnId},${String(type)},${db().json({ [type === "delta" ? "delta" : type === "thinking" ? "thinking" : "label"]: value })})`;
     return { accepted: true };
   }
+  if (input.operation === "record_tasks") {
+    // A request run in the browser called its editor directly. Its editor
+    // calls are recorded once, before completion, so the result card, undo
+    // and the save's change budget read them like any other request's.
+    const tasks = browserTaskRecords(input.tasks);
+    const recorded = await db().begin(async (sql) => {
+      const [context] = await sql`
+        select s.save_revision from spellbook_native_sessions s
+        join spellbook_native_turns t on t.id=${turnId} and t.session_id=s.id
+        where s.id=${sessionId} and s.status='active' and s.expires_at > now()
+          and t.status='running'
+        for update of s
+      `;
+      if (!context) return false;
+      for (const [index, task] of tasks.entries())
+        await sql`
+          insert into spellbook_native_tasks
+            (id,session_id,turn_id,request,status,result,error,save_revision_at_create,expires_at,created_at,updated_at)
+          values (${task.id},${sessionId},${turnId},${sql.json(task.request as never)},${task.status},
+            ${task.result === null ? null : sql.json(task.result as never)},${task.error},${context.save_revision},
+            now(),now() + ${index} * interval '1 millisecond',now())
+          on conflict (id) do nothing
+        `;
+      return true;
+    });
+    if (!recorded) throw new HttpError(409, "native_session_not_active");
+    return { accepted: true, recorded: tasks.length };
+  }
   throw new HttpError(400, "invalid_native_tool_operation");
+}
+
+const BROWSER_TASK_LIMIT = 200;
+const BROWSER_TASKS_BYTE_LIMIT = 8_000_000;
+
+/**
+ * Editor calls reported by a browser-run request. Screenshots stay in the
+ * page; only which slide each one showed is kept for the result card.
+ */
+export function browserTaskRecords(value: unknown) {
+  if (
+    !Array.isArray(value) ||
+    value.length > BROWSER_TASK_LIMIT ||
+    JSON.stringify(value).length > BROWSER_TASKS_BYTE_LIMIT
+  )
+    throw new HttpError(400, "invalid_native_task_records");
+  return value.map((raw) => {
+    const task = raw as Record<string, unknown> | null;
+    const request = task?.request as Record<string, unknown> | undefined;
+    const result = task?.result as Record<string, unknown> | null | undefined;
+    if (
+      typeof task?.id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        task.id,
+      ) ||
+      !request ||
+      typeof request !== "object" ||
+      typeof request.operation !== "string" ||
+      !["completed", "failed"].includes(String(task.status)) ||
+      (result !== null && result !== undefined && typeof result !== "object") ||
+      (task.error !== null &&
+        task.error !== undefined &&
+        typeof task.error !== "string")
+    )
+      throw new HttpError(400, "invalid_native_task_records");
+    return {
+      id: task.id,
+      request,
+      status: task.status as "completed" | "failed",
+      result: result
+        ? {
+            ...result,
+            images: Array.isArray(result.images)
+              ? result.images.map((image) => ({
+                  slideIndex: (image as { slideIndex?: unknown })?.slideIndex,
+                }))
+              : undefined,
+          }
+        : null,
+      error: typeof task.error === "string" ? task.error.slice(0, 1_000) : null,
+    };
+  });
 }
 
 function localConnectorJob(

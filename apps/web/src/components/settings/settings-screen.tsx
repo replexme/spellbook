@@ -188,6 +188,10 @@ export function SettingsScreen({
                   Google Gemini, OpenAI, Anthropic, OpenRouter 또는 ChatGPT
                   구독을 등록하고, 언제든지 원하는 AI로 즉시 전환할 수 있습니다.
                 </p>
+                <p>
+                  API 키는 이 브라우저에만 저장되고 Spellbook 서버로 보내지지
+                  않아요. 다른 기기나 브라우저에서는 키를 다시 등록해 주세요.
+                </p>
               </header>
 
               {/* ── Active Status Hero Banner ── */}

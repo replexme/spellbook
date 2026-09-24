@@ -1,5 +1,6 @@
 import capabilities from "../../../../contracts/native-edit-capabilities.json";
 import type { Sql, TransactionSql } from "postgres";
+import { NATIVE_AGENT_LEASE_SECONDS } from "./job-delivery";
 
 export interface NativePackageChangeBudget {
   contractVersion: "1.0";
@@ -135,6 +136,17 @@ export async function loadNativeSaveChangePolicy(
   sessionId: string,
   saveRevision: number,
 ): Promise<NativeSaveChangePolicy> {
+  // A request running in the browser records its editor calls when it ends,
+  // so a save while it runs could carry edits no review has covered yet.
+  const [browserTurn] = await sql`
+    select 1 from spellbook_native_turns turn
+    join spellbook_jobs job on job.id=turn.job_id
+    where turn.session_id=${sessionId} and turn.status='running'
+      and job.status='running' and job.payload->>'execution'='browser'
+      and job.heartbeat_at > now() - ${NATIVE_AGENT_LEASE_SECONDS} * interval '1 second'
+    limit 1
+  `;
+  if (browserTurn) throw new Error("native_ai_change_review_pending");
   const tasks = await sql`
     select task.id::text,task.request,task.result,
       task.status as "taskStatus",turn.status as "turnStatus",

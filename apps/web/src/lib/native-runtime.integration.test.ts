@@ -73,7 +73,7 @@ import { POST as postNativeConnectorTool } from "../app/api/native/jobs/[jobId]/
 import { POST as postNativeConnectorCallback } from "../app/api/native/jobs/[jobId]/callback/route";
 import { GET as getNativeStream } from "../app/api/documents/[id]/native/stream/route";
 import { consumeNativeStream } from "./native-stream-client";
-import { encryptApiKey } from "./provider-keys";
+import { loadNativeSaveChangePolicy } from "./native-change-budget";
 
 const enabled = process.env.SPELLBOOK_NATIVE_INTEGRATION === "1";
 const schema = `spellbook_native_${randomUUID().replaceAll("-", "")}`;
@@ -1280,118 +1280,205 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     );
   });
 
-  it("keeps provider API keys out of stored jobs while handing them to the worker", async () => {
+  it("runs an API-key turn in the browser and records it without any key on the server", async () => {
     const f = await fixture();
-    const apiKey = "gemini-integration-key";
-    await db()`insert into spellbook_account_providers
-      (account_id, provider, api_key_encrypted, is_active)
-      values (${accountId}, 'gemini_api', ${encryptApiKey(apiKey)}, true)`;
-    try {
-      workers.enqueueWorkerJob.mockClear();
-      const submitted = await submitNativeTurn(session, f.documentId, {
+    workers.enqueueWorkerJob.mockClear();
+    await expect(
+      submitNativeTurn(session, f.documentId, {
         text: "제목 변경",
         permission: "selection",
-      });
-      expect(workers.enqueueWorkerJob).toHaveBeenCalledWith(
-        expect.any(String),
-        "ai",
-        "/internal/jobs/native",
-        expect.objectContaining({
-          apiKey,
-          modelSettings: expect.objectContaining({ provider: "gemini_api" }),
-        }),
-      );
-      const [turn] =
-        await db()`select job_id from spellbook_native_turns where id=${submitted.turnId}`;
-      const [stored] =
-        await db()`select payload from spellbook_jobs where id=${turn.job_id}`;
-      expect(stored.payload).not.toHaveProperty("apiKey");
-      expect(JSON.stringify(stored.payload)).not.toContain(apiKey);
-
-      await db()`update spellbook_jobs set dispatched_at=now()-interval '1 hour' where id=${turn.job_id}`;
-      workers.enqueueWorkerJob.mockClear();
-      await pollNativeSession(session, f.documentId, 0);
-      expect(workers.enqueueWorkerJob).toHaveBeenCalledWith(
-        turn.job_id,
-        "ai",
-        "/internal/jobs/native",
-        expect.objectContaining({ apiKey }),
-      );
-      const [redelivered] =
-        await db()`select payload from spellbook_jobs where id=${turn.job_id}`;
-      expect(redelivered.payload).not.toHaveProperty("apiKey");
-
-      const previousMode = process.env.SPELLBOOK_AI_CONNECTOR_MODE;
-      process.env.SPELLBOOK_AI_CONNECTOR_MODE = "local";
-      try {
-        const local = await fixture();
-        const localTurn = await submitNativeTurn(session, local.documentId, {
-          text: "제목 변경",
-          permission: "selection",
-          execution: "local",
-        });
-        expect(localTurn.localJob).toMatchObject({ apiKey });
-        const polled = await pollNativeSession(session, local.documentId, 0);
-        expect(polled.localJob).toMatchObject({ apiKey });
-        const [localStored] =
-          await db()`select payload from spellbook_jobs where id=${String(localTurn.localJob?.jobId)}`;
-        expect(localStored.payload).not.toHaveProperty("apiKey");
-      } finally {
-        if (previousMode === undefined)
-          delete process.env.SPELLBOOK_AI_CONNECTOR_MODE;
-        else process.env.SPELLBOOK_AI_CONNECTOR_MODE = previousMode;
-      }
-
-      // A subscription model chosen by the user wins over the active key.
-      workers.callAiAccount.mockResolvedValueOnce({
-        models: [
-          {
-            model: "gpt-subscription",
-            displayName: "Subscription",
-            defaultReasoningEffort: "medium",
-            supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
-            isDefault: true,
-          },
-        ],
-      } as never);
-      const chosen = await fixture();
-      workers.enqueueWorkerJob.mockClear();
-      const chosenTurn = await submitNativeTurn(session, chosen.documentId, {
-        text: "제목 변경",
-        permission: "selection",
-        modelSettings: { model: "gpt-subscription", effort: "medium" },
-      });
-      const chosenPayload = workers.enqueueWorkerJob.mock.calls.at(-1)?.[3] as
-        | Record<string, unknown>
-        | undefined;
-      expect(chosenPayload).not.toHaveProperty("apiKey");
-      expect(chosenPayload?.modelSettings).toEqual({
-        model: "gpt-subscription",
-        effort: "medium",
-      });
-      const [recorded] =
-        await db()`select model_settings from spellbook_native_turns where id=${chosenTurn.turnId}`;
-      expect(recorded.model_settings).toEqual({
-        model: "gpt-subscription",
-        effort: "medium",
-      });
-      const [defaulted] =
-        await db()`select model_settings from spellbook_native_turns where id=${submitted.turnId}`;
-      expect(defaulted.model_settings).toMatchObject({
+        modelSettings: {
+          provider: "gemini_api",
+          model: "gemini-3.8-flash",
+          effort: "medium",
+        },
+        execution: "internal",
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: "invalid_native_execution",
+    });
+    const submitted = await submitNativeTurn(session, f.documentId, {
+      text: "제목 변경",
+      permission: "selection",
+      modelSettings: {
         provider: "gemini_api",
-      });
+        model: "gemini-3.8-flash",
+        effort: "medium",
+      },
+      execution: "browser",
+    });
+    expect(workers.enqueueWorkerJob).not.toHaveBeenCalled();
+    const job = submitted.browserJob as Record<string, unknown>;
+    expect(job).toMatchObject({
+      execution: "browser",
+      requestText: "제목 변경",
+      sessionId: f.nativeSessionId,
+      modelSettings: { provider: "gemini_api", model: "gemini-3.8-flash" },
+    });
+    expect(job).not.toHaveProperty("apiKey");
+    const jobId = String(job.jobId);
+    const capability = String(job.capability);
 
-      const legacyJob = randomUUID();
-      await db()`insert into spellbook_jobs (id,job_type,document_id,version_id,status,payload)
-        values (${legacyJob},'native_turn',${f.documentId},${f.versionId},'succeeded',${db().json({ apiKey, historical: true })})`;
-      const actual = await vi.importActual<typeof import("./db")>("./db");
-      await actual.runMigrations();
-      const [cleaned] =
-        await db()`select payload from spellbook_jobs where id=${legacyJob}`;
-      expect(cleaned.payload).toEqual({ historical: true });
-    } finally {
-      await db()`delete from spellbook_account_providers where account_id=${accountId}`;
-    }
+    // A browser job is never handed to the AI worker, however old.
+    await db()`update spellbook_jobs set dispatched_at=now()-interval '1 hour' where id=${jobId}`;
+    const polled = await pollNativeSession(session, f.documentId, 0);
+    expect(workers.enqueueWorkerJob).not.toHaveBeenCalled();
+    expect(polled.localJob).toBeNull();
+
+    const tool = (body: Record<string, unknown>) =>
+      postNativeConnectorTool(
+        new Request(
+          `https://spellbook.integration.invalid/api/native/jobs/${jobId}/tools`,
+          {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${capability}`,
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              jobId,
+              sessionId: f.nativeSessionId,
+              executionToken: "browser-execution",
+              ...body,
+            }),
+          },
+        ),
+        { params: Promise.resolve({ jobId }) },
+      );
+    expect((await tool({ operation: "start" })).status).toBe(200);
+
+    // While the browser runs the request, a save waits for its review.
+    await expect(
+      db().begin((sql) =>
+        loadNativeSaveChangePolicy(sql, f.nativeSessionId, 0),
+      ),
+    ).rejects.toThrow("native_ai_change_review_pending");
+
+    const observeId = randomUUID();
+    const editId = randomUUID();
+    const recorded = await tool({
+      operation: "record_tasks",
+      tasks: [
+        {
+          id: observeId,
+          request: { operation: "observe", detailSlideIndex: null },
+          status: "completed",
+          result: {
+            revision: "r1",
+            slides: [{ slideIndex: 0, elements: [] }],
+            images: [{ slideIndex: 0, pngBase64: "iVBORw0KGgo=" }],
+          },
+          error: null,
+        },
+        {
+          id: editId,
+          request: {
+            operation: "edit",
+            command: { op: "set_text", elementId: "title" },
+          },
+          status: "completed",
+          result: {
+            revision: "r2",
+            changedSlideIndexes: [0],
+            slides: [{ slideIndex: 0, elements: [] }],
+            images: [{ slideIndex: 0, pngBase64: "iVBORw0KGgo=" }],
+          },
+          error: null,
+        },
+      ],
+    });
+    expect(recorded.status).toBe(200);
+    const tasks = await db()`
+      select id::text, request, result, save_revision_at_create
+      from spellbook_native_tasks where turn_id=${submitted.turnId}
+      order by created_at, id
+    `;
+    expect(tasks.map((task) => task.id)).toEqual([observeId, editId]);
+    // Screenshots stay in the page; only the slide they showed is kept.
+    expect(tasks[1]!.result.images).toEqual([{ slideIndex: 0 }]);
+    expect(tasks[1]!.save_revision_at_create).toBe(0);
+
+    const callback = await postNativeConnectorCallback(
+      new Request(
+        `https://spellbook.integration.invalid/api/native/jobs/${jobId}/callback`,
+        {
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${capability}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            jobId,
+            status: "succeeded",
+            mode: "native",
+            result: {
+              text: "브라우저에서 수정했습니다.",
+              changed: true,
+              reviewed: true,
+              status: "completed",
+              executionToken: "browser-execution",
+            },
+          }),
+        },
+      ),
+      { params: Promise.resolve({ jobId }) },
+    );
+    expect(callback.status).toBe(200);
+    const final = await pollNativeSession(session, f.documentId, 0);
+    expect(final.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "done",
+          text: "브라우저에서 수정했습니다.",
+          turnId: submitted.turnId,
+        }),
+      ]),
+    );
+    const [turn] =
+      await db()`select model_settings from spellbook_native_turns where id=${submitted.turnId}`;
+    expect(turn.model_settings).toMatchObject({ provider: "gemini_api" });
+    const [stored] =
+      await db()`select payload from spellbook_jobs where id=${jobId}`;
+    expect(stored.payload).not.toHaveProperty("apiKey");
+
+    // A subscription model still goes to the AI worker.
+    workers.callAiAccount.mockResolvedValueOnce({
+      models: [
+        {
+          model: "gpt-subscription",
+          displayName: "Subscription",
+          defaultReasoningEffort: "medium",
+          supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+          isDefault: true,
+        },
+      ],
+    } as never);
+    const chosen = await fixture();
+    workers.enqueueWorkerJob.mockClear();
+    await submitNativeTurn(session, chosen.documentId, {
+      text: "제목 변경",
+      permission: "selection",
+      modelSettings: { model: "gpt-subscription", effort: "medium" },
+    });
+    expect(workers.enqueueWorkerJob).toHaveBeenCalledWith(
+      expect.any(String),
+      "ai",
+      "/internal/jobs/native",
+      expect.objectContaining({
+        execution: "internal",
+        modelSettings: { model: "gpt-subscription", effort: "medium" },
+      }),
+    );
+
+    const legacyJob = randomUUID();
+    await db()`insert into spellbook_jobs (id,job_type,document_id,version_id,status,payload)
+      values (${legacyJob},'native_turn',${f.documentId},${f.versionId},'succeeded',${db().json({ apiKey: "legacy-key", historical: true })})`;
+    const actual = await vi.importActual<typeof import("./db")>("./db");
+    await actual.runMigrations();
+    const [cleaned] =
+      await db()`select payload from spellbook_jobs where id=${legacyJob}`;
+    expect(cleaned.payload).toEqual({ historical: true });
   });
 
   it("refuses AI requests beyond the configured per-account limit", async () => {

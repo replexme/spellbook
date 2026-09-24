@@ -2,6 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { AiConnectorConfig } from "./ai-connector-config";
+import type { AvailableModel } from "./ai-models";
+import {
+  browserKeyModels,
+  isBrowserKeyProvider,
+  maskApiKey,
+  readBrowserKeys,
+  writeBrowserKeys,
+  type BrowserKeyProvider,
+  type BrowserKeys,
+} from "./browser-ai/key-store";
+import { checkProviderKey } from "./browser-ai/provider-key-check";
 import {
   callLocalConnector,
   LOCAL_CONNECTOR_SESSION_KEY,
@@ -58,8 +69,7 @@ export interface ProviderItem {
     | "openai_api"
     | "anthropic_api"
     | "gemini_api"
-    | "openrouter_api"
-    | "custom_api";
+    | "openrouter_api";
   displayName: string;
   type: "subscription" | "api_key";
   connected: boolean;
@@ -81,11 +91,8 @@ type AccountResponse = {
   };
   rateLimits?: any;
   rateLimitInfo?: RateLimitInfo | null;
-  customProviders?: Array<{
-    provider: string;
-    isActive: boolean;
-    maskedKey: string | null;
-  }>;
+  /** The account the browser's API keys are stored under. */
+  keyScope?: string;
 };
 
 function bounceToLogin() {
@@ -109,10 +116,29 @@ export function useAiAccount(config: AiConnectorConfig) {
   const [localSession, setLocalSession] =
     useState<LocalConnectorSession | null>(null);
   const [waitingForBrowserLogin, setWaitingForBrowserLogin] = useState(false);
+  const [keyScope, setKeyScope] = useState<string | null>(null);
+  const [browserKeys, setBrowserKeys] = useState<BrowserKeys>(() =>
+    readBrowserKeys(null),
+  );
+  useEffect(() => {
+    const refresh = () => setBrowserKeys(readBrowserKeys(keyScope));
+    refresh();
+    // A key added in another tab (for example the settings page) applies here.
+    window.addEventListener("storage", refresh);
+    return () => window.removeEventListener("storage", refresh);
+  }, [keyScope]);
 
   const load = useCallback(async () => {
     try {
       if (connectorOrigin) {
+        // Keys are kept per Spellbook account even when the subscription
+        // runs in the local connector.
+        void fetch("/api/ai/account/status", { cache: "no-store" })
+          .then((response) => (response.ok ? response.json() : null))
+          .then((value: AccountResponse | null) =>
+            setKeyScope(value?.keyScope ?? null),
+          )
+          .catch(() => undefined);
         const session = readLocalConnectorSession(window.sessionStorage);
         setLocalSession(session);
         if (!session) {
@@ -143,6 +169,7 @@ export function useAiAccount(config: AiConnectorConfig) {
       if (!response.ok) throw new Error("account_status_unavailable");
       const value = (await response.json()) as AccountResponse;
       setAccountResponse(value);
+      setKeyScope(value.keyScope ?? null);
       setStatus("ready");
       if (value.account?.account) {
         setDeviceLogin(null);
@@ -244,73 +271,69 @@ export function useAiAccount(config: AiConnectorConfig) {
     await load();
   }, [connectorOrigin, localSession, load]);
 
-  const configureApiKey = useCallback(
-    async (
-      provider:
-        | "openai_api"
-        | "anthropic_api"
-        | "gemini_api"
-        | "openrouter_api"
-        | "custom_api",
-      apiKey: string,
-      active = true,
-    ) => {
-      const res = await fetch("/api/ai/provider/configure", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider, apiKey, active }),
-      });
-      if (res.status === 401) {
-        bounceToLogin();
-        return;
+  const storeKeys = useCallback(
+    (next: BrowserKeys) => {
+      if (!keyScope)
+        throw new Error("로그인 상태를 확인한 뒤 다시 시도해 주세요.");
+      try {
+        writeBrowserKeys(keyScope, next);
+      } catch {
+        throw new Error(
+          "이 브라우저에 API 키를 저장할 수 없습니다. 개인정보 보호 모드나 사이트 데이터 차단을 확인해 주세요.",
+        );
       }
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "API 키를 저장하지 못했습니다.");
-      }
-      await load();
+      setBrowserKeys(next);
     },
-    [load],
+    [keyScope],
+  );
+
+  // API keys stay in this browser: checked against the provider from here
+  // and never sent to Spellbook's servers.
+  const configureApiKey = useCallback(
+    async (provider: BrowserKeyProvider, apiKey: string, active = true) => {
+      await checkProviderKey(provider, apiKey);
+      const current = readBrowserKeys(keyScope);
+      storeKeys({
+        active: active ? provider : current.active,
+        keys: { ...current.keys, [provider]: apiKey.trim() },
+      });
+    },
+    [keyScope, storeKeys],
   );
 
   const deleteApiKey = useCallback(
     async (provider: string) => {
-      const res = await fetch("/api/ai/provider/delete", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider }),
+      if (!isBrowserKeyProvider(provider)) return;
+      const current = readBrowserKeys(keyScope);
+      const { [provider]: _removed, ...keys } = current.keys;
+      storeKeys({
+        active: current.active === provider ? null : current.active,
+        keys,
       });
-      if (res.status === 401) {
-        bounceToLogin();
-        return;
-      }
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "API 키를 삭제하지 못했습니다.");
-      }
-      await load();
     },
-    [load],
+    [keyScope, storeKeys],
   );
 
   const selectProvider = useCallback(
     async (provider: string) => {
-      const res = await fetch("/api/ai/provider/select", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ provider }),
+      const current = readBrowserKeys(keyScope);
+      storeKeys({
+        ...current,
+        active: isBrowserKeyProvider(provider) ? provider : null,
       });
-      if (res.status === 401) {
-        bounceToLogin();
-        return;
-      }
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "공급자를 변경하지 못했습니다.");
-      }
-      await load();
     },
-    [load],
+    [keyScope, storeKeys],
+  );
+
+  /** The stored key for a provider, read when a request runs in this browser. */
+  const browserKey = useCallback(
+    (provider: BrowserKeyProvider) => browserKeys.keys[provider] ?? null,
+    [browserKeys],
+  );
+  /** Server models plus the models this browser's API keys can run. */
+  const withBrowserModels = useCallback(
+    (models: AvailableModel[]) => [...models, ...browserKeyModels(browserKeys)],
+    [browserKeys],
   );
 
   const localRequest = useCallback(
@@ -326,32 +349,15 @@ export function useAiAccount(config: AiConnectorConfig) {
   const codexConnected = Boolean(codexAccount);
   const rateLimitInfo = accountResponse?.rateLimitInfo ?? null;
 
-  const customProviders = accountResponse?.customProviders ?? [];
-  const openAiCustom = customProviders.find((p) => p.provider === "openai_api");
-  const anthropicCustom = customProviders.find(
-    (p) => p.provider === "anthropic_api",
-  );
-  const geminiCustom = customProviders.find((p) => p.provider === "gemini_api");
-  const openRouterCustom = customProviders.find(
-    (p) => p.provider === "openrouter_api",
-  );
-  const customCustom = customProviders.find((p) => p.provider === "custom_api");
-
-  const activeProvider =
-    accountResponse?.activeProvider ??
-    (openAiCustom?.isActive
-      ? "openai_api"
-      : anthropicCustom?.isActive
-        ? "anthropic_api"
-        : geminiCustom?.isActive
-          ? "gemini_api"
-          : openRouterCustom?.isActive
-            ? "openrouter_api"
-            : customCustom?.isActive
-              ? "custom_api"
-              : codexConnected
-                ? "codex"
-                : "none");
+  const activeProvider: string =
+    browserKeys.active ?? (codexConnected ? "codex" : "none");
+  const keyItem = (provider: BrowserKeyProvider) => ({
+    connected: Boolean(browserKeys.keys[provider]),
+    isActive: activeProvider === provider,
+    maskedKey: browserKeys.keys[provider]
+      ? maskApiKey(browserKeys.keys[provider]!)
+      : null,
+  });
 
   const providers: ProviderItem[] = [
     {
@@ -374,41 +380,25 @@ export function useAiAccount(config: AiConnectorConfig) {
       id: "gemini_api",
       displayName: "Google Gemini API 키",
       type: "api_key",
-      connected: Boolean(geminiCustom),
-      isActive: activeProvider === "gemini_api",
-      maskedKey: geminiCustom?.maskedKey,
+      ...keyItem("gemini_api"),
     },
     {
       id: "openai_api",
       displayName: "OpenAI API 키",
       type: "api_key",
-      connected: Boolean(openAiCustom),
-      isActive: activeProvider === "openai_api",
-      maskedKey: openAiCustom?.maskedKey,
+      ...keyItem("openai_api"),
     },
     {
       id: "anthropic_api",
       displayName: "Anthropic API 키",
       type: "api_key",
-      connected: Boolean(anthropicCustom),
-      isActive: activeProvider === "anthropic_api",
-      maskedKey: anthropicCustom?.maskedKey,
+      ...keyItem("anthropic_api"),
     },
     {
       id: "openrouter_api",
       displayName: "OpenRouter API 키",
       type: "api_key",
-      connected: Boolean(openRouterCustom),
-      isActive: activeProvider === "openrouter_api",
-      maskedKey: openRouterCustom?.maskedKey,
-    },
-    {
-      id: "custom_api",
-      displayName: "사용자 정의 OpenAI 호환 API",
-      type: "api_key",
-      connected: Boolean(customCustom),
-      isActive: activeProvider === "custom_api",
-      maskedKey: customCustom?.maskedKey,
+      ...keyItem("openrouter_api"),
     },
   ];
 
@@ -442,5 +432,7 @@ export function useAiAccount(config: AiConnectorConfig) {
     configureApiKey,
     deleteApiKey,
     selectProvider,
+    browserKey,
+    withBrowserModels,
   };
 }

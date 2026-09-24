@@ -27,7 +27,7 @@ export async function authorizeNativeConnectorJob(
     where j.id=${claims.jobId}
       and j.job_type='native_turn'
       and j.status in ('queued','running')
-      and j.payload->>'execution'='local'
+      and j.payload->>'execution' in ('local','browser')
       and t.session_id=${claims.sessionId}
       and t.account_id=${claims.accountId}
       and t.status in ('queued','running')

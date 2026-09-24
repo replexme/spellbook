@@ -18,6 +18,12 @@ import {
 import type { pollNativeSession } from "@/lib/native-runtime";
 import type { TurnSummary } from "@/lib/native-turn-summary";
 import { uploadImageAsset, uploadMediaAsset } from "@/lib/upload-image";
+import { isEditorAssetId, loadEditorAsset } from "@/lib/editor-asset";
+import {
+  isBrowserKeyProvider,
+  type BrowserKeyProvider,
+} from "@/lib/browser-ai/key-store";
+import type { BrowserJob } from "@/lib/browser-ai/run-browser-turn";
 import { useAiAccount } from "@/lib/use-ai-account";
 import type { AiConnectorConfig } from "@/lib/ai-connector-config";
 import { CompareDialog, type ComparePair } from "./workspace/compare-dialog";
@@ -198,6 +204,11 @@ export function NativeWorkspace({
     [bridgeReady, setBridgeReady] = useState(false),
     [sessionObserved, setSessionObserved] = useState(false);
   const latestObservation = useRef<Record<string, unknown> | null>(null);
+  /** The API-key request running in this page, if any. */
+  const browserRun = useRef<AbortController | null>(null);
+  const startBrowserJob = useRef<
+    (job: BrowserJob, provider: BrowserKeyProvider, apiKey: string) => void
+  >(() => undefined);
   const [phone, setPhone] = useState(
     () =>
       typeof window !== "undefined" && window.matchMedia(PHONE_QUERY).matches,
@@ -330,11 +341,23 @@ export function NativeWorkspace({
     [documentBase, launch.accessToken],
   );
   const loadModels = useCallback(
-    (signal: AbortSignal): Promise<{ models: AvailableModel[] }> =>
-      ai.mode === "local"
-        ? ai.localRequest("/v1/models")
-        : api("models", undefined, signal),
-    [ai.localRequest, ai.mode, api],
+    async (signal: AbortSignal): Promise<{ models: AvailableModel[] }> => {
+      // API-key models do not depend on the AI worker being reachable.
+      let serverModels: AvailableModel[] = [];
+      let failure: unknown = null;
+      try {
+        const body = (await (ai.mode === "local"
+          ? ai.localRequest("/v1/models")
+          : api("models", undefined, signal))) as { models?: AvailableModel[] };
+        serverModels = body.models ?? [];
+      } catch (error) {
+        failure = error;
+      }
+      const models = ai.withBrowserModels(serverModels);
+      if (!models.length && failure) throw failure;
+      return { models };
+    },
+    [ai.localRequest, ai.mode, ai.withBrowserModels, api],
   );
   const refreshHistory = useCallback(async () => {
     try {
@@ -386,16 +409,28 @@ export function NativeWorkspace({
     async (pending: PendingTurn) => {
       turnRequested.current = true;
       try {
+        // An API-key request runs in this page with the key kept here.
+        const keyProvider = isBrowserKeyProvider(pending.model?.provider)
+          ? pending.model.provider
+          : null;
+        const apiKey = keyProvider ? ai.browserKey(keyProvider) : null;
+        if (keyProvider && !apiKey)
+          throw new Error(
+            "이 브라우저에 저장된 API 키가 없어요. 설정에서 API 키를 등록해 주세요.",
+          );
+        browserRun.current?.abort();
         const submitted = await api("chat", {
           text: pending.draft,
           permission: pending.permission,
           modelSettings: pending.model,
-          execution: ai.mode,
+          execution: keyProvider ? "browser" : ai.mode,
           initialObservation: !editorModified.current
             ? (latestObservation.current ?? undefined)
             : undefined,
         });
         if (submitted.localJob) await dispatchLocalJob(submitted.localJob);
+        if (submitted.browserJob && keyProvider && apiKey)
+          startBrowserJob.current(submitted.browserJob, keyProvider, apiKey);
       } catch (cause) {
         if (ai.mode === "local") await api("cancel", {}).catch(() => undefined);
         turnRequested.current = false;
@@ -409,7 +444,7 @@ export function NativeWorkspace({
         );
       }
     },
-    [ai.mode, api, dispatchLocalJob],
+    [ai.browserKey, ai.mode, api, dispatchLocalJob],
   );
   const sendOffice = useCallback(
     (MessageId: string, Values: unknown = {}) => {
@@ -445,7 +480,11 @@ export function NativeWorkspace({
   }, [engineReady, sendOffice]);
   /** Runs one editor operation for this page (not for the AI) and waits for it. */
   const callEditor = useCallback(
-    (request: Record<string, unknown>, timeoutMs = 15_000) =>
+    (
+      request: Record<string, unknown>,
+      timeoutMs = 15_000,
+      transfer: Transferable[] = [],
+    ) =>
       new Promise<unknown>((resolve, reject) => {
         const channel = port.current;
         if (!channel) {
@@ -458,7 +497,7 @@ export function NativeWorkspace({
           reject(new Error("editor_timeout"));
         }, timeoutMs);
         hostCalls.current.set(id, { resolve, reject, timer });
-        channel.postMessage({ id, request });
+        channel.postMessage({ id, request }, transfer);
       }),
     [],
   );
@@ -476,6 +515,73 @@ export function NativeWorkspace({
     if (changed) setImages(new Map(imageUrls.current));
     return imageUrls.current.get(`${taskId}:0`) ?? null;
   }, []);
+  startBrowserJob.current = (job, provider, apiKey) => {
+    browserRun.current?.abort();
+    const abort = new AbortController();
+    browserRun.current = abort;
+    // Progress is shown here as it happens; the server only learns the result.
+    const live = { text: "", thinking: "", tools: [] as string[] };
+    const show = () =>
+      setMessages((items) =>
+        items.map((message) =>
+          message.role === "assistant" && message.turnId === job.turnId
+            ? {
+                ...message,
+                text: live.text,
+                thinking: live.thinking || message.thinking,
+                tools: [...live.tools],
+              }
+            : message,
+        ),
+      );
+    // The model runtime loads only when an API-key request is first sent.
+    void import("@/lib/browser-ai/run-browser-turn")
+      .then(({ runBrowserTurn }) =>
+        runBrowserTurn(job, {
+          documentId: launch.documentId,
+          provider,
+          apiKey,
+          callEditor,
+          onObservation: (taskId, observation) => {
+            latestObservation.current = observation;
+            const list = observation.images;
+            if (!Array.isArray(list) || !list.length) return;
+            const url = rememberImages(taskId, list);
+            if (url)
+              setLookingAt({
+                slideIndex: Number(list[0]?.slideIndex) || 0,
+                url,
+              });
+          },
+          onText: (delta) => {
+            live.text += delta;
+            show();
+          },
+          onThinking: (delta) => {
+            live.thinking += delta;
+            show();
+          },
+          onTool: (label) => {
+            live.tools.push(label);
+            show();
+          },
+          signal: abort.signal,
+        }),
+      )
+      .catch((cause) => {
+        if (abort.signal.aborted) return;
+        setError(
+          userFacingError(
+            cause instanceof Error ? cause.message : null,
+            "AI 요청을 시작하지 못했어요.",
+          ),
+        );
+        void api("cancel", {}).catch(() => undefined);
+      })
+      .finally(() => {
+        if (browserRun.current === abort) browserRun.current = null;
+      });
+  };
   const deliverTask = useCallback(
     (task: {
       id?: string;
@@ -510,11 +616,7 @@ export function NativeWorkspace({
         return;
       }
       const assetId = request.assetId ?? "";
-      if (
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-          assetId,
-        )
-      ) {
+      if (!isEditorAssetId(assetId)) {
         void api("result", {
           id: task.id,
           error: "invalid_document_asset",
@@ -549,89 +651,8 @@ export function NativeWorkspace({
       }
       if (loadingAssets.current.has(task.id)) return;
       loadingAssets.current.add(task.id);
-      const imageUrl = new URL(
-        `/api/documents/${launch.documentId}/assets/${assetId}`,
-        window.location.origin,
-      );
-      void fetch(imageUrl, { cache: "no-store" })
-        .then(async (response) => {
-          if (!response.ok) throw new Error("asset_download_failed");
-          const mediaType = response.headers
-            .get("content-type")
-            ?.split(";", 1)[0];
-          const allowedTypes = [
-            "image/png",
-            "image/jpeg",
-            "audio/mpeg",
-            "audio/wav",
-            "audio/ogg",
-            "audio/mp4",
-            "video/mp4",
-            "video/webm",
-          ];
-          if (!mediaType || !allowedTypes.includes(mediaType))
-            throw new Error("invalid_asset_type");
-          const bytes = await response.arrayBuffer();
-          const maximumBytes = mediaType.startsWith("image/")
-            ? 5_000_000
-            : 25_000_000;
-          if (!bytes.byteLength || bytes.byteLength > maximumBytes)
-            throw new Error("invalid_asset_size");
-          const signature = new Uint8Array(
-            bytes,
-            0,
-            Math.min(16, bytes.byteLength),
-          );
-          const png =
-            signature.length >= 8 &&
-            [137, 80, 78, 71, 13, 10, 26, 10].every(
-              (value, index) => signature[index] === value,
-            );
-          const jpeg = signature[0] === 0xff && signature[1] === 0xd8;
-          const textAt = (start: number, end: number) =>
-            String.fromCharCode(...signature.slice(start, end));
-          const mediaSignature =
-            (mediaType === "audio/mpeg" &&
-              (textAt(0, 3) === "ID3" ||
-                (signature[0] === 0xff && (signature[1]! & 0xe0) === 0xe0))) ||
-            (mediaType === "audio/wav" &&
-              textAt(0, 4) === "RIFF" &&
-              textAt(8, 12) === "WAVE") ||
-            (mediaType === "audio/ogg" && textAt(0, 4) === "OggS") ||
-            (mediaType === "video/webm" &&
-              signature[0] === 0x1a &&
-              signature[1] === 0x45 &&
-              signature[2] === 0xdf &&
-              signature[3] === 0xa3) ||
-            (["audio/mp4", "video/mp4"].includes(mediaType) &&
-              textAt(4, 8) === "ftyp");
-          if (
-            (mediaType === "image/png" && !png) ||
-            (mediaType === "image/jpeg" && !jpeg) ||
-            (!mediaType.startsWith("image/") && !mediaSignature)
-          )
-            throw new Error("invalid_asset_bytes");
-          const extension =
-            mediaType === "image/png"
-              ? "png"
-              : mediaType === "image/jpeg"
-                ? "jpg"
-                : mediaType === "audio/mpeg"
-                  ? "mp3"
-                  : mediaType === "audio/wav"
-                    ? "wav"
-                    : mediaType === "audio/ogg"
-                      ? "ogg"
-                      : mediaType === "audio/mp4"
-                        ? "m4a"
-                        : mediaType === "video/webm"
-                          ? "webm"
-                          : "mp4";
-          const payload = {
-            mediaType,
-            bytes,
-            fileName: `${assetId}.${extension}`,
-          };
+      void loadEditorAsset(launch.documentId, assetId)
+        .then((payload) => {
           assetPayloads.current.set(task.id!, payload);
           const cachedBytes = () =>
             [...assetPayloads.current.values()].reduce(
@@ -1450,6 +1471,7 @@ export function NativeWorkspace({
   ]);
   useEffect(
     () => () => {
+      browserRun.current?.abort();
       port.current?.close();
       port.current = null;
       bridgeSession.current = null;
@@ -1552,6 +1574,7 @@ export function NativeWorkspace({
       setError("AI 요청을 취소했어요.");
       return;
     }
+    browserRun.current?.abort();
     void api("cancel", {}).catch((e) => setError(e.message));
   }
   async function uploadConversationAsset(file: File) {

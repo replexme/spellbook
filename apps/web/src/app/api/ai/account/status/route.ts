@@ -1,6 +1,5 @@
 import { requireSession, routeError } from "@/lib/http";
 import { callAiAccount } from "@/lib/workers";
-import { getAccountProviders } from "@/lib/provider-keys";
 
 export const dynamic = "force-dynamic";
 
@@ -17,16 +16,9 @@ export async function GET(request: Request) {
       rawStatus = { account: null, rateLimits: null };
     }
 
-    const customProviders = await getAccountProviders(session.accountId);
-    const activeCustom = customProviders.find((p) => p.isActive);
-    const codexConnected = Boolean(rawStatus?.account?.account);
-
-    let activeProvider = "none";
-    if (activeCustom) {
-      activeProvider = activeCustom.provider;
-    } else if (codexConnected) {
-      activeProvider = "codex";
-    }
+    // API keys and the choice between a key and the subscription live in
+    // the browser, stored per account under keyScope.
+    const activeProvider = rawStatus?.account?.account ? "codex" : "none";
 
     const rateLimits = rawStatus?.rateLimits;
     const isRateLimited =
@@ -47,7 +39,7 @@ export async function GET(request: Request) {
             (isRateLimited ? "Codex 사용량 한도 도달" : null),
           description: rateLimits?.rateLimitUpsell?.description ?? null,
         },
-        customProviders,
+        keyScope: session.accountId,
       },
       { headers: { "cache-control": "no-store" } },
     );
