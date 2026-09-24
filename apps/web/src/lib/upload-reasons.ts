@@ -72,6 +72,12 @@ export function uploadFailure(
         reason: "네트워크 연결이 끊겼어요.",
         fix: "연결을 확인한 뒤 다시 가져오세요.",
       };
+    case "upload_incomplete":
+    case "upload_not_found":
+      return {
+        reason: "파일을 끝까지 보내지 못했어요.",
+        fix: "연결을 확인한 뒤 다시 가져오세요.",
+      };
     default:
       return {
         reason: "파일을 가져오지 못했어요.",

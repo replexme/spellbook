@@ -6,11 +6,16 @@ import editSchema from "../../../../contracts/edit-command.schema.json";
 import { editContractErrors } from "./edit-contract-errors";
 import {
   accountPrefix,
+  deleteObject,
+  directReadUrl,
+  directWriteTarget,
+  objectHead,
   storageNamespace,
   getJsonObject,
   getObject,
   putObject,
 } from "./storage";
+import { signClaims, verifiedClaims } from "./signed-claims";
 import { db, ensureSchema } from "./db";
 import type {
   EditCommandBatch,
@@ -46,6 +51,8 @@ import {
 import {
   availableDocumentFormatForFile,
   currentPresentationFormat,
+  documentFormat,
+  type DocumentFormat,
 } from "./document-formats";
 import { internalAppBaseUrl } from "./runtime-urls";
 import { jobRedeliverySeconds } from "./job-delivery";
@@ -81,33 +88,55 @@ export async function listDocuments(session: Session) {
   }));
 }
 
-export async function uploadDocument(
-  session: Session,
-  file: File,
-): Promise<{ id: string }> {
-  await ensureSchema();
+/** The document format for an upload, or the reason code it is refused. */
+function uploadFormat(fileName: string, size: number): DocumentFormat {
   // Reason codes; the product UI turns each into a sentence and a fix.
-  const format = availableDocumentFormatForFile(file.name);
+  const format = availableDocumentFormatForFile(fileName);
   if (!format) throw new HttpError(400, "unsupported_format");
-  if (file.size <= 0) throw new HttpError(400, "empty_file");
-  if (file.size > format.maxBytes) throw new HttpError(400, "file_too_large");
-  const data = Buffer.from(await file.arrayBuffer());
-  if (data[0] !== 0x50 || data[1] !== 0x4b)
-    throw new HttpError(
-      400,
-      // OLE compound files: password-protected OOXML or a renamed legacy .ppt.
-      data.subarray(0, 4).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0]))
-        ? "encrypted_or_legacy_file"
-        : "invalid_package",
-    );
+  if (size <= 0) throw new HttpError(400, "empty_file");
+  if (size > format.maxBytes) throw new HttpError(400, "file_too_large");
+  return format;
+}
 
-  const documentId = randomUUID();
-  const versionId = randomUUID();
-  const jobId = randomUUID();
+/** Office files are ZIP packages; refuse anything else before processing. */
+function packageProblem(head: Buffer): string | null {
+  if (head[0] === 0x50 && head[1] === 0x4b) return null;
+  // OLE compound files: password-protected OOXML or a renamed legacy .ppt.
+  return head.subarray(0, 4).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0]))
+    ? "encrypted_or_legacy_file"
+    : "invalid_package";
+}
+
+function uploadObjects(
+  session: Session,
+  documentId: string,
+  versionId: string,
+) {
   const prefix = accountPrefix(session.accountId, documentId);
-  const documentObject = `${prefix}/versions/${versionId}/document.pptx`;
-  const outputPrefix = `${prefix}/versions/${versionId}/render`;
-  await putObject(documentObject, data, format.mimeTypes[0]!);
+  return {
+    documentObject: `${prefix}/versions/${versionId}/document.pptx`,
+    outputPrefix: `${prefix}/versions/${versionId}/render`,
+  };
+}
+
+/** Records a stored upload as a new document and starts its processing. */
+async function registerUpload(
+  session: Session,
+  upload: {
+    documentId: string;
+    versionId: string;
+    fileName: string;
+    format: DocumentFormat;
+    bytes: number;
+  },
+): Promise<{ id: string }> {
+  const { documentId, versionId, fileName, format, bytes } = upload;
+  const jobId = randomUUID();
+  const { documentObject, outputPrefix } = uploadObjects(
+    session,
+    documentId,
+    versionId,
+  );
   const dispatch: Dispatch = {
     jobId,
     target: "document",
@@ -125,24 +154,147 @@ export async function uploadDocument(
   await sql.begin(async (transaction) => {
     await transaction`
       insert into spellbook_documents (id, account_id, file_name, format_id, status, original_version_id, current_version_id)
-      values (${documentId}, ${session.accountId}, ${file.name}, ${format.id}, 'processing', ${versionId}, ${versionId})
+      values (${documentId}, ${session.accountId}, ${fileName}, ${format.id}, 'processing', ${versionId}, ${versionId})
     `;
     await transaction`
       insert into spellbook_versions (id, document_id, kind, status, document_object, document_bytes)
-      values (${versionId}, ${documentId}, 'original', 'processing', ${documentObject}, ${data.length})
+      values (${versionId}, ${documentId}, 'original', 'processing', ${documentObject}, ${bytes})
     `;
     await transaction`
       insert into spellbook_jobs (id, job_type, document_id, version_id, status, payload)
       values (${jobId}, 'scan_render', ${documentId}, ${versionId}, 'queued', ${transaction.json(jsonValue(dispatch.payload))})
     `;
     await addEvent(transaction, documentId, "document_uploaded", {
-      fileName: file.name,
+      fileName,
       formatId: format.id,
       versionId,
     });
   });
   await dispatchOrFail(dispatch, documentId).catch(() => undefined);
   return { id: documentId };
+}
+
+export async function uploadDocument(
+  session: Session,
+  file: File,
+): Promise<{ id: string }> {
+  await ensureSchema();
+  const format = uploadFormat(file.name, file.size);
+  const data = Buffer.from(await file.arrayBuffer());
+  const problem = packageProblem(data);
+  if (problem) throw new HttpError(400, problem);
+  const documentId = randomUUID();
+  const versionId = randomUUID();
+  const { documentObject } = uploadObjects(session, documentId, versionId);
+  await putObject(documentObject, data, format.mimeTypes[0]!);
+  return registerUpload(session, {
+    documentId,
+    versionId,
+    fileName: file.name,
+    format,
+    bytes: data.length,
+  });
+}
+
+const UPLOAD_TOKEN_DOMAIN = "spellbook-direct-upload-v1";
+const UPLOAD_TOKEN_SECONDS = 15 * 60;
+
+interface UploadClaims {
+  version: 1;
+  accountId: string;
+  documentId: string;
+  versionId: string;
+  fileName: string;
+  formatId: string;
+  size: number;
+  expiresAt: number;
+}
+
+/**
+ * Starts an upload that goes from the browser straight to storage. Returns
+ * direct: false when the store cannot take one; the page then posts the file.
+ */
+export async function startDirectUpload(
+  session: Session,
+  input: { fileName?: unknown; size?: unknown },
+) {
+  const fileName = typeof input.fileName === "string" ? input.fileName : "";
+  const size = typeof input.size === "number" ? input.size : 0;
+  if (!fileName || fileName.length > 255 || !Number.isSafeInteger(size))
+    throw new HttpError(400, "invalid_upload");
+  const format = uploadFormat(fileName, size);
+  const documentId = randomUUID();
+  const versionId = randomUUID();
+  const { documentObject } = uploadObjects(session, documentId, versionId);
+  const target = await directWriteTarget(
+    documentObject,
+    format.mimeTypes[0]!,
+    format.maxBytes,
+  );
+  if (!target) return { direct: false as const };
+  const claims: UploadClaims = {
+    version: 1,
+    accountId: session.accountId,
+    documentId,
+    versionId,
+    fileName,
+    formatId: format.id,
+    size,
+    expiresAt: Date.now() + UPLOAD_TOKEN_SECONDS * 1000,
+  };
+  return {
+    direct: true as const,
+    url: target.url,
+    headers: target.headers,
+    token: signClaims(UPLOAD_TOKEN_DOMAIN, claims),
+  };
+}
+
+/** Checks what the browser stored and records it as a new document. */
+export async function completeDirectUpload(session: Session, token: unknown) {
+  await ensureSchema();
+  const claims =
+    typeof token === "string"
+      ? (verifiedClaims(UPLOAD_TOKEN_DOMAIN, token) as UploadClaims | null)
+      : null;
+  if (
+    !claims ||
+    claims.version !== 1 ||
+    claims.accountId !== session.accountId ||
+    !Number.isSafeInteger(claims.expiresAt) ||
+    claims.expiresAt <= Date.now()
+  )
+    throw new HttpError(400, "invalid_upload");
+  const [existing] = await db()`
+    select id from spellbook_documents
+    where id=${claims.documentId} and account_id=${session.accountId}
+  `;
+  if (existing) return { id: String(existing.id) };
+  const format = documentFormat(claims.formatId as DocumentFormat["id"]);
+  const { documentObject } = uploadObjects(
+    session,
+    claims.documentId,
+    claims.versionId,
+  );
+  const stored = await objectHead(documentObject, 4);
+  if (!stored) throw new HttpError(409, "upload_not_found");
+  const problem =
+    stored.size !== claims.size
+      ? "upload_incomplete"
+      : stored.size > format.maxBytes
+        ? "file_too_large"
+        : packageProblem(stored.head);
+  if (problem) {
+    await deleteObject(documentObject).catch(() => undefined);
+    throw new HttpError(400, problem);
+  }
+  return registerUpload(session, {
+    documentId: claims.documentId,
+    versionId: claims.versionId,
+    fileName: claims.fileName,
+    format,
+    bytes: stored.size,
+  });
 }
 
 export async function documentDetail(
@@ -758,11 +910,12 @@ async function abandonReadyCandidates(transaction: any, documentId: string) {
   `;
 }
 
-export async function downloadCurrent(
+/** Which stored file a download serves, and the name the person gets. */
+async function downloadSource(
   session: Session,
   documentId: string,
-  source: "current" | "original" | "candidate" = "current",
-): Promise<{ name: string; data: Buffer }> {
+  source: "current" | "original" | "candidate",
+): Promise<{ name: string; objectName: string }> {
   await ensureSchema();
   if (source === "original") {
     const rows =
@@ -772,7 +925,7 @@ export async function downloadCurrent(
     if (!rows[0]) throw new HttpError(404, "document_not_found");
     return {
       name: `원본-${rows[0].file_name}`,
-      data: await getObject(rows[0].document_object),
+      objectName: rows[0].document_object,
     };
   }
   if (source === "candidate") {
@@ -786,7 +939,7 @@ export async function downloadCurrent(
     if (!rows[0]) throw new HttpError(409, "candidate_not_ready");
     return {
       name: `미승인후보-${rows[0].file_name}`,
-      data: await getObject(rows[0].document_object),
+      objectName: rows[0].document_object,
     };
   }
   const rows = await db()`
@@ -797,7 +950,30 @@ export async function downloadCurrent(
   `;
   const row = rows[0];
   if (!row) throw new HttpError(404, "document_not_found");
-  return { name: row.file_name, data: await getObject(row.document_object) };
+  return { name: row.file_name, objectName: row.document_object };
+}
+
+export async function downloadCurrent(
+  session: Session,
+  documentId: string,
+  source: "current" | "original" | "candidate" = "current",
+): Promise<{ name: string; data: Buffer }> {
+  const file = await downloadSource(session, documentId, source);
+  return { name: file.name, data: await getObject(file.objectName) };
+}
+
+/**
+ * A signed link that lets the browser download straight from storage, or
+ * null when the store has none and the file must pass through the app.
+ */
+export async function directDownloadUrl(
+  session: Session,
+  documentId: string,
+  source: "current" | "original" | "candidate",
+  contentType: string,
+): Promise<string | null> {
+  const file = await downloadSource(session, documentId, source);
+  return directReadUrl(file.objectName, { fileName: file.name, contentType });
 }
 
 async function completeScan(

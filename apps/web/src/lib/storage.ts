@@ -96,6 +96,47 @@ export async function deleteDocumentObjects(
   });
 }
 
+/**
+ * A short-lived link the browser can use to read an object straight from
+ * storage. Local disk storage has none, so files pass through the app.
+ */
+export async function directReadUrl(
+  _objectName: string,
+  _download: { fileName: string; contentType: string },
+): Promise<string | null> {
+  return null;
+}
+
+/**
+ * A short-lived link the browser can use to write one object straight to
+ * storage, with the headers it must send. Local disk storage has none.
+ */
+export async function directWriteTarget(
+  _objectName: string,
+  _contentType: string,
+  _maxBytes: number,
+): Promise<{ url: string; headers: Record<string, string> } | null> {
+  return null;
+}
+
+/** An object's size and first bytes, without reading the whole object. */
+export async function objectHead(
+  objectName: string,
+  length: number,
+): Promise<{ size: number; head: Buffer } | null> {
+  const file = objectPath(objectName);
+  const handle = await fs.open(file, "r").catch(() => null);
+  if (!handle) return null;
+  try {
+    const { size } = await handle.stat();
+    const head = Buffer.alloc(Math.min(length, size));
+    await handle.read(head, 0, head.length, 0);
+    return { size, head };
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function getJsonObject<T>(objectName: string): Promise<T> {
   return JSON.parse((await getObject(objectName)).toString("utf8")) as T;
 }

@@ -206,6 +206,7 @@ export function NativeWorkspace({
   const latestObservation = useRef<Record<string, unknown> | null>(null);
   /** The API-key request running in this page, if any. */
   const browserRun = useRef<AbortController | null>(null);
+  const [browserRunning, setBrowserRunning] = useState(false);
   const startBrowserJob = useRef<
     (job: BrowserJob, provider: BrowserKeyProvider, apiKey: string) => void
   >(() => undefined);
@@ -519,6 +520,7 @@ export function NativeWorkspace({
     browserRun.current?.abort();
     const abort = new AbortController();
     browserRun.current = abort;
+    setBrowserRunning(true);
     // Progress is shown here as it happens; the server only learns the result.
     const live = { text: "", thinking: "", tools: [] as string[] };
     const show = () =>
@@ -579,7 +581,10 @@ export function NativeWorkspace({
         void api("cancel", {}).catch(() => undefined);
       })
       .finally(() => {
-        if (browserRun.current === abort) browserRun.current = null;
+        if (browserRun.current !== abort) return;
+        browserRun.current = null;
+        // Ends the slow polling below; the next poll brings the result.
+        setBrowserRunning(false);
       });
   };
   const deliverTask = useCallback(
@@ -1167,9 +1172,10 @@ export function NativeWorkspace({
     const abort = new AbortController();
     void refreshHistory();
     // A long-lived Cloud Run response is billable for its entire duration.
-    // Stream only while an AI turn needs low latency; idle sessions poll.
+    // Stream only while an AI turn on the server needs low latency; idle
+    // sessions and requests running in this page poll.
     const useStream = shouldStreamNativeEvents(
-      busy,
+      busy && !browserRunning,
       launch.accessToken,
       process.env.NEXT_PUBLIC_NATIVE_EVENTS_MODE,
     );
@@ -1420,12 +1426,16 @@ export function NativeWorkspace({
       if (!stopped)
         timer = setTimeout(
           poll,
-          turnRequested.current ||
-            pendingTurn.current ||
-            pendingSaveRevision.current !== null ||
-            pendingBrowserSave.current
-            ? 250
-            : 1_500,
+          // A request running in this page shows its own progress; the
+          // server only has its start and, after it ends, its result.
+          browserRunning
+            ? 5_000
+            : turnRequested.current ||
+                pendingTurn.current ||
+                pendingSaveRevision.current !== null ||
+                pendingBrowserSave.current
+              ? 250
+              : 1_500,
         );
     };
     const stream = async () => {
@@ -1455,6 +1465,7 @@ export function NativeWorkspace({
   }, [
     bridgeReady,
     busy,
+    browserRunning,
     api,
     deliverTask,
     sendOffice,
