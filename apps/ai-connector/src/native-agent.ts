@@ -105,6 +105,8 @@ interface NativeEditCommand {
 
 // The same subscription client used by the current product; only the document
 // tool transport changes from offline PPTX patch jobs to the open editor session.
+export const UNCONFIRMED_EDIT_NOTICE =
+  "요청한 수정 가운데 적용되지 않았거나 적용 여부를 확인하지 못한 명령이 있습니다. 결과를 직접 확인해 주세요.";
 export const UNREVIEWED_EDIT_NOTICE =
   "수정 뒤 화면 재검토가 끝나지 않아 이 결과는 아직 확인되지 않았습니다. 결과를 직접 확인해 주세요.";
 
@@ -336,6 +338,19 @@ export async function runNativeTurn(
     return slideIndex;
   };
   let generatedImageInserted = false;
+  // A mutation call that failed or timed out may still land in the editor.
+  let unconfirmedMutation = false;
+  const mutate = async (
+    request: Record<string, unknown>,
+    signal: AbortSignal,
+  ): Promise<NativeObservation> => {
+    try {
+      return await input.host.call(request, signal);
+    } catch (error) {
+      unconfirmedMutation = true;
+      throw error;
+    }
+  };
   // A review-only turn may look and record a review, never edit.
   const REVIEW_ONLY_TOOLS = new Set(["native_observe", "native_review"]);
   const turn = (
@@ -566,7 +581,7 @@ export async function runNativeTurn(
               // A failed/expired response may conceal a concurrent or already-applied
               // edit. Require another observation instead of replaying stale targets.
               observed = undefined;
-              observed = await input.host.call(
+              observed = await mutate(
                 nativePlatformAssetOperations.has(command.op ?? "")
                   ? {
                       ...command,
@@ -631,7 +646,9 @@ export async function runNativeTurn(
               );
               const previous = observed;
               observed = undefined;
-              observed = await input.host.call(
+              observed = await (
+                batch.dryRun ? input.host.call.bind(input.host) : mutate
+              )(
                 {
                   operation: "edit_batch",
                   expectedRevision: previous.revision,
@@ -779,6 +796,8 @@ export async function runNativeTurn(
   }
   if (changed && !reviewed)
     text = `${text.trim()}\n\n${UNREVIEWED_EDIT_NOTICE}`;
+  else if (unconfirmedMutation && !reviewed)
+    text = `${text.trim()}\n\n${UNCONFIRMED_EDIT_NOTICE}`;
   return {
     text,
     changed,

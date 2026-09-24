@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentTurnOptions, AppServerClient } from "./app-server-client.js";
 import {
   runNativeTurn,
+  UNCONFIRMED_EDIT_NOTICE,
   UNREVIEWED_EDIT_NOTICE,
   type NativeObservation,
   type NativePermission,
@@ -821,6 +822,58 @@ describe("shared open document agent", () => {
         .filter(([request]) => request.operation !== "observe"),
     ).toHaveLength(1);
     expect(result).toMatchObject({ reviewed: false, status: "needs_review" });
+  });
+  it("says so when an edit call fails even if the model claims success", async () => {
+    const f = fixture(async (o) => {
+      await o.onTool(
+        "native_observe",
+        { detailSlideIndex: null },
+        "1",
+        f.signal,
+      );
+      const edit = await o.onTool(
+        "native_batch_edit",
+        {
+          dryRun: false,
+          commands: [{ op: "replace_text", elementId: "0/0", text: "After" }],
+        },
+        "2",
+        f.signal,
+      );
+      expect(edit.success).toBe(false);
+    });
+    f.call.mockImplementation(async (request: Record<string, unknown>) => {
+      if (request.operation !== "observe")
+        throw new Error("native_task_expired");
+      return structuredClone(state);
+    });
+    const result = await f.run();
+    expect(result).toMatchObject({ changed: false, status: "completed" });
+    expect(result.text).toContain(UNCONFIRMED_EDIT_NOTICE);
+  });
+  it("adds no failure notice to a dry run that fails", async () => {
+    const f = fixture(async (o) => {
+      await o.onTool(
+        "native_observe",
+        { detailSlideIndex: null },
+        "1",
+        f.signal,
+      );
+      await o.onTool(
+        "native_batch_edit",
+        {
+          dryRun: true,
+          commands: [{ op: "replace_text", elementId: "0/0", text: "After" }],
+        },
+        "2",
+        f.signal,
+      );
+    });
+    f.call.mockImplementation(async (request: Record<string, unknown>) => {
+      if (request.operation !== "observe") throw new Error("invalid_plan");
+      return structuredClone(state);
+    });
+    expect((await f.run()).text).not.toContain(UNCONFIRMED_EDIT_NOTICE);
   });
   it("does not ask for a review when nothing changed", async () => {
     const f = fixture(async (o) => {
