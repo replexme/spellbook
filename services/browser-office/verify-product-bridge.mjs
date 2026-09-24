@@ -16,6 +16,15 @@ const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
 const repositoryIdentity = readRepositoryIdentity(repositoryRoot);
 const rendererCallTimeoutMs = 10_000;
+// One engine step (an edit, its checkpoint, a save). A slower machine, such
+// as a build machine drawing with software graphics, may raise it.
+const stepTimeoutMs = Number(
+  process.env.SPELLBOOK_BROWSER_VERIFY_STEP_TIMEOUT_MS ?? 30_000,
+);
+if (!Number.isSafeInteger(stepTimeoutMs) || stepTimeoutMs < 30_000)
+  throw new Error(
+    "SPELLBOOK_BROWSER_VERIFY_STEP_TIMEOUT_MS must be at least 30000.",
+  );
 const unsupportedOperationProbe = "execute_arbitrary_command";
 const mutationContract = JSON.parse(
   await readFile(
@@ -1725,7 +1734,7 @@ async function acknowledgeProductSave(
           event.type === "modified" && event.modified === expectedModified,
       ).length > previousCount,
     { previousCount: modifiedCount, expectedModified: modified },
-    { timeout: 30_000 },
+    { timeout: stepTimeoutMs },
   );
 }
 
@@ -1773,7 +1782,7 @@ async function waitForNewHostEvent(page, type, previousCount) {
         (event) => event.type === eventType,
       ).length > count,
     { eventType: type, count: previousCount },
-    { timeout: 30_000 },
+    { timeout: stepTimeoutMs },
   );
   return evaluateRenderer(
     page,
@@ -1870,10 +1879,10 @@ async function waitForEvent(page, expected) {
               ),
           ),
         expected,
-        { timeout: 30_000 },
+        { timeout: stepTimeoutMs },
       ),
       "wait for expected browser event",
-      35_000,
+      stepTimeoutMs + 5_000,
     );
   } catch (error) {
     const events = await evaluateRenderer(
