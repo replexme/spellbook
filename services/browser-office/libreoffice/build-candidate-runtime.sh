@@ -170,7 +170,7 @@ if [[ ! -f "$native_marker" ]]; then
 fi
 
 wasm_build="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm"
-wasm_configuration="LibreOfficeWASM32:$wasm_modules_arg:en-US ko:colibre:release"
+wasm_configuration="LibreOfficeWASM32:$wasm_modules_arg:en-US ko:colibre:release:avmedia"
 wasm_configuration_sha="$(printf '%s' "$wasm_configuration" | sha256sum | cut -d' ' -f1)"
 wasm_configuration_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm.configuration"
 wasm_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/wasm.$expected_patch_sha.$wasm_configuration_sha"
@@ -208,9 +208,15 @@ if [[ ! -f "$wasm_build/Makefile" ]] || \
       --enable-ccache \
       --enable-release-build \
       --with-lang="en-US ko" \
+      --disable-gstreamer-1-0 \
       --with-theme=colibre
   )
   printf '%s\n' "$wasm_configuration" > "$wasm_configuration_marker"
+fi
+# Audio and video stay in the browser engine (patch 0048).
+if ! grep -qx '#define HAVE_FEATURE_AVMEDIA 1' "$wasm_build/config_host/config_features.h"; then
+  echo "The configured WASM runtime has no avmedia." >&2
+  exit 1
 fi
 if ! grep -qx 'export ENABLE_WASM_STRIP_BASIC_DRAW_MATH_IMPRESS=' "$wasm_build/config_host.mk"; then
   echo "The configured WASM runtime still strips Impress." >&2

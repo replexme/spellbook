@@ -157,6 +157,14 @@ builds the document's font collection from Qt's font database, and Qt for
 WebAssembly knows only the three fonts it bundles, so every script was drawn
 with DejaVu Sans: Korean as empty boxes and Calibri text without the
 metric-compatible Carlito (production 2026-09-24).
+The `browser-undo-v33` series adds patch `0048`, which keeps avmedia in the
+WebAssembly build. `--enable-wasm-strip`, on by default for Emscripten,
+forced it off, so the browser editor could not insert or replace audio and
+video or change their playback settings. Inserting with a known size,
+importing, exporting and playback settings need no player, and the build
+disables GStreamer and fails when avmedia is off. With WordArt, whose shape
+type patch `0030` already exposes, the browser runtime now has no operation
+limitations of its own.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

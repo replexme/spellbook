@@ -1,0 +1,15 @@
+diff --git a/configure.ac b/configure.ac
+--- a/configure.ac
++++ b/configure.ac
+@@ -3213,7 +3213,10 @@ fi
+ # explicitly doesn't include enable_gtk3=no and enable_qt5=yes, so it should
+ # also work with the default gtk3 plugin.
+ if test "$enable_wasm_strip" = "yes"; then
+-    enable_avmedia=no
++    # Spellbook: keep avmedia so Impress can insert, replace and configure
++    # audio and video in the browser. There is no player backend (GStreamer
++    # is disabled), which insertion, PPTX import/export and playback
++    # settings do not need.
+     enable_libcmis=no
+     enable_coinmp=no
+     enable_cups=no

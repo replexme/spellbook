@@ -196,6 +196,7 @@ test("browser LibreOffice patches name their complete source surface", () => {
     ),
   );
   assert.deepEqual([...new Set(paths)].sort(), [
+    "configure.ac",
     "docmodel/source/theme/Theme.cxx",
     "include/oox/drawingml/shape.hxx",
     "include/oox/drawingml/shapepropertymap.hxx",

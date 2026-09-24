@@ -148,6 +148,9 @@ test("PowerPoint admission also requires every typed native operation", () => {
       ...report,
       scenarios: scenarios.slice(1),
     }).join("; "),
-    /all 12 contract scenarios/u,
+    new RegExp(
+      `all ${Object.keys(browserPlan.scenarios).length} contract scenarios`,
+      "u",
+    ),
   );
 });

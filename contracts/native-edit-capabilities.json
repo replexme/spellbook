@@ -1004,8 +1004,7 @@
         "execution": "platform_asset",
         "identityEffect": "create",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 0,
-        "unavailableIn": ["browser"]
+        "minEnginePatch": 0
       },
       "replace_media": {
         "family": "media_asset",
@@ -1013,8 +1012,7 @@
         "execution": "platform_asset",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 27,
-        "unavailableIn": ["browser"]
+        "minEnginePatch": 27
       },
       "set_media_playback": {
         "family": "media_playback",
@@ -1022,8 +1020,7 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 27,
-        "unavailableIn": ["browser"]
+        "minEnginePatch": 27
       },
       "set_smartart_node": {
         "family": "diagram_model",
@@ -1055,8 +1052,7 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 24,
-        "unavailableIn": ["browser"]
+        "minEnginePatch": 24
       },
       "set_3d_material": {
         "family": "object_3d",
@@ -1274,24 +1270,7 @@
     }
   ],
   "runtimeLimitations": {
-    "browser": [
-      {
-        "op": "insert_media",
-        "reason": "The browser LibreOffice runtime is configured with --enable-wasm-strip, which compiles out avmedia, so it cannot create media objects. Existing audio and video are preserved from the original PPTX."
-      },
-      {
-        "op": "replace_media",
-        "reason": "The browser runtime has no avmedia support (compiled out by --enable-wasm-strip), so it cannot replace media objects."
-      },
-      {
-        "op": "set_media_playback",
-        "reason": "The browser runtime has no avmedia support (compiled out by --enable-wasm-strip), so media playback settings cannot be edited."
-      },
-      {
-        "op": "set_fontwork",
-        "reason": "The browser UNO bridge cannot read CustomShapeGeometry (its nested sequence types are not registered), so it can neither observe nor verify a WordArt transform preset."
-      }
-    ]
+    "browser": []
   },
   "knownUnsafeTransactions": [
     {
