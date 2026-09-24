@@ -3072,6 +3072,7 @@ ooxmlWorker.onerror = (event) => {
 };
 installTextInputBridge({
   canvas,
+  textInput: document.querySelector("#text-input"),
   compositionBox: document.querySelector("#composition"),
 });
 globalThis.Module = {

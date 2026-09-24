@@ -2,22 +2,25 @@
 
 // The engine's Qt layer (5.15) reads only keydown and keyup on its canvas and
 // passes a key's text to LibreOffice only when the key carries one character.
-// Text an input method composes (Korean, Japanese, Chinese, and Android
-// keyboards for every language) arrives in composition and input events
-// instead, so without this bridge it never reaches the document.
+// The browser does not run an input method on a canvas, so Korean, Japanese
+// and Chinese text (and Android keyboards for every language) never reached
+// the document.
 //
-// The bridge keeps the input method's own key presses away from Qt, shows the
-// unfinished syllable next to where the person last clicked, and types each
-// committed character into LibreOffice as a one-character key press. It never
-// sends Backspace on the input method's behalf: outside text editing,
-// Backspace deletes the selected shape.
+// Keyboard focus therefore sits in a hidden text field over the canvas, where
+// the browser does run the input method. Ordinary key presses are handed to
+// the canvas unchanged; the input method's own key presses are not. The
+// unfinished syllable shows next to where the person last clicked, and each
+// committed character is typed into LibreOffice as a one-character key
+// press. The bridge never sends Backspace on the input method's behalf:
+// outside text editing, Backspace deletes the selected shape.
 
 const inputMethodKeyCode = 229;
 
 export function createTextInputBridge({ typeKey, showComposition }) {
   let composing = false;
-  // The last key that went straight to Qt. The browser reports that key's
-  // text again in an input event, which must not type it twice.
+  // The last key handed to Qt. When the browser also reports that key's text
+  // as input (a shortcut it was allowed to handle), it must not be typed
+  // twice.
   let directKey = null;
 
   const typeText = (text) => {
@@ -39,8 +42,8 @@ export function createTextInputBridge({ typeKey, showComposition }) {
     get composing() {
       return composing;
     },
-    // True when the key press belongs to the input method and must not
-    // reach Qt.
+    // True when the key press belongs to the input method and must not be
+    // handed to Qt.
     keydown(event) {
       if (belongsToInputMethod(event)) return true;
       directKey = event.key;
@@ -90,28 +93,32 @@ export function createTextInputBridge({ typeKey, showComposition }) {
         });
       }
       // Composition text arrives through compositionend; deletions and
-      // pastes already reached Qt as key presses.
+      // pastes reached Qt as key presses.
     },
   };
 }
 
-// Connects the bridge to the engine canvas. The canvas is contenteditable, so
-// the browser runs the input method on it and also keeps the typed text as
-// hidden children, which are cleared after each input.
-export function installTextInputBridge({ canvas, compositionBox }) {
-  const synthetic = new WeakSet();
+// Connects the bridge to the engine canvas through the hidden text field.
+export function installTextInputBridge({ canvas, textInput, compositionBox }) {
   let anchor = null;
+  const handToCanvas = (type, init) =>
+    canvas.dispatchEvent(
+      new KeyboardEvent(type, { bubbles: true, cancelable: true, ...init }),
+    );
   const typeKey = (init) => {
-    for (const type of ["keydown", "keyup"]) {
-      const event = new KeyboardEvent(type, {
-        bubbles: true,
-        cancelable: true,
-        ...init,
-      });
-      synthetic.add(event);
-      canvas.dispatchEvent(event);
-    }
+    handToCanvas("keydown", init);
+    handToCanvas("keyup", init);
   };
+  const keyInit = (event) => ({
+    key: event.key,
+    code: event.code,
+    location: event.location,
+    repeat: event.repeat,
+    ctrlKey: event.ctrlKey,
+    shiftKey: event.shiftKey,
+    altKey: event.altKey,
+    metaKey: event.metaKey,
+  });
   const showComposition = (text) => {
     compositionBox.textContent = text;
     compositionBox.hidden = !text;
@@ -125,36 +132,47 @@ export function installTextInputBridge({ canvas, compositionBox }) {
     compositionBox.style.top = `${Math.max(bounds.top, Math.min(y + 12, bounds.bottom - height))}px`;
   };
   const bridge = createTextInputBridge({ typeKey, showComposition });
-  // Clearing during a composition would cancel it.
-  const clearHiddenText = () => {
-    if (!bridge.composing && canvas.firstChild) canvas.replaceChildren();
+  const focusTextInput = () => {
+    if (document.activeElement !== textInput)
+      textInput.focus({ preventScroll: true });
   };
-  for (const type of ["keydown", "keyup"])
-    window.addEventListener(
-      type,
-      (event) => {
-        if (event.target !== canvas || synthetic.has(event)) return;
-        if (bridge[type](event)) event.stopImmediatePropagation();
-      },
-      true,
-    );
+  // Clearing during a composition would cancel it.
+  const clearTextInput = () => {
+    if (!bridge.composing && textInput.value) textInput.value = "";
+  };
   canvas.addEventListener(
     "pointerdown",
     (event) => {
       anchor = { x: event.clientX, y: event.clientY };
+      // The input method's candidate window opens at the text field.
+      textInput.style.left = `${event.clientX}px`;
+      textInput.style.top = `${event.clientY}px`;
     },
     true,
   );
-  canvas.addEventListener("compositionstart", () => bridge.compositionstart());
-  canvas.addEventListener("compositionupdate", (event) =>
+  canvas.addEventListener("pointerup", focusTextInput);
+  canvas.addEventListener("focus", focusTextInput);
+  textInput.addEventListener("keydown", (event) => {
+    if (bridge.keydown(event)) return;
+    handToCanvas("keydown", keyInit(event));
+    // Plain keys belong to the document; the browser keeps its shortcuts.
+    if (!event.ctrlKey && !event.metaKey) event.preventDefault();
+  });
+  textInput.addEventListener("keyup", (event) => {
+    if (!bridge.keyup(event)) handToCanvas("keyup", keyInit(event));
+  });
+  textInput.addEventListener("compositionstart", () =>
+    bridge.compositionstart(),
+  );
+  textInput.addEventListener("compositionupdate", (event) =>
     bridge.compositionupdate(event),
   );
-  canvas.addEventListener("compositionend", (event) => {
+  textInput.addEventListener("compositionend", (event) => {
     bridge.compositionend(event);
-    setTimeout(clearHiddenText);
+    setTimeout(clearTextInput);
   });
-  canvas.addEventListener("input", (event) => {
+  textInput.addEventListener("input", (event) => {
     bridge.input(event);
-    if (!event.isComposing) setTimeout(clearHiddenText);
+    if (!event.isComposing) setTimeout(clearTextInput);
   });
 }

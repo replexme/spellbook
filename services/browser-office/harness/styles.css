@@ -102,6 +102,22 @@ body[data-state="complete"] #qtcanvas {
   visibility: visible;
 }
 
+/* Keyboard focus for the canvas: the browser runs input methods only in
+   text fields. It stays invisible where the person last clicked. */
+#text-input {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1.2em;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  resize: none;
+  overflow: hidden;
+  pointer-events: none;
+}
+
 /* The syllable an input method is still composing; the engine shows only
    committed text. */
 #composition {
