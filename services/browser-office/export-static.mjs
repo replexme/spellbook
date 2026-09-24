@@ -50,6 +50,118 @@ function storedSource(target) {
   return { file: target.file.replace(/\.br$/u, "") };
 }
 
+const LICENSE_TEXTS = Object.freeze([
+  ["GPL-3.0.txt", "licenses/GPL-3.0.txt"],
+  ["LGPL-3.0.txt", "licenses/LGPL-3.0.txt"],
+  ["MPL-2.0.txt", "../../LICENSES/MPL-2.0.txt"],
+  ["emscripten-LICENSE.txt", "licenses/emscripten-LICENSE.txt"],
+  ["zetajs-LICENSE.txt", "licenses/zetajs-LICENSE.txt"],
+]);
+
+function escapeHtml(value) {
+  return String(value).replace(
+    /[&<>"']/gu,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character],
+  );
+}
+
+/**
+ * The notice for the engine sent to users' browsers: each component's
+ * license and the exact source this build was made from. Qt for WebAssembly
+ * is GPL-3.0/LGPL-3.0 licensed, so its corresponding source is named here.
+ */
+export function licensePage({
+  upstream,
+  publicCommit,
+  receiptSha256,
+  contact,
+}) {
+  const spellbook = `https://github.com/replexme/spellbook/tree/${publicCommit}`;
+  const { emsdk, emscripten, qt } = upstream.toolchain;
+  const zetajs = new URL(upstream.javascriptBridge.runtimeAsset.url);
+  const zetajsCommit = zetajs.pathname.split("/")[3];
+  const rows = [
+    [
+      "LibreOffice (with Spellbook patches)",
+      "MPL-2.0; parts under other upstream licenses",
+      `${upstream.source.repository} commit ${upstream.source.candidateCommit}`,
+      `${spellbook}/services/browser-office/libreoffice/patches`,
+    ],
+    [
+      "Qt 5.15 for WebAssembly",
+      "LGPL-3.0 / GPL-3.0 (by module)",
+      `${qt.repository} commit ${qt.commit} (qtbase ${qt.qtbaseCommit})`,
+      qt.repository.replace(/\.git$/u, `/tree/${qt.commit}`),
+    ],
+    [
+      "Emscripten runtime",
+      "MIT / University of Illinois NCSA",
+      `${emscripten.repository} commit ${emscripten.commit}; emsdk ${emsdk.version} commit ${emsdk.commit}`,
+      emscripten.repository.replace(/\.git$/u, `/tree/${emscripten.commit}`),
+    ],
+    [
+      "ZetaJS",
+      "MIT",
+      `https://github.com/allotropia/zetajs commit ${zetajsCommit}`,
+      `https://github.com/allotropia/zetajs/tree/${zetajsCommit}`,
+    ],
+    [
+      "Spellbook editor shell",
+      "MPL-2.0",
+      `https://github.com/replexme/spellbook commit ${publicCommit}`,
+      `${spellbook}/services/browser-office`,
+    ],
+  ];
+  const table = rows
+    .map(
+      ([name, license, source, link]) =>
+        `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(license)}</td><td><a href="${escapeHtml(link)}">${escapeHtml(source)}</a></td></tr>`,
+    )
+    .join("\n");
+  const texts = LICENSE_TEXTS.map(
+    ([name]) => `<li><a href="/licenses/${name}">${name}</a></li>`,
+  ).join("\n");
+  return `<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spellbook 편집기 오픈소스 고지</title>
+<style>
+body{font:15px/1.6 system-ui,sans-serif;max-width:960px;margin:0 auto;padding:24px 16px;color:#1f2937;background:#fff}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #e5e7eb;padding:8px;text-align:left;vertical-align:top;overflow-wrap:anywhere}
+th{background:#f9fafb}code{overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<h1>Spellbook 편집기 오픈소스 고지</h1>
+<p>Spellbook의 PPT 편집기는 여러분의 브라우저에서 실행되는 LibreOffice(WebAssembly)입니다. 아래는 이 편집기에 들어 있는 구성요소의 라이선스와, 지금 받은 빌드를 만든 정확한 소스 위치입니다.</p>
+<table>
+<thead><tr><th>구성요소</th><th>라이선스</th><th>이 빌드의 소스</th></tr></thead>
+<tbody>
+${table}
+</tbody>
+</table>
+<h2>빌드 방법</h2>
+<p>툴체인과 빌드 절차: <a href="${spellbook}/services/browser-office/libreoffice">${spellbook}/services/browser-office/libreoffice</a> (<code>Dockerfile.toolchain</code>, <code>build-candidate-runtime.sh</code>). 빌드 기록 SHA-256: <code>${escapeHtml(receiptSha256)}</code></p>
+<h2>소스 제공</h2>
+<p>위 링크에서 소스를 받을 수 없으면 <a href="mailto:${escapeHtml(contact)}">${escapeHtml(contact)}</a>로 요청해 주세요. 이 빌드의 전체 대응 소스를 배포에 드는 실비 이상 받지 않고, 이 빌드를 마지막으로 제공한 날부터 최소 3년 동안 제공합니다.</p>
+<h2>라이선스 전문</h2>
+<ul>
+${texts}
+</ul>
+</body>
+</html>
+`;
+}
+
 function headerList(headers) {
   return Object.entries(headers).map(([key, value]) => ({ key, value }));
 }
@@ -60,7 +172,7 @@ function headerList(headers) {
  */
 export function planStaticSite(
   routes,
-  { version, hostOrigins, documentHeaders, readyz },
+  { version, hostOrigins, documentHeaders, readyz, licenses },
 ) {
   if (!/^[0-9a-f]{16}$/u.test(version))
     throw new Error("Runtime version must be 16 hex characters.");
@@ -114,6 +226,26 @@ export function planStaticSite(
     },
     { ...base, ...candidate.headers, "Cache-Control": "no-store" },
   );
+  // The license notice is an ordinary page: no isolation, no embedding.
+  add(
+    "/licenses",
+    "licenses.html",
+    { body: licenses },
+    {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  );
+  for (const [name, file] of LICENSE_TEXTS)
+    add(
+      `/licenses/${name}`,
+      `licenses/${name}`,
+      { file: path.join(serviceRoot, file) },
+      {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache",
+      },
+    );
   add(
     "/readyz",
     "readyz.json",
@@ -163,6 +295,12 @@ export async function exportStatic({
     version,
     hostOrigins,
     documentHeaders: admitted.upstream.requiredDocumentHeaders,
+    licenses: licensePage({
+      upstream: admitted.upstream,
+      publicCommit: admitted.receipt.spellbookSourceRevision,
+      receiptSha256: admitted.receiptSha256,
+      contact: "hello@replex.me",
+    }),
     readyz: {
       status: "ok",
       protocolVersion: 1,

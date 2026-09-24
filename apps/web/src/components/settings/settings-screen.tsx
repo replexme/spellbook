@@ -905,6 +905,11 @@ export function SettingsScreen({
                   </ButtonLink>
                 </div>
               </div>
+              <p style={{ marginTop: "1rem" }}>
+                <a href="/licenses" target="_blank" rel="noreferrer">
+                  오픈소스 라이선스
+                </a>
+              </p>
             </section>
           </div>
         </div>

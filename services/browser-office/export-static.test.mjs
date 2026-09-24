@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { planStaticSite } from "./export-static.mjs";
+import { existsSync } from "node:fs";
+import { licensePage, planStaticSite } from "./export-static.mjs";
 import { buildRoutes } from "./server.mjs";
 
 const upstream = JSON.parse(
@@ -19,6 +20,7 @@ function plan() {
     hostOrigins: ["https://spellbook.replex.me"],
     documentHeaders: upstream.requiredDocumentHeaders,
     readyz: { status: "ok" },
+    licenses: "<p>notice</p>",
   });
 }
 
@@ -112,4 +114,27 @@ test("refuses a host origin that is not an https origin", () => {
       readyz: {},
     }),
   );
+});
+
+test("the license notice names the exact source of every shipped component", () => {
+  const page = licensePage({
+    upstream,
+    publicCommit: "a".repeat(40),
+    receiptSha256: "b".repeat(64),
+    contact: "hello@replex.me",
+  });
+  const { qt, emscripten } = upstream.toolchain;
+  assert.ok(page.includes(qt.commit));
+  assert.ok(page.includes(qt.qtbaseCommit));
+  assert.ok(page.includes(emscripten.commit));
+  assert.ok(page.includes(upstream.source.candidateCommit));
+  assert.ok(page.includes(`tree/${"a".repeat(40)}/services/browser-office`));
+  assert.ok(page.includes("mailto:hello@replex.me"));
+  const site = plan();
+  const headers = headersFor(site, "/licenses");
+  assert.equal(headers["Document-Isolation-Policy"], undefined);
+  for (const { file, source } of site.files.filter(({ file }) =>
+    file.startsWith("licenses/"),
+  ))
+    assert.ok(existsSync(source.file), `${file} has its text`);
 });

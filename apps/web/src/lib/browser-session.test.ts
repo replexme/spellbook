@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  browserOfficeLicensesUrl,
   browserOfficeWorkspaceUrl,
   browserRevision,
   requireBrowserOrigin,
@@ -51,6 +52,18 @@ describe("browser edit session boundary", () => {
     );
     expect(() => browserOfficeWorkspaceUrl()).toThrow(
       "SPELLBOOK_BROWSER_OFFICE_URL is invalid.",
+    );
+  });
+
+  it("points to the editor's open-source notice once it is configured", () => {
+    vi.stubEnv("SPELLBOOK_BROWSER_OFFICE_URL", "");
+    expect(browserOfficeLicensesUrl()).toBeNull();
+    vi.stubEnv(
+      "SPELLBOOK_BROWSER_OFFICE_URL",
+      "https://office.spellbook.example",
+    );
+    expect(browserOfficeLicensesUrl()).toBe(
+      "https://office.spellbook.example/licenses",
     );
   });
 });

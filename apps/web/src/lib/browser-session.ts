@@ -29,6 +29,18 @@ export interface BrowserDocumentLaunch {
 }
 
 export function browserOfficeWorkspaceUrl(): string {
+  const workspace = new URL("workspace", browserOfficeBase());
+  workspace.searchParams.set("hostOrigin", publicAppBaseUrl());
+  return workspace.toString();
+}
+
+/** The browser editor's open-source notice, when the editor is configured. */
+export function browserOfficeLicensesUrl(): string | null {
+  if (!process.env.SPELLBOOK_BROWSER_OFFICE_URL?.trim()) return null;
+  return new URL("licenses", browserOfficeBase()).toString();
+}
+
+function browserOfficeBase(): URL {
   const configured = process.env.SPELLBOOK_BROWSER_OFFICE_URL?.trim();
   if (!configured) throw new HttpError(503, "browser_office_not_configured");
   const base = new URL(
@@ -49,9 +61,7 @@ export function browserOfficeWorkspaceUrl(): string {
       !loopback)
   )
     throw new Error("SPELLBOOK_BROWSER_OFFICE_URL is invalid.");
-  const workspace = new URL("workspace", base);
-  workspace.searchParams.set("hostOrigin", publicAppBaseUrl());
-  return workspace.toString();
+  return base;
 }
 
 export async function createBrowserDocumentLaunch(
