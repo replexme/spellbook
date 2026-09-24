@@ -204,6 +204,10 @@ export function NativeWorkspace({
   /** Screenshots the AI looked at, kept only in this page ("taskId:index" → object URL). */
   const imageUrls = useRef(new Map<string, string>());
   const [images, setImages] = useState<Map<string, string>>(new Map());
+  /** The slide in view when each request was sent, drawn before any of its edits (turnId → image). */
+  const turnStartImages = useRef(
+    new Map<string, { slideIndex: number; key: string }>(),
+  );
   const [engineReady, setEngineReady] = useState(false),
     [bridgeReady, setBridgeReady] = useState(false),
     [sessionObserved, setSessionObserved] = useState(false);
@@ -424,6 +428,22 @@ export function NativeWorkspace({
             "이 브라우저에 저장된 API 키가 없어요. 설정에서 API 키를 등록해 주세요.",
           );
         browserRun.current?.abort();
+        // The editor draws the slide in view before the request goes out, so
+        // the result card has a "before" picture even when the AI edits that
+        // slide without looking first. The editor handles this page's calls
+        // in order, so the drawing precedes every edit of the request.
+        const viewedSlide = Number(latestObservation.current?.activeSlide);
+        const startImage =
+          Number.isSafeInteger(viewedSlide) && viewedSlide >= 0
+            ? callEditor(
+                {
+                  operation: "observe",
+                  detailSlideIndex: null,
+                  captureSlideIndexes: [viewedSlide],
+                },
+                30_000,
+              ).catch(() => null)
+            : Promise.resolve(null);
         const submitted = await api("chat", {
           text: pending.draft,
           permission: pending.permission,
@@ -433,6 +453,18 @@ export function NativeWorkspace({
             ? (latestObservation.current ?? undefined)
             : undefined,
         });
+        const turnId = submitted.turnId;
+        if (typeof turnId === "string")
+          void startImage.then((observation) => {
+            const list = (observation as { images?: unknown } | null)?.images;
+            if (!Array.isArray(list) || !list.length) return;
+            const key = `start:${turnId}`;
+            turnStartImages.current.set(turnId, {
+              slideIndex: Number(list[0]?.slideIndex),
+              key: `${key}:0`,
+            });
+            rememberImages(key, list.slice(0, 1));
+          });
         if (submitted.localJob) await dispatchLocalJob(submitted.localJob);
         if (submitted.browserJob && keyProvider && apiKey)
           startBrowserJob.current(submitted.browserJob, keyProvider, apiKey);
@@ -1769,8 +1801,15 @@ export function NativeWorkspace({
         (turn.turnId
           ? historyById.get(turn.turnId)?.savedPreviews
           : undefined) ?? [];
+      const start = turn.turnId
+        ? turnStartImages.current.get(turn.turnId)
+        : undefined;
       return summary.evidence.map((item) => {
-        const before = item.before ? (images.get(item.before) ?? null) : null;
+        const before = item.before
+          ? (images.get(item.before) ?? null)
+          : start?.slideIndex === item.slideIndex
+            ? (images.get(start.key) ?? null)
+            : null;
         const after = item.after ? (images.get(item.after) ?? null) : null;
         if (before || after)
           return {
