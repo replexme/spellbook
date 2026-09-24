@@ -1407,3 +1407,26 @@ test("an effect keeps its preset identity, not the sidebar's editing metadata", 
     true,
   );
 });
+
+test("persistence ignores the text frame anchor of Fontwork, which its path overrides", () => {
+  const state = (textVerticalAlignment, fontwork) => ({
+    slides: [
+      {
+        slideIndex: 0,
+        elements: [
+          { elementId: "e1", text: "WordArt", textVerticalAlignment, fontwork },
+        ],
+      },
+    ],
+    masters: [],
+  });
+  const arch = { preset: "textArchUp" };
+  assert.deepEqual(
+    normalizeDocumentPersistenceState(state("CENTER", arch)),
+    normalizeDocumentPersistenceState(state("BOTTOM", arch)),
+  );
+  assert.notDeepEqual(
+    normalizeDocumentPersistenceState(state("CENTER", null)),
+    normalizeDocumentPersistenceState(state("BOTTOM", null)),
+  );
+});

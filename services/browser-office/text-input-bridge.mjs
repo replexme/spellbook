@@ -119,6 +119,7 @@ export function installTextInputBridge({ canvas, textInput, compositionBox }) {
     altKey: event.altKey,
     metaKey: event.metaKey,
   });
+  // Below the clicked line, so the box does not cover the text being edited.
   const showComposition = (text) => {
     compositionBox.textContent = text;
     compositionBox.hidden = !text;
@@ -129,7 +130,7 @@ export function installTextInputBridge({ canvas, textInput, compositionBox }) {
     const width = compositionBox.offsetWidth;
     const height = compositionBox.offsetHeight;
     compositionBox.style.left = `${Math.max(bounds.left, Math.min(x, bounds.right - width))}px`;
-    compositionBox.style.top = `${Math.max(bounds.top, Math.min(y + 12, bounds.bottom - height))}px`;
+    compositionBox.style.top = `${Math.max(bounds.top, Math.min(y + 28, bounds.bottom - height))}px`;
   };
   const bridge = createTextInputBridge({ typeKey, showComposition });
   const focusTextInput = () => {

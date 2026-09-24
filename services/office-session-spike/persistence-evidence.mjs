@@ -234,6 +234,19 @@ function withoutTransientEmptyPlaceholderDefaults(slides) {
   return slides;
 }
 
+// Fontwork text follows its path rather than the text frame, so the frame's
+// vertical anchor has no effect: the browser engine drew an arched WordArt
+// identically with the anchor at top, center and bottom. On opening a file
+// the engine derives the value from the preset (an arch reads back as bottom
+// whatever anchor was saved), so it is not persisted state.
+function withoutFontworkTextAnchor(slides) {
+  for (const slide of slides)
+    for (const element of slide.elements ?? [])
+      if (typeof element.fontwork?.preset === "string")
+        delete element.textVerticalAlignment;
+  return slides;
+}
+
 function withCanonicalShapeIdentity(slides) {
   for (const slide of slides) {
     for (const element of slide.elements ?? []) {
@@ -458,44 +471,46 @@ export function normalizeDocumentPersistenceState(
       const rightIdentity = `${right.name ?? ""}\u0000${right.layout ?? ""}\u0000${stableJson(right)}`;
       return leftIdentity.localeCompare(rightIdentity, "en");
     });
-  const slides = withoutPresetEditorMetadata(
-    withSavedAnimationContainers(
-      withoutInactiveFooterValues(
-        withoutInactiveStyleValues(
-          withCanonicalShapeIdentity(
-            withoutTransientEmptyPlaceholderDefaults(
-              withoutMergedContinuationFormatting(
-                (state?.slides ?? []).map(
-                  ({ masterIndex: _masterIndex, ...slide }, index) => {
-                    const {
-                      masterIndex: _authoredMasterIndex,
-                      ...authoredSlide
-                    } =
-                      authoredArrayEntry(slide, authoredBy?.slides, index) ??
-                      {};
-                    const normalized = withoutObservationOnlyFields(
-                      withoutComputedPropertyValues(
-                        structuredClone(slide),
-                        authoredSlide,
-                      ),
-                    );
-                    if (normalized.transition) {
+  const slides = withoutFontworkTextAnchor(
+    withoutPresetEditorMetadata(
+      withSavedAnimationContainers(
+        withoutInactiveFooterValues(
+          withoutInactiveStyleValues(
+            withCanonicalShapeIdentity(
+              withoutTransientEmptyPlaceholderDefaults(
+                withoutMergedContinuationFormatting(
+                  (state?.slides ?? []).map(
+                    ({ masterIndex: _masterIndex, ...slide }, index) => {
                       const {
-                        effect: _effect,
-                        speed: _speed,
-                        ...persistedTransition
-                      } = normalized.transition;
-                      normalized.transition = persistedTransition;
-                    }
-                    return normalized;
-                  },
+                        masterIndex: _authoredMasterIndex,
+                        ...authoredSlide
+                      } =
+                        authoredArrayEntry(slide, authoredBy?.slides, index) ??
+                        {};
+                      const normalized = withoutObservationOnlyFields(
+                        withoutComputedPropertyValues(
+                          structuredClone(slide),
+                          authoredSlide,
+                        ),
+                      );
+                      if (normalized.transition) {
+                        const {
+                          effect: _effect,
+                          speed: _speed,
+                          ...persistedTransition
+                        } = normalized.transition;
+                        normalized.transition = persistedTransition;
+                      }
+                      return normalized;
+                    },
+                  ),
                 ),
               ),
             ),
+            authoredBy?.slides,
           ),
           authoredBy?.slides,
         ),
-        authoredBy?.slides,
       ),
     ),
   );
