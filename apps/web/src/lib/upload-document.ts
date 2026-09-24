@@ -78,12 +78,30 @@ export function uploadDocumentFile(
     })) as Target;
     if (aborted) throw new UploadError("aborted");
     if (target.direct) {
-      await send(request, "PUT", target.url, target.headers, file, onProgress);
-      const { id } = await postJson("/api/documents/uploads/complete", {
-        token: target.token,
-      });
-      if (typeof id !== "string") throw new UploadError("unexpected_error");
-      return id;
+      // A network that blocks the storage host (or a storage rule problem)
+      // must not stop an upload: it then goes through the app instead.
+      const sent = await send(
+        request,
+        "PUT",
+        target.url,
+        target.headers,
+        file,
+        onProgress,
+      ).then(
+        () => true,
+        (error: unknown) => {
+          if (aborted || !(error instanceof UploadError)) throw error;
+          if (error.message !== "network") throw error;
+          return false;
+        },
+      );
+      if (sent) {
+        const { id } = await postJson("/api/documents/uploads/complete", {
+          token: target.token,
+        });
+        if (typeof id !== "string") throw new UploadError("unexpected_error");
+        return id;
+      }
     }
     const form = new FormData();
     form.set("file", file);

@@ -19,6 +19,26 @@
   grid-template-columns: minmax(0, 1fr) var(--ds-panel-width);
 }
 
+/* A strip for an ad below the editor and the panel, never over them. Only
+   the managed service fills it. */
+.ws.has-ad {
+  --ws-ad-height: 106px;
+  grid-template-rows: var(--ds-topbar-height) minmax(0, 1fr) var(--ws-ad-height);
+}
+
+.ws-ad {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ds-space-3);
+  min-width: 0;
+  overflow: hidden;
+  border-top: 1px solid var(--ds-border);
+  background: var(--ds-bg-surface);
+}
+
 .ws-topbar {
   grid-column: 1 / -1;
   display: flex;
@@ -2138,6 +2158,17 @@ ol.connect {
   border-left: 0;
 }
 
+.ws.is-phone.has-ad {
+  --ws-ad-height: 66px;
+  grid-template-rows:
+    var(--ds-topbar-height) auto minmax(0, 1fr)
+    var(--ws-ad-height);
+}
+
+.ws.is-phone > .ws-ad {
+  grid-row: 4;
+}
+
 .ws-phone-slides {
   grid-row: 2;
   display: grid;
@@ -2202,6 +2233,11 @@ ol.connect {
     inset: var(--ds-topbar-height) 0 0;
     z-index: var(--ds-z-panel);
     border-left: 0;
+  }
+
+  /* The panel opened over the editor stops above the ad strip. */
+  .ws.has-ad .ws-panel {
+    bottom: var(--ws-ad-height);
   }
 
   .ws-file-name > span:last-child,

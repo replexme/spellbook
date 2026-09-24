@@ -271,58 +271,62 @@ export function useAiAccount(config: AiConnectorConfig) {
     await load();
   }, [connectorOrigin, localSession, load]);
 
-  const storeKeys = useCallback(
-    (next: BrowserKeys) => {
-      if (!keyScope)
-        throw new Error("로그인 상태를 확인한 뒤 다시 시도해 주세요.");
-      try {
-        writeBrowserKeys(keyScope, next);
-      } catch {
-        throw new Error(
-          "이 브라우저에 API 키를 저장할 수 없습니다. 개인정보 보호 모드나 사이트 데이터 차단을 확인해 주세요.",
-        );
-      }
-      setBrowserKeys(next);
-    },
-    [keyScope],
+  // A key saved before the page has learned the account waits for it.
+  const accountScope = useCallback(
+    async () => keyScope ?? (await load())?.keyScope ?? null,
+    [keyScope, load],
   );
+  const storeKeys = useCallback((scope: string | null, next: BrowserKeys) => {
+    if (!scope) throw new Error("로그인 상태를 확인한 뒤 다시 시도해 주세요.");
+    try {
+      writeBrowserKeys(scope, next);
+    } catch {
+      throw new Error(
+        "이 브라우저에 API 키를 저장할 수 없습니다. 개인정보 보호 모드나 사이트 데이터 차단을 확인해 주세요.",
+      );
+    }
+    setBrowserKeys(next);
+  }, []);
 
   // API keys stay in this browser: checked against the provider from here
   // and never sent to Spellbook's servers.
   const configureApiKey = useCallback(
     async (provider: BrowserKeyProvider, apiKey: string, active = true) => {
       await checkProviderKey(provider, apiKey);
-      const current = readBrowserKeys(keyScope);
-      storeKeys({
+      const scope = await accountScope();
+      const current = readBrowserKeys(scope);
+      storeKeys(scope, {
         active: active ? provider : current.active,
         keys: { ...current.keys, [provider]: apiKey.trim() },
       });
     },
-    [keyScope, storeKeys],
+    [accountScope, storeKeys],
   );
 
   const deleteApiKey = useCallback(
     async (provider: string) => {
       if (!isBrowserKeyProvider(provider)) return;
-      const current = readBrowserKeys(keyScope);
+      const scope = await accountScope();
+      const current = readBrowserKeys(scope);
       const { [provider]: _removed, ...keys } = current.keys;
-      storeKeys({
+      storeKeys(scope, {
         active: current.active === provider ? null : current.active,
         keys,
       });
     },
-    [keyScope, storeKeys],
+    [accountScope, storeKeys],
   );
 
   const selectProvider = useCallback(
     async (provider: string) => {
-      const current = readBrowserKeys(keyScope);
-      storeKeys({
+      const scope = await accountScope();
+      const current = readBrowserKeys(scope);
+      storeKeys(scope, {
         ...current,
         active: isBrowserKeyProvider(provider) ? provider : null,
       });
     },
-    [keyScope, storeKeys],
+    [accountScope, storeKeys],
   );
 
   /** The stored key for a provider, read when a request runs in this browser. */

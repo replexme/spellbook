@@ -62,6 +62,7 @@ import {
 } from "./workspace/turn-timeline";
 import { restoreLead, type VersionEntry } from "./workspace/version-entries";
 import { VersionPanel } from "./workspace/version-panel";
+import { WorkspaceAd, workspaceAdEnabled } from "./workspace/workspace-ad";
 
 interface LaunchBase {
   documentId: string;
@@ -2000,7 +2001,7 @@ export function NativeWorkspace({
     : null;
   return (
     <main
-      className={`ws ${panelOpen ? "has-panel" : ""} ${phone ? "is-phone" : ""}`}
+      className={`ws ${panelOpen ? "has-panel" : ""} ${phone ? "is-phone" : ""} ${workspaceAdEnabled ? "has-ad" : ""}`}
     >
       <WorkspaceTopBar
         fileName={launch.fileName}
@@ -2314,6 +2315,7 @@ export function NativeWorkspace({
         waiting={!download?.busy && saveState.endsWith("중…")}
         onDownload={startDownload}
       />
+      {workspaceAdEnabled ? <WorkspaceAd /> : null}
     </main>
   );
 }
