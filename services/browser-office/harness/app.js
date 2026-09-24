@@ -794,127 +794,23 @@ async function observeNativeDocument() {
 // A small sample of the visible canvas. Comparing samples tells whether the
 // editor has repainted since an edit; LibreOffice paints after the model
 // changes, not at the moment the edit call returns.
-function canvasFingerprint() {
-  try {
-    const sample = document.createElement("canvas");
-    sample.width = 48;
-    sample.height = 27;
-    const context = sample.getContext("2d", { willReadFrequently: true });
-    if (!context) return "";
-    context.drawImage(canvas, 0, 0, sample.width, sample.height);
-    const pixels = context.getImageData(0, 0, sample.width, sample.height).data;
-    let hash = 0;
-    for (let index = 0; index < pixels.length; index += 4)
-      hash =
-        (hash * 31 +
-          pixels[index] +
-          pixels[index + 1] * 3 +
-          pixels[index + 2] * 7) >>>
-        0;
-    return String(hash);
-  } catch {
-    return "";
-  }
-}
-
-// Waits until the canvas differs from `previous` and then holds still for
-// one sample. Returns false when it never changed within the time limit.
-async function waitForRepaint(previous, timeoutMs = 3_000) {
-  const deadline = Date.now() + timeoutMs;
-  let last = canvasFingerprint();
-  let changed = !previous || last !== previous;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    const next = canvasFingerprint();
-    if (next !== previous) changed = true;
-    if (changed && next === last) return true;
-    last = next;
-  }
-  return changed;
-}
-
-async function captureVisibleBrowserCanvas() {
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("browser_canvas_render_timeout")),
-      2_000,
-    );
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        clearTimeout(timer);
-        resolve();
-      }),
-    );
-  });
-  const blob = await new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error("browser_canvas_capture_timeout")),
-      5_000,
-    );
-    canvas.toBlob((value) => {
-      clearTimeout(timer);
-      if (value) resolve(value);
-      else reject(new Error("browser_canvas_capture_failed"));
-    }, "image/png");
-  });
-  if (blob.size < 1_000 || blob.size > 12_000_000)
-    throw new Error("browser_canvas_capture_size_invalid");
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  if (
-    ![137, 80, 78, 71, 13, 10, 26, 10].every(
-      (byte, index) => bytes[index] === byte,
-    )
-  )
-    throw new Error("browser_canvas_capture_png_invalid");
-  return Array.from(bytes);
-}
-
-async function attachBrowserVisualEvidence(
-  nativeRequest,
-  value,
-  paintBeforeEdit = null,
-) {
+// The AI sees each slide as the engine draws it, the way the server editor
+// shows it: the engine renders the slide to PNG, so the image does not wait
+// for the page to repaint and a hidden browser tab still gets the current
+// slide.
+async function attachBrowserVisualEvidence(nativeRequest, value) {
   let targets = [];
-  const activeSlide = value?.activeSlide;
-  let showingSlide = activeSlide;
   const images = [];
   let captureError = null;
-  const changed = new Set(
-    Array.isArray(value?.changedSlideIndexes) ? value.changedSlideIndexes : [],
-  );
   try {
     targets = browserCaptureTargets(nativeRequest, value);
     for (const slideIndex of targets) {
-      let fresh = true;
-      if (showingSlide !== slideIndex) {
-        const beforeShow = canvasFingerprint();
-        await request("show-slide", { slideIndex });
-        showingSlide = slideIndex;
-        await waitForRepaint(beforeShow);
-      } else if (paintBeforeEdit !== null && changed.has(slideIndex))
-        fresh = await waitForRepaint(paintBeforeEdit);
-      else await waitForRepaint(null, 800);
-      images.push({
-        slideIndex,
-        pngBytes: await captureVisibleBrowserCanvas(),
-        source: "browser_canvas",
-        ...(fresh ? {} : { stale: true }),
-      });
+      const rendered = await request("render-slide", { slideIndex });
+      images.push({ slideIndex, pngBytes: Array.from(rendered.png) });
     }
   } catch (error) {
     captureError = error instanceof Error ? error.message : String(error);
   }
-  if (Number.isSafeInteger(activeSlide) && showingSlide !== activeSlide)
-    try {
-      await request("show-slide", { slideIndex: activeSlide });
-    } catch (error) {
-      captureError = [
-        captureError,
-        `browser_canvas_restore_failed:${error instanceof Error ? error.message : String(error)}`,
-      ]
-        .filter(Boolean)
-        .join("; ");
-    }
   if (captureError)
     return {
       ...withBrowserVisualEvidence(value, images, targets),
@@ -2551,8 +2447,6 @@ async function handleProductHostMessage(message) {
     return;
   }
   if (typeof message.id === "string" && message.request) {
-    const paintBeforeEdit =
-      message.request.operation === "observe" ? null : canvasFingerprint();
     try {
       markBrowserProbePhase("prepare");
       const prepared = await prepareProductPackageMutation(message.request);
@@ -2571,11 +2465,7 @@ async function handleProductHostMessage(message) {
         value = await withPackageDocumentMetadata(committed ?? result.value);
       }
       markBrowserProbePhase("visual-capture");
-      value = await attachBrowserVisualEvidence(
-        message.request,
-        value,
-        paintBeforeEdit,
-      );
+      value = await attachBrowserVisualEvidence(message.request, value);
       markBrowserProbePhase("status");
       const status = await request("status");
       reportHostModified(

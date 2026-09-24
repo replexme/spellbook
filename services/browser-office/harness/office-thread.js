@@ -529,9 +529,8 @@ function start() {
             throw new Error(
               "Spellbook native operation program is unavailable.",
             );
-          // Browser visuals come from the actual canvas on the main thread.
-          // The WASM package has no GraphicExportFilter service, so UNO
-          // mutation and observation must not attempt server-side capture.
+          // The page asks for slide images separately ("render-slide"), so
+          // the shared program does not capture them itself.
           const nativeRequest =
             event.data.nativeRequest?.operation === "observe"
               ? { ...event.data.nativeRequest, captureSlideIndexes: [] }
@@ -555,6 +554,55 @@ function start() {
                 }),
           });
           break;
+        case "render-slide": {
+          // The engine draws the slide itself, as the server editor does for
+          // the AI: no wait for the page to repaint, and a hidden browser
+          // tab still gets the current slide.
+          if (!model) throw new Error("No browser Office document is open.");
+          const index = event.data.slideIndex;
+          if (
+            !Number.isSafeInteger(index) ||
+            index < 0 ||
+            index >= slideCount()
+          )
+            throw new Error("invalid_capture_slide_index");
+          const page = model.getDrawPages().getByIndex(index);
+          const out = css.io.SequenceOutputStream.create(context);
+          const exporter = css.drawing.GraphicExportFilter.create(context);
+          exporter.setSourceDocument(page);
+          const width = 1280;
+          const height = Math.round(
+            (width * page.getPropertyValue("Height")) /
+              page.getPropertyValue("Width"),
+          );
+          if (
+            !exporter.filter([
+              property("MediaType", zetajs.type.string, "image/png"),
+              property(
+                "OutputStream",
+                zetajs.type.interface(css.io.XOutputStream),
+                out,
+              ),
+              property(
+                "FilterData",
+                zetajs.type.sequence(
+                  zetajs.type.struct(css.beans.PropertyValue),
+                ),
+                [
+                  property("PixelWidth", zetajs.type.long, width),
+                  property("PixelHeight", zetajs.type.long, height),
+                ],
+              ),
+            ])
+          )
+            throw new Error("browser_slide_render_failed");
+          const png = Uint8Array.from(
+            out.getWrittenBytes(),
+            (value) => value & 0xff,
+          );
+          post("slide-rendered", { requestId, slideIndex: index, png });
+          break;
+        }
         case "show-slide": {
           if (!model) throw new Error("No browser Office document is open.");
           const index = event.data.slideIndex;
