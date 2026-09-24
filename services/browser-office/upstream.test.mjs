@@ -255,6 +255,7 @@ test("browser LibreOffice patches name their complete source surface", () => {
     "svx/source/table/tablerow.cxx",
     "svx/source/table/tableundo.cxx",
     "svx/source/unodraw/unoshtxt.cxx",
+    "vcl/qt5/QtGraphics_Text.cxx",
   ]);
 });
 

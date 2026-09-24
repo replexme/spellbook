@@ -1,0 +1,40 @@
+diff --git a/vcl/qt5/QtGraphics_Text.cxx b/vcl/qt5/QtGraphics_Text.cxx
+--- a/vcl/qt5/QtGraphics_Text.cxx
++++ b/vcl/qt5/QtGraphics_Text.cxx
+@@ -37,6 +37,10 @@
+ #include <QtGui/QRawFont>
+ #include <QtCore/QStringList>
+ 
++#ifdef EMSCRIPTEN
++#include <set>
++#endif
++
+ void QtGraphics::SetTextColor(Color nColor) { m_aTextColor = nColor; }
+ 
+ void QtGraphics::SetFont(LogicalFontInstance* pReqFont, int nFallbackLevel)
+@@ -95,6 +99,9 @@ void QtGraphics::GetDevFontList(vcl::font::PhysicalFontCollection* pPFC)
+     ::std::vector<psp::fontID> aList;
+ 
+     rMgr.getFontList(aList);
++#ifdef EMSCRIPTEN
++    std::set<OString> aQtFontFiles;
++#endif
+     for (auto const& nFontId : aList)
+     {
+         auto const* pFont = rMgr.getFont(nFontId);
+@@ -110,6 +117,15 @@ void QtGraphics::GetDevFontList(vcl::font::PhysicalFontCollection* pPFC)
+         aFA.IncreaseQualityBy(4096);
+         const OString& rFileName = rMgr.getFontFileSysPath(nFontId);
+         rFontManager.AddFontFile(rFileName, nFaceNum, nVariantNum, nFontId, aFA);
++#ifdef EMSCRIPTEN
++        // Spellbook: the collection below is built from Qt's font database,
++        // and Qt for WebAssembly knows only the three fonts it bundles. Give
++        // it every font file fontconfig found, so documents use the bundled
++        // metric-compatible fonts and the Korean fonts instead of drawing
++        // every script with DejaVu Sans. Qt opens a file path itself.
++        if (aQtFontFiles.insert(rFileName).second)
++            QFontDatabase::addApplicationFont(QString::fromUtf8(rFileName.getStr()));
++#endif
+     }
+ 
+     if (bUseFontconfig)

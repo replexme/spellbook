@@ -152,6 +152,11 @@ language's pack and, once all translations are built, their `.mo` files;
 the build fails when the Korean pack is missing. It changes no document
 code. The page selects Korean for the UI (`registry/spellbook-korean-ui.xcd`)
 and writes the Korean fonts the image does not carry (`runtime-files.json`).
+Patch `0047` gives Qt every font file fontconfig finds. The Qt drawing layer
+builds the document's font collection from Qt's font database, and Qt for
+WebAssembly knows only the three fonts it bundles, so every script was drawn
+with DejaVu Sans: Korean as empty boxes and Calibri text without the
+metric-compatible Carlito (production 2026-09-24).
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves
