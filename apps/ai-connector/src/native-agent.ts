@@ -1,4 +1,5 @@
 import type {
+  DynamicTool,
   AgentTurnClient,
   GeneratedImage,
   ToolResult,
@@ -335,23 +336,32 @@ export async function runNativeTurn(
     return slideIndex;
   };
   let generatedImageInserted = false;
+  // A review-only turn may look and record a review, never edit.
+  const REVIEW_ONLY_TOOLS = new Set(["native_observe", "native_review"]);
   const turn = (
     prompt: string,
     allowImageGeneration: boolean,
     timeout = 240000,
+    reviewOnly = false,
   ) =>
     client.runStructuredTurn(
       [
         {
           type: "text",
           text: [
-            observed
+            observed && !reviewOnly
               ? `Live document structure is ALREADY observed (Revision: ${observed.revision}, Active slide: ${observed.activeSlide + 1}번). Elements: ${JSON.stringify(observed.slides.find((s) => s.slideIndex === observed?.activeSlide)?.elements?.map((e) => ({ id: e.elementId, name: e.name, text: e.text, table: e.table })) ?? [])}. You do NOT need to call native_observe. You can immediately call native_batch_edit to apply the changes.`
-              : "You are editing the SAME open PowerPoint document as the user. Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
+              : reviewOnly
+                ? `This is a review-only step. The user's request was already applied to the SAME open PowerPoint document in this turn: ${JSON.stringify(input.requestText)}. Only native_observe and native_review are available; you cannot edit.`
+                : "You are editing the SAME open PowerPoint document as the user. Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
             `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
             "Observe returns live element structure, a revision, deterministic layout findings, and slide screenshots. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Inspect introducedIssues and the fresh screenshot after edits, correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
             "Web search and webpage reading are fully supported via web_search and fetch_web_page. When the user asks for real-world knowledge, recent news, industry statistics, domain references, or provides a URL, proactively use web_search and fetch_web_page to obtain accurate, up-to-date facts and cite sources. NEVER claim that you cannot access the internet or that browsing is disabled.",
-            "CRITICAL DIRECTIVE - BIAS FOR ACTION: When the user asks to edit, fill, create, or update content in the presentation (such as filling templates, modifying text/tables, adding text boxes, or updating slides), you MUST NOT merely observe and stop. You MUST NOT say '말씀해 주시면 진행하겠습니다' or ask for further confirmation. You MUST proactively execute the mutations in this turn using native_batch_edit (or native_edit), verify with native_review, and then report the completed result.",
+            ...(reviewOnly
+              ? []
+              : [
+                  "CRITICAL DIRECTIVE - BIAS FOR ACTION: When the user asks to edit, fill, create, or update content in the presentation (such as filling templates, modifying text/tables, adding text boxes, or updating slides), you MUST NOT merely observe and stop. You MUST NOT say '말씀해 주시면 진행하겠습니다' or ask for further confirmation. You MUST proactively execute the mutations in this turn using native_batch_edit (or native_edit), verify with native_review, and then report the completed result.",
+                ]),
             `Coordinates are 1/100 mm. IDs refer to the last observed revision; the editor rebinds batch targets to the same live objects before every command. ${nativeEditContract.transaction.ordering} Do not change original text or geometry merely to hide font/rendering differences. Answer in Korean.`,
             prompt,
           ].join("\n"),
@@ -363,80 +373,82 @@ export async function runNativeTurn(
         modelSettings: input.modelSettings,
         signal: input.signal,
         onThinking: input.onThinking,
-        tools: [
-          {
-            type: "function",
-            name: "native_observe",
-            description:
-              "Read the open document, including unsaved human edits. Pass null for the active slide or a slide index to receive that slide's screenshot and paragraph/run details without changing the user's active slide.",
-            inputSchema: observeSchema,
-          },
-          {
-            type: "function",
-            name: "native_edit",
-            description: `Change one observed object or slide in the SAME open editor with native undo. The schema includes all ${nativeEditOperationCount} bounded PPTX operations implemented by Spellbook: slide creation/reorder/layout/background/visibility/transition, speaker notes and animation timing; object creation/duplication/deletion/topology/geometry/style/text/range formatting/locking/cropping and safe click interactions; image/audio/video insertion or identity-preserving replacement using an observed document-scoped assetId; media playback, SmartArt semantic nodes, equations, Fontwork, 3D material and accessibility reading order; table content/structure/style; and fixed-size internal chart data plus column/line/area/pie/scatter/radar chart-family changes. Operations that need a patched engine are rejected unless the live observation reports the required undo-v level. Asset insertion/replacement must use native_edit and cannot be put in native_batch_edit because binary delivery crosses the trusted host boundary. For set_chart_data, keep the observed dimensions when changing data, rowDescriptions (category labels), or columnDescriptions (series labels). An identity-replacing operation must be isolated in its own edit. External interactions accept credential-free HTTP(S) only; do not add one without explicit user intent. Linked or external-workbook chart mutation and arbitrary new master/layout authoring are outside this bounded schema; set_master_theme only edits a fully observed existing master theme. Observe after stale state. Do not send executable code.`,
-            inputSchema: nativeEditContract.toolInputSchema,
-          },
-          {
-            type: "function",
-            name: "native_batch_edit",
-            description: `Plan or atomically apply 1-50 validated native edits to the SAME observed presentation. All targets come from one revision and are rebound to their live objects before each command. ${nativeEditContract.transaction.ordering} dryRun validates targets, options, and permission without changing the document. A non-dry-run batch becomes one native Undo action and rolls back completely if any command fails. Do not send executable code.`,
-            inputSchema: nativeBatchEditSchema,
-          },
-          {
-            type: "function",
-            name: "native_review",
-            description:
-              "Record a visual review of the latest mutation. Inspect every returned changed-slide screenshot and pass exactly those changedSlideIndexes. This is not user approval.",
-            inputSchema: {
-              type: "object",
-              additionalProperties: false,
-              properties: {
-                approved: { type: "boolean" },
-                problems: { type: "array", items: { type: "string" } },
-                reviewedSlideIndexes: {
-                  type: "array",
-                  items: { type: "integer", minimum: 0 },
-                  uniqueItems: true,
-                },
-              },
-              required: ["approved", "problems", "reviewedSlideIndexes"],
+        tools: (
+          [
+            {
+              type: "function",
+              name: "native_observe",
+              description:
+                "Read the open document, including unsaved human edits. Pass null for the active slide or a slide index to receive that slide's screenshot and paragraph/run details without changing the user's active slide.",
+              inputSchema: observeSchema,
             },
-          },
-          {
-            type: "function",
-            name: "web_search",
-            description:
-              "Search the web for up-to-date real-world facts, recent news, industry statistics, domain references, or company information to create or enrich presentation slides. Returns top search results with titles, snippets, and source URLs.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                query: {
-                  type: "string",
-                  description:
-                    "The search query (e.g., '2026 AI industry trends', 'Apple latest financial report').",
-                },
-              },
-              required: ["query"],
+            {
+              type: "function",
+              name: "native_edit",
+              description: `Change one observed object or slide in the SAME open editor with native undo. The schema includes all ${nativeEditOperationCount} bounded PPTX operations implemented by Spellbook: slide creation/reorder/layout/background/visibility/transition, speaker notes and animation timing; object creation/duplication/deletion/topology/geometry/style/text/range formatting/locking/cropping and safe click interactions; image/audio/video insertion or identity-preserving replacement using an observed document-scoped assetId; media playback, SmartArt semantic nodes, equations, Fontwork, 3D material and accessibility reading order; table content/structure/style; and fixed-size internal chart data plus column/line/area/pie/scatter/radar chart-family changes. Operations that need a patched engine are rejected unless the live observation reports the required undo-v level. Asset insertion/replacement must use native_edit and cannot be put in native_batch_edit because binary delivery crosses the trusted host boundary. For set_chart_data, keep the observed dimensions when changing data, rowDescriptions (category labels), or columnDescriptions (series labels). An identity-replacing operation must be isolated in its own edit. External interactions accept credential-free HTTP(S) only; do not add one without explicit user intent. Linked or external-workbook chart mutation and arbitrary new master/layout authoring are outside this bounded schema; set_master_theme only edits a fully observed existing master theme. Observe after stale state. Do not send executable code.`,
+              inputSchema: nativeEditContract.toolInputSchema,
             },
-          },
-          {
-            type: "function",
-            name: "fetch_web_page",
-            description:
-              "Fetch and read the text content of any web page URL provided by the user or found via search, extracting clean text to summarize or incorporate into the presentation.",
-            inputSchema: {
-              type: "object",
-              properties: {
-                url: {
-                  type: "string",
-                  description: "The full HTTP or HTTPS URL to read.",
-                },
-              },
-              required: ["url"],
+            {
+              type: "function",
+              name: "native_batch_edit",
+              description: `Plan or atomically apply 1-50 validated native edits to the SAME observed presentation. All targets come from one revision and are rebound to their live objects before each command. ${nativeEditContract.transaction.ordering} dryRun validates targets, options, and permission without changing the document. A non-dry-run batch becomes one native Undo action and rolls back completely if any command fails. Do not send executable code.`,
+              inputSchema: nativeBatchEditSchema,
             },
-          },
-        ],
+            {
+              type: "function",
+              name: "native_review",
+              description:
+                "Record a visual review of the latest mutation. Inspect every returned changed-slide screenshot and pass exactly those changedSlideIndexes. This is not user approval.",
+              inputSchema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  approved: { type: "boolean" },
+                  problems: { type: "array", items: { type: "string" } },
+                  reviewedSlideIndexes: {
+                    type: "array",
+                    items: { type: "integer", minimum: 0 },
+                    uniqueItems: true,
+                  },
+                },
+                required: ["approved", "problems", "reviewedSlideIndexes"],
+              },
+            },
+            {
+              type: "function",
+              name: "web_search",
+              description:
+                "Search the web for up-to-date real-world facts, recent news, industry statistics, domain references, or company information to create or enrich presentation slides. Returns top search results with titles, snippets, and source URLs.",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  query: {
+                    type: "string",
+                    description:
+                      "The search query (e.g., '2026 AI industry trends', 'Apple latest financial report').",
+                  },
+                },
+                required: ["query"],
+              },
+            },
+            {
+              type: "function",
+              name: "fetch_web_page",
+              description:
+                "Fetch and read the text content of any web page URL provided by the user or found via search, extracting clean text to summarize or incorporate into the presentation.",
+              inputSchema: {
+                type: "object",
+                properties: {
+                  url: {
+                    type: "string",
+                    description: "The full HTTP or HTTPS URL to read.",
+                  },
+                },
+                required: ["url"],
+              },
+            },
+          ] satisfies DynamicTool[]
+        ).filter((tool) => !reviewOnly || REVIEW_ONLY_TOOLS.has(tool.name)),
         onEvent: (event) => {
           const value = event.params as { delta?: string } | undefined;
           if (
@@ -508,6 +520,16 @@ export async function runNativeTurn(
             }
           : undefined,
         onTool: (name, args, _id, signal) => {
+          if (reviewOnly && !REVIEW_ONLY_TOOLS.has(name))
+            return Promise.resolve({
+              success: false,
+              contentItems: [
+                {
+                  type: "inputText",
+                  text: "Only native_observe and native_review are allowed in this review step.",
+                },
+              ],
+            });
           const work = toolTail.then(async (): Promise<ToolResult> => {
             if (name === "native_observe") {
               const detailSlideIndex = (args as { detailSlideIndex?: unknown })
@@ -741,13 +763,18 @@ export async function runNativeTurn(
   // Looking at the result after an edit is the product contract, not a hint.
   // A model that edits and stops is asked once more to observe and review.
   if (changed && !reviewed) {
-    const review = await turn(
-      generatedImageInserted
-        ? "The requested generated image is now an editable picture object in the open presentation. Observe the fresh slide, correct its position or size if needed, then call native_review. Do not generate another image."
-        : "This request changed the open presentation, but native_review has not approved a fresh screenshot of the changed slides. Observe the changed slides now, correct only regressions this request introduced, then call native_review with every changed slide. Do not make unrelated edits and do not claim the result was checked before native_review approves it.",
-      false,
-      180000,
-    );
+    const review = generatedImageInserted
+      ? await turn(
+          "The requested generated image is now an editable picture object in the open presentation. Observe the fresh slide, correct its position or size if needed, then call native_review. Do not generate another image.",
+          false,
+          180000,
+        )
+      : await turn(
+          "Observe the changed slides, then call native_review with every changed slide. Approve only if the fresh screenshot shows the requested change without new problems; otherwise report the problems. Then tell the user in Korean what changed and what the review found.",
+          false,
+          180000,
+          true,
+        );
     if (review.trim()) text = review;
   }
   if (changed && !reviewed)

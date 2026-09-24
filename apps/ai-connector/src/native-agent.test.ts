@@ -780,6 +780,48 @@ describe("shared open document agent", () => {
     expect(result).toMatchObject({ reviewed: false, status: "needs_review" });
     expect(result.text).toContain(UNREVIEWED_EDIT_NOTICE);
   });
+  it("offers only observation and review in the enforced review step", async () => {
+    let reviewTools: string[] = [];
+    let blockedEdit: { success: boolean } | undefined;
+    const f = fixture(
+      async (o) => {
+        await o.onTool(
+          "native_observe",
+          { detailSlideIndex: null },
+          "1",
+          f.signal,
+        );
+        await o.onTool(
+          "native_edit",
+          { op: "replace_text", elementId: "0/0", text: "After" },
+          "2",
+          f.signal,
+        );
+      },
+      permission,
+      changedState,
+      state,
+      async (o) => {
+        reviewTools = o.tools.map((tool) => tool.name);
+        blockedEdit = await o.onTool(
+          "native_edit",
+          { op: "replace_text", elementId: "0/1", text: "Unrelated" },
+          "3",
+          f.signal,
+        );
+      },
+    );
+    const callsBeforeRun = f.call.mock.calls.length;
+    const result = await f.run();
+    expect(reviewTools.sort()).toEqual(["native_observe", "native_review"]);
+    expect(blockedEdit?.success).toBe(false);
+    expect(
+      f.call.mock.calls
+        .slice(callsBeforeRun)
+        .filter(([request]) => request.operation !== "observe"),
+    ).toHaveLength(1);
+    expect(result).toMatchObject({ reviewed: false, status: "needs_review" });
+  });
   it("does not ask for a review when nothing changed", async () => {
     const f = fixture(async (o) => {
       await o.onTool(
