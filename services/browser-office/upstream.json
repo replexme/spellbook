@@ -14,7 +14,7 @@
     "patchSeriesReady": true,
     "buildReady": false,
     "nativeSlideStructureReady": false,
-    "patchSeriesSha256": "c69498dd306394a299a3db8c04766a96ec738fccf287da91218430f3071b6316",
+    "patchSeriesSha256": "e562409ca96dc5c9eac60e2a8e818880edab6befb67de4e4a28cb75d4d7fc14d",
     "patches": [
       "libreoffice/patches/0001-core-undo-identity.patch",
       "libreoffice/patches/0002-generic-pptx-edit-invariants.patch",
@@ -64,7 +64,7 @@
       "libreoffice/patches/0046-browser-korean-language-pack.patch",
       "libreoffice/patches/0047-browser-qt-uses-every-installed-font.patch",
       "libreoffice/patches/0048-browser-keeps-audio-and-video.patch",
-      "libreoffice/patches/0049-browser-qt-menus-use-a-font-for-the-ui-language.patch"
+      "libreoffice/patches/0049-browser-qt-widgets-fall-back-to-cjk-fonts.patch"
     ],
     "invariants": [
       "table-cell-native-undo",
