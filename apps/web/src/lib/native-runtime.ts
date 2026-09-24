@@ -37,6 +37,12 @@ import {
 
 type PermissionMode = "read_only" | "selection" | "slides" | "document";
 
+// Editor tasks must outlive their real execution time: an expired task that
+// still completes in the editor changes the document outside the AI turn's
+// review. Observed edit_batch p90 was 17s (max 20s) on the managed editor;
+// the AI worker waits up to 120s for a task.
+export const NATIVE_TASK_TTL_SECONDS = 120;
+
 const KEY_PROVIDERS = new Set([
   "openai_api",
   "anthropic_api",
@@ -675,7 +681,7 @@ export async function executeNativeTool(input: Record<string, unknown>) {
     const [created] = await db()`
       insert into spellbook_native_tasks
         (id,session_id,turn_id,request,status,save_revision_at_create,expires_at)
-      select ${id},s.id,${turnId},${db().json(input.request as never)},'queued',s.save_revision,now()+interval '25 seconds'
+      select ${id},s.id,${turnId},${db().json(input.request as never)},'queued',s.save_revision,now()+${NATIVE_TASK_TTL_SECONDS} * interval '1 second'
       from spellbook_native_sessions s
       join spellbook_native_turns t on t.id=${turnId} and t.session_id=s.id
       where s.id=${sessionId} and s.status='active' and s.expires_at > now()

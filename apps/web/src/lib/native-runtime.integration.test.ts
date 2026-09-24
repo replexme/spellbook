@@ -49,6 +49,7 @@ import {
   executeNativeTool,
   failNativeScan,
   markNativeUndo,
+  NATIVE_TASK_TTL_SECONDS,
   pollNativeSession,
   submitNativeTurn,
 } from "./native-runtime";
@@ -1020,6 +1021,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       operation: "task_create",
       request: { operation: "observe" },
     })) as { taskId: string };
+    const [lifetime] = await db()`
+      select extract(epoch from (expires_at - created_at))::float as seconds
+      from spellbook_native_tasks where id=${created.taskId}`;
+    // The task must not expire before the worker stops waiting for it.
+    expect(lifetime.seconds).toBeGreaterThanOrEqual(
+      NATIVE_TASK_TTL_SECONDS - 1,
+    );
     const polled = await pollNativeSession(session, f.documentId, 0);
     expect(polled.task).toMatchObject({
       id: created.taskId,
