@@ -89,7 +89,30 @@ export async function runBrowserTurn(
     lastBeat = Date.now();
     post("tools", { operation: "heartbeat" }).catch(() => undefined);
   };
+  const withoutPixels = (observation: NativeObservation) => ({
+    ...observation,
+    // Screenshots stay in this page; the record keeps which slide each showed.
+    images: (observation.images ?? []).map(({ slideIndex }) => ({
+      slideIndex,
+    })),
+  });
   const host = {
+    /** Records an observation this page already has, without asking the editor. */
+    async record(
+      request: Record<string, unknown>,
+      observation: NativeObservation,
+    ) {
+      const taskId = crypto.randomUUID();
+      await post("tools", { operation: "task_begin", taskId, request });
+      deps.onObservation(taskId, observation);
+      await post("tools", {
+        operation: "task_end",
+        taskId,
+        status: "completed",
+        result: withoutPixels(observation),
+      });
+      return observation;
+    },
     async call(request: Record<string, unknown>) {
       if (deps.signal.aborted) throw new Error("cancelled");
       const taskId = crypto.randomUUID();
@@ -122,13 +145,7 @@ export async function runBrowserTurn(
           operation: "task_end",
           taskId,
           status: "completed",
-          // Screenshots stay in this page; the record keeps which slide each showed.
-          result: {
-            ...observation,
-            images: (observation.images ?? []).map(({ slideIndex }) => ({
-              slideIndex,
-            })),
-          },
+          result: withoutPixels(observation),
         }).catch(() => undefined);
         return observation;
       } catch (error) {
@@ -154,9 +171,14 @@ export async function runBrowserTurn(
     // Same rule as the AI worker: the page's latest observation when it sent
     // one, otherwise a fresh look; a selection request with nothing selected
     // covers the active slide instead.
+    // The page's view is recorded as this request's first look, so the
+    // result card knows the state before the edit and can undo exactly it.
     const initial =
       job.initialObservation && typeof job.initialObservation === "object"
-        ? job.initialObservation
+        ? await host.record(
+            { operation: "observe", detailSlideIndex: null },
+            job.initialObservation,
+          )
         : await host.call({ operation: "observe" });
     const selected = Array.isArray(initial.selectedElementIds)
       ? (initial.selectedElementIds as string[])
