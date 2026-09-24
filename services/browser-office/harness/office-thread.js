@@ -215,17 +215,23 @@ function mutateAsset(request) {
     "video/webm": "webm",
   }[mediaType];
   if (!extension) throw new Error("unsupported_asset_type");
-  const path = `/tmp/spellbook/asset-${Date.now()}.${extension}`;
+  // The page writes audio and video where the engine's own file calls can
+  // read them (this thread's file system is a separate copy).
+  const path = request.assetPath;
+  if (
+    !isImage &&
+    (typeof path !== "string" ||
+      !new RegExp(
+        `^/tmp/spellbook-assets/[0-9a-f-]{36}\\.${extension}$`,
+        "u",
+      ).test(path))
+  )
+    throw new Error("invalid_asset_path");
   const undo = model.getUndoManager();
   const undoCount = undo.getAllUndoActionTitles().length;
   let contextOpen = false;
   let phase = "prepare_asset";
   try {
-    if (!isImage) {
-      FS.mkdirTree("/tmp/spellbook");
-      phase = "write_asset";
-      FS.writeFile(path, new Uint8Array(assetBytes));
-    }
     phase = "create_shape";
     const page = model.getDrawPages().getByIndex(slideIndex);
     const pageWidth = Number(page.getPropertyValue("Width")) || 28_000;
@@ -407,12 +413,6 @@ function mutateAsset(request) {
       `asset_${phase}:${error instanceof Error ? error.message || error.name : String(error)}`,
       { cause: error },
     );
-  } finally {
-    if (!isImage) {
-      try {
-        FS.unlink(path);
-      } catch {}
-    }
   }
 }
 

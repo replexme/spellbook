@@ -448,7 +448,16 @@ test("browser runtime decodes image and media assets without exposing model URLs
   assert.match(officeThreadSource, /property\(\s*"InputStream"/u);
   assert.match(officeThreadSource, /dispatch\("InsertAVMedia"/u);
   assert.match(officeThreadSource, /"SpellbookReplaceObject"/u);
-  assert.match(officeThreadSource, /FS\.unlink\(path\)/u);
+  // The engine reads media through the page's file system: the page writes
+  // and removes the file, the engine thread only takes its path.
+  assert.match(officeThreadSource, /request\.assetPath/u);
+  assert.doesNotMatch(officeThreadSource, /FS\.writeFile/u);
+  const appSource = readFileSync(
+    new URL("./harness/app.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(appSource, /assetPath: mediaPath/u);
+  assert.match(appSource, /FS\.unlink\(mediaPath\)/u);
 });
 
 test("browser adapter exposes only stock slide lifecycle on an unbuilt runtime", () => {

@@ -548,13 +548,43 @@ async function packageSectionsOf(bytes) {
   return packageSectionsByBytes.get(bytes);
 }
 
+const mediaFileExtensions = Object.freeze({
+  "audio/mpeg": "mp3",
+  "audio/wav": "wav",
+  "audio/ogg": "ogg",
+  "audio/mp4": "m4a",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+});
+
 async function requestNative(nativeRequest) {
-  return request("native", {
-    nativeRequest: {
-      ...nativeRequest,
-      packageSections: await packageSectionsOf(currentBytes),
-    },
-  });
+  // The engine reads audio and video with its own file calls, which go to
+  // this page's file system, not the engine thread's copy; write the file
+  // here and name it in the request.
+  const mediaPath =
+    ["insert_media", "replace_media"].includes(nativeRequest.operation) &&
+    nativeRequest.assetBytes instanceof ArrayBuffer &&
+    Object.hasOwn(mediaFileExtensions, nativeRequest.mediaType)
+      ? `/tmp/spellbook-assets/${crypto.randomUUID()}.${mediaFileExtensions[nativeRequest.mediaType]}`
+      : null;
+  if (mediaPath) {
+    FS.mkdirTree("/tmp/spellbook-assets");
+    FS.writeFile(mediaPath, new Uint8Array(nativeRequest.assetBytes));
+  }
+  try {
+    return await request("native", {
+      nativeRequest: {
+        ...nativeRequest,
+        ...(mediaPath ? { assetPath: mediaPath } : {}),
+        packageSections: await packageSectionsOf(currentBytes),
+      },
+    });
+  } finally {
+    if (mediaPath)
+      try {
+        FS.unlink(mediaPath);
+      } catch {}
+  }
 }
 
 async function withPackageDocumentMetadata(value) {
@@ -1087,14 +1117,7 @@ async function prepareProductPackageMutation(nativeRequest) {
         (isImage ? 5_000_000 : 25_000_000) ||
       (isImage
         ? !["image/png", "image/jpeg"].includes(nativeRequest.mediaType)
-        : ![
-            "audio/mpeg",
-            "audio/wav",
-            "audio/ogg",
-            "audio/mp4",
-            "video/mp4",
-            "video/webm",
-          ].includes(nativeRequest.mediaType))
+        : !Object.hasOwn(mediaFileExtensions, nativeRequest.mediaType))
     )
       throw new Error("invalid_asset");
     const beforeObservation = await observeNativeDocument();
