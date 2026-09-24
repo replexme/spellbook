@@ -262,6 +262,20 @@ function withCanonicalShapeIdentity(slides) {
         /^unnamed-com\.sun\.star\.[A-Za-z0-9.]+Shape$/u.test(element.name ?? "")
       )
         delete element.name;
+      // LibreOffice opens every PPTX audio or video as a presentation media
+      // object (oox Shape::createAndInsert), while one it inserts is a drawing
+      // media object. An embedded media URL names a package part that saving
+      // renames, so its digest changes although the media does not.
+      if (
+        /^com\.sun\.star\.(?:drawing|presentation)\.MediaShape$/u.test(
+          element.kind ?? "",
+        )
+      ) {
+        element.kind = "com.sun.star.drawing.MediaShape";
+        delete element.presentationObject;
+        if (element.media?.urlKind === "embedded")
+          delete element.media.sourceId;
+      }
     }
   }
   return slides;

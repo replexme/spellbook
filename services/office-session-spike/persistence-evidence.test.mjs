@@ -1430,3 +1430,30 @@ test("persistence ignores the text frame anchor of Fontwork, which its path over
     normalizeDocumentPersistenceState(state("BOTTOM", null)),
   );
 });
+
+test("persistence compares an embedded media object as LibreOffice reopens it", () => {
+  const state = (kind, presentationObject, sourceId) => ({
+    slides: [
+      {
+        slideIndex: 0,
+        elements: [
+          {
+            elementId: "e1",
+            kind,
+            presentationObject,
+            media: { sourceId, urlKind: "embedded", loop: false },
+          },
+        ],
+      },
+    ],
+    masters: [],
+  });
+  assert.deepEqual(
+    normalizeDocumentPersistenceState(
+      state("com.sun.star.drawing.MediaShape", false, "v2-live"),
+    ),
+    normalizeDocumentPersistenceState(
+      state("com.sun.star.presentation.MediaShape", true, "v2-reopened"),
+    ),
+  );
+});

@@ -279,8 +279,6 @@ function mutateAsset(request) {
     } else {
       dispatch("InsertAVMedia", [
         property("URL", zetajs.type.string, `file://${path}`),
-        property("Size.Width", zetajs.type.long, Math.round(pageWidth * 0.7)),
-        property("Size.Height", zetajs.type.long, Math.round(pageHeight * 0.7)),
         property("IsLink", zetajs.type.boolean, false),
       ]);
     }
@@ -318,6 +316,33 @@ function mutateAsset(request) {
           otherSlidesUnchanged,
         })}`,
       );
+    if (operation === "insert_media") {
+      // The engine sizes and centres new media on its window rather than the
+      // slide, which in this runtime put audio metres off the page. Centre it
+      // on the slide: video at 70% of the slide width in 16:9 (the browser
+      // engine cannot read a video's own size), audio at the engine's
+      // default 5 cm square.
+      const media = page.getByIndex(
+        Number(String(inserted[0].elementId).split("/")[1]),
+      );
+      let width = 5_000;
+      let height = 5_000;
+      if (mediaType.startsWith("video/")) {
+        width = Math.round(pageWidth * 0.7);
+        height = Math.round((width * 9) / 16);
+        if (height > pageHeight * 0.7) {
+          height = Math.round(pageHeight * 0.7);
+          width = Math.round((height * 16) / 9);
+        }
+      }
+      media.setSize(new css.awt.Size({ Width: width, Height: height }));
+      media.setPosition(
+        new css.awt.Point({
+          X: Math.round((pageWidth - width) / 2),
+          Y: Math.round((pageHeight - height) / 2),
+        }),
+      );
+    }
     const replacementTarget = operation.startsWith("replace_")
       ? before.slides[slideIndex].elements.find(
           (element) => element.elementId === elementId,

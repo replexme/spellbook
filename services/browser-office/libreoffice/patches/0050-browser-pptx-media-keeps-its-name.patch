@@ -1,0 +1,26 @@
+diff --git a/oox/source/export/shapes.cxx b/oox/source/export/shapes.cxx
+--- a/oox/source/export/shapes.cxx
++++ b/oox/source/export/shapes.cxx
+@@ -67,6 +67,7 @@
+ #include <com/sun/star/presentation/ClickAction.hpp>
+ #include <com/sun/star/drawing/XGluePointsSupplier.hpp>
+ #include <com/sun/star/container/XIdentifierAccess.hpp>
++#include <com/sun/star/container/XNamed.hpp>
+ #include <com/sun/star/table/BorderLineStyle.hpp>
+ #include <tools/globname.hxx>
+ #include <comphelper/classids.hxx>
+@@ -2892,6 +2893,14 @@ OUString ShapeExport::GetShapeName(const Reference<XShape>& xShape)
+ 
+     if (GetProperty(rXPropSet, "Name"))
+         mAny >>= sName;
++    // Spellbook: a media shape's property set has no "Name", so its name was
++    // lost on save; the shape's XNamed always carries it.
++    if (sName.isEmpty())
++    {
++        Reference<container::XNamed> xNamed(xShape, UNO_QUERY);
++        if (xNamed.is())
++            sName = xNamed->getName();
++    }
+     return sName;
+ }
+ 
