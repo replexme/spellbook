@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Korean fonts written into the browser engine's file system before it starts. Same design as the server editor's Noto Sans CJK KR, so line breaks match.",
+  "description": "Files written into the browser engine's file system before it starts: Korean fonts (the same design and advances as the server editor's Noto Sans CJK KR), the server's font rules, and the Korean user interface setting.",
   "source": {
     "repository": "https://github.com/notofonts/noto-cjk",
     "commit": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
@@ -24,5 +24,6 @@
     "../fonts/spellbook-font-aliases.conf",
     "../fonts/spellbook-korean-fallback.conf",
     "fonts/spellbook-browser-korean.conf"
-  ]
+  ],
+  "registry": ["registry/spellbook-korean-ui.xcd"]
 }

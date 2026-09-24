@@ -143,6 +143,15 @@ Patch `0045` keeps a connector attached to a shape the save writes after it:
 the connection assigns that shape's id, and writing a second id for the shape
 left the connection pointing at no shape at all, so PowerPoint and a reopened
 deck showed the connector detached.
+The `browser-undo-v32` series adds patch `0046`, which packages the Korean
+language pack and UI translations in the browser file system. The build
+already configured `--with-lang="en-US ko"`, but the file list of the
+WebAssembly image named only the en-US language pack, so the editor showed
+its menus in English (production 2026-09-24). The patch lists every built
+language's pack and, once all translations are built, their `.mo` files;
+the build fails when the Korean pack is missing. It changes no document
+code. The page selects Korean for the UI (`registry/spellbook-korean-ui.xcd`)
+and writes the Korean fonts the image does not carry (`runtime-files.json`).
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

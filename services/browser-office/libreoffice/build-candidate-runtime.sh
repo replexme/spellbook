@@ -249,6 +249,18 @@ for artifact in soffice.data.js.metadata soffice.data; do
   fi
   install -m 0644 "$package_root/$artifact" "$SPELLBOOK_BROWSER_OUTPUT_DIR/$artifact"
 done
+# The browser editor shows its UI in Korean (patch 0046): the Korean language
+# pack and UI translations must be in the packaged file system.
+for required in \
+  /instdir/share/registry/Langpack-ko.xcd \
+  /instdir/share/registry/res/registry_ko.xcd \
+  /instdir/program/resource/ko/LC_MESSAGES/sd.mo \
+  /instdir/program/resource/ko/LC_MESSAGES/svx.mo; do
+  if ! grep -qF "\"$required\"" "$SPELLBOOK_BROWSER_OUTPUT_DIR/soffice.data.js.metadata"; then
+    echo "The WASM package does not contain $required." >&2
+    exit 1
+  fi
+done
 
 compression_cache="$SPELLBOOK_BROWSER_BUILD_ROOT/compression-cache"
 mkdir -p "$compression_cache"

@@ -242,6 +242,7 @@ test("browser LibreOffice patches name their complete source surface", () => {
     "sd/source/ui/view/drviews7.cxx",
     "sd/source/ui/view/unmodpg.cxx",
     "solenv/gbuild/platform/EMSCRIPTEN_INTEL_GCC.mk",
+    "static/CustomTarget_emscripten_fs_image.mk",
     "svx/source/inc/cell.hxx",
     "svx/source/sdr/contact/viewcontactofsdrmediaobj.cxx",
     "svx/source/sdr/contact/viewobjectcontactofsdrmediaobj.cxx",

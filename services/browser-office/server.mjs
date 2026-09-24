@@ -229,9 +229,12 @@ export function buildRoutes(
       },
     ),
   );
-  // Korean fonts and font rules the engine does not carry. The page writes
-  // them into the engine's file system before it starts (fonts.json).
-  const fonts = JSON.parse(readFileSync(path.join(root, "fonts.json"), "utf8"));
+  // Korean fonts, font rules and the Korean UI setting the engine does not
+  // carry. The page writes them into the engine's file system before it
+  // starts (runtime-files.json).
+  const fonts = JSON.parse(
+    readFileSync(path.join(root, "runtime-files.json"), "utf8"),
+  );
   const install = [];
   for (const font of fonts.fonts) {
     routes.set(
@@ -265,8 +268,24 @@ export function buildRoutes(
       name,
     });
   });
+  for (const file of fonts.registry) {
+    const name = path.basename(file);
+    routes.set(
+      `/runtime/registry/${name}`,
+      route(
+        path.join(root, file),
+        "application/xml; charset=utf-8",
+        upstream.requiredAssetHeaders,
+      ),
+    );
+    install.push({
+      url: `registry/${name}`,
+      directory: "/instdir/share/registry",
+      name,
+    });
+  }
   routes.set(
-    "/runtime/fonts.json",
+    "/runtime/files.json",
     inlineRoute(
       JSON.stringify(install),
       "application/json",

@@ -306,7 +306,7 @@ export async function exportStatic({
     licenses: licensePage({
       upstream: admitted.upstream,
       fonts: JSON.parse(
-        await readFile(path.join(serviceRoot, "fonts.json"), "utf8"),
+        await readFile(path.join(serviceRoot, "runtime-files.json"), "utf8"),
       ),
       publicCommit: admitted.receipt.spellbookSourceRevision,
       receiptSha256: admitted.receiptSha256,

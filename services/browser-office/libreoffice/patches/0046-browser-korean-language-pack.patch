@@ -1,0 +1,35 @@
+diff --git a/static/CustomTarget_emscripten_fs_image.mk b/static/CustomTarget_emscripten_fs_image.mk
+--- a/static/CustomTarget_emscripten_fs_image.mk
++++ b/static/CustomTarget_emscripten_fs_image.mk
+@@ -1762,6 +1762,16 @@ endif # !ENABLE_WASM_STRIP_CHART
+ $(foreach theme,$(WITH_THEMES), \
+     $(eval gb_emscripten_fs_image_files += $(INSTROOT)/$(LIBO_SHARE_FOLDER)/config/images_$(theme).zip))
+ 
++# Spellbook: the language packs of every configured language besides en-US,
++# so the browser editor can show its menus and dialogs in Korean. The UI
++# translations (.mo) are added when the file list is written, after all of
++# them are built (see the AllResources prerequisite below).
++$(foreach lang,$(gb_AllLangMoTarget_LANGS), \
++    $(eval gb_emscripten_fs_image_files += \
++        $(INSTROOT)/$(LIBO_SHARE_FOLDER)/registry/Langpack-$(lang).xcd \
++        $(INSTROOT)/$(LIBO_SHARE_FOLDER)/registry/res/fcfg_langpack_$(lang).xcd \
++        $(INSTROOT)/$(LIBO_SHARE_FOLDER)/registry/res/registry_$(lang).xcd))
++
+ ifeq ($(WITH_FONTS),TRUE)
+ gb_emscripten_fs_image_autoinstall += $(call gb_AutoInstall_get_target,ooo_fonts)
+ endif
+@@ -1794,11 +1804,13 @@ $(emscripten_fs_image_WORKDIR)/soffice.data.concat_lists: $(gb_emscripten_fs_ima
+ 	    $(shell cat $(call gb_Package_get_target,$(list)) >> $@.tmp))
+ 	$(shell mv $@.tmp $@)
+ 
+-gb_emscripten_fs_image_all_files = $(gb_emscripten_fs_image_files) $(shell cat $(emscripten_fs_image_WORKDIR)/soffice.data.concat_lists)
++gb_emscripten_fs_image_all_files = $(gb_emscripten_fs_image_files) $(shell cat $(emscripten_fs_image_WORKDIR)/soffice.data.concat_lists) \
++    $(foreach lang,$(gb_AllLangMoTarget_LANGS),$(wildcard $(INSTROOT)/$(LIBO_SHARE_RESOURCE_FOLDER)/$(shell $(SRCDIR)/solenv/bin/localestr $(lang))/LC_MESSAGES/*.mo))
+ 
+ .PHONY: $(emscripten_fs_image_WORKDIR)/soffice.data.filelist
+ $(emscripten_fs_image_WORKDIR)/soffice.data.filelist: \
+ 		$(call gb_InstallModule_get_target,scp2/ooo) \
++		$(call gb_Postprocess_get_target,AllResources) \
+ 		$(emscripten_fs_image_WORKDIR)/soffice.data.concat_lists \
+ 		$(gb_emscripten_fs_image_files) \
+ 		| $(emscripten_fs_image_WORKDIR)/.dir

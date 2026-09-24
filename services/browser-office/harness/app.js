@@ -3163,21 +3163,22 @@ globalThis.Module = {
     new URL("/harness/office-thread.js", location.href).href,
   ],
   locateFile: (path, prefix) => (prefix || runtimeBase) + path,
-  preRun: [installRuntimeFonts],
+  preRun: [installRuntimeFiles],
 };
 
-// The engine carries no Korean fonts. Write them, with the font rules, into
-// its file system before it starts; runtime/fonts.json lists the files.
-function installRuntimeFonts() {
-  Module.addRunDependency("spellbook-fonts");
+// The engine carries no Korean fonts or Korean UI setting. Write them, with
+// the font rules, into its file system before it starts; runtime/files.json
+// lists the files.
+function installRuntimeFiles() {
+  Module.addRunDependency("spellbook-runtime-files");
   (async () => {
-    const listing = await networkFetch(new URL("fonts.json", runtimeBase));
-    if (!listing.ok) throw new Error("The editor font list failed to load.");
+    const listing = await networkFetch(new URL("files.json", runtimeBase));
+    if (!listing.ok) throw new Error("The editor file list failed to load.");
     const files = await Promise.all(
       (await listing.json()).map(async (file) => {
         const response = await networkFetch(new URL(file.url, runtimeBase));
         if (!response.ok)
-          throw new Error(`The editor font ${file.name} failed to load.`);
+          throw new Error(`The editor file ${file.name} failed to load.`);
         return { ...file, bytes: new Uint8Array(await response.arrayBuffer()) };
       }),
     );
@@ -3193,7 +3194,7 @@ function installRuntimeFonts() {
       );
     }
   })().then(
-    () => Module.removeRunDependency("spellbook-fonts"),
+    () => Module.removeRunDependency("spellbook-runtime-files"),
     (error) => {
       body.dataset.error = error.message;
       setState("error", error.message);

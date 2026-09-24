@@ -14,7 +14,7 @@ const outputRoot = path.resolve(
 );
 
 const fonts = JSON.parse(
-  await readFile(path.join(serviceRoot, "fonts.json"), "utf8"),
+  await readFile(path.join(serviceRoot, "runtime-files.json"), "utf8"),
 );
 const fontSource = new URL(fonts.source.repository).pathname;
 await mkdir(path.join(outputRoot, "fonts"), { recursive: true });
@@ -24,7 +24,7 @@ const downloadableAssets = [
     url: new URL(asset.path, manifest.runtimeBaseUrl),
   })),
   manifest.javascriptBridge.runtimeAsset,
-  // Korean fonts the engine does not carry (see fonts.json).
+  // Korean fonts the engine does not carry (see runtime-files.json).
   ...fonts.fonts.map((font) => ({
     ...font,
     storedPath: `fonts/${font.file}`,
