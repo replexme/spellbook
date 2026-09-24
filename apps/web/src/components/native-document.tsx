@@ -300,15 +300,32 @@ export default function NativeDocument({
   );
   const loadModels = useCallback(
     async (signal: AbortSignal): Promise<{ models: AvailableModel[] }> => {
-      if (ai.mode === "local") return ai.localRequest("/v1/models");
-      const response = await fetch("/api/ai/models", {
-        cache: "no-store",
-        signal,
-      });
-      if (!response.ok) throw new Error("models_unavailable");
-      return response.json();
+      // API-key models do not depend on the AI worker being reachable.
+      let serverModels: AvailableModel[] = [];
+      let failure: unknown = null;
+      try {
+        if (ai.mode === "local")
+          serverModels = (
+            await ai.localRequest<{ models: AvailableModel[] }>("/v1/models")
+          ).models;
+        else {
+          const response = await fetch("/api/ai/models", {
+            cache: "no-store",
+            signal,
+          });
+          if (!response.ok) throw new Error("models_unavailable");
+          serverModels = (
+            (await response.json()) as { models: AvailableModel[] }
+          ).models;
+        }
+      } catch (error) {
+        failure = error;
+      }
+      const models = ai.withBrowserModels(serverModels ?? []);
+      if (!models.length && failure) throw failure;
+      return { models };
     },
-    [ai.localRequest, ai.mode],
+    [ai.localRequest, ai.mode, ai.withBrowserModels],
   );
 
   const preview = summary?.previews[0] ?? null;

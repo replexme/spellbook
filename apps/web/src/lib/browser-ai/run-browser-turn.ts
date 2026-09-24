@@ -131,7 +131,13 @@ export async function runBrowserTurn(
           transfer,
         )) as NativeObservation;
         record.status = "completed";
-        record.result = observation;
+        // Screenshots stay in this page; the record keeps which slide each showed.
+        record.result = {
+          ...observation,
+          images: (observation.images ?? []).map(({ slideIndex }) => ({
+            slideIndex,
+          })),
+        };
         deps.onObservation(id, observation);
         return observation;
       } catch (error) {
