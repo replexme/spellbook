@@ -1,0 +1,49 @@
+diff --git a/vcl/qt5/QtGraphics_Text.cxx b/vcl/qt5/QtGraphics_Text.cxx
+--- a/vcl/qt5/QtGraphics_Text.cxx
++++ b/vcl/qt5/QtGraphics_Text.cxx
+@@ -39,6 +39,11 @@
+ 
+ #ifdef EMSCRIPTEN
+ #include <set>
++#include <i18nlangtag/languagetag.hxx>
++#include <vcl/settings.hxx>
++#include <vcl/svapp.hxx>
++#include <QtGui/QFont>
++#include <QtGui/QGuiApplication>
+ #endif
+ 
+ void QtGraphics::SetTextColor(Color nColor) { m_aTextColor = nColor; }
+@@ -128,6 +133,33 @@ void QtGraphics::GetDevFontList(vcl::font::PhysicalFontCollection* pPFC)
+ #endif
+     }
+ 
++#ifdef EMSCRIPTEN
++    // Spellbook: Qt draws the menu bar and its own widgets with its default
++    // font and, in WebAssembly, falls back only to the fonts it bundles, none
++    // of which has Korean, Japanese or Chinese glyphs. For such an interface
++    // language, draw them with a registered font that covers its script.
++    {
++        const OUString aLanguage = Application::GetSettings().GetUILanguageTag().getLanguage();
++        QFontDatabase::WritingSystem eSystem = QFontDatabase::Any;
++        if (aLanguage == "ko")
++            eSystem = QFontDatabase::Korean;
++        else if (aLanguage == "ja")
++            eSystem = QFontDatabase::Japanese;
++        else if (aLanguage == "zh")
++            eSystem = QFontDatabase::SimplifiedChinese;
++        if (eSystem != QFontDatabase::Any)
++        {
++            const QStringList aFamilies = QFontDatabase().families(eSystem);
++            if (!aFamilies.isEmpty())
++            {
++                QFont aFont = QGuiApplication::font();
++                aFont.setFamily(aFamilies.first());
++                QGuiApplication::setFont(aFont);
++            }
++        }
++    }
++#endif
++
+     if (bUseFontconfig)
+         SalGenericInstance::RegisterFontSubstitutors(pPFC);
+ 

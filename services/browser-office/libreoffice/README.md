@@ -165,6 +165,11 @@ importing, exporting and playback settings need no player, and the build
 disables GStreamer and fails when avmedia is off. With WordArt, whose shape
 type patch `0030` already exposes, the browser runtime now has no operation
 limitations of its own.
+The `browser-undo-v34` series adds patch `0049`. Qt draws the menu bar and its
+own widgets with its default font and, in WebAssembly, falls back only to the
+fonts it bundles, so the Korean menus drew as empty boxes while LibreOffice's
+own panels drew Korean. For a Korean, Japanese or Chinese interface language
+Qt now draws with a registered font that covers the script.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves
