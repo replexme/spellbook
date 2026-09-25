@@ -8273,12 +8273,26 @@ function spellbookDocumentOperation(request) {
         prop("TransformPosX", uno.type.long, Math.round(command.x)),
         prop("TransformPosY", uno.type.long, Math.round(command.y)),
       ]);
-    else if (command.op === "resize")
-      dispatch(".uno:TransformDialog", [
-        prop("TransformWidth", uno.type.long, Math.round(command.width)),
-        prop("TransformHeight", uno.type.long, Math.round(command.height)),
-      ]);
-    else if (command.op === "underline")
+    else if (command.op === "resize") {
+      // A text box that fits its height to its text keeps that height, so an
+      // explicit new height turns the fitting off in the same Undo step.
+      const releasesFittedHeight =
+        element.textAutoGrowHeight === true &&
+        Math.round(command.height) !== element.height;
+      const ownsUndoContext =
+        releasesFittedHeight && !request.transactionActive;
+      if (ownsUndoContext) undo.enterUndoContext("AI presentation edit");
+      try {
+        if (releasesFittedHeight)
+          shape.setPropertyValue("TextAutoGrowHeight", false);
+        dispatch(".uno:TransformDialog", [
+          prop("TransformWidth", uno.type.long, Math.round(command.width)),
+          prop("TransformHeight", uno.type.long, Math.round(command.height)),
+        ]);
+      } finally {
+        if (ownsUndoContext) undo.leaveUndoContext();
+      }
+    } else if (command.op === "underline")
       dispatch(".uno:Underline", [
         prop("Underline", uno.type.boolean, command.underline),
       ]);
