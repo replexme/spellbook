@@ -809,6 +809,11 @@ async function undoMutation() {
 }
 
 async function observeNativeDocument() {
+  return (await observeNativeDocumentChanges()).value;
+}
+
+// The observation with the engine's change count for the state it read.
+async function observeNativeDocumentChanges() {
   const result = await requestNative({
     operation: "observe",
     captureSlideIndexes: [],
@@ -819,7 +824,7 @@ async function observeNativeDocument() {
     !result.value.revision
   )
     throw new Error("Browser Office observation has no document revision.");
-  return result.value;
+  return result;
 }
 
 // A small sample of the visible canvas. Comparing samples tells whether the
@@ -2475,6 +2480,8 @@ async function handleProductHostMessage(message) {
       markBrowserProbePhase("prepare");
       const prepared = await prepareProductPackageMutation(message.request);
       let value;
+      // The engine reply whose state became the reconciled one, when known.
+      let nativeResult = null;
       if (prepared?.persistence === "package_reload") {
         markBrowserProbePhase("package-reload");
         value = await commitProductPackageReload(prepared);
@@ -2486,6 +2493,7 @@ async function handleProductHostMessage(message) {
           prepared,
           result.value,
         );
+        if (!committed || committed === result.value) nativeResult = result;
         value = await withPackageDocumentMetadata(committed ?? result.value);
       }
       markBrowserProbePhase("visual-capture");
@@ -2497,8 +2505,10 @@ async function handleProductHostMessage(message) {
           commands.length > 0 ||
           Boolean(unreconciledModelRevision),
       );
-      if (value?.revision === reconciledModelRevision)
+      if (value?.revision === reconciledModelRevision) {
         rememberReconciledObservation(value);
+        noteCheckpointedDocumentChanges(nativeResult);
+      }
       markBrowserProbePhase("complete");
       postHost({ id: message.id, value });
     } catch (error) {
@@ -2553,6 +2563,17 @@ let lastSelectionKey = "";
 let selectionTick = 0;
 let checkpointInFlight = false;
 let lastCheckpointAt = 0;
+// The engine's change count when the live document last matched the
+// journaled state. The heartbeat reads the whole deck, which takes seconds to
+// minutes on a large deck, only after the count moves.
+let checkpointedDocumentChanges = null;
+function noteCheckpointedDocumentChanges(result) {
+  checkpointedDocumentChanges =
+    result?.value?.revision === reconciledModelRevision &&
+    Number.isSafeInteger(result.documentChanges)
+      ? result.documentChanges
+      : null;
+}
 function startProductHeartbeat() {
   if (!productMode || !runtimeReady || !hostPort || productHeartbeat) return;
   const poll = () => {
@@ -2576,14 +2597,21 @@ function startProductHeartbeat() {
           postHost({ type: "selection", value: selection.value });
         }
       }
-      if (modified && Date.now() - lastCheckpointAt >= 10_000) {
+      if (
+        modified &&
+        Date.now() - lastCheckpointAt >= 10_000 &&
+        (!Number.isSafeInteger(current.documentChanges) ||
+          current.documentChanges !== checkpointedDocumentChanges)
+      ) {
         // A failed checkpoint waits for the next interval instead of
         // re-serializing the whole document on every tick.
         lastCheckpointAt = Date.now();
-        const live = await observeNativeDocument();
+        const observedLive = await observeNativeDocumentChanges();
+        const live = observedLive.value;
         if (live.revision !== reconciledModelRevision)
           await checkpointLiveNativeState(live, "manual_autosave");
         else await persistCheckpoint();
+        noteCheckpointedDocumentChanges(observedLive);
         lastCheckpointAt = Date.now();
       }
     }).then(

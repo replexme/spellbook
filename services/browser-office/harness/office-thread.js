@@ -476,9 +476,52 @@ function closeDocument() {
   model = undefined;
 }
 
+// Counts every change to the open document: each Undo action added, undone
+// or redone, and each modification broadcast. The page compares counts to
+// skip reading the whole deck when nothing changed, so a count must never
+// miss a change; null means the listeners could not be registered.
+let documentChanges = 0;
+let documentChangesWatched = false;
+let documentChangeListener = null;
+
+function watchDocumentChanges() {
+  documentChangesWatched = false;
+  const counted = () => {
+    documentChanges += 1;
+  };
+  try {
+    documentChangeListener ??= zetajs.unoObject(
+      [css.util.XModifyListener, css.document.XUndoManagerListener],
+      {
+        disposing() {},
+        modified: counted,
+        undoActionAdded: counted,
+        actionUndone: counted,
+        actionRedone: counted,
+        allActionsCleared: counted,
+        redoActionsCleared: counted,
+        resetAll: counted,
+        enteredContext: counted,
+        enteredHiddenContext: counted,
+        leftContext: counted,
+        leftHiddenContext: counted,
+        cancelledContext: counted,
+      },
+    );
+    model.addModifyListener(documentChangeListener);
+    model.getUndoManager().addUndoManagerListener(documentChangeListener);
+    documentChanges += 1;
+    documentChangesWatched = true;
+  } catch {}
+}
+
+const documentChangeCount = () =>
+  documentChangesWatched ? documentChanges : null;
+
 function openDocument(path, requestId) {
   closeDocument();
   model = desktop.loadComponentFromURL(`file://${path}`, "_default", 0, []);
+  watchDocumentChanges();
   const controller = model.getCurrentController();
   controller.getFrame().getContainerWindow().FullScreen = true;
   post("document-ready", { requestId, slideCount: slideCount() });
@@ -589,6 +632,8 @@ function start() {
                   mutationContracts: spellbookMutationContracts,
                   nativeAdapter,
                 }),
+            // Read after the operation: the count of the state it returns.
+            documentChanges: documentChangeCount(),
           });
           break;
         case "render-slide": {
@@ -660,6 +705,7 @@ function start() {
             requestId,
             modified: Boolean(model?.isModified()),
             slideCount: slideCount(),
+            documentChanges: documentChangeCount(),
           });
           break;
         case "store":
