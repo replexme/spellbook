@@ -9,12 +9,12 @@
     "candidateCommit": "dced3bc711d18407a2cc2400eb46e8261b663d95"
   },
   "sourceCandidate": {
-    "patchLevel": "browser-undo-v35",
+    "patchLevel": "browser-undo-v34",
     "wasmModules": ["calc", "writer", "impress"],
     "patchSeriesReady": true,
     "buildReady": false,
     "nativeSlideStructureReady": false,
-    "patchSeriesSha256": "68655cd561ddcbfb8774f3e5f1c0a41e2dd090fb25bde0df80b82b1c749d3f43",
+    "patchSeriesSha256": "0d9ba11772ffdd978a20eb7e7d7463d2dda2f27b1d1473cddb8dde05e090705c",
     "patches": [
       "libreoffice/patches/0001-core-undo-identity.patch",
       "libreoffice/patches/0002-generic-pptx-edit-invariants.patch",
@@ -64,7 +64,7 @@
       "libreoffice/patches/0046-browser-korean-language-pack.patch",
       "libreoffice/patches/0047-browser-qt-uses-every-installed-font.patch",
       "libreoffice/patches/0048-browser-keeps-audio-and-video.patch",
-      "libreoffice/patches/0049-browser-qt-application-font-covers-korean.patch",
+      "libreoffice/patches/0049-browser-qt-widgets-fall-back-to-cjk-fonts.patch",
       "libreoffice/patches/0050-browser-pptx-media-keeps-its-name.patch"
     ],
     "invariants": [
