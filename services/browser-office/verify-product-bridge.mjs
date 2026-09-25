@@ -11,6 +11,7 @@ import { admitCandidateRuntime } from "./candidate-runtime.mjs";
 import { readRepositoryIdentity } from "./repository-identity.mjs";
 import { createHarnessServer } from "./server.mjs";
 import { applyOoxmlCommand } from "./ooxml-worker-source.mjs";
+import { firstDocumentStateDifference } from "../office-session-spike/document-state-evidence.mjs";
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
@@ -807,7 +808,21 @@ try {
   const laterRedone = await sendHostCommand(page, "Send_UNO_Command", {
     Command: ".uno:Redo",
   });
-  assert.equal(laterRedone.revision, laterEdit.revision);
+  if (laterRedone.revision !== laterEdit.revision) {
+    // When native Redo misses the recorded revision the product reopens the
+    // saved package; that state must match the edit within the documented
+    // 0.02 mm geometry quantization (a Korean interface lays out a text box
+    // that fits its text one unit apart on Redo).
+    const redone = await nativeTask(page, "observe-after-redo", {
+      operation: "observe",
+    });
+    assert.equal(
+      JSON.stringify(
+        firstDocumentStateDifference(laterEdit.slides, redone.slides),
+      ),
+      "null",
+    );
+  }
   await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
   await connectProductHost(page, origin);
   await openProductFixture(

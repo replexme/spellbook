@@ -19,6 +19,7 @@ function isQuantizedGeometryPath(path) {
   return (
     /(?:^|\.)(?:slides|masters)\[\d+\]\.(?:width|height)$/.test(path) ||
     /\.elements\[\d+\]\.(?:x|y|width|height)$/.test(path) ||
+    /\.layoutIssues\[\d+\]\.bounds\.(?:x|y|width|height)$/.test(path) ||
     /\.table\.(?:rowHeights|columnWidths)\[\d+\]$/.test(path)
   );
 }

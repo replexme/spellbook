@@ -112,3 +112,20 @@ test("revision state leaves out a master's shape count and live element handles"
     revisionDocumentState(state(4, "a", "Other")),
   );
 });
+
+test("layout issue bounds follow the element geometry quantization", () => {
+  const slides = (x) => [
+    {
+      elements: [{ elementId: "0/0", x, y: 0, width: 10, height: 10 }],
+      layoutIssues: [{ kind: "out_of_slide_bounds", bounds: { x, y: 0 } }],
+    },
+  ];
+  assert.equal(
+    firstDocumentStateDifference(slides(-1794), slides(-1795)),
+    null,
+  );
+  assert.notEqual(
+    firstDocumentStateDifference(slides(-1794), slides(-1800)),
+    null,
+  );
+});
