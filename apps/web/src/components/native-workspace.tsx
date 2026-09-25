@@ -430,20 +430,13 @@ export function NativeWorkspace({
         browserRun.current?.abort();
         // The editor draws the slide in view before the request goes out, so
         // the result card has a "before" picture even when the AI edits that
-        // slide without looking first. The editor handles this page's calls
-        // in order, so the drawing precedes every edit of the request.
-        const viewedSlide = Number(latestObservation.current?.activeSlide);
-        const startImage =
-          Number.isSafeInteger(viewedSlide) && viewedSlide >= 0
-            ? callEditor(
-                {
-                  operation: "observe",
-                  detailSlideIndex: null,
-                  captureSlideIndexes: [viewedSlide],
-                },
-                30_000,
-              ).catch(() => null)
-            : Promise.resolve(null);
+        // slide without looking first. An observation draws the slide in view
+        // by itself, and the editor handles this page's calls in order, so the
+        // drawing precedes every edit of the request.
+        const startImage = callEditor(
+          { operation: "observe", detailSlideIndex: null },
+          30_000,
+        ).catch(() => null);
         const submitted = await api("chat", {
           text: pending.draft,
           permission: pending.permission,
