@@ -1,7 +1,8 @@
 # Browser Office runtime
 
-This directory makes the client-side LibreOffice experiment reproducible. It
-does not make it the default Spellbook editor yet.
+This directory builds and verifies the browser editor: LibreOffice compiled to
+WebAssembly, run in the user's browser. The managed Spellbook service serves it
+on its own site; it is not yet the default editor there (status below).
 
 The first real browser probe used the official ZetaOffice Web Office demo and
 proved this vertical with a PPTX: load, show an editable Impress canvas, insert
@@ -100,11 +101,19 @@ six-step Undo and reopen checks.
 The cumulative candidate implements the complete 97-operation source contract,
 including semantic diagrams, equations, image/media insertion and
 identity-preserving replacement, media playback, Fontwork, 3D materials,
-reading order and animation lifecycle. Promotion still requires Korean IME and
-accessibility checks, product-integrated OPFS recovery, the final patched
-browser LibreOffice build, public-corpus render comparison and a PowerPoint
-platform matrix. Until those checks pass, `status` stays
-`viability_probe_only` and the server editor remains the runtime fallback.
+reading order and animation lifecycle. Media playback settings change in the
+editor but LibreOffice's PPTX filter does not save them, so the save check
+refuses that edit.
+
+Status on 2026-09-25: Korean, Japanese and Chinese input methods work through a
+hidden text field over the canvas (`text-input-bridge.mjs`), and a production
+smoke typed Korean, saved it automatically and undid it from the host's top
+bar. The product bridge, including OPFS recovery, passes in Cloud Build. The
+engine's menus, context menus and tooltips still draw Korean as boxes until
+the `browser-undo-v35` build. Accessibility checks, public-corpus render
+comparison and the PowerPoint platform matrix are not done, so `status` stays
+`viability_probe_only`. Browsers that cannot isolate the editor frame are
+refused rather than served by the server editor.
 
 For direct human edits and native AI transactions, the browser now keeps the
 uploaded package as the file authority. It serializes the edited model, also
