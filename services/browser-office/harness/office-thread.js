@@ -277,8 +277,13 @@ function mutateAsset(request) {
       );
       page.add(shape);
     } else {
+      // The size argument is required: without it the engine probes the
+      // file with a media player, which the browser build does not have,
+      // and refuses to insert.
       dispatch("InsertAVMedia", [
         property("URL", zetajs.type.string, `file://${path}`),
+        property("Size.Width", zetajs.type.long, Math.round(pageWidth * 0.7)),
+        property("Size.Height", zetajs.type.long, Math.round(pageHeight * 0.7)),
         property("IsLink", zetajs.type.boolean, false),
       ]);
     }
