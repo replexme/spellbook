@@ -735,7 +735,11 @@ function relationshipAdopter(part, original, merged) {
       for (const element of [node, ...node.getElementsByTagName("*")])
         for (let index = 0; index < element.attributes.length; index += 1) {
           const attribute = element.attributes.item(index);
-          if (attribute.namespaceURI !== relationshipAttributeNamespace)
+          // An empty id refers to no part (PowerPoint's media hyperlink).
+          if (
+            attribute.namespaceURI !== relationshipAttributeNamespace ||
+            !attribute.value
+          )
             continue;
           const relationship = authored.get(attribute.value);
           if (!relationship || !document) return false;
@@ -915,7 +919,12 @@ function repairChangedTableCellInsets(
 // author's .rels are retained, rewrite each r:* reference to the author's id
 // with the same relationship type and resolved target. Returns null when a
 // reference has no unique counterpart, so the caller refuses the candidate.
-function remapPartRelationshipIds(part, bytes, originalRels, engineRels) {
+export function remapPartRelationshipIds(
+  part,
+  bytes,
+  originalRels,
+  engineRels,
+) {
   if (!bytes || !originalRels || !engineRels || !part.endsWith(".xml"))
     return null;
   const relationshipPath = relationshipsPath(part);
@@ -938,7 +947,11 @@ function remapPartRelationshipIds(part, bytes, originalRels, engineRels) {
   ])
     for (let index = 0; index < element.attributes.length; index += 1) {
       const attribute = element.attributes.item(index);
-      if (attribute.namespaceURI !== relationshipAttributeNamespace) continue;
+      if (
+        attribute.namespaceURI !== relationshipAttributeNamespace ||
+        !attribute.value
+      )
+        continue;
       const key = engineById.get(attribute.value);
       const originalId = key ? originalByKey.get(key) : undefined;
       if (!originalId) return null;
@@ -1330,7 +1343,10 @@ function referencedRelationshipsStillMatch(
   for (const element of edited.getElementsByTagName("*")) {
     for (let index = 0; index < element.attributes.length; index += 1) {
       const attribute = element.attributes.item(index);
-      if (attribute.namespaceURI === relationshipAttributeNamespace)
+      if (
+        attribute.namespaceURI === relationshipAttributeNamespace &&
+        attribute.value
+      )
         referencedIds.add(attribute.value);
     }
   }

@@ -11,6 +11,7 @@ import {
   inspectOoxmlDocument,
   preserveOriginalPptxParts,
   verifyPersistedElementMutation,
+  remapPartRelationshipIds,
 } from "./ooxml-worker-source.mjs";
 import { persistedSlideTopologyMatches } from "./harness/product-persistence.mjs";
 
@@ -2957,4 +2958,27 @@ test("native snapshot keeps a slide the engine only renumbered as authored", asy
   assert.ok(result.report.changedParts.includes(paths[0]));
   assert.ok(!result.report.changedParts.includes(paths[1]));
   assert.deepEqual(unzipSync(result.bytes)[paths[1]], original[paths[1]]);
+});
+
+test("relationship remapping leaves an empty relationship id alone", () => {
+  const part = "ppt/slides/slide1.xml";
+  const relationships = (entries) =>
+    strToU8(
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${entries}</Relationships>`,
+    );
+  const image = (id) =>
+    `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.png"/>`;
+  const slide = strToU8(
+    '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:pic><p:nvPicPr><p:cNvPr id="2" name="Media 1"><a:hlinkClick r:id="" action="ppaction://media"/></p:cNvPr></p:nvPicPr><p:blipFill><a:blip r:embed="rId1"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>',
+  );
+  const remapped = strFromU8(
+    remapPartRelationshipIds(
+      part,
+      slide,
+      relationships(image("rId5")),
+      relationships(image("rId1")),
+    ),
+  );
+  assert.match(remapped, /r:embed="rId5"/u);
+  assert.match(remapped, /r:id=""/u);
 });
