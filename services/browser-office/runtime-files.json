@@ -25,5 +25,8 @@
     "../fonts/spellbook-korean-fallback.conf",
     "fonts/spellbook-browser-korean.conf"
   ],
-  "registry": ["registry/spellbook-korean-ui.xcd"]
+  "registry": [
+    "registry/spellbook-korean-ui.xcd",
+    "registry/spellbook-undo-steps.xcd"
+  ]
 }

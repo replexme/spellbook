@@ -144,12 +144,13 @@ test("the license notice names the exact source of every shipped component", () 
     assert.ok(existsSync(source.file), `${file} has its text`);
 });
 
-test("Korean fonts, font rules and the Korean UI ship in the runtime folder", () => {
+test("Korean fonts, font rules and the engine settings ship in the runtime folder", () => {
   const site = plan();
   const written = new Set(site.files.map(({ file }) => file));
   for (const name of [
     "files.json",
     "registry/spellbook-korean-ui.xcd",
+    "registry/spellbook-undo-steps.xcd",
     "fonts/NotoSansKR-Regular.otf",
     "fonts/NotoSansKR-Bold.otf",
     "fonts/57-spellbook-font-aliases.conf",
@@ -172,6 +173,7 @@ test("Korean fonts, font rules and the Korean UI ship in the runtime folder", ()
       "/instdir/share/fontconfig/conf.d",
       "/instdir/share/fontconfig/conf.d",
       "/instdir/share/fontconfig/conf.d",
+      "/instdir/share/registry",
       "/instdir/share/registry",
     ],
   );
