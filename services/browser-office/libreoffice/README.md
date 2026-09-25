@@ -164,12 +164,19 @@ video or change their playback settings. Inserting with a known size,
 importing, exporting and playback settings need no player, and the build
 disables GStreamer and fails when avmedia is off. With WordArt, whose shape
 type patch `0030` already exposes, the browser runtime now has no operation
-limitations of its own.
-The `browser-undo-v34` series adds patch `0049`. Qt draws the menu bar and its
-own widgets with its default font and, in WebAssembly, falls back only to the
-fonts it bundles, so the Korean menus drew as empty boxes while LibreOffice's
-own panels drew Korean. For a Korean, Japanese or Chinese interface language
-Qt now draws with a registered font that covers the script.
+limitations of its own. LibreOffice's PPTX filter neither writes nor reads a
+media object's loop, mute and volume, so a playback change does not survive a
+save; the browser save check refuses it as an unchanged package.
+The `browser-undo-v34` series adds patch `0050`: the PPTX exporter read a
+shape's name from a property media objects lack, so a media object lost its
+name on save; it now falls back to the shape's `XNamed`. Its first `0049`
+appended a CJK font to the application font's family list, which did not
+help: Qt for WebAssembly picks one family from that list and falls back glyph
+by glyph only to the fonts it bundles, so the menu bar, context menus and
+tooltips still drew Korean as empty boxes (production 2026-09-25).
+The `browser-undo-v35` series replaces `0049`: the application font itself
+becomes a registered font that covers Korean (and Latin), found by name
+first in case its writing systems were not detected.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

@@ -1,0 +1,55 @@
+diff --git a/vcl/qt5/QtGraphics_Text.cxx b/vcl/qt5/QtGraphics_Text.cxx
+--- a/vcl/qt5/QtGraphics_Text.cxx
++++ b/vcl/qt5/QtGraphics_Text.cxx
+@@ -39,6 +39,8 @@
+ 
+ #ifdef EMSCRIPTEN
+ #include <set>
++#include <QtGui/QFont>
++#include <QtWidgets/QApplication>
+ #endif
+ 
+ void QtGraphics::SetTextColor(Color nColor) { m_aTextColor = nColor; }
+@@ -128,6 +130,42 @@ void QtGraphics::GetDevFontList(vcl::font::PhysicalFontCollection* pPFC)
+ #endif
+     }
+ 
++#ifdef EMSCRIPTEN
++    // Spellbook: Qt draws the menu bar, context menus and tooltips with the
++    // application font. In WebAssembly it falls back only to the fonts it
++    // bundles, none of which has Korean, Japanese or Chinese glyphs, and a
++    // font's family list there picks one family rather than falling back
++    // glyph by glyph. So the application font itself becomes a registered
++    // font that covers Korean (and Latin), found by name first in case its
++    // writing systems were not detected; QApplication updates existing
++    // widgets too.
++    {
++        const QFontDatabase aDatabase;
++        QString aFamily;
++        for (const QString& rCandidate :
++             { QStringLiteral("Noto Sans KR"), QStringLiteral("Noto Sans CJK KR") })
++        {
++            if (aDatabase.hasFamily(rCandidate))
++            {
++                aFamily = rCandidate;
++                break;
++            }
++        }
++        if (aFamily.isEmpty())
++        {
++            const QStringList aKorean = aDatabase.families(QFontDatabase::Korean);
++            if (!aKorean.isEmpty())
++                aFamily = aKorean.first();
++        }
++        if (!aFamily.isEmpty() && QApplication::font().family() != aFamily)
++        {
++            QFont aFont = QApplication::font();
++            aFont.setFamily(aFamily);
++            QApplication::setFont(aFont);
++        }
++    }
++#endif
++
+     if (bUseFontconfig)
+         SalGenericInstance::RegisterFontSubstitutors(pPFC);
+ 
