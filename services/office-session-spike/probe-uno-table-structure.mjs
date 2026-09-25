@@ -3,10 +3,11 @@ import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { documentStatesEquivalent } from "./document-state-evidence.mjs";
 import {
-  documentStatesEquivalent,
-  undoDocumentStateEquivalent,
-} from "./document-state-evidence.mjs";
+  historyStateDifference,
+  historyStateEquivalent,
+} from "./persistence-evidence.mjs";
 import {
   installNativeBridgeTrace,
   nativeBridgeDiagnostics,
@@ -127,23 +128,15 @@ try {
     let candidate;
     do {
       candidate = await call({ operation: "observe" });
-      if (undoDocumentStateEquivalent(expected, candidate)) return candidate;
+      // The browser product returns to a saved package by reopening it when
+      // native history is not exact; that step is compared as persisted
+      // state, the way the other native probes compare it.
+      if (historyStateEquivalent(expected, candidate)) return candidate;
       await page.waitForTimeout(100);
     } while (Date.now() < deadline);
     throw new Error(
       `${label} did not restore the exact document: ${JSON.stringify(
-        firstDifference(
-          {
-            revision: expected.revision,
-            slides: expected.slides,
-            masters: expected.masters,
-          },
-          {
-            revision: candidate?.revision,
-            slides: candidate?.slides,
-            masters: candidate?.masters,
-          },
-        ),
+        historyStateDifference(expected, candidate),
       )}`,
     );
   };
