@@ -171,6 +171,8 @@ export function NativeWorkspace({
     pendingSaveRevision = useRef<number | null>(null),
     pendingTurn = useRef<PendingTurn | null>(null),
     editorModified = useRef(false),
+    /** Saves a person's browser-editor edits shortly after they start. */
+    browserAutosave = useRef<ReturnType<typeof setTimeout> | null>(null),
     downloadAfterRevision = useRef<number | null>(null),
     browserOpening = useRef(false),
     browserRevision = useRef(
@@ -850,6 +852,7 @@ export function NativeWorkspace({
       imageUrls.current.clear();
       for (const call of hostCalls.current.values()) clearTimeout(call.timer);
       hostCalls.current.clear();
+      if (browserAutosave.current) clearTimeout(browserAutosave.current);
     },
     [],
   );
@@ -938,6 +941,21 @@ export function NativeWorkspace({
                     ? current
                     : "저장됨",
               );
+              // The server editor saves a person's edits by itself; the
+              // browser editor keeps them in this browser until saved, so it
+              // saves them 20 seconds after they start.
+              if (browserAutosave.current)
+                clearTimeout(browserAutosave.current);
+              browserAutosave.current = result.data.modified
+                ? setTimeout(() => {
+                    browserAutosave.current = null;
+                    if (
+                      editorModified.current &&
+                      pendingSaveRevision.current === null
+                    )
+                      requestSave("자동 저장 중…");
+                  }, 20_000)
+                : null;
               return;
             }
             if (result.data?.type === "save") {
