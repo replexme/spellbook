@@ -21,7 +21,8 @@ import { buildRoutes } from "./server.mjs";
  *   small pointer script and the documents are fetched on every open.
  *
  *   node export-static.mjs --runtime <verified build dir> --out <dir> \
- *     --host-origin https://spellbook.replex.me [--site <firebase site>]
+ *     --host-origin https://spellbook.replex.me \
+ *     --source-contact <address for source requests> [--site <firebase site>]
  */
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -282,8 +283,16 @@ export async function exportStatic({
   runtimeDirectory,
   outDirectory,
   hostOrigins,
+  sourceContact,
   site,
 }) {
+  // The operator who publishes the build answers source requests; the
+  // address is theirs, not part of this repository.
+  if (
+    typeof sourceContact !== "string" ||
+    !/^[^\s@]+@[^\s@]+$/u.test(sourceContact)
+  )
+    throw new Error("A source-request contact address is required.");
   const admitted = await admitCandidateRuntime({ runtimeDirectory });
   const routes = buildRoutes(serviceRoot, admitted.upstream, {
     runtimeRoot: admitted.runtimeDirectory,
@@ -310,7 +319,7 @@ export async function exportStatic({
       ),
       publicCommit: admitted.receipt.spellbookSourceRevision,
       receiptSha256: admitted.receiptSha256,
-      contact: "hello@replex.me",
+      contact: sourceContact,
     }),
     readyz: {
       status: "ok",
@@ -352,12 +361,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [runtimeDirectory] = flagValues("--runtime");
   const [outDirectory] = flagValues("--out");
   const [site] = flagValues("--site");
+  const [sourceContact] = flagValues("--source-contact");
   if (!runtimeDirectory || !outDirectory)
     throw new Error("--runtime and --out are required.");
   const result = await exportStatic({
     runtimeDirectory,
     outDirectory: path.resolve(outDirectory),
     hostOrigins: flagValues("--host-origin"),
+    sourceContact,
     site,
   });
   process.stdout.write(`${JSON.stringify(result)}\n`);

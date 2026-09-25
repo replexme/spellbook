@@ -125,7 +125,7 @@ test("the license notice names the exact source of every shipped component", () 
     fonts,
     publicCommit: "a".repeat(40),
     receiptSha256: "b".repeat(64),
-    contact: "hello@replex.me",
+    contact: "source-requests@example.org",
   });
   const { qt, emscripten } = upstream.toolchain;
   assert.ok(page.includes(qt.commit));
@@ -133,7 +133,7 @@ test("the license notice names the exact source of every shipped component", () 
   assert.ok(page.includes(emscripten.commit));
   assert.ok(page.includes(upstream.source.candidateCommit));
   assert.ok(page.includes(`tree/${"a".repeat(40)}/services/browser-office`));
-  assert.ok(page.includes("mailto:hello@replex.me"));
+  assert.ok(page.includes("mailto:source-requests@example.org"));
   assert.ok(page.includes(fonts.source.commit));
   const site = plan();
   const headers = headersFor(site, "/licenses");
