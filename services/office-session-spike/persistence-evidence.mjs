@@ -247,6 +247,29 @@ function withoutFontworkTextAnchor(slides) {
   return slides;
 }
 
+// PPTX has no table height or width of its own: PowerPoint and a reopened
+// file size a table from its row heights and column widths, which are
+// compared themselves. Impress's live frame can differ from them (with a
+// Korean interface it lays out an inserted empty row with the interface
+// language's taller default font), so a table is compared as its rows and
+// columns add up.
+function withTableSizeFromGrid(slides) {
+  const sum = (values) =>
+    Array.isArray(values) &&
+    values.length &&
+    values.every((value) => Number.isFinite(value))
+      ? values.reduce((total, value) => total + value, 0)
+      : null;
+  for (const slide of slides)
+    for (const element of slide.elements ?? []) {
+      const height = sum(element.table?.rowHeights);
+      const width = sum(element.table?.columnWidths);
+      if (height !== null) element.height = height;
+      if (width !== null) element.width = width;
+    }
+  return slides;
+}
+
 function withCanonicalShapeIdentity(slides) {
   for (const slide of slides) {
     for (const element of slide.elements ?? []) {
@@ -485,45 +508,50 @@ export function normalizeDocumentPersistenceState(
       const rightIdentity = `${right.name ?? ""}\u0000${right.layout ?? ""}\u0000${stableJson(right)}`;
       return leftIdentity.localeCompare(rightIdentity, "en");
     });
-  const slides = withoutFontworkTextAnchor(
-    withoutPresetEditorMetadata(
-      withSavedAnimationContainers(
-        withoutInactiveFooterValues(
-          withoutInactiveStyleValues(
-            withCanonicalShapeIdentity(
-              withoutTransientEmptyPlaceholderDefaults(
-                withoutMergedContinuationFormatting(
-                  (state?.slides ?? []).map(
-                    ({ masterIndex: _masterIndex, ...slide }, index) => {
-                      const {
-                        masterIndex: _authoredMasterIndex,
-                        ...authoredSlide
-                      } =
-                        authoredArrayEntry(slide, authoredBy?.slides, index) ??
-                        {};
-                      const normalized = withoutObservationOnlyFields(
-                        withoutComputedPropertyValues(
-                          structuredClone(slide),
-                          authoredSlide,
-                        ),
-                      );
-                      if (normalized.transition) {
+  const slides = withTableSizeFromGrid(
+    withoutFontworkTextAnchor(
+      withoutPresetEditorMetadata(
+        withSavedAnimationContainers(
+          withoutInactiveFooterValues(
+            withoutInactiveStyleValues(
+              withCanonicalShapeIdentity(
+                withoutTransientEmptyPlaceholderDefaults(
+                  withoutMergedContinuationFormatting(
+                    (state?.slides ?? []).map(
+                      ({ masterIndex: _masterIndex, ...slide }, index) => {
                         const {
-                          effect: _effect,
-                          speed: _speed,
-                          ...persistedTransition
-                        } = normalized.transition;
-                        normalized.transition = persistedTransition;
-                      }
-                      return normalized;
-                    },
+                          masterIndex: _authoredMasterIndex,
+                          ...authoredSlide
+                        } =
+                          authoredArrayEntry(
+                            slide,
+                            authoredBy?.slides,
+                            index,
+                          ) ?? {};
+                        const normalized = withoutObservationOnlyFields(
+                          withoutComputedPropertyValues(
+                            structuredClone(slide),
+                            authoredSlide,
+                          ),
+                        );
+                        if (normalized.transition) {
+                          const {
+                            effect: _effect,
+                            speed: _speed,
+                            ...persistedTransition
+                          } = normalized.transition;
+                          normalized.transition = persistedTransition;
+                        }
+                        return normalized;
+                      },
+                    ),
                   ),
                 ),
               ),
+              authoredBy?.slides,
             ),
             authoredBy?.slides,
           ),
-          authoredBy?.slides,
         ),
       ),
     ),

@@ -1457,3 +1457,29 @@ test("persistence compares an embedded media object as LibreOffice reopens it", 
     ),
   );
 });
+
+test("persistence compares a table's size as its rows and columns add up", () => {
+  const state = (height) => ({
+    slides: [
+      {
+        slideIndex: 0,
+        elements: [
+          {
+            elementId: "t1",
+            height,
+            width: 7111,
+            table: { rowHeights: [1030, 1030], columnWidths: [3000, 4111] },
+          },
+        ],
+      },
+    ],
+    masters: [],
+  });
+  assert.deepEqual(
+    normalizeDocumentPersistenceState(state(2199)),
+    normalizeDocumentPersistenceState(state(2060)),
+  );
+  const [table] = normalizeDocumentPersistenceState(state(2199)).slides[0]
+    .elements;
+  assert.equal(table.height, 2060);
+});
