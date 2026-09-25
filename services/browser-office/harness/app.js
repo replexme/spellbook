@@ -3087,8 +3087,16 @@ globalThis.Module = {
     new URL("/harness/office-thread.js", location.href).href,
   ],
   locateFile: (path, prefix) => (prefix || runtimeBase) + path,
-  preRun: [installRuntimeFiles],
+  preRun: [useQtFonts, installRuntimeFiles],
 };
+
+// LibreOffice's Qt layer draws text with cairo unless SAL_VCL_QT_USE_QFONT is
+// set, and only the Qt font path registers the Korean fonts with Qt (patches
+// 0047 and 0049). Qt draws the menu bar, context menus and tooltips itself,
+// so without it their Korean labels were empty boxes; slides render the same.
+function useQtFonts() {
+  ENV.SAL_VCL_QT_USE_QFONT = "1";
+}
 
 // The engine carries no Korean fonts or Korean UI setting. Write them, with
 // the font rules, into its file system before it starts; runtime/files.json
