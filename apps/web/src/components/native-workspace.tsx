@@ -173,6 +173,7 @@ export function NativeWorkspace({
     editorModified = useRef(false),
     /** Saves a person's browser-editor edits shortly after they start. */
     browserAutosave = useRef<ReturnType<typeof setTimeout> | null>(null),
+    aiRunning = useRef(false),
     downloadAfterRevision = useRef<number | null>(null),
     browserOpening = useRef(false),
     browserRevision = useRef(
@@ -503,6 +504,22 @@ export function NativeWorkspace({
     },
     [sendOffice],
   );
+  // The browser editor keeps a person's edits in this browser until they are
+  // saved, so it saves them 20 seconds later. While an AI request runs the
+  // server refuses saves (its edits are not reviewed yet), so the save waits.
+  const armBrowserAutosave = useCallback(() => {
+    if (browserAutosave.current) clearTimeout(browserAutosave.current);
+    const wait = () => {
+      browserAutosave.current = setTimeout(() => {
+        browserAutosave.current = null;
+        if (!editorModified.current || pendingSaveRevision.current !== null)
+          return;
+        if (aiRunning.current) wait();
+        else requestSave("자동 저장 중…");
+      }, 20_000);
+    };
+    wait();
+  }, [requestSave]);
   useEffect(() => {
     if (!engineReady) return;
     const heartbeat = setInterval(() => {
@@ -827,6 +844,15 @@ export function NativeWorkspace({
         });
         pendingSaveRevision.current = null;
         editorModified.current = true;
+        // A running AI request's edits are saved after it; nothing failed.
+        if (
+          cause instanceof Error &&
+          cause.message === "native_ai_change_review_pending"
+        ) {
+          setSaveState("변경 사항 있음");
+          armBrowserAutosave();
+          return;
+        }
         setSaveState("저장 실패");
         setError(
           cause instanceof Error
@@ -835,7 +861,7 @@ export function NativeWorkspace({
         );
       }
     },
-    [launch],
+    [armBrowserAutosave, launch],
   );
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "nearest" });
@@ -941,21 +967,12 @@ export function NativeWorkspace({
                     ? current
                     : "저장됨",
               );
-              // The server editor saves a person's edits by itself; the
-              // browser editor keeps them in this browser until saved, so it
-              // saves them 20 seconds after they start.
-              if (browserAutosave.current)
+              // The server editor saves a person's edits by itself.
+              if (result.data.modified) armBrowserAutosave();
+              else if (browserAutosave.current) {
                 clearTimeout(browserAutosave.current);
-              browserAutosave.current = result.data.modified
-                ? setTimeout(() => {
-                    browserAutosave.current = null;
-                    if (
-                      editorModified.current &&
-                      pendingSaveRevision.current === null
-                    )
-                      requestSave("자동 저장 중…");
-                  }, 20_000)
-                : null;
+                browserAutosave.current = null;
+              }
               return;
             }
             if (result.data?.type === "save") {
@@ -1166,6 +1183,7 @@ export function NativeWorkspace({
     openBrowserDocument,
     saveBrowserDocument,
     sendOffice,
+    armBrowserAutosave,
     dispatchTurn,
     launch.documentId,
     editorMounted,
@@ -1862,6 +1880,9 @@ export function NativeWorkspace({
     messages.some(
       (message) => message.role === "assistant" && message.status === "running",
     );
+  useEffect(() => {
+    aiRunning.current = running;
+  }, [running]);
   const undoFor = (turn: CardTurn, key: string): UndoAction | null =>
     running
       ? null
