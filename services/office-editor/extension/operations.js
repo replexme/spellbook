@@ -2869,8 +2869,7 @@ function spellbookDocumentOperation(request) {
       ),
     });
     if (request.operation === "reveal") {
-      if (Number.isInteger(request.slideIndex))
-        activateSlide(request.slideIndex);
+      if (Number.isInteger(request.slideIndex)) activateSlide(request.slideIndex);
       if (typeof request.elementId === "string") {
         try {
           const shape = resolveShape(request.elementId);
@@ -6561,22 +6560,10 @@ function spellbookDocumentOperation(request) {
       const leftBdr = safeProperty(cell, "LeftBorder");
       const rightBdr = safeProperty(cell, "RightBorder");
       cell.setString(command.text);
-      if (topBdr)
-        try {
-          cell.setPropertyValue("TopBorder", topBdr);
-        } catch (_) {}
-      if (bottomBdr)
-        try {
-          cell.setPropertyValue("BottomBorder", bottomBdr);
-        } catch (_) {}
-      if (leftBdr)
-        try {
-          cell.setPropertyValue("LeftBorder", leftBdr);
-        } catch (_) {}
-      if (rightBdr)
-        try {
-          cell.setPropertyValue("RightBorder", rightBdr);
-        } catch (_) {}
+      if (topBdr) try { cell.setPropertyValue("TopBorder", topBdr); } catch (_) {}
+      if (bottomBdr) try { cell.setPropertyValue("BottomBorder", bottomBdr); } catch (_) {}
+      if (leftBdr) try { cell.setPropertyValue("LeftBorder", leftBdr); } catch (_) {}
+      if (rightBdr) try { cell.setPropertyValue("RightBorder", rightBdr); } catch (_) {}
       const after = read();
       const target = after.slides[slideIndex].elements.find(
         (candidate) => candidate.elementId === command.elementId,
@@ -7822,76 +7809,47 @@ function spellbookDocumentOperation(request) {
         const diagnosticMutationStartedAt = request.diagnosticTimings
           ? Date.now()
           : 0;
-        const ownsUndoContext = !request.transactionActive;
-        if (ownsUndoContext) undo.enterUndoContext("AI table edit");
-        try {
-          if (command.op === "insert_table_rows")
-            table.getRows().insertByIndex(command.index, command.count);
-          else if (command.op === "delete_table_rows")
-            table.getRows().removeByIndex(command.index, command.count);
-          else if (command.op === "insert_table_columns")
-            table.getColumns().insertByIndex(command.index, command.count);
-          else if (command.op === "delete_table_columns")
-            table.getColumns().removeByIndex(command.index, command.count);
-          else if (command.op === "merge_table_cells") {
-            const cursor = table.createCursorByRange(
+        if (command.op === "insert_table_rows")
+          table.getRows().insertByIndex(command.index, command.count);
+        else if (command.op === "delete_table_rows")
+          table.getRows().removeByIndex(command.index, command.count);
+        else if (command.op === "insert_table_columns")
+          table.getColumns().insertByIndex(command.index, command.count);
+        else if (command.op === "delete_table_columns")
+          table.getColumns().removeByIndex(command.index, command.count);
+        else if (command.op === "merge_table_cells") {
+          const cursor = table.createCursorByRange(
+            table.getCellRangeByPosition(
+              command.startColumn,
+              command.startRow,
+              command.endColumn,
+              command.endRow,
+            ),
+          );
+          if (!cursor.isMergeable())
+            throw new Error("table_range_not_mergeable");
+          cursor.merge();
+        } else if (command.op === "split_table_cell") {
+          table
+            .createCursorByRange(
               table.getCellRangeByPosition(
-                command.startColumn,
-                command.startRow,
-                command.endColumn,
-                command.endRow,
+                command.column,
+                command.row,
+                command.column,
+                command.row,
               ),
-            );
-            if (!cursor.isMergeable())
-              throw new Error("table_range_not_mergeable");
-            cursor.merge();
-          } else if (command.op === "split_table_cell") {
-            table
-              .createCursorByRange(
-                table.getCellRangeByPosition(
-                  command.column,
-                  command.row,
-                  command.column,
-                  command.row,
-                ),
-              )
-              .split(command.columns - 1, command.rows - 1);
-          } else if (command.op === "set_table_row_height")
-            table
-              .getRows()
-              .getByIndex(command.index)
-              .setPropertyValue("Height", command.height);
-          else
-            table
-              .getColumns()
-              .getByIndex(command.index)
-              .setPropertyValue("Width", command.width);
-          // Impress grows the frame by the height it lays out for an inserted
-          // row with the interface language's default font (a Korean interface
-          // makes that taller than the row), while PPTX and a reopened file
-          // size the frame from its rows. Keep the frame at the sum of the rows;
-          // a row whose text needs more still grows.
-          const rows = table.getRows();
-          let rowsHeight = 0;
-          for (let row = 0; row < rows.getCount(); row++)
-            rowsHeight += Number(
-              rows.getByIndex(row).getPropertyValue("Height"),
-            );
-          const frame = shape.getSize();
-          if (
-            Number.isFinite(rowsHeight) &&
-            rowsHeight > 0 &&
-            frame.Height > rowsHeight
-          )
-            shape.setSize(
-              new uno.idl.com.sun.star.awt.Size({
-                Width: frame.Width,
-                Height: rowsHeight,
-              }),
-            );
-        } finally {
-          if (ownsUndoContext) undo.leaveUndoContext();
-        }
+            )
+            .split(command.columns - 1, command.rows - 1);
+        } else if (command.op === "set_table_row_height")
+          table
+            .getRows()
+            .getByIndex(command.index)
+            .setPropertyValue("Height", command.height);
+        else
+          table
+            .getColumns()
+            .getByIndex(command.index)
+            .setPropertyValue("Width", command.width);
 
         const diagnosticMutationEndedAt = request.diagnosticTimings
           ? Date.now()
