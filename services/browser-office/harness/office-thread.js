@@ -516,6 +516,11 @@ function openDocument(path, requestId) {
   model = desktop.loadComponentFromURL(`file://${path}`, "_default", 0, []);
   watchDocumentChanges();
   const controller = model.getCurrentController();
+  // The shared operation program finds the document through the desktop's
+  // current frame, which a fresh load leaves unset until the window gets
+  // focus; a request right after a reload (an Undo that reopens the file)
+  // then found no frame at all.
+  controller.getFrame().activate();
   controller.getFrame().getContainerWindow().FullScreen = true;
   post("document-ready", { requestId, slideCount: slideCount() });
 }
