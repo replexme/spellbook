@@ -1798,11 +1798,15 @@ export function NativeWorkspace({
         ? turnStartImages.current.get(turn.turnId)
         : undefined;
       return summary.evidence.map((item) => {
-        const before = item.before
-          ? (images.get(item.before) ?? null)
-          : start?.slideIndex === item.slideIndex
-            ? (images.get(start.key) ?? null)
-            : null;
+        // The recorded first look may name a picture this page never held
+        // (the server keeps which slide it showed, not its pixels); the slide
+        // drawn before the request stands in for it.
+        const before =
+          (item.before ? images.get(item.before) : undefined) ??
+          (start?.slideIndex === item.slideIndex
+            ? images.get(start.key)
+            : undefined) ??
+          null;
         const after = item.after ? (images.get(item.after) ?? null) : null;
         if (before || after)
           return {
