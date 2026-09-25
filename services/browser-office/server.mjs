@@ -9,6 +9,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { probeAssets } from "../office-session-spike/probe-assets.mjs";
+import { applyEmbindOverlay } from "./embind-overlay.mjs";
 import { applyZetaJsOverlay } from "./zetajs-overlay.mjs";
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -205,12 +206,26 @@ export function buildRoutes(
       asset.path ?? path.basename(new URL(asset.url).pathname);
     routes.set(
       `/runtime/${requestedPath}`,
-      route(path.join(runtimeRoot, asset.storedPath), asset.contentType, {
-        ...(asset.contentEncoding
-          ? { "Content-Encoding": asset.contentEncoding }
-          : {}),
-        ...upstream.requiredAssetHeaders,
-      }),
+      route(
+        path.join(runtimeRoot, asset.storedPath),
+        asset.contentType,
+        {
+          ...(asset.contentEncoding
+            ? { "Content-Encoding": asset.contentEncoding }
+            : {}),
+          ...upstream.requiredAssetHeaders,
+        },
+        // The engine's JavaScript is served as admitted, less Embind's
+        // per-object leak warning (embind-overlay.mjs).
+        requestedPath === "soffice.js"
+          ? (source) => {
+              const digest = createHash("sha256").update(source).digest("hex");
+              if (asset.sha256 && digest !== asset.sha256)
+                throw new Error("The engine's JavaScript failed admission.");
+              return applyEmbindOverlay(source);
+            }
+          : undefined,
+      ),
     );
   }
   const bridgeAsset = upstream.javascriptBridge.runtimeAsset;
