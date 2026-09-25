@@ -2,6 +2,13 @@
 
 "use strict";
 
+// LibreOffice links the engine with Emscripten ASSERTIONS=1 (to keep the
+// final link from rewriting the module), and in that mode Embind records a
+// stack trace for every C++ object handed to JavaScript, in case it leaks.
+// Formatting those traces took most of each full document read (74 of 82 s
+// of one edit on a 14-slide deck). Errors here are reported by message.
+Error.stackTraceLimit = 0;
+
 let zetajs;
 let css;
 let context;
