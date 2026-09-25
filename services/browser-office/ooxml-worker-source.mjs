@@ -15,6 +15,7 @@ const powerpoint2010Namespace =
   "http://schemas.microsoft.com/office/powerpoint/2010/main";
 const drawingNamespace =
   "http://schemas.openxmlformats.org/drawingml/2006/main";
+const chartNamespace = "http://schemas.openxmlformats.org/drawingml/2006/chart";
 const relationshipAttributeNamespace =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const packageRelationshipNamespace =
@@ -137,6 +138,25 @@ function sameEngineExportPart(part, left, right) {
       const id = shapeIds.get(element.getAttribute(attribute));
       if (id) element.setAttribute(attribute, id);
     }
+    // Each save draws new random chart axis ids, which only pair a chart
+    // with its axes, and a new PowerPoint modification id for a table or
+    // chart frame.
+    const axisIds = new Map();
+    for (const name of ["axId", "crossAx"])
+      for (const axis of document.getElementsByTagNameNS(
+        chartNamespace,
+        name,
+      )) {
+        const id = axis.getAttribute("val");
+        if (!axisIds.has(id))
+          axisIds.set(id, `__office_axis_${axisIds.size + 1}__`);
+        axis.setAttribute("val", axisIds.get(id));
+      }
+    for (const modification of document.getElementsByTagNameNS(
+      powerpoint2010Namespace,
+      "modId",
+    ))
+      modification.setAttribute("val", "__office_modification__");
     return serializeXml(document);
   };
   return samePartBytes(normalized(left), normalized(right));

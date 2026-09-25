@@ -1683,6 +1683,17 @@ async function commitProductPackageMutation(prepared, nativeValue) {
   }
   observed.lastMutation = prepared.mutation.report;
   evidence.value = JSON.stringify(observed);
+  // A later direct edit is compared with a save of this live document; a
+  // fresh load of the patched file writes untouched tables differently.
+  if (!packageAuthoritative)
+    try {
+      liveExportBaseline = {
+        revision: nativeValue.revision,
+        bytes: await serializeNativeDocument(),
+      };
+    } catch {
+      liveExportBaseline = null;
+    }
   return nativeValue;
 }
 

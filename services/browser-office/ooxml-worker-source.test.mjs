@@ -488,6 +488,54 @@ test("native snapshot reconciliation refuses a changed part with remapped refere
   );
 });
 
+test("native snapshot comparison ignores the random ids each engine save draws", async () => {
+  const source = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const chartPart = "ppt/charts/chart99.xml";
+  const slidePart = "ppt/slides/slide1.xml";
+  const chart = (category, value) =>
+    strToU8(
+      `<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart><c:plotArea><c:barChart><c:axId val="${category}"/><c:axId val="${value}"/></c:barChart><c:catAx><c:axId val="${category}"/><c:crossAx val="${value}"/></c:catAx><c:valAx><c:axId val="${value}"/><c:crossAx val="${category}"/></c:valAx></c:plotArea></c:chart></c:chartSpace>`,
+    );
+  const slide = (modification) =>
+    strToU8(
+      strFromU8(source[slidePart]).replace(
+        "</p:sld>",
+        `<p:extLst><p:ext uri="{BB962C8B-B14F-4D97-AF65-F5344CB8AC3E}"><p14:modId xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" val="${modification}"/></p:ext></p:extLst></p:sld>`,
+      ),
+    );
+  const save = (category, value, modification) => ({
+    ...source,
+    [chartPart]: chart(category, value),
+    [slidePart]: slide(modification),
+  });
+  const original = save(1, 2, 7);
+  // A direct human edit, whose budget admits every changed part: the two
+  // engine saves differ only in the ids each save draws anew.
+  const kept = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(save(87096, 5775388, 1962833182)),
+    zipSync(save(52273715, 31502705, 494112455)),
+    null,
+  );
+  assert.deepEqual(kept.report.changedParts, []);
+
+  // An axis that points at a different axis is a change, not a new id.
+  const rewired = save(52273715, 31502705, 494112455);
+  rewired[chartPart] = strToU8(
+    strFromU8(rewired[chartPart]).replace(
+      '<c:crossAx val="31502705"/>',
+      '<c:crossAx val="52273715"/>',
+    ),
+  );
+  const changed = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(save(87096, 5775388, 1962833182)),
+    zipSync(rewired),
+    null,
+  );
+  assert.deepEqual(changed.report.changedParts, [chartPart]);
+});
+
 test("native snapshot comparison ignores generated field GUIDs but not field semantics", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const part = "ppt/slideMasters/slideMaster1.xml";
