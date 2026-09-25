@@ -176,7 +176,10 @@ by glyph only to the fonts it bundles, so the menu bar, context menus and
 tooltips still drew Korean as empty boxes (production 2026-09-25).
 The `browser-undo-v35` series replaces `0049`: the application font itself
 becomes a registered font that covers Korean (and Latin), found by name
-first in case its writing systems were not detected.
+first in case its writing systems were not detected. Patches `0047` and
+`0049` change `QtGraphics::GetDevFontList`, which LibreOffice's Qt layer calls
+only when `SAL_VCL_QT_USE_QFONT` is set (otherwise it draws text with cairo),
+so the page sets that variable before the engine starts.
 The browser-native adapter now accepts the complete
 97-operation typed mutation contract and persists both its commands and direct
 human edits as native PPTX snapshots. The cumulative patch also preserves

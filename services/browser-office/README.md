@@ -2,7 +2,7 @@
 
 This directory builds and verifies the browser editor: LibreOffice compiled to
 WebAssembly, run in the user's browser. The managed Spellbook service serves it
-on its own site; it is not yet the default editor there (status below).
+on its own site and has made it the default editor (2026-09-26).
 
 The first real browser probe used the official ZetaOffice Web Office demo and
 proved this vertical with a PPTX: load, show an editable Impress canvas, insert
@@ -108,9 +108,11 @@ refuses that edit.
 Status on 2026-09-25: Korean, Japanese and Chinese input methods work through a
 hidden text field over the canvas (`text-input-bridge.mjs`), and a production
 smoke typed Korean, saved it automatically and undid it from the host's top
-bar. The product bridge, including OPFS recovery, passes in Cloud Build. The
-engine's menus, context menus and tooltips still draw Korean as boxes until
-the `browser-undo-v35` build. Accessibility checks, public-corpus render
+bar. The product bridge, including OPFS recovery and the slide lifecycle,
+passes in Cloud Build. The page sets `SAL_VCL_QT_USE_QFONT` before the engine
+starts: LibreOffice's Qt layer otherwise draws text with cairo and never
+registers the Korean fonts with Qt, so the menus, context menus and tooltips
+drew Korean as boxes. Accessibility checks, public-corpus render
 comparison and the PowerPoint platform matrix are not done, so `status` stays
 `viability_probe_only`. Browsers that cannot isolate the editor frame are
 refused rather than served by the server editor.
