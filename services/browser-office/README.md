@@ -117,11 +117,25 @@ comparison and the PowerPoint platform matrix are not done, so `status` stays
 `viability_probe_only`. Browsers that cannot isolate the editor frame are
 refused rather than served by the server editor.
 
+Speed, 2026-09-26: LibreOffice links the engine with Emscripten
+`ASSERTIONS=1`, and in that mode Embind builds a "leaked C++ instance" warning,
+an `Error` with a captured stack, for every C++ object it hands to JavaScript.
+ZetaJS deletes those objects itself, but building the warning was most of every
+document read. The server serves the admitted `soffice.js` without it
+(`embind-overlay.mjs`, applied on its route like the ZetaJS overlay; the
+cleanup registration stays). On a 14-slide deck a full read fell from 24.6 s to
+3.1 s and one fill-colour edit from 139-158 s to 6.5 s; a 60-slide deck opens in
+27 s, reads in about 10 s and takes one edit in about 22 s. The page's
+heartbeat reads the deck for a recovery checkpoint only after the engine's
+change count moved (Undo and modify events), not every 10 seconds while the
+document is unsaved.
+
 For direct human edits and native AI transactions, the browser now keeps the
 uploaded package as the file authority. It serializes the edited model, also
 exports a model-only no-edit baseline, and applies only their package-part
 differences to the uploaded bytes. Regenerated DrawingML field GUIDs do not
-count as authored changes. The merged package must reopen to the intended
+count as authored changes, nor do the chart axis ids and PowerPoint frame
+modification ids (`p14:modId`) each save draws anew. The merged package must reopen to the intended
 model state; unresolved relationship remapping fails closed. This path is
 source-implemented, not runtime-verified until the candidate product bridge
 and original-part preservation check pass.
