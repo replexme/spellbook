@@ -7936,6 +7936,20 @@ function spellbookDocumentOperation(request) {
     const colorOperation = ["font_color", "fill_color", "line_color"].includes(
       command.op,
     );
+    // A table's fill and borders belong to its cells (set_table_cell_*);
+    // PPTX gives the table frame no shape fill or outline, and Impress leaves
+    // these commands unapplied on a selected table.
+    if (
+      element.table &&
+      [
+        "fill_color",
+        "fill_opacity",
+        "line_color",
+        "line_width",
+        "line_opacity",
+      ].includes(command.op)
+    )
+      throw new Error("unsupported_table_target");
     if (
       command.op === "replace_text" &&
       (typeof command.text !== "string" ||
