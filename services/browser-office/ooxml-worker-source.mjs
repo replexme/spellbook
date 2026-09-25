@@ -2391,7 +2391,8 @@ export function verifyPersistedElementMutation(
     );
   const before = openPackage(beforeBytes, { requireSimpleTopology: false });
   const after = openPackage(afterBytes, { requireSimpleTopology: false });
-  const beforeShape = resolveElementShape(before, command.elementId).shape;
+  const beforeTarget = resolveElementShape(before, command.elementId);
+  const beforeShape = beforeTarget.shape;
   const afterShape = resolveElementShape(after, command.elementId).shape;
   const unchanged = (expected, actual) => {
     if (expected !== actual)
@@ -2402,7 +2403,11 @@ export function verifyPersistedElementMutation(
     return;
   }
   if (geometryOperations.has(command.op)) {
-    const beforeTransform = requiredShapeTransform(beforeShape);
+    const beforeTransform = effectiveShapeTransform(
+      before,
+      beforeTarget.target.path,
+      beforeShape,
+    );
     const afterTransform = requiredShapeTransform(afterShape);
     if (command.op === "move") {
       for (const [attribute, requested, previous] of [
@@ -2922,7 +2927,7 @@ function updateElement(context, command) {
     command.op === "replace_text"
       ? replaceElementText(shape, command)
       : geometryOperations.has(command.op)
-        ? updateElementGeometry(shape, path, command)
+        ? updateElementGeometry(context, target.path, shape, path, command)
         : shapeAppearanceOperations.has(command.op)
           ? updateShapeAppearance(shape, command)
           : updateTextAppearance(shape, command);
@@ -2981,9 +2986,9 @@ function replaceElementText(shape, command) {
   };
 }
 
-function updateElementGeometry(shape, path, command) {
+function updateElementGeometry(context, slidePath, shape, path, command) {
   if (path.length !== 1) throw new Error("Invalid top-level shape path.");
-  const transform = requiredShapeTransform(shape);
+  const transform = ownShapeTransform(context, slidePath, shape);
   if (command.op === "move") {
     const offset = requiredDirectElement(transform, drawingNamespace, "off");
     const expectedX = safeInteger(command.expectedX, "expectedX");
@@ -3500,6 +3505,127 @@ function insertBeforeDrawingChildren(parent, child, laterNames) {
   );
   if (anchor) parent.insertBefore(child, anchor);
   else parent.appendChild(child);
+}
+
+// A placeholder without its own a:xfrm takes its position and size from the
+// matching placeholder of its layout, and a layout placeholder without one
+// from its master.
+function effectiveShapeTransform(context, slidePath, shape) {
+  const own =
+    shape.localName === "graphicFrame" ||
+    directElement(requiredShapeProperties(shape), drawingNamespace, "xfrm");
+  const placeholder = own ? null : shapePlaceholder(shape);
+  if (!placeholder) return requiredShapeTransform(shape);
+  const layoutPath = singleRelationshipTarget(
+    context.entries,
+    slidePath,
+    "slideLayout",
+  );
+  const masterPath = singleRelationshipTarget(
+    context.entries,
+    layoutPath,
+    "slideMaster",
+  );
+  const layoutMatch = matchingPlaceholder(
+    parseXml(context.entries, layoutPath),
+    placeholder,
+    false,
+  );
+  return (
+    placeholderTransform(layoutMatch) ??
+    placeholderTransform(
+      matchingPlaceholder(
+        parseXml(context.entries, masterPath),
+        layoutMatch ? shapePlaceholder(layoutMatch) : placeholder,
+        true,
+      ),
+    ) ??
+    requiredShapeTransform(shape)
+  );
+}
+
+// Moving or resizing a placeholder writes its inherited transform onto the
+// slide first, the way PowerPoint does, so only the edited value changes.
+function ownShapeTransform(context, slidePath, shape) {
+  const transform = effectiveShapeTransform(context, slidePath, shape);
+  if (transform.ownerDocument === shape.ownerDocument) return transform;
+  const properties = requiredShapeProperties(shape);
+  const copy = shape.ownerDocument.importNode(transform, true);
+  properties.insertBefore(copy, properties.firstChild);
+  return copy;
+}
+
+function shapePlaceholder(shape) {
+  const nonVisual = [...shape.childNodes].find(
+    (node) => node.nodeType === 1 && node.localName.startsWith("nv"),
+  );
+  const properties =
+    nonVisual && directElement(nonVisual, presentationNamespace, "nvPr");
+  const placeholder =
+    properties && directElement(properties, presentationNamespace, "ph");
+  return placeholder
+    ? {
+        type: placeholder.getAttribute("type") || "obj",
+        idx: placeholder.getAttribute("idx") || "0",
+      }
+    : null;
+}
+
+const masterPlaceholderType = (type) =>
+  ["title", "ctrTitle"].includes(type)
+    ? "title"
+    : ["dt", "ftr", "sldNum"].includes(type)
+      ? type
+      : "body";
+
+// A slide placeholder matches its layout placeholder by idx, and by type
+// when no idx matches; a layout placeholder matches its master by type.
+function matchingPlaceholder(document, placeholder, byTypeOnly) {
+  const tree = document.getElementsByTagNameNS(
+    presentationNamespace,
+    "spTree",
+  )[0];
+  if (!tree) return null;
+  const candidates = directShapes(tree)
+    .map((node) => ({ node, placeholder: shapePlaceholder(node) }))
+    .filter((candidate) => candidate.placeholder);
+  const unique = (matches) => (matches.length === 1 ? matches[0].node : null);
+  if (byTypeOnly)
+    return unique(
+      candidates.filter(
+        (candidate) =>
+          masterPlaceholderType(candidate.placeholder.type) ===
+          masterPlaceholderType(placeholder.type),
+      ),
+    );
+  return (
+    unique(
+      candidates.filter(
+        (candidate) => candidate.placeholder.idx === placeholder.idx,
+      ),
+    ) ??
+    unique(
+      candidates.filter(
+        (candidate) => candidate.placeholder.type === placeholder.type,
+      ),
+    )
+  );
+}
+
+function placeholderTransform(shape) {
+  if (!shape || shape.localName === "graphicFrame") return null;
+  const properties = directElement(
+    shape,
+    presentationNamespace,
+    shape.localName === "grpSp" ? "grpSpPr" : "spPr",
+  );
+  const transform =
+    properties && directElement(properties, drawingNamespace, "xfrm");
+  return transform &&
+    directElement(transform, drawingNamespace, "off") &&
+    directElement(transform, drawingNamespace, "ext")
+    ? transform
+    : null;
 }
 
 function requiredShapeTransform(shape) {

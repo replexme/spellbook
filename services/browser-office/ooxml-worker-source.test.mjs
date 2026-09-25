@@ -1038,6 +1038,84 @@ test("browser OOXML worker applies observed geometry deltas to one slide part", 
   );
 });
 
+test("moving or resizing a placeholder writes the position it inherits first", async () => {
+  const fixture = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  // The first shape becomes a placeholder with no a:xfrm of its own, as
+  // PowerPoint saves titles and bodies that keep their layout position.
+  const withPlaceholder = (placeholder, layout) => {
+    const slide = strFromU8(fixture["ppt/slides/slide1.xml"])
+      .replace(
+        '<p:cNvSpPr txBox="1"/><p:nvPr/>',
+        `<p:cNvSpPr/><p:nvPr>${placeholder}</p:nvPr>`,
+      )
+      .replace(
+        '<a:xfrm><a:off x="914400" y="914400"/><a:ext cx="5029200" cy="822960"/></a:xfrm>',
+        "",
+      );
+    const rels = strFromU8(fixture["ppt/slides/_rels/slide1.xml.rels"]).replace(
+      "slideLayout7.xml",
+      layout,
+    );
+    return zipSync({
+      ...fixture,
+      "ppt/slides/slide1.xml": strToU8(slide),
+      "ppt/slides/_rels/slide1.xml.rels": strToU8(rels),
+    });
+  };
+  const move = {
+    op: "move",
+    elementId: "0/0",
+    expectedX: 0,
+    expectedY: 0,
+    x: 100,
+    y: -100,
+  };
+
+  // A title takes its layout's position; only the moved offset changes.
+  const title = firstShapeTransform(
+    unzipSync(
+      applyOoxmlCommand(
+        withPlaceholder('<p:ph type="ctrTitle"/>', "slideLayout1.xml"),
+        move,
+      ).bytes,
+    ),
+  );
+  assert.equal(title.offset.getAttribute("x"), String(685800 + 36000));
+  assert.equal(title.offset.getAttribute("y"), String(2130425 - 36000));
+  assert.equal(title.extent.getAttribute("cx"), "7772400");
+  assert.equal(title.extent.getAttribute("cy"), "1470025");
+
+  // A footer whose layout placeholder has no position takes the master's,
+  // matched by type although the layout and master number it differently.
+  const footer = firstShapeTransform(
+    unzipSync(
+      applyOoxmlCommand(
+        withPlaceholder(
+          '<p:ph type="ftr" sz="quarter" idx="11"/>',
+          "slideLayout7.xml",
+        ),
+        {
+          op: "resize",
+          elementId: "0/0",
+          expectedWidth: 1000,
+          expectedHeight: 1000,
+          width: 1100,
+          height: 1000,
+        },
+      ).bytes,
+    ),
+  );
+  assert.equal(footer.offset.getAttribute("x"), "3124200");
+  assert.equal(footer.extent.getAttribute("cx"), String(2895600 + 36000));
+  assert.equal(footer.extent.getAttribute("cy"), "365125");
+
+  // A shape that is not a placeholder still needs its own position.
+  assert.throws(
+    () => applyOoxmlCommand(withPlaceholder("", "slideLayout1.xml"), move),
+    /xfrm/u,
+  );
+});
+
 test("browser OOXML worker writes local shape appearance without touching theme parts", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const original = unzipSync(source);
