@@ -1997,16 +1997,17 @@ async function checkpointLiveNativeState(live, reason) {
     observedRevision: live.revision,
   });
   if (knownState) {
-    currentBytes = knownState.bytes;
-    reconciledModelRevision = live.revision;
-    unreconciledModelRevision = "";
-    currentSlideCount = live.slides.length;
     try {
+      const serialized = await serializeNativeDocument();
+      currentBytes = knownState.bytes;
+      reconciledModelRevision = live.revision;
+      unreconciledModelRevision = "";
+      currentSlideCount = live.slides.length;
       rememberReconciledObservation(live);
       await persistCheckpoint();
       liveExportBaseline = {
         revision: live.revision,
-        bytes: await serializeNativeDocument(),
+        bytes: serialized,
       };
     } catch (error) {
       restoreProductEditState(previousState);
