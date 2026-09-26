@@ -549,6 +549,11 @@ export function NativeWorkspace({
         hostCalls.current.set(id, { resolve, reject, timer });
         channel.postMessage({ id, request }, transfer);
       }).then((result) => {
+        if (
+          (window as Window & { __spellbookEditorDiagnostics?: boolean })
+            .__spellbookEditorDiagnostics !== true
+        )
+          return result;
         // Keep operation counts and engine read time without recording text,
         // screenshots, element IDs, or the request itself.
         const operation = String(request.operation ?? "other");
