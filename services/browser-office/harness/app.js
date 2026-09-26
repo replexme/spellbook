@@ -13,6 +13,7 @@ import {
   persistedSlideTopologyMatches,
 } from "/harness/product-persistence.mjs";
 import {
+  reconcileNativeHistoryRevision,
   recordManualProductCheckpoint,
   snapshotProductEditState,
   trimSessionProductHistory,
@@ -1987,6 +1988,33 @@ async function checkpointLiveNativeState(live, reason) {
   const beforeRevision = previousState.reconciledModelRevision;
   if (reconciledObservation?.revision !== beforeRevision)
     throw new Error("browser_native_baseline_unavailable");
+  const knownState = reconcileNativeHistoryRevision({
+    commands,
+    undoHistory: productUndoHistory,
+    redoHistory: productRedoHistory,
+    currentBytes,
+    currentRevision: beforeRevision,
+    observedRevision: live.revision,
+  });
+  if (knownState) {
+    currentBytes = knownState.bytes;
+    reconciledModelRevision = live.revision;
+    unreconciledModelRevision = "";
+    currentSlideCount = live.slides.length;
+    try {
+      rememberReconciledObservation(live);
+      await persistCheckpoint();
+      liveExportBaseline = {
+        revision: live.revision,
+        bytes: await serializeNativeDocument(),
+      };
+    } catch (error) {
+      restoreProductEditState(previousState);
+      unreconciledModelRevision = live.revision;
+      throw error;
+    }
+    return true;
+  }
   const baselineBytes =
     liveExportBaseline?.revision === beforeRevision
       ? liveExportBaseline.bytes

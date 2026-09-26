@@ -2,10 +2,102 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  reconcileNativeHistoryRevision,
   recordManualProductCheckpoint,
   snapshotProductEditState,
   trimSessionProductHistory,
 } from "./product-history.mjs";
+
+test("native Undo and Redo reuse exact journaled PPTX bytes", () => {
+  const base = Uint8Array.of(1);
+  const ai = Uint8Array.of(2);
+  const typed = Uint8Array.of(3);
+  const aiCommand = { op: "replace_text" };
+  const manualCommand = { op: "native_snapshot" };
+  const aiEntry = {
+    command: aiCommand,
+    beforeBytes: base,
+    afterBytes: ai,
+    beforeRevision: "base",
+    afterRevision: "ai",
+  };
+  const manualEntry = {
+    command: manualCommand,
+    beforeBytes: ai,
+    afterBytes: typed,
+    beforeRevision: "ai",
+    afterRevision: "typed",
+  };
+  const commands = [aiCommand, manualCommand];
+  const undoHistory = [aiEntry, manualEntry];
+  const redoHistory = [];
+  const reconcile = (currentBytes, currentRevision, observedRevision) =>
+    reconcileNativeHistoryRevision({
+      commands,
+      undoHistory,
+      redoHistory,
+      currentBytes,
+      currentRevision,
+      observedRevision,
+    });
+  assert.deepEqual(reconcile(typed, "typed", "ai"), {
+    direction: "undo",
+    bytes: ai,
+  });
+  assert.deepEqual(reconcile(ai, "ai", "base"), {
+    direction: "undo",
+    bytes: base,
+  });
+  assert.deepEqual(commands, []);
+  assert.equal(redoHistory.length, 2);
+  assert.deepEqual(reconcile(base, "base", "ai"), {
+    direction: "redo",
+    bytes: ai,
+  });
+  assert.deepEqual(reconcile(ai, "ai", "typed"), {
+    direction: "redo",
+    bytes: typed,
+  });
+  assert.deepEqual(commands, [aiCommand, manualCommand]);
+  assert.deepEqual(
+    undoHistory.map((entry) => entry.command),
+    commands,
+  );
+});
+
+test("native history cannot reuse a package when its bytes or revision differ", () => {
+  const command = { op: "edit" };
+  const undoHistory = [
+    {
+      command,
+      beforeBytes: Uint8Array.of(1),
+      afterBytes: Uint8Array.of(2),
+      beforeRevision: "base",
+      afterRevision: "edit",
+    },
+  ];
+  const commands = [command];
+  const redoHistory = [];
+  const input = {
+    commands,
+    undoHistory,
+    redoHistory,
+    currentBytes: Uint8Array.of(9),
+    currentRevision: "edit",
+    observedRevision: "base",
+  };
+  assert.equal(reconcileNativeHistoryRevision(input), null);
+  assert.equal(
+    reconcileNativeHistoryRevision({
+      ...input,
+      currentBytes: Uint8Array.of(2),
+      observedRevision: "other",
+    }),
+    null,
+  );
+  assert.equal(undoHistory.length, 1);
+  assert.equal(commands.length, 1);
+});
 
 test("manual checkpoints preserve earlier AI Undo and coalesce continuous typing", () => {
   const aiBytes = Uint8Array.of(2);

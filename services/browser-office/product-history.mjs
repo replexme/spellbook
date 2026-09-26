@@ -19,6 +19,58 @@ function sameBytes(left, right) {
   return true;
 }
 
+// A human can use the editor's own Undo/Redo instead of the product toolbar.
+// When that reaches an already journaled revision, reuse its exact package.
+// Re-exporting the engine's equivalent model can rewrite untouched masters.
+export function reconcileNativeHistoryRevision({
+  commands,
+  undoHistory,
+  redoHistory,
+  currentBytes,
+  currentRevision,
+  observedRevision,
+}) {
+  if (!(currentBytes instanceof Uint8Array) || !observedRevision) return null;
+  const lastUndo = undoHistory.at(-1);
+  if (
+    lastUndo &&
+    lastUndo.beforeBytes instanceof Uint8Array &&
+    lastUndo.afterBytes instanceof Uint8Array &&
+    commands.at(-1) === lastUndo.command &&
+    lastUndo.afterRevision === currentRevision &&
+    lastUndo.beforeRevision === observedRevision &&
+    sameBytes(lastUndo.afterBytes, currentBytes)
+  ) {
+    undoHistory.pop();
+    commands.pop();
+    redoHistory.push({
+      ...lastUndo,
+      nativeUndoAvailable: false,
+      nativeRedoAvailable: false,
+    });
+    return { direction: "undo", bytes: lastUndo.beforeBytes.slice() };
+  }
+  const lastRedo = redoHistory.at(-1);
+  if (
+    lastRedo &&
+    lastRedo.beforeBytes instanceof Uint8Array &&
+    lastRedo.afterBytes instanceof Uint8Array &&
+    lastRedo.beforeRevision === currentRevision &&
+    lastRedo.afterRevision === observedRevision &&
+    sameBytes(lastRedo.beforeBytes, currentBytes)
+  ) {
+    redoHistory.pop();
+    commands.push(lastRedo.command);
+    undoHistory.push({
+      ...lastRedo,
+      nativeUndoAvailable: false,
+      nativeRedoAvailable: false,
+    });
+    return { direction: "redo", bytes: lastRedo.afterBytes.slice() };
+  }
+  return null;
+}
+
 export function recordManualProductCheckpoint({
   commands,
   undoHistory,

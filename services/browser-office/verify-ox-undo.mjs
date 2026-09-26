@@ -297,6 +297,11 @@ async function runCycle(index) {
     );
     const file = path.join(outputRoot, `cycle-${index}.pptx`);
     await writeFile(file, Uint8Array.from(bytes));
+    assert.equal(
+      Buffer.compare(Buffer.from(bytes), Buffer.from(fixture)),
+      0,
+      "Two Undo actions must restore the exact original PPTX package.",
+    );
     const pptx = unzipSync(Uint8Array.from(bytes));
     assert.match(
       strFromU8(pptx["ppt/slides/slide1.xml"]),
@@ -306,6 +311,7 @@ async function runCycle(index) {
     return {
       status: "passed",
       sourceRevisionRestored: true,
+      exactOriginalBytes: true,
       savedBytes: bytes.length,
       output: file,
       readMetrics: {
