@@ -22,6 +22,8 @@ const packageRelationshipNamespace =
   "http://schemas.openxmlformats.org/package/2006/relationships";
 const contentTypeNamespace =
   "http://schemas.openxmlformats.org/package/2006/content-types";
+const extendedPropertiesNamespace =
+  "http://schemas.openxmlformats.org/officeDocument/2006/extended-properties";
 const markupCompatibilityNamespace =
   "http://schemas.openxmlformats.org/markup-compatibility/2006";
 const diagramDrawingNamespace =
@@ -115,6 +117,12 @@ function sameEngineExportPart(part, left, right) {
   if (!left || !right || !part.endsWith(".xml")) return false;
   const normalized = (bytes) => {
     const document = parseXml({ [part]: bytes }, part);
+    if (part === "docProps/app.xml")
+      for (const totalTime of document.getElementsByTagNameNS(
+        extendedPropertiesNamespace,
+        "TotalTime",
+      ))
+        totalTime.textContent = "__office_save_duration__";
     let fieldIndex = 0;
     for (const field of document.getElementsByTagNameNS(
       drawingNamespace,
@@ -343,6 +351,53 @@ function mergeElementThreeWay(document, source, baseline, edited) {
   }
   for (const { node } of output) merged.appendChild(node);
   return merged;
+}
+
+// Impress rewrites extended document properties on export. Apply only the
+// fields that differ between its two saves to the author's original XML.
+// TotalTime is save duration, already excluded by sameEngineExportPart.
+function mergeExtendedProperties(originalBytes, noEditBytes, editedBytes) {
+  const part = "docProps/app.xml";
+  const original = parseXml({ [part]: originalBytes }, part);
+  const noEdit = parseXml({ [part]: noEditBytes }, part);
+  const edited = parseXml({ [part]: editedBytes }, part);
+  for (const document of [original, noEdit, edited])
+    if (
+      document.documentElement.namespaceURI !== extendedPropertiesNamespace ||
+      document.documentElement.localName !== "Properties"
+    )
+      throw new Error("Native snapshot has invalid extended properties.");
+  const childrenByName = (document) => {
+    const children = new Map();
+    for (const child of xmlElementChildren(document.documentElement)) {
+      const key = xmlElementKey(child);
+      if (children.has(key))
+        throw new Error("Native snapshot has duplicate extended properties.");
+      children.set(key, child);
+    }
+    return children;
+  };
+  const authored = childrenByName(original);
+  const baseline = childrenByName(noEdit);
+  const changed = childrenByName(edited);
+  let patched = false;
+  for (const key of new Set([...baseline.keys(), ...changed.keys()])) {
+    const before = baseline.get(key);
+    const after = changed.get(key);
+    if (
+      key === `${extendedPropertiesNamespace}|TotalTime` ||
+      (before && after && comparableXml(before) === comparableXml(after))
+    )
+      continue;
+    const source = authored.get(key);
+    if (after) {
+      const replacement = original.importNode(after, true);
+      if (source) original.documentElement.replaceChild(replacement, source);
+      else original.documentElement.appendChild(replacement);
+    } else if (source) original.documentElement.removeChild(source);
+    patched = true;
+  }
+  return patched ? serializeXml(original) : originalBytes;
 }
 
 function preserveUnaffectedSlideShapes(
@@ -2227,6 +2282,14 @@ export function preserveOriginalPptxParts(
           targetNamesBySlide?.get(part) ?? null,
         )
       : null;
+    const semanticExtendedPropertiesPatch =
+      authoredChange &&
+      part === "docProps/app.xml" &&
+      original[part] &&
+      noEdit[part] &&
+      edited[part]
+        ? mergeExtendedProperties(original[part], noEdit[part], edited[part])
+        : null;
     let relationshipRemap = null;
     const presentationPatch =
       presentationPartsPatch && Object.hasOwn(presentationPartsPatch, part);
@@ -2277,12 +2340,15 @@ export function preserveOriginalPptxParts(
                 : (relationshipRemap ??
                   semanticShapePatch ??
                   semanticTableInsetPatch ??
+                  semanticExtendedPropertiesPatch ??
                   edited[part])
             : (reboundReferences ?? original[part]);
     if (semanticSlideSizePatch) semanticPatchedParts.push(part);
     if (
       semanticShapePatch ||
       semanticTableInsetPatch ||
+      (semanticExtendedPropertiesPatch &&
+        semanticExtendedPropertiesPatch !== original[part]) ||
       relationshipRemap ||
       (reboundReferences && reboundReferences !== original[part])
     )

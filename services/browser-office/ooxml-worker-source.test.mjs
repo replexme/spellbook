@@ -464,6 +464,159 @@ test("native snapshot keeps unrequested core metadata while committing slide edi
   );
 });
 
+test("native snapshot keeps extended properties after a direct slide text edit", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(source);
+  const noEdit = { ...original };
+  const edited = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "replace_text",
+      elementId: "0/0",
+      expectedText: "Spellbook 검증 العربية",
+      text: "Typed by a person",
+    }).bytes,
+  );
+  noEdit["docProps/app.xml"] = strToU8(
+    '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><TotalTime>1629</TotalTime><Application>ZetaOffice</Application></Properties>',
+  );
+  edited["docProps/app.xml"] = strToU8(
+    '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><TotalTime>1630</TotalTime><Application>ZetaOffice</Application></Properties>',
+  );
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    null,
+  );
+  const preserved = unzipSync(result.bytes);
+  assert.deepEqual(result.report.changedParts, ["ppt/slides/slide1.xml"]);
+  assert.deepEqual(preserved["docProps/app.xml"], original["docProps/app.xml"]);
+  assert.match(
+    strFromU8(preserved["ppt/slides/slide1.xml"]),
+    /Typed by a person/u,
+  );
+});
+
+test("native snapshot allows a direct extended-properties-only edit", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const noEdit = unzipSync(source);
+  const edited = { ...noEdit };
+  edited["docProps/app.xml"] = strToU8(
+    strFromU8(noEdit["docProps/app.xml"]).replace(
+      "<Company></Company>",
+      "<Company>Edited company</Company>",
+    ),
+  );
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    null,
+  );
+  assert.deepEqual(result.report.changedParts, ["docProps/app.xml"]);
+  assert.match(
+    strFromU8(unzipSync(result.bytes)["docProps/app.xml"]),
+    /Edited company/u,
+  );
+});
+
+test("native snapshot ignores save duration even without a slide change", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(source);
+  const noEdit = { ...original };
+  const edited = { ...original };
+  const engine =
+    '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><TotalTime>1629</TotalTime><Application>ZetaOffice</Application></Properties>';
+  noEdit["docProps/app.xml"] = strToU8(engine);
+  edited["docProps/app.xml"] = strToU8(
+    engine.replace("<TotalTime>1629", "<TotalTime>1630"),
+  );
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    null,
+  );
+  assert.deepEqual(result.report.changedParts, []);
+  assert.deepEqual(
+    unzipSync(result.bytes)["docProps/app.xml"],
+    original["docProps/app.xml"],
+  );
+});
+
+test("native snapshot keeps authored properties across a direct slide addition", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(source);
+  const noEdit = { ...original };
+  const edited = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "duplicate_slide",
+      slideIndex: 0,
+      insertIndex: 1,
+    }).bytes,
+  );
+  const engine =
+    '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><TotalTime>1629</TotalTime><Application>ZetaOffice</Application></Properties>';
+  noEdit["docProps/app.xml"] = strToU8(engine);
+  edited["docProps/app.xml"] = strToU8(
+    engine.replace("<TotalTime>1629", "<TotalTime>1630"),
+  );
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    null,
+  );
+  assert.equal(inspectOoxmlDocument(result.bytes).slideIds.length, 2);
+  assert.deepEqual(
+    unzipSync(result.bytes)["docProps/app.xml"],
+    original["docProps/app.xml"],
+  );
+});
+
+test("native snapshot merges a property edit with a slide edit", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(source);
+  const noEdit = { ...original };
+  const edited = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "replace_text",
+      elementId: "0/0",
+      expectedText: "Spellbook 검증 العربية",
+      text: "Typed alongside property edit",
+    }).bytes,
+  );
+  noEdit["docProps/app.xml"] = strToU8(
+    '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><TotalTime>1629</TotalTime><Application>ZetaOffice</Application><Company>Before</Company></Properties>',
+  );
+  edited["docProps/app.xml"] = strToU8(
+    '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><TotalTime>1630</TotalTime><Application>ZetaOffice</Application><Company>After</Company></Properties>',
+  );
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    null,
+  );
+  const merged = unzipSync(result.bytes);
+  assert.deepEqual(result.report.changedParts, [
+    "docProps/app.xml",
+    "ppt/slides/slide1.xml",
+  ]);
+  assert.match(
+    strFromU8(merged["docProps/app.xml"]),
+    /<Company>After<\/Company>/u,
+  );
+  assert.match(
+    strFromU8(merged["docProps/app.xml"]),
+    /<Application>Microsoft Macintosh PowerPoint<\/Application>/u,
+  );
+  assert.match(
+    strFromU8(merged["docProps/app.xml"]),
+    /<PresentationFormat>On-screen Show \(4:3\)<\/PresentationFormat>/u,
+  );
+});
+
 test("native snapshot reconciliation refuses a changed part with remapped references", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const noEdit = unzipSync(source);
