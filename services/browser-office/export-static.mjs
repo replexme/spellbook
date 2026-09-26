@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
+import { readRepositoryIdentity } from "./repository-identity.mjs";
 import { buildRoutes } from "./server.mjs";
 
 /*
@@ -26,6 +27,7 @@ import { buildRoutes } from "./server.mjs";
  */
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
+const repositoryRoot = path.resolve(serviceRoot, "../..");
 const RUNTIME_PREFIX = "/runtime/";
 const IMMUTABLE = "public, max-age=31536000, immutable";
 
@@ -293,6 +295,7 @@ export async function exportStatic({
     !/^[^\s@]+@[^\s@]+$/u.test(sourceContact)
   )
     throw new Error("A source-request contact address is required.");
+  const editorSourceRevision = readRepositoryIdentity(repositoryRoot).revision;
   const admitted = await admitCandidateRuntime({ runtimeDirectory });
   const routes = buildRoutes(serviceRoot, admitted.upstream, {
     runtimeRoot: admitted.runtimeDirectory,
@@ -317,7 +320,7 @@ export async function exportStatic({
       fonts: JSON.parse(
         await readFile(path.join(serviceRoot, "runtime-files.json"), "utf8"),
       ),
-      publicCommit: admitted.receipt.spellbookSourceRevision,
+      publicCommit: editorSourceRevision,
       receiptSha256: admitted.receiptSha256,
       contact: sourceContact,
     }),
@@ -329,6 +332,7 @@ export async function exportStatic({
       ...admitted.upstream.sourceCandidate,
       runtimeVersion: version,
       receiptSha256: admitted.receiptSha256,
+      editorSourceRevision,
     },
   });
   for (const { file, source } of plan.files) {
