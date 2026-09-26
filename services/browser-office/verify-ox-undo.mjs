@@ -101,12 +101,14 @@ async function runCycle(index) {
   });
   const page = await context.newPage();
   const errors = [];
+  let stage = "navigate";
   page.on("pageerror", (error) => errors.push(error.message));
   try {
     await page.goto(
       `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}`,
       { waitUntil: "domcontentloaded", timeout },
     );
+    stage = "runtime-ready";
     await page.waitForFunction(
       () => ["runtime-ready", "error"].includes(document.body.dataset.state),
       null,
@@ -118,6 +120,7 @@ async function runCycle(index) {
         : null,
     );
     if (runtimeError) throw new Error(`Runtime failed: ${runtimeError}`);
+    stage = "connect-product-host";
     await page.evaluate((hostOrigin) => {
       const channel = new MessageChannel();
       const events = [];
@@ -131,6 +134,7 @@ async function runCycle(index) {
       );
     }, origin);
     await waitEvent(page, { type: "ready" });
+    stage = "open-document";
     await page.evaluate(
       ({ bytes, index }) => {
         const payload = Uint8Array.from(bytes);
@@ -154,6 +158,7 @@ async function runCycle(index) {
       type: "open-complete",
       requestId: `open-${index}`,
     });
+    stage = "observe-original";
     const before = await task(page, {
       operation: "observe",
       captureSlideIndexes: [],
@@ -167,6 +172,7 @@ async function runCycle(index) {
           : element.text.includes("Typical Presentation")),
     );
     assert.ok(target, "Expected first-slide title not observed.");
+    stage = "edit-title";
     const editStartedAt = Date.now();
     const changed = await task(page, {
       operation: "edit",
@@ -187,6 +193,7 @@ async function runCycle(index) {
       "AI 수정",
     );
     if (measureFixture) {
+      stage = "observe-edited";
       const reviewed = await task(page, {
         operation: "observe",
         captureSlideIndexes: [],
@@ -206,6 +213,7 @@ async function runCycle(index) {
     await page.waitForTimeout(25_000);
     // Give the Qt canvas keyboard focus before selecting the title through
     // the native bridge. A bridge selection alone does not focus the canvas.
+    stage = "type-human-text";
     await page.mouse.click(700, 400);
     await task(page, {
       operation: "reveal",
@@ -228,6 +236,7 @@ async function runCycle(index) {
       ).text,
       /AI 수정 사람/,
     );
+    stage = "first-undo";
     await page.keyboard.press("Control+z");
     await page.waitForTimeout(25_000);
     const once = await task(page, {
@@ -240,6 +249,7 @@ async function runCycle(index) {
       ).text,
       "AI 수정",
     );
+    stage = "second-undo";
     await page.keyboard.press("Control+z");
     await page.waitForTimeout(25_000);
     const twice = await task(page, {
@@ -247,6 +257,7 @@ async function runCycle(index) {
       captureSlideIndexes: [],
     });
     assert.equal(twice.revision, before.revision);
+    stage = "save-after-undo";
     const previous = await page.evaluate(
       () => globalThis.__oxHost.events.length,
     );
@@ -305,6 +316,20 @@ async function runCycle(index) {
         afterSecondUndo: twice.readMetrics,
       },
     };
+  } catch (error) {
+    const state = await page
+      .evaluate(() => ({
+        state: document.body.dataset.state,
+        error: document.body.dataset.error,
+        hostErrors: (globalThis.__oxHost?.events ?? [])
+          .filter((event) => event.type === "error")
+          .map((event) => String(event.error ?? ""))
+          .slice(-5),
+      }))
+      .catch(() => null);
+    throw new Error(
+      `${stage}: ${String(error)}; state=${JSON.stringify(state)}; pageErrors=${JSON.stringify(errors.slice(-5))}`,
+    );
   } finally {
     await context.close();
   }
