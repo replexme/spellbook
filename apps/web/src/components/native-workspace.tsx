@@ -533,8 +533,9 @@ export function NativeWorkspace({
       request: Record<string, unknown>,
       timeoutMs = 15_000,
       transfer: Transferable[] = [],
-    ) =>
-      new Promise<unknown>((resolve, reject) => {
+    ) => {
+      const startedAt = performance.now();
+      return new Promise<unknown>((resolve, reject) => {
         const channel = port.current;
         if (!channel) {
           reject(new Error("editor_not_connected"));
@@ -547,7 +548,27 @@ export function NativeWorkspace({
         }, timeoutMs);
         hostCalls.current.set(id, { resolve, reject, timer });
         channel.postMessage({ id, request }, transfer);
-      }),
+      }).then((result) => {
+        // Keep operation counts and engine read time without recording text,
+        // screenshots, element IDs, or the request itself.
+        const operation = String(request.operation ?? "other");
+        const safeOperation = /^[a-z_]{1,40}$/.test(operation)
+          ? operation
+          : "other";
+        const metrics = (result as {
+          readMetrics?: { count?: number; elapsedMs?: number };
+        })?.readMetrics;
+        performance.measure(`spellbook-editor:${safeOperation}`, {
+          start: startedAt,
+          end: performance.now(),
+          detail: {
+            documentReads: metrics?.count ?? null,
+            documentReadMs: metrics?.elapsedMs ?? null,
+          },
+        });
+        return result;
+      });
+    },
     [],
   );
   /** Keeps the task's screenshots in this page; the server drops them when the request ends. */

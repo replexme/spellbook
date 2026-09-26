@@ -1919,7 +1919,11 @@ function spellbookDocumentOperation(request) {
     return shape;
   };
 
+  let documentReadCount = 0;
+  let documentReadMs = 0;
   function read(detailSlideIndex) {
+    const readStartedAt = Date.now();
+    documentReadCount++;
     const slides = [];
     const masters = masterDetails();
     const selectedElementIds = [];
@@ -2428,18 +2432,21 @@ function spellbookDocumentOperation(request) {
       ...slide,
       elements: elements.map(({ stableId: _stableId, ...element }) => element),
     }));
+    const revision = revisionOf({
+      slides: revisionSlides,
+      masters: revisionMasters,
+      sections,
+    });
+    documentReadMs += Date.now() - readStartedAt;
     return {
       unit: "1/100mm",
+      readMetrics: { count: documentReadCount, elapsedMs: documentReadMs },
       engine: {
         ...engineIdentity,
         supportedOperations: [...runtimeOperations],
       },
       styleCatalog,
-      revision: revisionOf({
-        slides: revisionSlides,
-        masters: revisionMasters,
-        sections,
-      }),
+      revision,
       masters,
       sections,
       slides,
