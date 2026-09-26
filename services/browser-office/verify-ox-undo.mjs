@@ -204,6 +204,9 @@ async function runCycle(index) {
       };
     }
     await page.waitForTimeout(25_000);
+    // Give the Qt canvas keyboard focus before selecting the title through
+    // the native bridge. A bridge selection alone does not focus the canvas.
+    await page.mouse.click(700, 400);
     await task(page, {
       operation: "reveal",
       slideIndex: 0,
