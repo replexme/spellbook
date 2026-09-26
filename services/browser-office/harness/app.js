@@ -51,6 +51,8 @@ const networkFetch = globalThis.fetch.bind(globalThis);
 let enginePort;
 let engineDocumentOpen = false;
 let hostPort;
+const productTaskReplies = new Map();
+const productTasksInFlight = new Set();
 let hostRevision = "";
 let hostMaximumBytes = 0;
 let lastReportedModified = false;
@@ -2092,6 +2094,16 @@ function requireProductHostOrigin() {
 
 function postHost(message, transfer = []) {
   if (!hostPort) throw new Error("Browser Office host is not connected.");
+  if (
+    typeof message.id === "string" &&
+    (Object.hasOwn(message, "value") || Object.hasOwn(message, "error"))
+  ) {
+    productTaskReplies.set(message.id, message);
+    // The server can redeliver a task while the editor is still working.
+    // Retain recent replies so a lost acknowledgement cannot replay an edit.
+    while (productTaskReplies.size > 8)
+      productTaskReplies.delete(productTaskReplies.keys().next().value);
+  }
   hostPort.postMessage(message, transfer);
 }
 
@@ -2157,6 +2169,7 @@ async function openProductDocument(message) {
   if (initial[0] !== 0x50 || initial[1] !== 0x4b)
     throw new Error("Browser Office received an invalid PPTX package.");
   hostRevision = message.revision;
+  productTaskReplies.clear();
   hostMaximumBytes = message.maxBytes;
   history.length = 0;
   commands.length = 0;
@@ -2576,6 +2589,16 @@ function connectProductHost(event) {
     return;
   hostPort = event.ports[0];
   hostPort.onmessage = (hostEvent) => {
+    const message = hostEvent.data;
+    if (typeof message?.id === "string" && message.request) {
+      const reply = productTaskReplies.get(message.id);
+      if (reply) {
+        hostPort.postMessage(reply);
+        return;
+      }
+      if (productTasksInFlight.has(message.id)) return;
+      productTasksInFlight.add(message.id);
+    }
     if (browserProbeMode && typeof hostEvent.data?.id === "string")
       browserProbeActivity = {
         id: hostEvent.data.id,
@@ -2588,8 +2611,11 @@ function connectProductHost(event) {
       };
     if (browserProbeMode && typeof hostEvent.data?.id === "string")
       browserProbePhaseTrace = [{ phase: "queued", at: Date.now() }];
-    void enqueueProductOperation(() =>
-      handleProductHostMessage(hostEvent.data),
+    void enqueueProductOperation(() => handleProductHostMessage(message)).finally(
+      () => {
+        if (typeof message?.id === "string")
+          productTasksInFlight.delete(message.id);
+      },
     );
   };
   hostPort.start();
