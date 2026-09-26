@@ -43,7 +43,8 @@ export class NativeRemoteHost implements NativeHost {
       signal,
     )) as { taskId?: string };
     if (!created.taskId) throw new Error("native_task_not_created");
-    const deadline = Date.now() + 120_000;
+    // Match the native task lifetime; large PPTX edits can take minutes.
+    const deadline = Date.now() + 300_000;
     while (Date.now() < deadline) {
       const task = (await this.post(
         { operation: "task_status", taskId: created.taskId },

@@ -39,7 +39,7 @@ const ASSET_OPERATIONS = new Set([
 ]);
 const HEARTBEAT_MS = 15_000;
 // Longer than an observed edit batch (p90 17 s) with headroom for a slow machine.
-const EDITOR_CALL_TIMEOUT_MS = 120_000;
+const EDITOR_CALL_TIMEOUT_MS = 300_000;
 
 export async function runBrowserTurn(
   job: BrowserJob,

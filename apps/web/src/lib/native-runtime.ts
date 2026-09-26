@@ -37,7 +37,7 @@ type PermissionMode = "read_only" | "selection" | "slides" | "document";
 // still completes in the editor changes the document outside the AI turn's
 // review. Observed edit_batch p90 was 17s (max 20s) on the managed editor;
 // the AI worker waits up to 120s for a task.
-export const NATIVE_TASK_TTL_SECONDS = 120;
+export const NATIVE_TASK_TTL_SECONDS = 300;
 
 // API-key requests run in the user's browser, which calls the provider with
 // a key Spellbook's servers never receive. The server only records them.
