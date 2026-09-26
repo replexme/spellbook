@@ -96,6 +96,33 @@ export type PendingTurn = {
 
 const PHONE_QUERY = "(max-width: 760px)";
 
+function measureEditorOperation(
+  operation: unknown,
+  startedAt: number,
+  result: unknown,
+) {
+  if (
+    (window as Window & { __spellbookEditorDiagnostics?: boolean })
+      .__spellbookEditorDiagnostics !== true
+  )
+    return;
+  // The diagnostic records only operation names and timings, never document
+  // text, screenshots, element IDs, or AI prompts.
+  const name = String(operation ?? "other");
+  const safeOperation = /^[a-z_]{1,40}$/.test(name) ? name : "other";
+  const metrics = (result as {
+    readMetrics?: { count?: number; elapsedMs?: number };
+  } | null)?.readMetrics;
+  performance.measure(`spellbook-editor:${safeOperation}`, {
+    start: startedAt,
+    end: performance.now(),
+    detail: {
+      documentReads: metrics?.count ?? null,
+      documentReadMs: metrics?.elapsedMs ?? null,
+    },
+  });
+}
+
 /** A screenshot from a task result, as an object URL (revoked on unmount). */
 function pngUrl(
   image: { pngBytes?: unknown; pngBase64?: unknown } | undefined,
@@ -204,6 +231,10 @@ export function NativeWorkspace({
       }
     >(),
   );
+  const editorTaskStarts = useRef(
+    new Map<string, { operation: string; startedAt: number }>(),
+  );
+  const measuredEditorTasks = useRef(new Set<string>());
   /** Screenshots the AI looked at, kept only in this page ("taskId:index" → object URL). */
   const imageUrls = useRef(new Map<string, string>());
   const [images, setImages] = useState<Map<string, string>>(new Map());
@@ -549,28 +580,7 @@ export function NativeWorkspace({
         hostCalls.current.set(id, { resolve, reject, timer });
         channel.postMessage({ id, request }, transfer);
       }).then((result) => {
-        if (
-          (window as Window & { __spellbookEditorDiagnostics?: boolean })
-            .__spellbookEditorDiagnostics !== true
-        )
-          return result;
-        // Keep operation counts and engine read time without recording text,
-        // screenshots, element IDs, or the request itself.
-        const operation = String(request.operation ?? "other");
-        const safeOperation = /^[a-z_]{1,40}$/.test(operation)
-          ? operation
-          : "other";
-        const metrics = (result as {
-          readMetrics?: { count?: number; elapsedMs?: number };
-        })?.readMetrics;
-        performance.measure(`spellbook-editor:${safeOperation}`, {
-          start: startedAt,
-          end: performance.now(),
-          detail: {
-            documentReads: metrics?.count ?? null,
-            documentReadMs: metrics?.elapsedMs ?? null,
-          },
-        });
+        measureEditorOperation(request.operation, startedAt, result);
         return result;
       });
     },
@@ -691,6 +701,17 @@ export function NativeWorkspace({
         !assetOperations.has(operation) ||
         typeof task.id !== "string"
       ) {
+        if (
+          typeof task.id === "string" &&
+          (window as Window & { __spellbookEditorDiagnostics?: boolean })
+            .__spellbookEditorDiagnostics === true &&
+          !measuredEditorTasks.current.has(task.id) &&
+          !editorTaskStarts.current.has(task.id)
+        )
+          editorTaskStarts.current.set(task.id, {
+            operation,
+            startedAt: performance.now(),
+          });
         port.current?.postMessage(task);
         return;
       }
@@ -707,6 +728,16 @@ export function NativeWorkspace({
         bytes: ArrayBuffer;
         fileName: string;
       }) => {
+        if (
+          (window as Window & { __spellbookEditorDiagnostics?: boolean })
+            .__spellbookEditorDiagnostics === true &&
+          !measuredEditorTasks.current.has(task.id!) &&
+          !editorTaskStarts.current.has(task.id!)
+        )
+          editorTaskStarts.current.set(task.id!, {
+            operation,
+            startedAt: performance.now(),
+          });
         // Transfer a fresh copy because MessagePort detaches transferred buffers.
         // Task redelivery is safe: the extension caches the result by task id.
         const bytes = payload.bytes.slice(0);
@@ -1075,6 +1106,20 @@ export function NativeWorkspace({
             return;
           }
           if (typeof result.data?.id === "string") {
+            const timing = editorTaskStarts.current.get(result.data.id);
+            if (timing) {
+              editorTaskStarts.current.delete(result.data.id);
+              measuredEditorTasks.current.add(result.data.id);
+              while (measuredEditorTasks.current.size > 100)
+                measuredEditorTasks.current.delete(
+                  measuredEditorTasks.current.values().next().value!,
+                );
+              measureEditorOperation(
+                timing.operation,
+                timing.startedAt,
+                result.data.value,
+              );
+            }
             if (result.data?.value && typeof result.data.value === "object") {
               latestObservation.current = result.data.value as Record<
                 string,

@@ -9225,7 +9225,9 @@ function spellbookDocumentOperation(request) {
     }
     undo.leaveUndoContext();
     contextOpen = false;
-    const after = read();
+    // executeSingle already read the complete state after the last command.
+    // Leaving the Undo context changes history, not document content.
+    const after = current;
     const changed = transactionChanged(before, after);
     if (changed && undo.getAllUndoActionTitles().length <= undoCount)
       throw new Error("transaction_undo_not_recorded");
