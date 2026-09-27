@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   aiObservationView,
   invalidatesAiObservationCache,
+  navigatedAiObservationCache,
   reusableAiObservation,
   reusableAiObservationForSlide,
 } from "./ai-observation-view.mjs";
@@ -58,6 +59,13 @@ test("saving keeps an observation eligible for strict live-state reuse", () => {
     invalidatesAiObservationCache({
       type: "command",
       messageId: "Action_Save",
+    }),
+    false,
+  );
+  assert.equal(
+    invalidatesAiObservationCache({
+      type: "command",
+      messageId: "Action_GoToPage",
     }),
     false,
   );
@@ -136,6 +144,64 @@ test("slide detail reuse keeps the whole-deck state and rejects stale or partial
       ...detail,
       elements: [{ ...detail.elements[0], text: "stale" }],
     }),
+    null,
+  );
+});
+
+test("slide navigation keeps the deck but requires fresh detail for the new active slide", () => {
+  const bytes = new Uint8Array([1]);
+  const slides = [{ slideIndex: 0 }, { slideIndex: 1 }];
+  const cache = {
+    bytes,
+    revision: "r1",
+    documentChanges: 7,
+    activeSlide: 0,
+    selectedElementIds: [],
+    detailSlideIndex: null,
+    observation: {
+      revision: "r1",
+      activeSlide: 0,
+      selectedElementIds: [],
+      slides,
+      textDetails: { slideIndex: 0, elements: [] },
+    },
+  };
+  const current = {
+    bytes,
+    revision: "r1",
+    documentChanges: 7,
+    activeSlide: 1,
+    selectedElementIds: [],
+    detailSlideIndex: null,
+  };
+  const navigated = navigatedAiObservationCache(cache, current);
+  assert.equal(navigated?.activeSlide, 1);
+  assert.equal(navigated?.observation.activeSlide, 1);
+  assert.equal(navigated?.detailSlideIndex, 0);
+  assert.equal(reusableAiObservation(navigated, current), null);
+  assert.equal(
+    reusableAiObservationForSlide(
+      navigated,
+      { ...current, detailSlideIndex: 1 },
+      { slideIndex: 1, elements: [] },
+    )?.textDetails.slideIndex,
+    1,
+  );
+  for (const changed of [
+    { documentChanges: 8 },
+    { bytes: new Uint8Array([1]) },
+    { revision: "r2" },
+    { selectedElementIds: ["1/0"] },
+  ])
+    assert.equal(
+      navigatedAiObservationCache(cache, { ...current, ...changed }),
+      null,
+    );
+  assert.equal(
+    navigatedAiObservationCache(
+      { ...cache, selectedElementIds: ["0/0"] },
+      current,
+    ),
     null,
   );
 });

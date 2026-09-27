@@ -112,13 +112,54 @@ export function reusableAiObservationForSlide(cache, current, detail) {
   };
 }
 
+// Showing another slide changes the editor view, not the PPTX. Carry the
+// whole-deck read across that view change only when both selections are empty
+// and the live document identity is still exact. Keep the old detail index so
+// an implicit detail request for the newly active slide cannot reuse it.
+export function navigatedAiObservationCache(cache, current) {
+  const previousDetail = cache?.observation?.textDetails?.slideIndex;
+  if (
+    !Number.isSafeInteger(cache?.documentChanges) ||
+    !Number.isSafeInteger(current?.documentChanges) ||
+    cache.documentChanges !== current.documentChanges ||
+    cache.bytes !== current.bytes ||
+    cache.revision !== current.revision ||
+    !Number.isSafeInteger(current.activeSlide) ||
+    !cache.observation.slides?.[current.activeSlide] ||
+    !Number.isSafeInteger(previousDetail) ||
+    cache.observation.activeSlide !== cache.activeSlide ||
+    cache.selectedElementIds?.length !== 0 ||
+    cache.observation.selectedElementIds?.length !== 0 ||
+    current.selectedElementIds?.length !== 0
+  )
+    return null;
+  return {
+    ...cache,
+    activeSlide: current.activeSlide,
+    detailSlideIndex: previousDetail,
+    observation: {
+      ...cache.observation,
+      activeSlide: current.activeSlide,
+      selectedElementIds: [],
+    },
+  };
+}
+
 // Saving may update the document's modified flag but does not itself edit
 // slide content. Reuse still requires the live counter, bytes, revision and
 // selection checks above after the save has finished.
 export function invalidatesAiObservationCache(message) {
+  const viewOnlyCommands = [
+    "Action_Save",
+    "Action_GoToPage",
+    "welcome-close",
+    "Host_PostmessageReady",
+    "User_Active",
+  ];
   return Boolean(
     message?.type === "open" ||
-      (message?.type === "command" && message.messageId !== "Action_Save") ||
+      (message?.type === "command" &&
+        !viewOnlyCommands.includes(message.messageId)) ||
       (message?.request &&
         !["observe", "selection", "reveal"].includes(
           message.request.operation,

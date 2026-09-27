@@ -12,6 +12,7 @@ import {
 import {
   aiObservationView,
   invalidatesAiObservationCache,
+  navigatedAiObservationCache,
   reusableAiObservation,
   reusableAiObservationForSlide,
 } from "/harness/ai-observation-view.mjs";
@@ -2809,13 +2810,22 @@ async function cachedAiObservation(requested) {
       (item) => item.elementId,
     ),
   };
-  const sameSlide = reusableAiObservation(cache, current);
-  if (sameSlide) return sameSlide;
+  const navigated =
+    cache.activeSlide === current.activeSlide
+      ? null
+      : navigatedAiObservationCache(cache, current);
+  const observedCache = navigated ?? cache;
+  if (navigated) noteAiObservationCache("navigation-verified");
+  const sameSlide = reusableAiObservation(observedCache, current);
+  if (sameSlide) {
+    if (navigated) aiObservationCache = observedCache;
+    return sameSlide;
+  }
   const slideIndex = current.detailSlideIndex ?? current.activeSlide;
-  const slide = cache.observation.slides?.[slideIndex];
-  const sameDocument = reusableAiObservation(cache, {
+  const slide = observedCache.observation.slides?.[slideIndex];
+  const sameDocument = reusableAiObservation(observedCache, {
     ...current,
-    detailSlideIndex: cache.detailSlideIndex,
+    detailSlideIndex: observedCache.detailSlideIndex,
   });
   if (!slide || !sameDocument) {
     const reason = !Number.isSafeInteger(current.documentChanges)
@@ -2855,7 +2865,7 @@ async function cachedAiObservation(requested) {
       return null;
     }
     const observation = reusableAiObservationForSlide(
-      cache,
+      observedCache,
       { ...current, detailSlideIndex: slideIndex },
       detail.value,
     );
@@ -2865,7 +2875,7 @@ async function cachedAiObservation(requested) {
       return null;
     }
     aiObservationCache = {
-      ...cache,
+      ...observedCache,
       detailSlideIndex: current.detailSlideIndex,
       observation,
     };
