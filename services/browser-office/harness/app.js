@@ -9,6 +9,10 @@ import {
   withBrowserVisualEvidence,
 } from "/harness/browser-visual-evidence.mjs";
 import {
+  aiObservationView,
+  reusableAiObservation,
+} from "/harness/ai-observation-view.mjs";
+import {
   persistedSectionsMatch,
   persistedSlideTopologyMatches,
 } from "/harness/product-persistence.mjs";
@@ -53,6 +57,7 @@ let engineDocumentOpen = false;
 let hostPort;
 const productTaskReplies = new Map();
 const productTasksInFlight = new Set();
+let aiObservationCache = null;
 let hostRevision = "";
 let hostMaximumBytes = 0;
 let lastReportedModified = false;
@@ -692,30 +697,49 @@ async function preserveAndInspectNativeDocument(
   sourceTargets = null,
   baselineBytes = null,
 ) {
+  const measure = async (name, work) => {
+    const startedAt = performance.now();
+    try {
+      return await work();
+    } finally {
+      performance.measure(`spellbook-persist:${name}`, {
+        start: startedAt,
+        end: performance.now(),
+      });
+    }
+  };
   markBrowserProbePhase("snapshot:serialize");
-  const serialized = await serializeNativeDocument();
+  const serialized = await measure("serialize", () =>
+    serializeNativeDocument(),
+  );
   markBrowserProbePhase("snapshot:normalize");
   const noEdit =
     baselineBytes?.slice() ??
-    (await normalizeNativeDocumentBytes(originalBytes));
+    (await measure("normalize", () =>
+      normalizeNativeDocumentBytes(originalBytes),
+    ));
   if (browserProbeMode && query.get("nativeRaw") === "1") {
     savedArtifacts.set("native-snapshot-original", originalBytes.slice());
     savedArtifacts.set("native-snapshot-no-edit", noEdit.slice());
     savedArtifacts.set("native-snapshot-edited", serialized.slice());
   }
   markBrowserProbePhase("snapshot:preserve");
-  const preserved = await preserveNativeSnapshot(
-    originalBytes,
-    noEdit,
-    serialized,
-    sourceOperations,
-    sourceTargets,
+  const preserved = await measure("preserve", () =>
+    preserveNativeSnapshot(
+      originalBytes,
+      noEdit,
+      serialized,
+      sourceOperations,
+      sourceTargets,
+    ),
   );
   const bytes = new Uint8Array(preserved.bytes);
   if (browserProbeMode && query.get("nativeRaw") === "1")
     savedArtifacts.set("native-snapshot-preserved", bytes.slice());
   markBrowserProbePhase("snapshot:inspect");
-  const observation = await inspectNativeDocumentBytes(bytes, detailSlideIndex);
+  const observation = await measure("inspect", () =>
+    inspectNativeDocumentBytes(bytes, detailSlideIndex),
+  );
   return { bytes, observation, report: preserved.report, serialized };
 }
 
@@ -2299,7 +2323,12 @@ async function saveProductDocument() {
   const requestId = `browser-save-${++requestSequence}`;
   hostSaveRequestId = requestId;
   try {
+    const exportStartedAt = performance.now();
     const bytes = await exportProductDocument();
+    performance.measure("spellbook-persist:save-export", {
+      start: exportStartedAt,
+      end: performance.now(),
+    });
     hostSaveSnapshot = createSaveSnapshot(bytes, reconciledModelRevision);
     const transferable = bytes.slice();
     postHost(
@@ -2321,6 +2350,12 @@ async function saveProductDocument() {
 async function handleProductHostMessage(message) {
   if (!message || typeof message !== "object")
     throw new Error("Browser Office host message is invalid.");
+  if (
+    ["open", "command", "save-result"].includes(message.type) ||
+    (message.request &&
+      !["observe", "selection", "reveal"].includes(message.request.operation))
+  )
+    aiObservationCache = null;
   if (message.type === "open") {
     await openProductDocument(message);
     return;
@@ -2535,7 +2570,10 @@ async function handleProductHostMessage(message) {
       let value;
       // The engine reply whose state became the reconciled one, when known.
       let nativeResult = null;
-      if (prepared?.persistence === "package_reload") {
+      const cached = await cachedAiObservation(message.request);
+      if (cached) {
+        value = cached;
+      } else if (prepared?.persistence === "package_reload") {
         markBrowserProbePhase("package-reload");
         value = await commitProductPackageReload(prepared);
       } else {
@@ -2551,8 +2589,26 @@ async function handleProductHostMessage(message) {
       }
       markBrowserProbePhase("visual-capture");
       value = await attachBrowserVisualEvidence(message.request, value);
+      if (Array.isArray(value?.slides))
+        value = { ...value, modelView: aiObservationView(value) };
       markBrowserProbePhase("status");
       const status = await request("status");
+      if (cached) {
+        const selection = await requestNative({ operation: "selection" });
+        if (
+          !reusableAiObservation(aiObservationCache, {
+            bytes: currentBytes,
+            revision: reconciledModelRevision,
+            detailSlideIndex: message.request.detailSlideIndex ?? null,
+            documentChanges: status.documentChanges,
+            activeSlide: selection.value?.activeSlide,
+            selectedElementIds: selection.value?.selected?.map(
+              (item) => item.elementId,
+            ),
+          })
+        )
+          throw new Error("document_changed_observe_again");
+      }
       reportHostModified(
         Boolean(status.modified) ||
           commands.length > 0 ||
@@ -2560,8 +2616,24 @@ async function handleProductHostMessage(message) {
       );
       if (value?.revision === reconciledModelRevision) {
         rememberReconciledObservation(value);
-        noteCheckpointedDocumentChanges(nativeResult);
+        if (nativeResult) noteCheckpointedDocumentChanges(nativeResult);
       }
+      if (
+        message.request.operation === "observe" &&
+        !cached &&
+        nativeResult?.documentChanges === status.documentChanges &&
+        Number.isSafeInteger(status.documentChanges) &&
+        value?.revision === reconciledModelRevision
+      )
+        aiObservationCache = {
+          bytes: currentBytes,
+          revision: value.revision,
+          detailSlideIndex: message.request.detailSlideIndex ?? null,
+          documentChanges: status.documentChanges,
+          activeSlide: value.activeSlide,
+          selectedElementIds: value.selectedElementIds,
+          observation: value,
+        };
       markBrowserProbePhase("complete");
       postHost({ id: message.id, value });
     } catch (error) {
@@ -2611,12 +2683,12 @@ function connectProductHost(event) {
       };
     if (browserProbeMode && typeof hostEvent.data?.id === "string")
       browserProbePhaseTrace = [{ phase: "queued", at: Date.now() }];
-    void enqueueProductOperation(() => handleProductHostMessage(message)).finally(
-      () => {
-        if (typeof message?.id === "string")
-          productTasksInFlight.delete(message.id);
-      },
-    );
+    void enqueueProductOperation(() =>
+      handleProductHostMessage(message),
+    ).finally(() => {
+      if (typeof message?.id === "string")
+        productTasksInFlight.delete(message.id);
+    });
   };
   hostPort.start();
   postHost({ type: "ready", protocolVersion: 1 });
@@ -2633,6 +2705,23 @@ let lastCheckpointAt = 0;
 // journaled state. The heartbeat reads the whole deck, which takes seconds to
 // minutes on a large deck, only after the count moves.
 let checkpointedDocumentChanges = null;
+async function cachedAiObservation(requested) {
+  if (!aiObservationCache || requested.operation !== "observe") return null;
+  const selection = await requestNative({ operation: "selection" }).catch(
+    () => null,
+  );
+  const status = selection ? await request("status").catch(() => null) : null;
+  return reusableAiObservation(aiObservationCache, {
+    bytes: currentBytes,
+    revision: reconciledModelRevision,
+    detailSlideIndex: requested.detailSlideIndex ?? null,
+    documentChanges: status?.documentChanges,
+    activeSlide: selection?.value?.activeSlide,
+    selectedElementIds: selection?.value?.selected?.map(
+      (item) => item.elementId,
+    ),
+  });
+}
 function noteCheckpointedDocumentChanges(result) {
   checkpointedDocumentChanges =
     result?.value?.revision === reconciledModelRevision &&

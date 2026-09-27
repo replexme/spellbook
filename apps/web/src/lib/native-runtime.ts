@@ -792,6 +792,28 @@ export async function completeNativeTurn(
   const reviewed = result?.reviewed as boolean;
   const executionToken =
     typeof result?.executionToken === "string" ? result.executionToken : "";
+  const rawModelInput = result?.modelInput as
+    | Record<string, unknown>
+    | undefined;
+  const modelInputFields = [
+    "calls",
+    "fullTextBytes",
+    "sentTextBytes",
+    "imageCount",
+    "imageBytes",
+  ] as const;
+  const modelInput =
+    rawModelInput &&
+    modelInputFields.every(
+      (field) =>
+        Number.isSafeInteger(rawModelInput[field]) &&
+        (rawModelInput[field] as number) >= 0 &&
+        (rawModelInput[field] as number) < 1_000_000_000,
+    )
+      ? Object.fromEntries(
+          modelInputFields.map((field) => [field, rawModelInput[field]]),
+        )
+      : null;
   if (
     !text ||
     text.length > 8_000 ||
@@ -810,7 +832,7 @@ export async function completeNativeTurn(
       changed=${changed}, reviewed=${reviewed}, updated_at=now() where job_id=${job.id} returning id,session_id`;
     const summary = await storeTurnSummary(sql, turn.id);
     await sql`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
-      values (${turn.session_id},${turn.id},'done',${sql.json({ text, changed, reviewed, status: typeof result?.status === "string" ? result.status : "completed", turnId: turn.id, summary } as never)})`;
+      values (${turn.session_id},${turn.id},'done',${sql.json({ text, changed, reviewed, status: typeof result?.status === "string" ? result.status : "completed", turnId: turn.id, summary, ...(modelInput ? { modelInput } : {}) } as never)})`;
   });
 }
 

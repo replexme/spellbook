@@ -8737,7 +8737,12 @@ function spellbookDocumentOperation(request) {
 
   if (request.operation !== "edit_batch") return executeSingle(request);
 
-  const before = read();
+  // Only the browser worker supplies this value after checking its document
+  // change listener and selection. Server requests still take a live read.
+  const before =
+    engineIdentity.engineImage === "browser-wasm" && request.observedBefore
+      ? request.observedBefore
+      : read();
   let expectedSlides;
   try {
     expectedSlides = JSON.parse(request.expectedSlides);

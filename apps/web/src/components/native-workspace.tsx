@@ -110,15 +110,22 @@ function measureEditorOperation(
   // text, screenshots, element IDs, or AI prompts.
   const name = String(operation ?? "other");
   const safeOperation = /^[a-z_]{1,40}$/.test(name) ? name : "other";
-  const metrics = (result as {
-    readMetrics?: { count?: number; elapsedMs?: number };
-  } | null)?.readMetrics;
+  const metrics = (
+    result as {
+      readMetrics?: { count?: number; elapsedMs?: number };
+      observationCacheHit?: boolean;
+    } | null
+  )?.readMetrics;
+  const cacheHit =
+    (result as { observationCacheHit?: boolean } | null)
+      ?.observationCacheHit === true;
   performance.measure(`spellbook-editor:${safeOperation}`, {
     start: startedAt,
     end: performance.now(),
     detail: {
       documentReads: metrics?.count ?? null,
       documentReadMs: metrics?.elapsedMs ?? null,
+      cacheHit,
     },
   });
 }

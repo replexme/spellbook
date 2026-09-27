@@ -19,6 +19,7 @@ function installSpellbookUnoAdapter() {
 }
 
 let nativeAdapter;
+let batchObservation = null;
 
 function post(command, details = {}) {
   zetajs.mainPort.postMessage({ command, ...details });
@@ -460,6 +461,7 @@ function storeDocument(path, requestId) {
 }
 
 function closeDocument() {
+  batchObservation = null;
   if (!model) return;
   try {
     model.close(true);
@@ -566,6 +568,7 @@ function start() {
           openDocument(event.data.path, requestId);
           break;
         case "dispatch":
+          batchObservation = null;
           dispatch(event.data.unoCommand);
           post("dispatch-complete", {
             requestId,
@@ -609,29 +612,78 @@ function start() {
             );
           // The page asks for slide images separately ("render-slide"), so
           // the shared program does not capture them itself.
+          // Only this thread may supply an earlier observation. Never trust
+          // one sent through the page's native request boundary.
+          const { observedBefore: _untrustedObservation, ...requested } =
+            event.data.nativeRequest ?? {};
           const nativeRequest =
-            event.data.nativeRequest?.operation === "observe"
-              ? { ...event.data.nativeRequest, captureSlideIndexes: [] }
-              : { ...event.data.nativeRequest, suppressCapture: true };
+            requested.operation === "observe"
+              ? { ...requested, captureSlideIndexes: [] }
+              : { ...requested, suppressCapture: true };
           packageSections = Array.isArray(nativeRequest.packageSections)
             ? nativeRequest.packageSections
             : [];
+          const changesBefore = documentChangeCount();
+          let observedBefore = null;
+          if (
+            nativeRequest.operation === "edit_batch" &&
+            batchObservation &&
+            Number.isSafeInteger(changesBefore) &&
+            changesBefore === batchObservation.documentChanges &&
+            nativeRequest.expectedRevision ===
+              batchObservation.value.revision &&
+            JSON.stringify(packageSections) === batchObservation.packageSections
+          ) {
+            try {
+              const selection = spellbookDocumentOperation({
+                operation: "selection",
+                mutationContracts: spellbookMutationContracts,
+                nativeAdapter,
+              });
+              if (
+                changesBefore === documentChangeCount() &&
+                selection.activeSlide === batchObservation.value.activeSlide &&
+                JSON.stringify(
+                  selection.selected.map((item) => item.elementId),
+                ) === JSON.stringify(batchObservation.value.selectedElementIds)
+              )
+                observedBefore = batchObservation.value;
+            } catch {
+              // A missing cheap selection read uses the ordinary full read.
+            }
+          }
+          if (nativeRequest.operation !== "selection") batchObservation = null;
+          const value = [
+            "insert_image",
+            "replace_image",
+            "insert_media",
+            "replace_media",
+          ].includes(nativeRequest.operation)
+            ? mutateAsset(nativeRequest)
+            : spellbookDocumentOperation({
+                ...nativeRequest,
+                ...(observedBefore ? { observedBefore } : {}),
+                mutationContracts: spellbookMutationContracts,
+                nativeAdapter,
+              });
+          const changesAfter = documentChangeCount();
+          if (
+            nativeRequest.operation === "observe" &&
+            Number.isSafeInteger(changesBefore) &&
+            changesBefore === changesAfter &&
+            typeof value?.revision === "string" &&
+            Array.isArray(value.slides)
+          )
+            batchObservation = {
+              value,
+              documentChanges: changesAfter,
+              packageSections: JSON.stringify(packageSections),
+            };
           post("native-complete", {
             requestId,
-            value: [
-              "insert_image",
-              "replace_image",
-              "insert_media",
-              "replace_media",
-            ].includes(nativeRequest.operation)
-              ? mutateAsset(nativeRequest)
-              : spellbookDocumentOperation({
-                  ...nativeRequest,
-                  mutationContracts: spellbookMutationContracts,
-                  nativeAdapter,
-                }),
+            value,
             // Read after the operation: the count of the state it returns.
-            documentChanges: documentChangeCount(),
+            documentChanges: changesAfter,
           });
           break;
         case "render-slide": {

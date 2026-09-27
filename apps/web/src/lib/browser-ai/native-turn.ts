@@ -43,6 +43,10 @@ export interface NativeObservation {
     introducedIssues?: Array<Record<string, unknown>>;
   };
   [key: string]: unknown;
+  modelView?: Record<string, unknown> & {
+    slides?: unknown[];
+    revision?: string;
+  };
 }
 
 export interface NativePermission {
@@ -160,15 +164,43 @@ export async function runNativeTurn(
   let changed = false,
     reviewed = false;
   let toolTail: Promise<unknown> = Promise.resolve();
-  const content = (state: NativeObservation): ToolOutput => ({
-    ok: true,
-    text: JSON.stringify({
-      ...state,
+  const modelInput = {
+    calls: 0,
+    fullTextBytes: 0,
+    sentTextBytes: 0,
+    imageCount: 0,
+    imageBytes: 0,
+  };
+  const content = (state: NativeObservation): ToolOutput => {
+    const { modelView, ...complete } = state;
+    const fullText = JSON.stringify({
+      ...complete,
       images: undefined,
       permission: input.permission,
-    }),
-    images: state.images.map(screenshotBase64),
-  });
+    });
+    const view =
+      Array.isArray(modelView?.slides) && modelView.revision === state.revision
+        ? modelView
+        : complete;
+    const text =
+      view === complete
+        ? fullText
+        : JSON.stringify({ ...view, permission: input.permission });
+    const images = state.images.map(screenshotBase64);
+    const bytes = new TextEncoder();
+    modelInput.calls += 1;
+    modelInput.fullTextBytes += bytes.encode(fullText).length;
+    modelInput.sentTextBytes += bytes.encode(text).length;
+    modelInput.imageCount += images.length;
+    modelInput.imageBytes += images.reduce(
+      (size, image) =>
+        size +
+        Math.floor((image.length * 3) / 4) -
+        (image.endsWith("==") ? 2 : image.endsWith("=") ? 1 : 0),
+      0,
+    );
+    return { ok: true, text, images };
+  };
   const registerMutationEvidence = (state: NativeObservation): boolean => {
     if (state.visualEvidenceComplete !== true)
       throw new Error("Mutation result has incomplete visual evidence.");
@@ -612,7 +644,7 @@ export async function runNativeTurn(
             ? `This is a review-only step. The user's request was already applied to the SAME open PowerPoint document in this turn: ${JSON.stringify(input.requestText)}. Only native_observe and native_review are available; you cannot edit.`
             : "You are editing the SAME open PowerPoint document as the user. Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
         `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
-        "Observe returns live element structure, a revision, deterministic layout findings, and slide screenshots. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Inspect introducedIssues and the fresh screenshot after edits, correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
+        "Observe returns a deck outline and full details for detailSlideIndexes. For an element on a summarized slide, call native_observe with its slide index before editing. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Inspect introducedIssues and the fresh screenshot after edits, correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
         "Web search and webpage reading are fully supported via web_search and fetch_web_page. When the user asks for real-world knowledge, recent news, industry statistics, domain references, or provides a URL, proactively use web_search and fetch_web_page to obtain accurate, up-to-date facts and cite sources. NEVER claim that you cannot access the internet or that browsing is disabled.",
         ...(reviewOnly
           ? []
@@ -671,5 +703,6 @@ export async function runNativeTurn(
     reviewed,
     status:
       changed && !reviewed ? ("needs_review" as const) : ("completed" as const),
+    modelInput,
   };
 }

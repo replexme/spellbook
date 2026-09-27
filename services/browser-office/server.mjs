@@ -49,6 +49,13 @@ export function buildRoutes(
       ),
     ],
     [
+      "/harness/ai-observation-view.mjs",
+      route(
+        path.join(root, "ai-observation-view.mjs"),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
       "/harness/runtime-admission.js",
       route(
         path.join(root, "harness/runtime-admission.js"),

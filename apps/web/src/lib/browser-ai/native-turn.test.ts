@@ -96,6 +96,40 @@ const edit = {
 };
 
 describe("browser-run AI request", () => {
+  it("uses the compact view for the model without changing the editor observation", async () => {
+    const source = structuredClone(before);
+    source.slides.push({
+      slideIndex: 1,
+      elements: [{ elementId: "1/0", text: "Complete distant slide text" }],
+    });
+    source.modelView = {
+      revision: "r1",
+      activeSlide: 0,
+      slides: [
+        source.slides[0],
+        {
+          slideIndex: 1,
+          detailAvailable: true,
+          elements: [{ elementId: "1/0", text: "Distant slide" }],
+        },
+      ],
+    };
+    const host = {
+      call: vi.fn(async () => structuredClone(source)),
+    };
+    const { model } = scriptedModel(async (tool) => {
+      const output = await tool("native_observe", { detailSlideIndex: null });
+      expect(output.text).toContain("Distant slide");
+      expect(output.text).not.toContain("Complete distant slide text");
+      return "확인했습니다.";
+    });
+    const result = await run(model, host);
+    expect(result.modelInput.calls).toBe(1);
+    expect(result.modelInput.sentTextBytes).toBeLessThan(
+      result.modelInput.fullTextBytes,
+    );
+  });
+
   it("asks a model that edited and stopped to look again, with only look and review tools", async () => {
     const { model, turns } = scriptedModel(
       async (tool) => {

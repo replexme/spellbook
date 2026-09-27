@@ -1077,6 +1077,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
         reviewed: true,
         status: "completed",
         executionToken: "worker-1",
+        modelInput: {
+          calls: 2,
+          fullTextBytes: 120_000,
+          sentTextBytes: 15_000,
+          imageCount: 2,
+          imageBytes: 8_000,
+        },
       },
     };
     await completeNativeTurn({ id: turn.job_id }, callback);
@@ -1085,6 +1092,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     expect(final.events.filter((event) => event.type === "done")).toHaveLength(
       1,
     );
+    expect(final.events.find((event) => event.type === "done")).toMatchObject({
+      modelInput: {
+        calls: 2,
+        fullTextBytes: 120_000,
+        sentTextBytes: 15_000,
+      },
+    });
   });
 
   it("keeps AI screenshots only while a request runs and names the save after an undo", async () => {
