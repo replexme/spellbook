@@ -2652,7 +2652,13 @@ async function handleProductHostMessage(message) {
   if (typeof message.id === "string" && message.request) {
     try {
       markBrowserProbePhase("prepare");
+      const prepareStartedAt = performance.now();
       const prepared = await prepareProductPackageMutation(message.request);
+      if (message.request.operation === "observe")
+        performance.measure("spellbook-native-read:ai-observe-prepare", {
+          start: prepareStartedAt,
+          end: performance.now(),
+        });
       if (prepared && defersAiObservationCacheInvalidation(message)) {
         if (aiObservationCache)
           noteAiObservationCache(`cleared-${message.request.operation}`);
@@ -2661,7 +2667,13 @@ async function handleProductHostMessage(message) {
       let value;
       // The engine reply whose state became the reconciled one, when known.
       let nativeResult = null;
+      const cacheLookupStartedAt = performance.now();
       const cached = await cachedAiObservation(message.request);
+      if (message.request.operation === "observe")
+        performance.measure("spellbook-native-read:ai-observe-cache-lookup", {
+          start: cacheLookupStartedAt,
+          end: performance.now(),
+        });
       if (cached) {
         value = cached;
       } else if (prepared?.persistence === "package_reload") {
@@ -2679,10 +2691,23 @@ async function handleProductHostMessage(message) {
         value = await withPackageDocumentMetadata(committed ?? result.value);
       }
       markBrowserProbePhase("visual-capture");
+      const visualStartedAt = performance.now();
       value = await attachBrowserVisualEvidence(message.request, value);
+      if (message.request.operation === "observe")
+        performance.measure("spellbook-native-read:ai-observe-visual", {
+          start: visualStartedAt,
+          end: performance.now(),
+        });
+      const viewStartedAt = performance.now();
       if (Array.isArray(value?.slides))
         value = { ...value, modelView: aiObservationView(value) };
+      if (message.request.operation === "observe")
+        performance.measure("spellbook-native-read:ai-observe-model-view", {
+          start: viewStartedAt,
+          end: performance.now(),
+        });
       markBrowserProbePhase("status");
+      const statusStartedAt = performance.now();
       const status = await request("status");
       if (cached) {
         const selection = await requestMeasuredAiCacheSelection();
@@ -2709,6 +2734,12 @@ async function handleProductHostMessage(message) {
             ),
           };
       }
+      if (message.request.operation === "observe")
+        performance.measure("spellbook-native-read:ai-observe-status", {
+          start: statusStartedAt,
+          end: performance.now(),
+        });
+      const reconcileStartedAt = performance.now();
       reportHostModified(
         Boolean(status.modified) ||
           commands.length > 0 ||
@@ -2747,8 +2778,19 @@ async function handleProductHostMessage(message) {
               : readOnlyAiObservationAfterMutation(value),
           capturedImages: retainBrowserImages([], value.images),
         };
+      if (message.request.operation === "observe")
+        performance.measure("spellbook-native-read:ai-observe-reconcile", {
+          start: reconcileStartedAt,
+          end: performance.now(),
+        });
       markBrowserProbePhase("complete");
+      const hostSendStartedAt = performance.now();
       postHost({ id: message.id, value });
+      if (message.request.operation === "observe")
+        performance.measure("spellbook-native-read:ai-observe-host-send", {
+          start: hostSendStartedAt,
+          end: performance.now(),
+        });
     } catch (error) {
       markBrowserProbePhase("error");
       postHost({
