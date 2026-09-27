@@ -11,8 +11,28 @@ test("direct human title input scopes preservation to one named shape", () => {
   const before = {
     masters: [{ name: "Author master", backgroundColor: 0xffffff }],
     slides: [
-      { elements: [{ elementId: "0/1", name: "Title", text: "Before" }] },
-      { elements: [{ elementId: "1/1", name: "Other", text: "Keep" }] },
+      {
+        elements: [
+          {
+            elementId: "0/1",
+            parentElementId: null,
+            zIndex: 1,
+            name: "Title",
+            text: "Before",
+          },
+        ],
+      },
+      {
+        elements: [
+          {
+            elementId: "1/1",
+            parentElementId: null,
+            zIndex: 1,
+            name: "Other",
+            text: "Keep",
+          },
+        ],
+      },
     ],
   };
   const after = structuredClone(before);
@@ -21,6 +41,7 @@ test("direct human title input scopes preservation to one named shape", () => {
     op: "replace_text",
     slideIndex: 0,
     name: "Title",
+    shapeIndex: 1,
   });
   assert.equal(before.slides[0].elements[0].text, "Before");
   after.slides[1].elements[0].text = "Another edit";

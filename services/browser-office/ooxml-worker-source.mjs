@@ -407,38 +407,20 @@ function preserveUnaffectedSlideShapes(
   editedBytes,
   sourceOperations,
   targetNames = null,
+  targetIndexes = null,
 ) {
   if (
     !/^ppt\/slides\/slide[^/]+\.xml$/u.test(part) ||
     !originalBytes ||
     !noEditBytes ||
     !editedBytes ||
-    samePartBytes(originalBytes, noEditBytes)
+    (samePartBytes(originalBytes, noEditBytes) && targetIndexes === null)
   )
     return null;
   const documents = [originalBytes, noEditBytes, editedBytes].map((bytes) =>
     parseXml({ [part]: bytes }, part),
   );
-  const shapeChildren = (document) => {
-    const commonSlide = directXmlChild(
-      document.documentElement,
-      presentationNamespace,
-      "cSld",
-    );
-    const tree =
-      commonSlide &&
-      directXmlChild(commonSlide, presentationNamespace, "spTree");
-    if (!tree) return null;
-    return [...tree.childNodes].filter(
-      (node) =>
-        node.nodeType === 1 &&
-        node.namespaceURI === presentationNamespace &&
-        ["sp", "pic", "graphicFrame", "cxnSp", "grpSp"].includes(
-          node.localName,
-        ),
-    );
-  };
-  const [authored, normalized, changed] = documents.map(shapeChildren);
+  const [authored, normalized, changed] = documents.map(topLevelSlideShapes);
   if (
     !authored ||
     !normalized ||
@@ -501,10 +483,12 @@ function preserveUnaffectedSlideShapes(
   // A shape the command did not name keeps its authored XML even when the
   // engine's save rewrote it (for example dropping an empty paragraph's
   // alignment): the contract confines the command to its targets.
-  const untargeted = (source) =>
-    targetNames !== null &&
-    Boolean(identity(source)?.name) &&
-    !targetNames.has(identity(source).name);
+  const untargeted = (source, index) =>
+    targetIndexes !== null
+      ? !targetIndexes.has(index)
+      : targetNames !== null &&
+        Boolean(identity(source)?.name) &&
+        !targetNames.has(identity(source).name);
   const replacements = [];
   // Every author shape matched to its engine counterpart, replaced or not;
   // the ids of both saves are mapped through these pairs.
@@ -524,6 +508,7 @@ function preserveUnaffectedSlideShapes(
     const editedShape = editedCounterpart(baseline);
     if (!editedShape) continue;
     pairs.push({
+      index,
       source,
       baseline,
       editedShape,
@@ -533,6 +518,11 @@ function preserveUnaffectedSlideShapes(
       finalId: identity(editedShape).id,
     });
   }
+  if (
+    targetIndexes !== null &&
+    [...targetIndexes].some((index) => !pairs.some((pair) => pair.index === index))
+  )
+    return null;
   // An engine element as the author would name it: its references to other
   // shapes in the author's ids, and without its own engine-numbered id.
   const asAuthored = (node, ids) => {
@@ -550,11 +540,11 @@ function preserveUnaffectedSlideShapes(
     pairs.map((pair) => [pair.editedId, pair.sourceId]),
   );
   for (const pair of pairs) {
-    const { source, baseline, editedShape } = pair;
+    const { source, baseline, editedShape, index } = pair;
     if (hasRelationshipReference(source)) continue;
     if (
       additiveOnly ||
-      untargeted(source) ||
+      untargeted(source, index) ||
       asAuthored(editedShape, editedInAuthorIds) ===
         asAuthored(baseline, baselineInAuthorIds)
     ) {
@@ -688,6 +678,23 @@ function preserveUnaffectedSlideShapes(
   )
     return null;
   return serializeXml(documents[2]);
+}
+
+function topLevelSlideShapes(document) {
+  const commonSlide = directXmlChild(
+    document.documentElement,
+    presentationNamespace,
+    "cSld",
+  );
+  const tree =
+    commonSlide && directXmlChild(commonSlide, presentationNamespace, "spTree");
+  if (!tree) return null;
+  return [...tree.childNodes].filter(
+    (node) =>
+      node.nodeType === 1 &&
+      node.namespaceURI === presentationNamespace &&
+      ["sp", "pic", "graphicFrame", "cxnSp", "grpSp"].includes(node.localName),
+  );
 }
 
 // Attributes through which a slide names its shapes by id: animation and
@@ -1277,6 +1284,24 @@ function shapeTargetsBySlide(original, scopes) {
     targets.set(part, names);
   }
   return targets;
+}
+
+// The observation and the OOXML merge both enumerate top-level slide shapes
+// in their slide order. A direct text edit keeps that position even when the
+// live placeholder name differs from the author's cNvPr name.
+function directTextTargetIndexesBySlide(original, operations, targets) {
+  if (
+    operations?.length !== 1 ||
+    operations[0] !== "replace_text" ||
+    targets?.length !== 1 ||
+    targets[0]?.op !== "replace_text" ||
+    !Number.isSafeInteger(targets[0].slideIndex) ||
+    !Number.isSafeInteger(targets[0].shapeIndex) ||
+    targets[0].shapeIndex < 0
+  )
+    return null;
+  const part = orderedSlidePaths(original)[targets[0].slideIndex];
+  return part ? new Map([[part, new Set([targets[0].shapeIndex])]]) : null;
 }
 
 function changedPackageParts(original, merged) {
@@ -2180,6 +2205,9 @@ export function preserveOriginalPptxParts(
   const targetNamesBySlide = shapeScopes
     ? shapeTargetsBySlide(original, shapeScopes)
     : null;
+  const targetIndexesBySlide = targetNamesBySlide
+    ? directTextTargetIndexesBySlide(original, sourceOperations, sourceTargets)
+    : null;
   const merged = {};
   const editedSlides = [];
   const semanticPatchedParts = [];
@@ -2280,8 +2308,11 @@ export function preserveOriginalPptxParts(
           semanticTableInsetPatch ?? edited[part],
           sourceOperations,
           targetNamesBySlide?.get(part) ?? null,
+          targetIndexesBySlide?.get(part) ?? null,
         )
       : null;
+    if (targetIndexesBySlide?.has(part) && semanticShapePatch === null)
+      throw new Error(`Native snapshot cannot isolate direct text in ${part}.`);
     const semanticExtendedPropertiesPatch =
       authoredChange &&
       part === "docProps/app.xml" &&

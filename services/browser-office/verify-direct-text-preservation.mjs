@@ -18,6 +18,8 @@ function requiredFlag(name) {
 const inputPath = requiredFlag("--input");
 const runtimeDirectory = requiredFlag("--candidate-runtime");
 const outputRoot = requiredFlag("--output");
+const productionTiming = process.argv.includes("--production-timing");
+const aiFirst = process.argv.includes("--ai-first");
 const input = new Uint8Array(await readFile(inputPath));
 const runtime = await admitCandidateRuntime({ runtimeDirectory });
 await mkdir(outputRoot, { recursive: true });
@@ -64,15 +66,15 @@ async function eventOf(type, previousCount = 0) {
   return result;
 }
 
-async function observeTitle() {
+async function nativeCall(request) {
   const id = `local-observe-${Date.now()}-${Math.random()}`;
   await page.evaluate(
-    (taskId) =>
+    ({ taskId, task }) =>
       globalThis.__spellbookProductHost.port.postMessage({
         id: taskId,
-        request: { operation: "observe", captureSlideIndexes: [] },
+        request: task,
       }),
-    id,
+    { taskId: id, task: request },
   );
   await page.waitForFunction(
     (taskId) =>
@@ -90,7 +92,15 @@ async function observeTitle() {
     );
   }, id);
   if (result.error) throw new Error(result.error);
-  return result.value?.slides?.[0]?.elements?.[0]?.text;
+  return result.value;
+}
+
+async function observeTitle() {
+  const observed = await nativeCall({
+    operation: "observe",
+    captureSlideIndexes: [],
+  });
+  return observed?.slides?.[0]?.elements?.[0]?.text;
 }
 
 async function waitForCompleteTitle() {
@@ -148,19 +158,100 @@ try {
   }, Array.from(input));
   const opened = await eventOf("open-complete");
   assert.ok(opened.slideCount > 1);
-  await page.waitForTimeout(1000);
+  let aiSaved = null;
+  if (aiFirst) {
+    const before = await nativeCall({
+      operation: "observe",
+      captureSlideIndexes: [],
+    });
+    const first = before.slides[0].elements[0];
+    const last = before.slides.at(-1).elements[0];
+    const changed = await nativeCall({
+      operation: "edit_batch",
+      expectedRevision: before.revision,
+      expectedSlides: JSON.stringify(before.slides),
+      commands: [
+        {
+          op: "replace_text",
+          elementId: first.elementId,
+          text: `1. 2026 분기 실적 보고 — 매출과 비용`,
+        },
+        {
+          op: "replace_text",
+          elementId: last.elementId,
+          text: `60. 2026 분기 실적 보고 — 매출과 비용`,
+        },
+      ],
+      permission: { mode: "document", elementIds: [], slideIndexes: [] },
+      suppressCapture: true,
+    });
+    assert.notEqual(changed.revision, before.revision);
+    assert.equal(changed.readMetrics?.fullCount, 1);
+    assert.equal(changed.readMetrics?.slidesScanned, opened.slideCount + 1);
+    const aiSaveCount = await page.evaluate(
+      () =>
+        globalThis.__spellbookProductHost.events.filter(
+          (event) => event.type === "save",
+        ).length,
+    );
+    await page.evaluate(() =>
+      globalThis.__spellbookProductHost.port.postMessage({
+        type: "command",
+        messageId: "Action_Save",
+        values: { Notify: true },
+      }),
+    );
+    const aiSave = await eventOf("save", aiSaveCount);
+    assert.ok(
+      await page.evaluate(
+        () =>
+          performance.getEntriesByName("spellbook-native-read:save-cache-hit")
+            .length > 0,
+      ),
+      "The unchanged AI result should save without reading every slide again.",
+    );
+    aiSaved = Uint8Array.from(
+      await page.evaluate((requestId) => {
+        const event = globalThis.__spellbookProductHost.events.find(
+          (candidate) =>
+            candidate.type === "save" && candidate.requestId === requestId,
+        );
+        return Array.from(new Uint8Array(event.bytes));
+      }, aiSave.requestId),
+    );
+    await page.evaluate(
+      (requestId) =>
+        globalThis.__spellbookProductHost.port.postMessage({
+          type: "save-result",
+          requestId,
+          ok: true,
+          revision: '"local-ai-saved"',
+        }),
+      aiSave.requestId,
+    );
+    await eventOf("save-response");
+    await page.evaluate(() =>
+      globalThis.__spellbookProductHost.port.postMessage({
+        type: "command",
+        messageId: "Action_GoToPage",
+        values: { Page: 1 },
+      }),
+    );
+    await page.waitForTimeout(1000);
+  }
+  if (!productionTiming) await page.waitForTimeout(1000);
   const canvas = page.locator("#qtcanvas");
   const box = await canvas.boundingBox();
   assert.ok(box, "Canvas is visible");
   await page.mouse.click(box.x + box.width * 0.48, box.y + box.height * 0.33);
-  await page.waitForTimeout(1000);
+  if (!productionTiming) await page.waitForTimeout(1000);
   await page.keyboard.press("F2");
-  await page.waitForTimeout(1000);
+  if (!productionTiming) await page.waitForTimeout(1000);
   await page.keyboard.press("End");
   await page.keyboard.type(" MANUAL", { delay: 80 });
-  await waitForCompleteTitle();
+  if (!productionTiming) await waitForCompleteTitle();
   await page.keyboard.press("Escape");
-  await waitForCompleteTitle();
+  if (!productionTiming) await waitForCompleteTitle();
   const beforeSaveCount = await page.evaluate(
     () =>
       globalThis.__spellbookProductHost.events.filter(
@@ -189,7 +280,7 @@ try {
   await page.screenshot({
     path: path.join(outputRoot, "direct-text-saved.png"),
   });
-  const beforeParts = unzipSync(input);
+  const beforeParts = unzipSync(aiSaved ?? input);
   const afterParts = unzipSync(output);
   const slideNames = Object.keys(beforeParts).filter((name) =>
     /^ppt\/slides\/slide\d+\.xml$/u.test(name),
@@ -209,6 +300,9 @@ try {
       result: "pass",
       slideCount: slideNames.length,
       preservedSlides: slideNames.length - 1,
+      ...(aiFirst
+        ? { aiEditReads: { full: 1, slidesScanned: opened.slideCount + 1 } }
+        : {}),
       outputPath,
     }) + "\n",
   );

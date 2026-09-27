@@ -2456,6 +2456,96 @@ test("native snapshot keeps the authored XML of shapes a command did not name", 
   assert.doesNotMatch(untargeted, /<a:pPr algn="ctr"\/>/u);
 });
 
+test("direct text after an earlier save targets slide order despite a different live name", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const noEdit = withEngineSave(original, {
+    shadow: false,
+    keepRectangleAlignment: true,
+  });
+  const part = "ppt/slides/slide1.xml";
+  const edited = {
+    ...noEdit,
+    [part]: strToU8(
+      strFromU8(noEdit[part]).replace(
+        "Spellbook 검증 العربية",
+        "Spellbook 검증 العربية MANUAL",
+      ),
+    ),
+  };
+  const preserve = (shapeIndex) =>
+    strFromU8(
+      unzipSync(
+        preserveOriginalPptxParts(
+          zipSync(original),
+          zipSync(noEdit),
+          zipSync(edited),
+          ["replace_text"],
+          [
+            {
+              op: "replace_text",
+              slideIndex: 0,
+              name: "Live Text 1",
+              shapeIndex,
+            },
+          ],
+        ).bytes,
+      )[part],
+    );
+  const saved = preserve(0);
+  assert.match(saved, /Spellbook 검증 العربية MANUAL/u);
+  assert.match(saved, /<a:p><a:pPr algn="ctr"\/><\/a:p>/u);
+  assert.throws(() => preserve(99), /cannot isolate direct text/u);
+
+  const normalized = {
+    ...noEdit,
+    [part]: strToU8(
+      strFromU8(noEdit[part]).replace(
+        "Spellbook 검증 العربية",
+        "Engine baseline",
+      ),
+    ),
+  };
+  const changed = {
+    ...normalized,
+    [part]: strToU8(
+      strFromU8(normalized[part]).replace(
+        "Engine baseline",
+        "Engine baseline MANUAL",
+      ),
+    ),
+  };
+  const afterEngineNormalization = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(normalized),
+    zipSync(changed),
+    ["replace_text"],
+    [{ op: "replace_text", slideIndex: 0, name: "Live Text 1", shapeIndex: 0 }],
+  );
+  assert.match(
+    strFromU8(unzipSync(afterEngineNormalization.bytes)[part]),
+    /Engine baseline MANUAL/u,
+  );
+
+  const noRewrite = {
+    ...original,
+    [part]: strToU8(
+      strFromU8(original[part])
+        .replace("Spellbook 검증 العربية", "Spellbook 검증 العربية MANUAL")
+        .replace('<a:pPr algn="ctr"/>', ""),
+    ),
+  };
+  const directOnly = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(original),
+    zipSync(noRewrite),
+    ["replace_text"],
+    [{ op: "replace_text", slideIndex: 0, name: "Live Text 1", shapeIndex: 0 }],
+  );
+  const directOnlySlide = strFromU8(unzipSync(directOnly.bytes)[part]);
+  assert.match(directOnlySlide, /Spellbook 검증 العربية MANUAL/u);
+  assert.match(directOnlySlide, /<a:p><a:pPr algn="ctr"\/><\/a:p>/u);
+});
+
 // An engine save of the rectangle as LibreOffice writes it: explicit insets,
 // no empty list style, an explicit end-of-paragraph font, lower-case colors
 // and a size rounded through 1/100 mm.

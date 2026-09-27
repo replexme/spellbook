@@ -121,10 +121,18 @@ export function directTextPreservationTarget(before, after) {
         typeof beforeElement?.name !== "string" ||
         !beforeElement.name ||
         beforeElement.name !== afterElement?.name ||
-        beforeElement.elementId !== afterElement?.elementId
+        beforeElement.elementId !== afterElement?.elementId ||
+        beforeElement.parentElementId !== null ||
+        !Number.isSafeInteger(beforeElement.zIndex) ||
+        beforeElement.zIndex < 0
       )
         return null;
-      target = { op: "replace_text", slideIndex, name: beforeElement.name };
+      target = {
+        op: "replace_text",
+        slideIndex,
+        name: beforeElement.name,
+        shapeIndex: beforeElement.zIndex,
+      };
       beforeElement.text = afterElement.text;
     }
   }
