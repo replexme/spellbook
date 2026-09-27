@@ -2402,7 +2402,22 @@ async function saveProductDocument() {
 async function handleProductHostMessage(message) {
   if (!message || typeof message !== "object")
     throw new Error("Browser Office host message is invalid.");
-  if (invalidatesAiObservationCache(message)) aiObservationCache = null;
+  if (invalidatesAiObservationCache(message)) {
+    if (aiObservationCache)
+      noteAiObservationCache(
+        message.type === "open"
+          ? "cleared-open"
+          : message.type === "command"
+            ? /^Action_[A-Za-z]+$/.test(message.messageId)
+              ? `cleared-${message.messageId}`
+              : "cleared-command"
+            : typeof message.request?.operation === "string" &&
+                /^[a-z_]{1,40}$/.test(message.request.operation)
+              ? `cleared-${message.request.operation}`
+              : "cleared-mutation",
+      );
+    aiObservationCache = null;
+  }
   if (message.type === "open") {
     await openProductDocument(message);
     return;
