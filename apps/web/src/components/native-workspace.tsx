@@ -112,7 +112,12 @@ function measureEditorOperation(
   const safeOperation = /^[a-z_]{1,40}$/.test(name) ? name : "other";
   const metrics = (
     result as {
-      readMetrics?: { count?: number; elapsedMs?: number };
+      readMetrics?: {
+        count?: number;
+        fullCount?: number;
+        slidesScanned?: number;
+        elapsedMs?: number;
+      };
       observationCacheHit?: boolean;
     } | null
   )?.readMetrics;
@@ -124,6 +129,8 @@ function measureEditorOperation(
     end: performance.now(),
     detail: {
       documentReads: metrics?.count ?? null,
+      fullDocumentReads: metrics?.fullCount ?? metrics?.count ?? null,
+      slidesScanned: metrics?.slidesScanned ?? null,
       documentReadMs: metrics?.elapsedMs ?? null,
       cacheHit,
     },

@@ -2204,7 +2204,24 @@ async function exportProductDocumentNow({ checkpoint = true } = {}) {
   const observeStartedAt = performance.now();
   let live;
   try {
-    live = await observeNativeDocument();
+    const status = await request("status");
+    if (
+      Number.isSafeInteger(status.documentChanges) &&
+      status.documentChanges === checkpointedDocumentChanges &&
+      reconciledObservation?.revision === reconciledModelRevision &&
+      !unreconciledModelRevision
+    ) {
+      live = reconciledObservation;
+      performance.measure("spellbook-native-read:save-cache-hit", {
+        start: observeStartedAt,
+        end: performance.now(),
+      });
+    } else {
+      const observed = await observeNativeDocumentChanges();
+      live = observed.value;
+      if (live.revision === reconciledModelRevision)
+        noteCheckpointedDocumentChanges(observed);
+    }
   } finally {
     performance.measure("spellbook-persist:save-observe", {
       start: observeStartedAt,

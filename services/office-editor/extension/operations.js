@@ -1920,10 +1920,22 @@ function spellbookDocumentOperation(request) {
   };
 
   let documentReadCount = 0;
+  let documentFullReadCount = 0;
+  let documentSlidesScanned = 0;
   let documentReadMs = 0;
-  function read(detailSlideIndex) {
+  function read(detailSlideIndex, reusableObservation, changedSlideIndex) {
     const readStartedAt = Date.now();
     documentReadCount++;
+    // Only a transaction's intermediate, shape-local result may reuse slides.
+    // Its final command still takes a complete read to verify the edit scope.
+    const reuseUnchangedSlides =
+      engineIdentity.engineImage === "browser-wasm" &&
+      Array.isArray(reusableObservation?.slides) &&
+      reusableObservation.slides.length === pages.getCount() &&
+      Number.isInteger(changedSlideIndex) &&
+      changedSlideIndex >= 0 &&
+      changedSlideIndex < pages.getCount();
+    if (!reuseUnchangedSlides) documentFullReadCount++;
     const slides = [];
     const masters = masterDetails();
     const selectedElementIds = [];
@@ -1949,6 +1961,16 @@ function spellbookDocumentOperation(request) {
     for (let slideIndex = 0; slideIndex < pages.getCount(); slideIndex++) {
       const page = pages.getByIndex(slideIndex);
       if (uno.sameUnoObject(page, currentPage)) activeSlide = slideIndex;
+      if (reuseUnchangedSlides && slideIndex !== changedSlideIndex) {
+        const cached = reusableObservation.slides[slideIndex];
+        // Clone because the interaction pass below attaches derived fields.
+        slides.push({
+          ...cached,
+          elements: cached.elements.map((element) => ({ ...element })),
+        });
+        continue;
+      }
+      documentSlidesScanned++;
       const elements = [];
       const shapeReferences = [];
       const visit = (container, prefix, parentElementId, stablePrefix) => {
@@ -2440,7 +2462,12 @@ function spellbookDocumentOperation(request) {
     documentReadMs += Date.now() - readStartedAt;
     return {
       unit: "1/100mm",
-      readMetrics: { count: documentReadCount, elapsedMs: documentReadMs },
+      readMetrics: {
+        count: documentReadCount,
+        fullCount: documentFullReadCount,
+        slidesScanned: documentSlidesScanned,
+        elapsedMs: documentReadMs,
+      },
       engine: {
         ...engineIdentity,
         supportedOperations: [...runtimeOperations],
@@ -8434,7 +8461,12 @@ function spellbookDocumentOperation(request) {
       }
     } else if (command.op === "delete_element") dispatch(".uno:Delete");
 
-    const after = usesTypedTextFormatting ? read(slideIndex) : read();
+    const after =
+      request.deferFullRead && command.op === "replace_text"
+        ? read(slideIndex, before, slideIndex)
+        : usesTypedTextFormatting
+          ? read(slideIndex)
+          : read();
     const target = after.slides[slideIndex].elements.find(
       (candidate) => candidate.elementId === command.elementId,
     );
@@ -9252,6 +9284,9 @@ function spellbookDocumentOperation(request) {
           command: rebound,
           permission: rebindPermission(),
           transactionActive: true,
+          deferFullRead:
+            index < request.commands.length - 1 &&
+            request.commands[index].op === "replace_text",
           suppressCapture: true,
           observedBefore: current,
         });
@@ -9266,6 +9301,25 @@ function spellbookDocumentOperation(request) {
     // executeSingle already read the complete state after the last command.
     // Leaving the Undo context changes history, not document content.
     const after = current;
+    if (request.commands.every((command) => command.op === "replace_text")) {
+      const targetedSlides = new Set(
+        request.commands.map((command) =>
+          Number(command.elementId.split("/")[0]),
+        ),
+      );
+      const unchangedSlides = (state) =>
+        state.slides.filter((slide) => !targetedSlides.has(slide.slideIndex));
+      const comparableMasters = (state) =>
+        state.masters.map(({ shapeCount: _shapeCount, ...master }) => master);
+      if (
+        documentStateJson(unchangedSlides(before)) !==
+          documentStateJson(unchangedSlides(after)) ||
+        documentStateJson(comparableMasters(before)) !==
+          documentStateJson(comparableMasters(after)) ||
+        documentStateJson(before.sections) !== documentStateJson(after.sections)
+      )
+        throw new Error("unexpected_edit_scope");
+    }
     const changed = transactionChanged(before, after);
     if (changed && undo.getAllUndoActionTitles().length <= undoCount)
       throw new Error("transaction_undo_not_recorded");
