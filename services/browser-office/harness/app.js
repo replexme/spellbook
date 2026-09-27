@@ -11,6 +11,7 @@ import {
 import {
   aiObservationView,
   reusableAiObservation,
+  reusableAiObservationForSlide,
 } from "/harness/ai-observation-view.mjs";
 import {
   persistedSectionsMatch,
@@ -2765,7 +2766,7 @@ async function cachedAiObservation(requested) {
     () => null,
   );
   const status = selection ? await request("status").catch(() => null) : null;
-  return reusableAiObservation(aiObservationCache, {
+  const current = {
     bytes: currentBytes,
     revision: reconciledModelRevision,
     detailSlideIndex: requested.detailSlideIndex ?? null,
@@ -2774,7 +2775,50 @@ async function cachedAiObservation(requested) {
     selectedElementIds: selection?.value?.selected?.map(
       (item) => item.elementId,
     ),
-  });
+  };
+  const sameSlide = reusableAiObservation(aiObservationCache, current);
+  if (sameSlide) return sameSlide;
+  const slideIndex = current.detailSlideIndex ?? current.activeSlide;
+  const slide = aiObservationCache.observation.slides?.[slideIndex];
+  if (
+    !slide ||
+    !reusableAiObservation(aiObservationCache, {
+      ...current,
+      detailSlideIndex: aiObservationCache.detailSlideIndex,
+    })
+  )
+    return null;
+  try {
+    const detail = await requestNative({
+      operation: "detail_slide",
+      slideIndex,
+      expectedElements: (slide.elements ?? [])
+        .filter((element) => typeof element.text === "string")
+        .map(({ elementId, text }) => ({ elementId, text })),
+    });
+    if (detail.documentChanges !== current.documentChanges) {
+      aiObservationCache = null;
+      return null;
+    }
+    const observation = reusableAiObservationForSlide(
+      aiObservationCache,
+      { ...current, detailSlideIndex: slideIndex },
+      detail.value,
+    );
+    if (!observation) {
+      aiObservationCache = null;
+      return null;
+    }
+    aiObservationCache = {
+      ...aiObservationCache,
+      detailSlideIndex: current.detailSlideIndex,
+      observation,
+    };
+    return observation;
+  } catch {
+    aiObservationCache = null;
+    return null;
+  }
 }
 function noteCheckpointedDocumentChanges(result) {
   checkpointedDocumentChanges =

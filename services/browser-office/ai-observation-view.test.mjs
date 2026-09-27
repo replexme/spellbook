@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   aiObservationView,
   reusableAiObservation,
+  reusableAiObservationForSlide,
 } from "./ai-observation-view.mjs";
 
 test("AI sees a deck outline and full details for the requested and changed slides", () => {
@@ -47,6 +48,61 @@ test("AI sees a deck outline and full details for the requested and changed slid
   assert.equal(view.readMetrics, undefined);
   assert.ok(
     JSON.stringify(view).length < JSON.stringify(observation).length / 4,
+  );
+});
+
+test("slide detail reuse keeps the whole-deck state and rejects stale or partial replies", () => {
+  const bytes = new Uint8Array([1]);
+  const slides = [0, 1].map((slideIndex) => ({
+    slideIndex,
+    elements: [{ elementId: `${slideIndex}/0`, text: `Title ${slideIndex}` }],
+  }));
+  const cache = {
+    bytes,
+    revision: "r1",
+    detailSlideIndex: 0,
+    documentChanges: 7,
+    activeSlide: 0,
+    selectedElementIds: [],
+    observation: { revision: "r1", slides, textDetails: { slideIndex: 0 } },
+  };
+  const current = {
+    bytes,
+    revision: "r1",
+    detailSlideIndex: 1,
+    documentChanges: 7,
+    activeSlide: 0,
+    selectedElementIds: [],
+  };
+  const detail = {
+    slideIndex: 1,
+    elements: [{ elementId: "1/0", text: "Title 1", paragraphs: [] }],
+  };
+  const reused = reusableAiObservationForSlide(cache, current, detail);
+  assert.equal(reused?.observationCacheHit, true);
+  assert.equal(reused?.slides, slides);
+  assert.deepEqual(reused?.textDetails, {
+    slideIndex: 1,
+    elements: [{ elementId: "1/0", paragraphs: [] }],
+  });
+  assert.equal(
+    reusableAiObservationForSlide(
+      cache,
+      { ...current, documentChanges: 8 },
+      detail,
+    ),
+    null,
+  );
+  assert.equal(
+    reusableAiObservationForSlide(cache, current, { ...detail, elements: [] }),
+    null,
+  );
+  assert.equal(
+    reusableAiObservationForSlide(cache, current, {
+      ...detail,
+      elements: [{ ...detail.elements[0], text: "stale" }],
+    }),
+    null,
   );
 });
 

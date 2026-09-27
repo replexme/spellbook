@@ -8595,6 +8595,39 @@ function spellbookDocumentOperation(request) {
     return result(after, slideIndex);
   };
 
+  // The host already holds a full-deck observation. Read paragraph details
+  // for one slide without rescanning the other slides, and reject a stale
+  // shape path or text so the host can fall back to a full observation.
+  if (request.operation === "detail_slide") {
+    const slideIndex = request.slideIndex;
+    const expectedElements = request.expectedElements;
+    if (
+      !Number.isSafeInteger(slideIndex) ||
+      slideIndex < 0 ||
+      slideIndex >= pages.getCount() ||
+      !Array.isArray(expectedElements)
+    )
+      throw new Error("invalid_detail_slide");
+    const elements = expectedElements.map((expected) => {
+      if (
+        !expected ||
+        typeof expected.elementId !== "string" ||
+        !/^\d+(?:\/\d+)+$/.test(expected.elementId) ||
+        Number(expected.elementId.split("/")[0]) !== slideIndex ||
+        typeof expected.text !== "string"
+      )
+        throw new Error("invalid_detail_element");
+      const shape = resolveShape(expected.elementId);
+      const text = safeCall(shape, "getString", null);
+      if (text !== expected.text) throw new Error("stale_detail_element");
+      const paragraphs = textDetails(shape, expected.elementId);
+      if (!Array.isArray(paragraphs))
+        throw new Error("unavailable_detail_element");
+      return { elementId: expected.elementId, text, paragraphs };
+    });
+    return { slideIndex, elements };
+  }
+
   // Host-only reads for the request box and result cards. They neither
   // enumerate the deck nor render, so the host can call them on every
   // selection change without slowing the editor.

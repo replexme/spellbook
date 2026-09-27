@@ -67,3 +67,47 @@ export function reusableAiObservation(cache, current) {
     observationCacheHit: true,
   };
 }
+
+// Detail for another slide may be grafted onto a trusted whole-deck read only
+// while the live document and selection still match that read. The engine
+// checks each text shape again; this check also rejects incomplete replies.
+export function reusableAiObservationForSlide(cache, current, detail) {
+  if (
+    !reusableAiObservation(cache, {
+      ...current,
+      detailSlideIndex: cache?.detailSlideIndex,
+    }) ||
+    !Number.isSafeInteger(current.detailSlideIndex) ||
+    detail?.slideIndex !== current.detailSlideIndex ||
+    !Array.isArray(detail.elements)
+  )
+    return null;
+  const slide = cache.observation.slides?.[current.detailSlideIndex];
+  if (!slide) return null;
+  const expected = (slide.elements ?? []).filter(
+    (element) => typeof element.text === "string",
+  );
+  if (
+    expected.length !== detail.elements.length ||
+    expected.some(
+      (element, index) =>
+        detail.elements[index]?.elementId !== element.elementId ||
+        detail.elements[index]?.text !== element.text ||
+        !Array.isArray(detail.elements[index]?.paragraphs),
+    )
+  )
+    return null;
+  return {
+    ...cache.observation,
+    textDetails: {
+      slideIndex: detail.slideIndex,
+      elements: detail.elements.map(({ elementId, paragraphs }) => ({
+        elementId,
+        paragraphs,
+      })),
+    },
+    images: [],
+    readMetrics: { count: 0, elapsedMs: 0 },
+    observationCacheHit: true,
+  };
+}

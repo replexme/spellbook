@@ -652,7 +652,11 @@ function start() {
               // A missing cheap selection read uses the ordinary full read.
             }
           }
-          if (nativeRequest.operation !== "selection") batchObservation = null;
+          if (
+            nativeRequest.operation !== "selection" &&
+            nativeRequest.operation !== "detail_slide"
+          )
+            batchObservation = null;
           const value = [
             "insert_image",
             "replace_image",
