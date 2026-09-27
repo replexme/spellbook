@@ -62,6 +62,7 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
                 Environment.GetEnvironmentVariable("SPELLBOOK_DISABLE_CJK_SCRIPT_SPACING"),
                 "1",
                 StringComparison.Ordinal);
+            var conversionTime = Stopwatch.StartNew();
             var pdfPath = string.Empty;
             InvalidOperationException? normalizationFailure = null;
             for (var pass = 0; pass < (normalizeForPowerPointFidelity ? MaxRenderAttempts : 1); pass++)
@@ -121,6 +122,7 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
             {
                 throw new InvalidOperationException("LibreOffice did not create a PDF.");
             }
+            var conversionMs = Math.Round(conversionTime.Elapsed.TotalMilliseconds, 2);
 
             // Diagnostics only: keep the intermediate PDF so text geometry can be
             // compared against a PowerPoint export of the same deck.
@@ -133,6 +135,7 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
             }
 
             var prefix = Path.Combine(outputDirectory, "slide");
+            var rasterTime = Stopwatch.StartNew();
             await RunAsync(
                 Environment.GetEnvironmentVariable("PDFTOPPM_PATH") ?? "pdftoppm",
                 [
@@ -150,6 +153,22 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
             if (images.Count == 0 || !images.Select(SlideNumber).SequenceEqual(Enumerable.Range(1, images.Count)))
             {
                 throw new InvalidOperationException("PDF renderer did not create slide images.");
+            }
+            try
+            {
+                await File.AppendAllTextAsync(
+                    diagnosticsPath,
+                    JsonSerializer.Serialize(new
+                    {
+                        kind = "render-stage-timing",
+                        conversionMs,
+                        rasterMs = Math.Round(rasterTime.Elapsed.TotalMilliseconds, 2)
+                    }) + "\n",
+                    cancellationToken);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Timing is diagnostic only; a valid render must still save.
             }
             return images;
         }
