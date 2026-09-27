@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   acknowledgedSaveHasLaterChanges,
+  canReuseSaveAcknowledgementObservation,
   createSaveSnapshot,
   journalSnapshotFromSavedBase,
   journalRecoveryDisposition,
@@ -27,6 +28,44 @@ test("recovery distinguishes unsaved work from a save acknowledged before journa
   assert.throws(() => journalRecoveryDisposition("invalid", checkpoint));
   assert.throws(() =>
     journalRecoveryDisposition(oldHash, { metadata: { baseSha256: oldHash } }),
+  );
+});
+
+test("save acknowledgement reuses its read only when the engine state stayed still", () => {
+  const stable = {
+    observation: { revision: "saved" },
+    documentChanges: 7,
+    status: { documentChanges: 7, modified: false },
+    reconciledRevision: "saved",
+  };
+  assert.equal(canReuseSaveAcknowledgementObservation(stable), true);
+  assert.equal(
+    canReuseSaveAcknowledgementObservation({
+      ...stable,
+      documentChanges: null,
+    }),
+    false,
+  );
+  assert.equal(
+    canReuseSaveAcknowledgementObservation({
+      ...stable,
+      status: { documentChanges: 8, modified: true },
+    }),
+    false,
+  );
+  assert.equal(
+    canReuseSaveAcknowledgementObservation({
+      ...stable,
+      status: { documentChanges: 7, modified: true },
+    }),
+    false,
+  );
+  assert.equal(
+    canReuseSaveAcknowledgementObservation({
+      ...stable,
+      reconciledRevision: "later-edit",
+    }),
+    false,
   );
 });
 

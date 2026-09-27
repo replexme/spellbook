@@ -29,6 +29,7 @@ import {
 } from "/harness/persistence-evidence.mjs";
 import {
   acknowledgedSaveHasLaterChanges,
+  canReuseSaveAcknowledgementObservation,
   createSaveSnapshot,
   journalSnapshotFromSavedBase,
   journalRecoveryDisposition,
@@ -2490,7 +2491,8 @@ async function handleProductHostMessage(message) {
       // The server has already accepted this version. Even if local
       // reconciliation fails, the next save must not use the previous ETag.
       hostRevision = message.revision;
-      const live = await observeNativeDocument();
+      const acknowledgedRead = await observeNativeDocumentChanges();
+      const live = acknowledgedRead.value;
       if (live.revision !== reconciledModelRevision)
         await checkpointLiveNativeState(live, "manual_after_save_request");
       const hasLaterChanges = acknowledgedSaveHasLaterChanges(
@@ -2509,7 +2511,15 @@ async function handleProductHostMessage(message) {
         history.length = 0;
         commands.length = 0;
       }
-      const afterAcknowledgement = await observeNativeDocument();
+      const afterStatus = !hasLaterChanges ? await request("status") : null;
+      const afterAcknowledgement = canReuseSaveAcknowledgementObservation({
+        observation: live,
+        documentChanges: acknowledgedRead.documentChanges,
+        status: afterStatus,
+        reconciledRevision: reconciledModelRevision,
+      })
+        ? live
+        : await observeNativeDocument();
       if (afterAcknowledgement.revision !== reconciledModelRevision)
         await checkpointLiveNativeState(
           afterAcknowledgement,

@@ -49,6 +49,23 @@ export function acknowledgedSaveHasLaterChanges(
   );
 }
 
+// A fresh engine read already proved the saved model at acknowledgement.
+// Marking it saved need not read the whole deck again when the engine's
+// change listener confirms that no edit landed in between.
+export function canReuseSaveAcknowledgementObservation({
+  observation,
+  documentChanges,
+  status,
+  reconciledRevision,
+}) {
+  return (
+    observation?.revision === reconciledRevision &&
+    Number.isSafeInteger(documentChanges) &&
+    status?.documentChanges === documentChanges &&
+    status?.modified === false
+  );
+}
+
 export function journalSnapshotFromSavedBase({
   baseBytes,
   currentBytes,
