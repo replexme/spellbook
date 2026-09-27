@@ -2765,16 +2765,25 @@ let lastSelectionKey = "";
 let selectionTick = 0;
 let checkpointInFlight = false;
 let lastCheckpointAt = 0;
+function noteAiObservationCache(reason) {
+  const now = performance.now();
+  performance.measure(`spellbook-native-read:ai-cache-${reason}`, {
+    start: now,
+    end: now,
+  });
+}
 // The engine's change count when the live document last matched the
 // journaled state. The heartbeat reads the whole deck, which takes seconds to
 // minutes on a large deck, only after the count moves.
 let checkpointedDocumentChanges = null;
 async function cachedAiObservation(requested) {
-  if (!aiObservationCache || requested.operation !== "observe") return null;
+  const cache = aiObservationCache;
+  if (!cache || requested.operation !== "observe") return null;
   const selection = await requestNative({ operation: "selection" }).catch(
     () => null,
   );
   const status = selection ? await request("status").catch(() => null) : null;
+  if (aiObservationCache !== cache) return null;
   const current = {
     bytes: currentBytes,
     revision: reconciledModelRevision,
@@ -2785,19 +2794,34 @@ async function cachedAiObservation(requested) {
       (item) => item.elementId,
     ),
   };
-  const sameSlide = reusableAiObservation(aiObservationCache, current);
+  const sameSlide = reusableAiObservation(cache, current);
   if (sameSlide) return sameSlide;
   const slideIndex = current.detailSlideIndex ?? current.activeSlide;
-  const slide = aiObservationCache.observation.slides?.[slideIndex];
-  if (
-    !slide ||
-    !reusableAiObservation(aiObservationCache, {
-      ...current,
-      detailSlideIndex: aiObservationCache.detailSlideIndex,
-    })
-  )
+  const slide = cache.observation.slides?.[slideIndex];
+  const sameDocument = reusableAiObservation(cache, {
+    ...current,
+    detailSlideIndex: cache.detailSlideIndex,
+  });
+  if (!slide || !sameDocument) {
+    const reason = !Number.isSafeInteger(current.documentChanges)
+      ? "listener-unavailable"
+      : cache.documentChanges !== current.documentChanges
+        ? "document-changed"
+        : cache.bytes !== current.bytes
+          ? "bytes-changed"
+          : cache.revision !== current.revision
+            ? "revision-changed"
+            : cache.activeSlide !== current.activeSlide
+              ? "active-slide-changed"
+              : JSON.stringify(cache.selectedElementIds) !==
+                  JSON.stringify(current.selectedElementIds)
+                ? "selection-changed"
+                : "slide-unavailable";
+    noteAiObservationCache(reason);
     return null;
+  }
   try {
+    const detailStartedAt = performance.now();
     const detail = await requestNative({
       operation: "detail_slide",
       slideIndex,
@@ -2805,26 +2829,45 @@ async function cachedAiObservation(requested) {
         .filter((element) => typeof element.text === "string")
         .map(({ elementId, text }) => ({ elementId, text })),
     });
+    performance.measure("spellbook-native-read:detail-slide", {
+      start: detailStartedAt,
+      end: performance.now(),
+    });
+    if (aiObservationCache !== cache) return null;
     if (detail.documentChanges !== current.documentChanges) {
+      noteAiObservationCache("detail-document-changed");
       aiObservationCache = null;
       return null;
     }
     const observation = reusableAiObservationForSlide(
-      aiObservationCache,
+      cache,
       { ...current, detailSlideIndex: slideIndex },
       detail.value,
     );
     if (!observation) {
+      noteAiObservationCache("detail-invalid");
       aiObservationCache = null;
       return null;
     }
     aiObservationCache = {
-      ...aiObservationCache,
+      ...cache,
       detailSlideIndex: current.detailSlideIndex,
       observation,
     };
+    noteAiObservationCache("detail-hit");
     return observation;
-  } catch {
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "unknown";
+    noteAiObservationCache(
+      [
+        "invalid_detail_slide",
+        "invalid_detail_element",
+        "stale_detail_element",
+        "unavailable_detail_element",
+      ].includes(code)
+        ? code
+        : "detail-error",
+    );
     aiObservationCache = null;
     return null;
   }
