@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   aiObservationView,
+  defersAiObservationCacheInvalidation,
   invalidatesAiObservationCache,
   navigatedAiObservationCache,
   reusableAiObservation,
@@ -84,10 +85,13 @@ test("saving keeps an observation eligible for strict live-state reuse", () => {
     }),
     true,
   );
+  const edit = { id: "2", request: { operation: "edit_batch" } };
+  assert.equal(invalidatesAiObservationCache(edit), false);
+  assert.equal(defersAiObservationCacheInvalidation(edit), true);
   assert.equal(
     invalidatesAiObservationCache({
-      id: "2",
-      request: { operation: "edit_batch" },
+      id: "3",
+      request: { operation: "undo_turn" },
     }),
     true,
   );

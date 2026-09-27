@@ -6,11 +6,13 @@ import {
 } from "/harness/opfs-journal.mjs";
 import {
   browserCaptureTargets,
+  retainBrowserImages,
   reusableBrowserImage,
   withBrowserVisualEvidence,
 } from "/harness/browser-visual-evidence.mjs";
 import {
   aiObservationView,
+  defersAiObservationCacheInvalidation,
   invalidatesAiObservationCache,
   navigatedAiObservationCache,
   reusableAiObservation,
@@ -887,7 +889,16 @@ async function attachBrowserVisualEvidence(nativeRequest, value) {
         images.push(cachedImage);
         continue;
       }
-      const rendered = await request("render-slide", { slideIndex });
+      const renderStartedAt = performance.now();
+      let rendered;
+      try {
+        rendered = await request("render-slide", { slideIndex });
+      } finally {
+        performance.measure("spellbook-native-read:render-slide", {
+          start: renderStartedAt,
+          end: performance.now(),
+        });
+      }
       images.push({ slideIndex, pngBytes: Array.from(rendered.png) });
     }
   } catch (error) {
@@ -1173,7 +1184,7 @@ async function prepareProductPackageMutation(nativeRequest) {
         : !Object.hasOwn(mediaFileExtensions, nativeRequest.mediaType))
     )
       throw new Error("invalid_asset");
-    const beforeObservation = await observeNativeDocument();
+    const beforeObservation = await observeBeforeNativeMutation();
     return {
       persistence: "native_snapshot",
       beforeBytes: currentBytes.slice(),
@@ -1244,7 +1255,7 @@ async function prepareProductPackageMutation(nativeRequest) {
   if (!localized) {
     if (!patchedBrowserRuntimeAdmitted())
       throw new Error("browser_native_runtime_patch_required");
-    const beforeObservation = await observeNativeDocument();
+    const beforeObservation = await observeBeforeNativeMutation();
     return {
       persistence: "native_snapshot",
       beforeBytes: currentBytes.slice(),
@@ -2641,6 +2652,11 @@ async function handleProductHostMessage(message) {
     try {
       markBrowserProbePhase("prepare");
       const prepared = await prepareProductPackageMutation(message.request);
+      if (prepared && defersAiObservationCacheInvalidation(message)) {
+        if (aiObservationCache)
+          noteAiObservationCache(`cleared-${message.request.operation}`);
+        aiObservationCache = null;
+      }
       let value;
       // The engine reply whose state became the reconciled one, when known.
       let nativeResult = null;
@@ -2683,7 +2699,14 @@ async function handleProductHostMessage(message) {
         )
           throw new Error("document_changed_observe_again");
         if (value.visualEvidenceComplete && !value.visualEvidenceError)
-          aiObservationCache = { ...aiObservationCache, observation: value };
+          aiObservationCache = {
+            ...aiObservationCache,
+            observation: value,
+            capturedImages: retainBrowserImages(
+              aiObservationCache.capturedImages,
+              value.images,
+            ),
+          };
       }
       reportHostModified(
         Boolean(status.modified) ||
@@ -2709,6 +2732,7 @@ async function handleProductHostMessage(message) {
           activeSlide: value.activeSlide,
           selectedElementIds: value.selectedElementIds,
           observation: value,
+          capturedImages: retainBrowserImages([], value.images),
         };
       markBrowserProbePhase("complete");
       postHost({ id: message.id, value });
@@ -2788,6 +2812,14 @@ function noteAiObservationCache(reason) {
 // journaled state. The heartbeat reads the whole deck, which takes seconds to
 // minutes on a large deck, only after the count moves.
 let checkpointedDocumentChanges = null;
+async function observeBeforeNativeMutation() {
+  return (
+    (await cachedAiObservation({
+      operation: "observe",
+      detailSlideIndex: aiObservationCache?.detailSlideIndex,
+    })) ?? (await observeNativeDocument())
+  );
+}
 async function cachedAiObservation(requested) {
   const cache = aiObservationCache;
   if (requested.operation !== "observe") return null;
@@ -2819,7 +2851,10 @@ async function cachedAiObservation(requested) {
   const sameSlide = reusableAiObservation(observedCache, current);
   if (sameSlide) {
     if (navigated) aiObservationCache = observedCache;
-    return sameSlide;
+    return {
+      ...sameSlide,
+      images: observedCache.capturedImages ?? sameSlide.images,
+    };
   }
   const slideIndex = current.detailSlideIndex ?? current.activeSlide;
   const slide = observedCache.observation.slides?.[slideIndex];
@@ -2880,7 +2915,10 @@ async function cachedAiObservation(requested) {
       observation,
     };
     noteAiObservationCache("detail-hit");
-    return observation;
+    return {
+      ...observation,
+      images: observedCache.capturedImages ?? observation.images,
+    };
   } catch (error) {
     const code = error instanceof Error ? error.message : "unknown";
     noteAiObservationCache(

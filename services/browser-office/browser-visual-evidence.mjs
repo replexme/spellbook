@@ -58,3 +58,21 @@ export function reusableBrowserImage(observation, slideIndex) {
     ? image
     : null;
 }
+
+// Keep a small set of previously rendered slides for the same verified deck
+// revision. The caller drops this set whenever a document mutation begins.
+export function retainBrowserImages(previous = [], current = [], limit = 8) {
+  const images = new Map();
+  for (const image of [...previous, ...current]) {
+    if (
+      Number.isSafeInteger(image?.slideIndex) &&
+      Array.isArray(image.pngBytes) &&
+      image.pngBytes.length > 0
+    ) {
+      images.delete(image.slideIndex);
+      images.set(image.slideIndex, image);
+      if (images.size > limit) images.delete(images.keys().next().value);
+    }
+  }
+  return [...images.values()];
+}

@@ -163,6 +163,24 @@ export function invalidatesAiObservationCache(message) {
       (message?.request &&
         !["observe", "selection", "reveal"].includes(
           message.request.operation,
-        )),
+        ) &&
+        !defersAiObservationCacheInvalidation(message)),
+  );
+}
+
+// These operations prepare a mutation using a before-image. Keep the cache
+// until that preparation can verify and consume it; the caller clears it
+// before executing the mutation.
+export function defersAiObservationCacheInvalidation(message) {
+  return Boolean(
+    message?.request?.dryRun !== true &&
+      [
+        "edit",
+        "edit_batch",
+        "insert_image",
+        "replace_image",
+        "insert_media",
+        "replace_media",
+      ].includes(message?.request?.operation),
   );
 }

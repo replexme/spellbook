@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   browserCaptureTargets,
+  retainBrowserImages,
   reusableBrowserImage,
   withBrowserVisualEvidence,
 } from "./browser-visual-evidence.mjs";
@@ -41,6 +42,14 @@ test("browser observations capture requested slides and validate bounds", () => 
       ),
     /invalid_capture_slide_indexes/u,
   );
+});
+
+test("previously rendered slides are retained only within a bounded cache", () => {
+  const image = (slideIndex) => ({ slideIndex, pngBytes: [137, 80, 78, 71] });
+  const first = retainBrowserImages([image(0), image(1)], [image(2)], 2);
+  assert.deepEqual(first.map((value) => value.slideIndex), [1, 2]);
+  const revisited = retainBrowserImages(first, [image(1)], 2);
+  assert.deepEqual(revisited.map((value) => value.slideIndex), [2, 1]);
 });
 
 test("only a validated unchanged observation can reuse its captured slide", () => {
