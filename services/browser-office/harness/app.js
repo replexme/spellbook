@@ -11,6 +11,7 @@ import {
 } from "/harness/browser-visual-evidence.mjs";
 import {
   aiObservationView,
+  invalidatesAiObservationCache,
   reusableAiObservation,
   reusableAiObservationForSlide,
 } from "/harness/ai-observation-view.mjs";
@@ -2401,12 +2402,7 @@ async function saveProductDocument() {
 async function handleProductHostMessage(message) {
   if (!message || typeof message !== "object")
     throw new Error("Browser Office host message is invalid.");
-  if (
-    ["open", "command", "save-result"].includes(message.type) ||
-    (message.request &&
-      !["observe", "selection", "reveal"].includes(message.request.operation))
-  )
-    aiObservationCache = null;
+  if (invalidatesAiObservationCache(message)) aiObservationCache = null;
   if (message.type === "open") {
     await openProductDocument(message);
     return;
@@ -2778,7 +2774,11 @@ function noteAiObservationCache(reason) {
 let checkpointedDocumentChanges = null;
 async function cachedAiObservation(requested) {
   const cache = aiObservationCache;
-  if (!cache || requested.operation !== "observe") return null;
+  if (requested.operation !== "observe") return null;
+  if (!cache) {
+    noteAiObservationCache("empty");
+    return null;
+  }
   const selection = await requestNative({ operation: "selection" }).catch(
     () => null,
   );

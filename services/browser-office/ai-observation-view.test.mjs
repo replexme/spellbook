@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   aiObservationView,
+  invalidatesAiObservationCache,
   reusableAiObservation,
   reusableAiObservationForSlide,
 } from "./ai-observation-view.mjs";
@@ -48,6 +49,39 @@ test("AI sees a deck outline and full details for the requested and changed slid
   assert.equal(view.readMetrics, undefined);
   assert.ok(
     JSON.stringify(view).length < JSON.stringify(observation).length / 4,
+  );
+});
+
+test("saving keeps an observation eligible for strict live-state reuse", () => {
+  assert.equal(invalidatesAiObservationCache({ type: "save-result" }), false);
+  assert.equal(
+    invalidatesAiObservationCache({
+      type: "command",
+      messageId: "Action_Save",
+    }),
+    false,
+  );
+  assert.equal(
+    invalidatesAiObservationCache({
+      id: "1",
+      request: { operation: "observe" },
+    }),
+    false,
+  );
+  assert.equal(invalidatesAiObservationCache({ type: "open" }), true);
+  assert.equal(
+    invalidatesAiObservationCache({
+      type: "command",
+      messageId: "Action_Undo",
+    }),
+    true,
+  );
+  assert.equal(
+    invalidatesAiObservationCache({
+      id: "2",
+      request: { operation: "edit_batch" },
+    }),
+    true,
   );
 });
 

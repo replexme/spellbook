@@ -111,3 +111,17 @@ export function reusableAiObservationForSlide(cache, current, detail) {
     observationCacheHit: true,
   };
 }
+
+// Saving may update the document's modified flag but does not itself edit
+// slide content. Reuse still requires the live counter, bytes, revision and
+// selection checks above after the save has finished.
+export function invalidatesAiObservationCache(message) {
+  return Boolean(
+    message?.type === "open" ||
+      (message?.type === "command" && message.messageId !== "Action_Save") ||
+      (message?.request &&
+        !["observe", "selection", "reveal"].includes(
+          message.request.operation,
+        )),
+  );
+}
