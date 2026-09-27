@@ -6,6 +6,7 @@ import {
   defersAiObservationCacheInvalidation,
   invalidatesAiObservationCache,
   navigatedAiObservationCache,
+  readOnlyAiObservationAfterMutation,
   reusableAiObservation,
   reusableAiObservationForSlide,
 } from "./ai-observation-view.mjs";
@@ -52,6 +53,19 @@ test("AI sees a deck outline and full details for the requested and changed slid
   assert.ok(
     JSON.stringify(view).length < JSON.stringify(observation).length / 4,
   );
+});
+
+test("a verified mutation can seed a later read without repeating its changed-slide demand", () => {
+  const mutation = {
+    revision: "revision-2",
+    changedSlideIndexes: [0, 59],
+    images: [{ slideIndex: 0, pngBytes: [137] }],
+  };
+  const read = readOnlyAiObservationAfterMutation(mutation);
+  assert.deepEqual(read.changedSlideIndexes, []);
+  assert.deepEqual(mutation.changedSlideIndexes, [0, 59]);
+  assert.equal(read.revision, mutation.revision);
+  assert.equal(read.images, mutation.images);
 });
 
 test("saving keeps an observation eligible for strict live-state reuse", () => {

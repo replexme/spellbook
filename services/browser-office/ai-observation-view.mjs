@@ -44,6 +44,12 @@ export function aiObservationView(observation) {
   };
 }
 
+// A mutation result includes changed-slide identities so its fresh images
+// can be reviewed. A later read of that same revision is not another edit.
+export function readOnlyAiObservationAfterMutation(observation) {
+  return { ...observation, changedSlideIndexes: [] };
+}
+
 // A missing change listener or a changed selection fails closed to a fresh
 // engine read. The caller also verifies the counter after visual capture.
 export function reusableAiObservation(cache, current) {

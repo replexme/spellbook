@@ -15,6 +15,7 @@ import {
   defersAiObservationCacheInvalidation,
   invalidatesAiObservationCache,
   navigatedAiObservationCache,
+  readOnlyAiObservationAfterMutation,
   reusableAiObservation,
   reusableAiObservationForSlide,
 } from "/harness/ai-observation-view.mjs";
@@ -2718,20 +2719,32 @@ async function handleProductHostMessage(message) {
         if (nativeResult) noteCheckpointedDocumentChanges(nativeResult);
       }
       if (
-        message.request.operation === "observe" &&
+        (message.request.operation === "observe" ||
+          (prepared &&
+            Number.isSafeInteger(value?.textDetails?.slideIndex))) &&
         !cached &&
         nativeResult?.documentChanges === status.documentChanges &&
         Number.isSafeInteger(status.documentChanges) &&
-        value?.revision === reconciledModelRevision
+        value?.revision === reconciledModelRevision &&
+        value.visualEvidenceComplete === true &&
+        !value.visualEvidenceError
       )
         aiObservationCache = {
           bytes: currentBytes,
           revision: value.revision,
-          detailSlideIndex: message.request.detailSlideIndex ?? null,
+          detailSlideIndex:
+            message.request.operation === "observe"
+              ? (message.request.detailSlideIndex ?? null)
+              : value.textDetails.slideIndex === value.activeSlide
+                ? null
+                : value.textDetails.slideIndex,
           documentChanges: status.documentChanges,
           activeSlide: value.activeSlide,
           selectedElementIds: value.selectedElementIds,
-          observation: value,
+          observation:
+            message.request.operation === "observe"
+              ? value
+              : readOnlyAiObservationAfterMutation(value),
           capturedImages: retainBrowserImages([], value.images),
         };
       markBrowserProbePhase("complete");
