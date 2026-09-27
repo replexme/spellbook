@@ -55,13 +55,17 @@ export function acknowledgedSaveHasLaterChanges(
 export function canReuseSaveAcknowledgementObservation({
   observation,
   documentChanges,
+  markSaved,
   status,
   reconciledRevision,
 }) {
   return (
     observation?.revision === reconciledRevision &&
     Number.isSafeInteger(documentChanges) &&
-    status?.documentChanges === documentChanges &&
+    Number.isSafeInteger(markSaved?.documentChangesBefore) &&
+    Number.isSafeInteger(markSaved?.documentChangesAfter) &&
+    markSaved.documentChangesBefore === documentChanges &&
+    status?.documentChanges === markSaved.documentChangesAfter &&
     status?.modified === false
   );
 }

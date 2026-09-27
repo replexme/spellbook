@@ -35,7 +35,8 @@ test("save acknowledgement reuses its read only when the engine state stayed sti
   const stable = {
     observation: { revision: "saved" },
     documentChanges: 7,
-    status: { documentChanges: 7, modified: false },
+    markSaved: { documentChangesBefore: 7, documentChangesAfter: 8 },
+    status: { documentChanges: 8, modified: false },
     reconciledRevision: "saved",
   };
   assert.equal(canReuseSaveAcknowledgementObservation(stable), true);
@@ -49,6 +50,13 @@ test("save acknowledgement reuses its read only when the engine state stayed sti
   assert.equal(
     canReuseSaveAcknowledgementObservation({
       ...stable,
+      status: { documentChanges: 9, modified: false },
+    }),
+    false,
+  );
+  assert.equal(
+    canReuseSaveAcknowledgementObservation({
+      ...stable,
       status: { documentChanges: 8, modified: true },
     }),
     false,
@@ -56,7 +64,8 @@ test("save acknowledgement reuses its read only when the engine state stayed sti
   assert.equal(
     canReuseSaveAcknowledgementObservation({
       ...stable,
-      status: { documentChanges: 7, modified: true },
+      markSaved: { documentChangesBefore: 8, documentChangesAfter: 9 },
+      status: { documentChanges: 9, modified: false },
     }),
     false,
   );

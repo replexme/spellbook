@@ -777,11 +777,17 @@ function start() {
           normalizeSavedDocument(event.data.path, event.data.outputPath);
           post("normalize-saved-complete", { requestId });
           break;
-        case "mark-saved":
+        case "mark-saved": {
           if (!model) throw new Error("No browser Office document is open.");
+          const documentChangesBefore = documentChangeCount();
           model.setModified(false);
-          post("mark-saved-complete", { requestId });
+          post("mark-saved-complete", {
+            requestId,
+            documentChangesBefore,
+            documentChangesAfter: documentChangeCount(),
+          });
           break;
+        }
         case "close":
           closeDocument();
           post("close-complete", { requestId });

@@ -2502,11 +2502,12 @@ async function handleProductHostMessage(message) {
       );
       baseBytes = saved.bytes.slice();
       baseModelRevision = saved.modelRevision;
+      let markSaved = null;
       if (hasLaterChanges) {
         rebaseCommandsToSavedBase("save_acknowledged_with_later_edits");
         await persistCheckpoint();
       } else {
-        await request("mark-saved");
+        markSaved = await request("mark-saved");
         await journal.clear();
         history.length = 0;
         commands.length = 0;
@@ -2515,6 +2516,7 @@ async function handleProductHostMessage(message) {
       const afterAcknowledgement = canReuseSaveAcknowledgementObservation({
         observation: live,
         documentChanges: acknowledgedRead.documentChanges,
+        markSaved,
         status: afterStatus,
         reconciledRevision: reconciledModelRevision,
       })
