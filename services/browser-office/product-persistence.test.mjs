@@ -2,9 +2,36 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  directTextPreservationTarget,
   persistedSectionsMatch,
   persistedSlideTopologyMatches,
 } from "./harness/product-persistence.mjs";
+
+test("direct human title input scopes preservation to one named shape", () => {
+  const before = {
+    masters: [{ name: "Author master", backgroundColor: 0xffffff }],
+    slides: [
+      { elements: [{ elementId: "0/1", name: "Title", text: "Before" }] },
+      { elements: [{ elementId: "1/1", name: "Other", text: "Keep" }] },
+    ],
+  };
+  const after = structuredClone(before);
+  after.slides[0].elements[0].text = "After";
+  assert.deepEqual(directTextPreservationTarget(before, after), {
+    op: "replace_text",
+    slideIndex: 0,
+    name: "Title",
+  });
+  assert.equal(before.slides[0].elements[0].text, "Before");
+  after.slides[1].elements[0].text = "Another edit";
+  assert.equal(directTextPreservationTarget(before, after), null);
+  after.slides[1].elements[0].text = "Keep";
+  after.masters[0].backgroundColor = 0;
+  assert.equal(directTextPreservationTarget(before, after), null);
+  after.masters[0].backgroundColor = 0xffffff;
+  after.slides[0].elements[0].name = "Different shape";
+  assert.equal(directTextPreservationTarget(before, after), null);
+});
 
 const opening = {
   id: "{11111111-1111-4111-8111-111111111111}",

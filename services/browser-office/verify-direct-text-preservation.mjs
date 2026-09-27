@@ -1,0 +1,234 @@
+import assert from "node:assert/strict";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+
+import { chromium } from "@playwright/test";
+import { strFromU8, unzipSync } from "fflate";
+
+import { admitCandidateRuntime } from "./candidate-runtime.mjs";
+import { createHarnessServer } from "./server.mjs";
+
+function requiredFlag(name) {
+  const index = process.argv.indexOf(name);
+  if (index < 0 || !process.argv[index + 1])
+    throw new Error(`Missing ${name} <path>.`);
+  return path.resolve(process.argv[index + 1]);
+}
+
+const inputPath = requiredFlag("--input");
+const runtimeDirectory = requiredFlag("--candidate-runtime");
+const outputRoot = requiredFlag("--output");
+const input = new Uint8Array(await readFile(inputPath));
+const runtime = await admitCandidateRuntime({ runtimeDirectory });
+await mkdir(outputRoot, { recursive: true });
+const server = createHarnessServer({
+  runtimeRoot: runtime.runtimeDirectory,
+  runtimeIdentity: runtime.runtimeIdentity,
+  upstream: runtime.upstream,
+});
+await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+const origin = `http://127.0.0.1:${server.address().port}`;
+const browser = await chromium.launch({
+  headless: true,
+  args: ["--use-gl=angle", "--use-angle=swiftshader"],
+});
+const page = await browser.newPage({ viewport: { width: 900, height: 684 } });
+const errors = [];
+page.on("pageerror", (error) => errors.push(error.message));
+page.on("console", (message) => {
+  if (message.type() === "error") errors.push(message.text());
+});
+
+async function eventOf(type, previousCount = 0) {
+  await page.waitForFunction(
+    ({ expectedType, count }) => {
+      const events = globalThis.__spellbookProductHost?.events ?? [];
+      return (
+        events.some((event) => event.type === "error") ||
+        events.filter((event) => event.type === expectedType).length > count
+      );
+    },
+    { expectedType: type, count: previousCount },
+    { timeout: 300_000 },
+  );
+  const result = await page.evaluate(
+    ({ expectedType, count }) => {
+      const events = globalThis.__spellbookProductHost.events;
+      const failure = events.find((event) => event.type === "error");
+      if (failure) return { error: failure.error };
+      return events.filter((event) => event.type === expectedType)[count];
+    },
+    { expectedType: type, count: previousCount },
+  );
+  if (result.error) throw new Error(result.error);
+  return result;
+}
+
+async function observeTitle() {
+  const id = `local-observe-${Date.now()}-${Math.random()}`;
+  await page.evaluate(
+    (taskId) =>
+      globalThis.__spellbookProductHost.port.postMessage({
+        id: taskId,
+        request: { operation: "observe", captureSlideIndexes: [] },
+      }),
+    id,
+  );
+  await page.waitForFunction(
+    (taskId) =>
+      globalThis.__spellbookProductHost.events.some(
+        (event) => event.id === taskId || event.type === "error",
+      ),
+    id,
+    { timeout: 120_000 },
+  );
+  const result = await page.evaluate((taskId) => {
+    const events = globalThis.__spellbookProductHost.events;
+    return (
+      events.find((event) => event.id === taskId) ??
+      events.find((event) => event.type === "error")
+    );
+  }, id);
+  if (result.error) throw new Error(result.error);
+  return result.value?.slides?.[0]?.elements?.[0]?.text;
+}
+
+async function waitForCompleteTitle() {
+  let lastText;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    lastText = await observeTitle();
+    if (lastText?.includes("MANUAL")) return;
+    await page.waitForTimeout(1000);
+  }
+  throw new Error(
+    `The direct title input did not complete: ${JSON.stringify(lastText)}.`,
+  );
+}
+
+try {
+  await page.goto(
+    `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}`,
+    { waitUntil: "domcontentloaded", timeout: 30_000 },
+  );
+  await page.waitForFunction(
+    () => ["runtime-ready", "error"].includes(document.body.dataset.state),
+    null,
+    { timeout: 180_000 },
+  );
+  const state = await page.evaluate(() => document.body.dataset.state);
+  assert.equal(state, "runtime-ready");
+  await page.evaluate((hostOrigin) => {
+    const events = [];
+    const channel = new MessageChannel();
+    channel.port1.onmessage = (event) => events.push(event.data);
+    channel.port1.start();
+    globalThis.__spellbookProductHost = { events, port: channel.port1 };
+    window.postMessage(
+      { type: "spellbook.browser-office-connect", protocolVersion: 1 },
+      hostOrigin,
+      [channel.port2],
+    );
+  }, origin);
+  await eventOf("ready");
+  await page.evaluate((source) => {
+    const bytes = Uint8Array.from(source);
+    globalThis.__spellbookProductHost.port.postMessage(
+      {
+        type: "open",
+        requestId: "local-direct-text-open",
+        documentId: "local-direct-text-preservation",
+        fileName: "direct-text-preservation.pptx",
+        revision:
+          '"baseline:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+        maxBytes: 64 * 1024 * 1024,
+        bytes: bytes.buffer,
+      },
+      [bytes.buffer],
+    );
+  }, Array.from(input));
+  const opened = await eventOf("open-complete");
+  assert.ok(opened.slideCount > 1);
+  await page.waitForTimeout(1000);
+  const canvas = page.locator("#qtcanvas");
+  const box = await canvas.boundingBox();
+  assert.ok(box, "Canvas is visible");
+  await page.mouse.click(box.x + box.width * 0.48, box.y + box.height * 0.33);
+  await page.waitForTimeout(1000);
+  await page.keyboard.press("F2");
+  await page.waitForTimeout(1000);
+  await page.keyboard.press("End");
+  await page.keyboard.type(" MANUAL", { delay: 80 });
+  await waitForCompleteTitle();
+  await page.keyboard.press("Escape");
+  await waitForCompleteTitle();
+  const beforeSaveCount = await page.evaluate(
+    () =>
+      globalThis.__spellbookProductHost.events.filter(
+        (event) => event.type === "save",
+      ).length,
+  );
+  await page.evaluate(() =>
+    globalThis.__spellbookProductHost.port.postMessage({
+      type: "command",
+      messageId: "Action_Save",
+      values: { Notify: true },
+    }),
+  );
+  const save = await eventOf("save", beforeSaveCount);
+  const output = Uint8Array.from(
+    await page.evaluate((requestId) => {
+      const event = globalThis.__spellbookProductHost.events.find(
+        (candidate) =>
+          candidate.type === "save" && candidate.requestId === requestId,
+      );
+      return Array.from(new Uint8Array(event.bytes));
+    }, save.requestId),
+  );
+  const outputPath = path.join(outputRoot, "direct-text-saved.pptx");
+  await writeFile(outputPath, output);
+  await page.screenshot({
+    path: path.join(outputRoot, "direct-text-saved.png"),
+  });
+  const beforeParts = unzipSync(input);
+  const afterParts = unzipSync(output);
+  const slideNames = Object.keys(beforeParts).filter((name) =>
+    /^ppt\/slides\/slide\d+\.xml$/u.test(name),
+  );
+  assert.equal(slideNames.length, opened.slideCount);
+  assert.match(strFromU8(afterParts["ppt/slides/slide1.xml"]), /MANUAL/u);
+  for (const name of slideNames.filter(
+    (name) => name !== "ppt/slides/slide1.xml",
+  ))
+    assert.deepEqual(afterParts[name], beforeParts[name], `${name} changed`);
+  for (const name of Object.keys(beforeParts).filter((part) =>
+    /^ppt\/slideMasters\/slideMaster\d+\.xml$/u.test(part),
+  ))
+    assert.deepEqual(afterParts[name], beforeParts[name], `${name} changed`);
+  process.stdout.write(
+    JSON.stringify({
+      result: "pass",
+      slideCount: slideNames.length,
+      preservedSlides: slideNames.length - 1,
+      outputPath,
+    }) + "\n",
+  );
+} catch (error) {
+  await page
+    .screenshot({ path: path.join(outputRoot, "direct-text-failure.png") })
+    .catch(() => {});
+  const events = await page
+    .evaluate(() =>
+      (globalThis.__spellbookProductHost?.events ?? []).map((event) => ({
+        type: event.type,
+        requestId: event.requestId,
+        error: event.error,
+      })),
+    )
+    .catch(() => []);
+  throw new Error(
+    `${error.message}; events=${JSON.stringify(events)}; browserErrors=${JSON.stringify(errors)}`,
+  );
+} finally {
+  await browser.close();
+  await new Promise((resolve) => server.close(resolve));
+}

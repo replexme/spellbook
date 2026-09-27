@@ -86,3 +86,49 @@ export function persistedSlideTopologyMatches(command, before, after) {
     expected.every((id, index) => id === after[index])
   );
 }
+
+// A direct text edit can be scoped to its one named slide shape. Other manual
+// changes retain the broad human budget because their intended package reach
+// cannot be inferred from a text-only observation.
+export function directTextPreservationTarget(before, after) {
+  if (
+    !Array.isArray(before?.slides) ||
+    !Array.isArray(after?.slides) ||
+    before.slides.length !== after.slides.length
+  )
+    return null;
+  const baseline = structuredClone(before);
+  const edited = structuredClone(after);
+  let target = null;
+  for (
+    let slideIndex = 0;
+    slideIndex < baseline.slides.length;
+    slideIndex += 1
+  ) {
+    const beforeElements = baseline.slides[slideIndex]?.elements;
+    const afterElements = edited.slides[slideIndex]?.elements;
+    if (!Array.isArray(beforeElements) || !Array.isArray(afterElements))
+      return null;
+    if (beforeElements.length !== afterElements.length) return null;
+    for (let index = 0; index < beforeElements.length; index += 1) {
+      const beforeElement = beforeElements[index];
+      const afterElement = afterElements[index];
+      if (beforeElement?.text === afterElement?.text) continue;
+      if (
+        target ||
+        typeof beforeElement?.text !== "string" ||
+        typeof afterElement?.text !== "string" ||
+        typeof beforeElement?.name !== "string" ||
+        !beforeElement.name ||
+        beforeElement.name !== afterElement?.name ||
+        beforeElement.elementId !== afterElement?.elementId
+      )
+        return null;
+      target = { op: "replace_text", slideIndex, name: beforeElement.name };
+      beforeElement.text = afterElement.text;
+    }
+  }
+  return target && JSON.stringify(baseline) === JSON.stringify(edited)
+    ? target
+    : null;
+}

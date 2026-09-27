@@ -20,6 +20,7 @@ import {
   reusableAiObservationForSlide,
 } from "/harness/ai-observation-view.mjs";
 import {
+  directTextPreservationTarget,
   persistedSectionsMatch,
   persistedSlideTopologyMatches,
 } from "/harness/product-persistence.mjs";
@@ -31,6 +32,7 @@ import {
 } from "/harness/product-history.mjs";
 import {
   intendedDocumentMutationDifferences,
+  normalizeDocumentPersistenceState,
   persistenceStateFromObservation,
   withAuthoredUntargetedShapes,
 } from "/harness/persistence-evidence.mjs";
@@ -55,7 +57,6 @@ const saveButton = document.querySelector("#save");
 const productMode = location.pathname === "/workspace";
 const query = new URLSearchParams(location.search);
 const browserProbeMode = productMode && query.get("browserProbe") === "1";
-const captureNativeRaw = productMode && query.get("nativeRaw") === "1";
 const compactEditor = window.matchMedia("(max-width: 760px)");
 const productBridgeSessionId = productMode ? crypto.randomUUID() : "";
 const expectedHostOrigin = productMode ? query.get("hostOrigin") : null;
@@ -727,11 +728,6 @@ async function preserveAndInspectNativeDocument(
     (await measure("normalize", () =>
       normalizeNativeDocumentBytes(originalBytes),
     ));
-  if (captureNativeRaw) {
-    savedArtifacts.set("native-snapshot-original", originalBytes.slice());
-    savedArtifacts.set("native-snapshot-no-edit", noEdit.slice());
-    savedArtifacts.set("native-snapshot-edited", serialized.slice());
-  }
   markBrowserProbePhase("snapshot:preserve");
   const preserved = await measure("preserve", () =>
     preserveNativeSnapshot(
@@ -743,8 +739,6 @@ async function preserveAndInspectNativeDocument(
     ),
   );
   const bytes = new Uint8Array(preserved.bytes);
-  if (captureNativeRaw)
-    savedArtifacts.set("native-snapshot-preserved", bytes.slice());
   markBrowserProbePhase("snapshot:inspect");
   const observation = await measure("inspect", () =>
     inspectNativeDocumentBytes(bytes, detailSlideIndex),
@@ -2035,7 +2029,7 @@ async function persistCheckpoint() {
   trimSessionProductHistory(productUndoHistory, productRedoHistory);
 }
 
-async function checkpointLiveNativeState(live, reason) {
+async function checkpointLiveNativeState(live, reason, retryCount = 0) {
   if (
     !live ||
     typeof live.revision !== "string" ||
@@ -2080,21 +2074,44 @@ async function checkpointLiveNativeState(live, reason) {
       ? liveExportBaseline.bytes
       : null;
   liveExportBaseline = null;
-  // A direct human edit has no command list; null selects the human-edit
-  // preservation budget instead of an AI operation family.
+  const directTextTarget = directTextPreservationTarget(
+    normalizeDocumentPersistenceState(
+      persistenceStateFromObservation(reconciledObservation),
+    ),
+    normalizeDocumentPersistenceState(persistenceStateFromObservation(live)),
+  );
+  // When the only model difference is one text value, preserve every other
+  // shape and package part exactly as the author saved it. Other direct edits
+  // continue through the human budget.
   const preserved = await preserveAndInspectNativeDocument(
     previousState.currentBytes,
     live.textDetails?.slideIndex,
-    null,
-    null,
+    directTextTarget ? ["replace_text"] : null,
+    directTextTarget ? [directTextTarget] : null,
     baselineBytes,
   );
   const afterBytes = preserved.bytes;
-  assertPersistedNativeIntent(
-    reconciledObservation,
-    live,
-    preserved.observation,
-  );
+  try {
+    assertPersistedNativeIntent(
+      reconciledObservation,
+      live,
+      preserved.observation,
+    );
+  } catch (error) {
+    if (
+      retryCount < 2 &&
+      error instanceof Error &&
+      error.message.startsWith("browser_native_snapshot_not_persisted:")
+    ) {
+      // Human typing can advance the model while a large PPTX is exporting.
+      // Reconcile the latest revision instead of rejecting the save against
+      // an observation taken before the export finished.
+      const latest = await observeNativeDocument();
+      if (latest.revision !== live.revision)
+        return checkpointLiveNativeState(latest, reason, retryCount + 1);
+    }
+    throw error;
+  }
   recordManualProductCheckpoint({
     commands,
     undoHistory: productUndoHistory,
@@ -2752,8 +2769,7 @@ async function handleProductHostMessage(message) {
       }
       if (
         (message.request.operation === "observe" ||
-          (prepared &&
-            Number.isSafeInteger(value?.textDetails?.slideIndex))) &&
+          (prepared && Number.isSafeInteger(value?.textDetails?.slideIndex))) &&
         !cached &&
         nativeResult?.documentChanges === status.documentChanges &&
         Number.isSafeInteger(status.documentChanges) &&
