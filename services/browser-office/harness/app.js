@@ -841,10 +841,19 @@ async function observeNativeDocument() {
 
 // The observation with the engine's change count for the state it read.
 async function observeNativeDocumentChanges() {
-  const result = await requestNative({
-    operation: "observe",
-    captureSlideIndexes: [],
-  });
+  const startedAt = performance.now();
+  let result;
+  try {
+    result = await requestNative({
+      operation: "observe",
+      captureSlideIndexes: [],
+    });
+  } finally {
+    performance.measure("spellbook-native-read:internal-observe", {
+      start: startedAt,
+      end: performance.now(),
+    });
+  }
   if (
     !result.value ||
     typeof result.value.revision !== "string" ||
@@ -2151,21 +2160,54 @@ function enqueueProductOperation(operation) {
 async function exportProductDocumentNow({ checkpoint = true } = {}) {
   if (!currentBytes || !journal)
     throw new Error("No browser Office document is open.");
-  const live = await observeNativeDocument();
-  if (live.revision !== reconciledModelRevision)
-    await checkpointLiveNativeState(live, "manual_save");
+  const observeStartedAt = performance.now();
+  let live;
+  try {
+    live = await observeNativeDocument();
+  } finally {
+    performance.measure("spellbook-persist:save-observe", {
+      start: observeStartedAt,
+      end: performance.now(),
+    });
+  }
+  if (live.revision !== reconciledModelRevision) {
+    const reconcileStartedAt = performance.now();
+    try {
+      await checkpointLiveNativeState(live, "manual_save");
+    } finally {
+      performance.measure("spellbook-persist:save-reconcile", {
+        start: reconcileStartedAt,
+        end: performance.now(),
+      });
+    }
+  }
   unreconciledModelRevision = "";
   const bytes = currentBytes.slice();
   if (!bytes.byteLength || bytes.byteLength > hostMaximumBytes)
     throw new Error("Browser Office export exceeded the document limit.");
-  if (checkpoint) await persistCheckpoint();
+  if (checkpoint) {
+    const checkpointStartedAt = performance.now();
+    try {
+      await persistCheckpoint();
+    } finally {
+      performance.measure("spellbook-persist:save-checkpoint", {
+        start: checkpointStartedAt,
+        end: performance.now(),
+      });
+    }
+  }
   return bytes;
 }
 
 function exportProductDocument(options = {}) {
-  const pendingExport = productExportQueue.then(() =>
-    exportProductDocumentNow(options),
-  );
+  const queuedAt = performance.now();
+  const pendingExport = productExportQueue.then(() => {
+    performance.measure("spellbook-persist:save-queue-wait", {
+      start: queuedAt,
+      end: performance.now(),
+    });
+    return exportProductDocumentNow(options);
+  });
   productExportQueue = pendingExport.catch(() => undefined);
   return pendingExport;
 }
