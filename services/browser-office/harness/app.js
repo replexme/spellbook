@@ -2685,7 +2685,7 @@ async function handleProductHostMessage(message) {
       markBrowserProbePhase("status");
       const status = await request("status");
       if (cached) {
-        const selection = await requestNative({ operation: "selection" });
+        const selection = await requestMeasuredAiCacheSelection();
         if (
           !reusableAiObservation(aiObservationCache, {
             bytes: currentBytes,
@@ -2825,6 +2825,17 @@ function noteAiObservationCache(reason) {
 // journaled state. The heartbeat reads the whole deck, which takes seconds to
 // minutes on a large deck, only after the count moves.
 let checkpointedDocumentChanges = null;
+async function requestMeasuredAiCacheSelection() {
+  const startedAt = performance.now();
+  try {
+    return await requestNative({ operation: "selection" });
+  } finally {
+    performance.measure("spellbook-native-read:ai-cache-selection", {
+      start: startedAt,
+      end: performance.now(),
+    });
+  }
+}
 async function observeBeforeNativeMutation() {
   return (
     (await cachedAiObservation({
@@ -2840,10 +2851,13 @@ async function cachedAiObservation(requested) {
     noteAiObservationCache("empty");
     return null;
   }
-  const selection = await requestNative({ operation: "selection" }).catch(
-    () => null,
-  );
+  const selection = await requestMeasuredAiCacheSelection().catch(() => null);
+  const statusStartedAt = performance.now();
   const status = selection ? await request("status").catch(() => null) : null;
+  performance.measure("spellbook-native-read:ai-cache-status", {
+    start: statusStartedAt,
+    end: performance.now(),
+  });
   if (aiObservationCache !== cache) return null;
   const current = {
     bytes: currentBytes,
