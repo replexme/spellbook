@@ -46,3 +46,15 @@ export function withBrowserVisualEvidence(observation, images, targets = []) {
       ),
   };
 }
+
+// The host marks a read as a cache hit only after comparing the live change
+// counter, package bytes, revision and selection with the cached observation.
+export function reusableBrowserImage(observation, slideIndex) {
+  if (observation?.observationCacheHit !== true) return null;
+  const image = observation.images?.find(
+    (candidate) => candidate.slideIndex === slideIndex,
+  );
+  return Array.isArray(image?.pngBytes) && image.pngBytes.length > 0
+    ? image
+    : null;
+}

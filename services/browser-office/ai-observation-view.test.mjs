@@ -108,7 +108,11 @@ test("slide detail reuse keeps the whole-deck state and rejects stale or partial
 
 test("AI observation reuse fails closed on edits, selection, reload and missing listener", () => {
   const bytes = new Uint8Array([1]);
-  const observation = { revision: "r1", slides: [] };
+  const observation = {
+    revision: "r1",
+    slides: [],
+    images: [{ slideIndex: 0, pngBytes: [1] }],
+  };
   const baseline = {
     bytes,
     revision: "r1",
@@ -123,6 +127,10 @@ test("AI observation reuse fails closed on edits, selection, reload and missing 
     true,
   );
   assert.equal(reusableAiObservation(cache, baseline)?.readMetrics.count, 0);
+  assert.equal(
+    reusableAiObservation(cache, baseline)?.images,
+    observation.images,
+  );
   for (const change of [
     { documentChanges: 8 },
     { documentChanges: null },

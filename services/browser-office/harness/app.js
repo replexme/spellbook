@@ -6,6 +6,7 @@ import {
 } from "/harness/opfs-journal.mjs";
 import {
   browserCaptureTargets,
+  reusableBrowserImage,
   withBrowserVisualEvidence,
 } from "/harness/browser-visual-evidence.mjs";
 import {
@@ -879,6 +880,11 @@ async function attachBrowserVisualEvidence(nativeRequest, value) {
   try {
     targets = browserCaptureTargets(nativeRequest, value);
     for (const slideIndex of targets) {
+      const cachedImage = reusableBrowserImage(value, slideIndex);
+      if (cachedImage) {
+        images.push(cachedImage);
+        continue;
+      }
       const rendered = await request("render-slide", { slideIndex });
       images.push({ slideIndex, pngBytes: Array.from(rendered.png) });
     }
@@ -891,7 +897,8 @@ async function attachBrowserVisualEvidence(nativeRequest, value) {
       visualEvidenceComplete: false,
       visualEvidenceError: captureError,
     };
-  return withBrowserVisualEvidence(value, images, targets);
+  const { visualEvidenceError: _previousError, ...currentValue } = value;
+  return withBrowserVisualEvidence(currentValue, images, targets);
 }
 
 function parseExpectedSlides(value) {
@@ -2663,6 +2670,8 @@ async function handleProductHostMessage(message) {
           })
         )
           throw new Error("document_changed_observe_again");
+        if (value.visualEvidenceComplete && !value.visualEvidenceError)
+          aiObservationCache = { ...aiObservationCache, observation: value };
       }
       reportHostModified(
         Boolean(status.modified) ||

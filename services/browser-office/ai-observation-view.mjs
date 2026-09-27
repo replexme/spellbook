@@ -62,7 +62,7 @@ export function reusableAiObservation(cache, current) {
     return null;
   return {
     ...cache.observation,
-    images: [],
+    images: cache.observation.images ?? [],
     readMetrics: { count: 0, elapsedMs: 0 },
     observationCacheHit: true,
   };
@@ -106,7 +106,7 @@ export function reusableAiObservationForSlide(cache, current, detail) {
         paragraphs,
       })),
     },
-    images: [],
+    images: cache.observation.images ?? [],
     readMetrics: { count: 0, elapsedMs: 0 },
     observationCacheHit: true,
   };
