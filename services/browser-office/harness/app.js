@@ -55,6 +55,7 @@ const saveButton = document.querySelector("#save");
 const productMode = location.pathname === "/workspace";
 const query = new URLSearchParams(location.search);
 const browserProbeMode = productMode && query.get("browserProbe") === "1";
+const captureNativeRaw = productMode && query.get("nativeRaw") === "1";
 const compactEditor = window.matchMedia("(max-width: 760px)");
 const productBridgeSessionId = productMode ? crypto.randomUUID() : "";
 const expectedHostOrigin = productMode ? query.get("hostOrigin") : null;
@@ -726,7 +727,7 @@ async function preserveAndInspectNativeDocument(
     (await measure("normalize", () =>
       normalizeNativeDocumentBytes(originalBytes),
     ));
-  if (browserProbeMode && query.get("nativeRaw") === "1") {
+  if (captureNativeRaw) {
     savedArtifacts.set("native-snapshot-original", originalBytes.slice());
     savedArtifacts.set("native-snapshot-no-edit", noEdit.slice());
     savedArtifacts.set("native-snapshot-edited", serialized.slice());
@@ -742,7 +743,7 @@ async function preserveAndInspectNativeDocument(
     ),
   );
   const bytes = new Uint8Array(preserved.bytes);
-  if (browserProbeMode && query.get("nativeRaw") === "1")
+  if (captureNativeRaw)
     savedArtifacts.set("native-snapshot-preserved", bytes.slice());
   markBrowserProbePhase("snapshot:inspect");
   const observation = await measure("inspect", () =>
