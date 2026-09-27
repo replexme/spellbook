@@ -12,8 +12,17 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
 
     public string Version => Environment.GetEnvironmentVariable("SPELLBOOK_RENDERER_VERSION") ?? "unversioned";
 
-    public async Task<IReadOnlyList<string>> RenderAsync(string pptxPath, string outputDirectory, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<string>> RenderAsync(
+        string pptxPath,
+        string outputDirectory,
+        CancellationToken cancellationToken,
+        IReadOnlyList<int>? slideIndexes = null)
     {
+        if (slideIndexes is not null &&
+            (slideIndexes.Any(index => index < 0) ||
+             slideIndexes.Count != slideIndexes.Distinct().Count()))
+            throw new ArgumentException("Selected slide indexes must be distinct and non-negative.", nameof(slideIndexes));
+        if (slideIndexes is { Count: 0 }) return [];
         Directory.CreateDirectory(outputDirectory);
         var rasterSize = PptxRasterSize.Read(pptxPath, RasterDotsPerInch);
         var workDirectory = Path.Combine(Path.GetTempPath(), $"spellbook-render-{Guid.NewGuid():N}");
@@ -77,7 +86,8 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
                         cancellationToken,
                         renderEnvironment,
                         diagnosticsPath,
-                        normalizeForPowerPointFidelity);
+                        normalizeForPowerPointFidelity,
+                        slideIndexes);
                     break;
                 }
                 catch (InvalidOperationException exception)
@@ -115,12 +125,46 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
                     cancellationToken,
                     renderEnvironment,
                     diagnosticsPath,
-                    normalizeForPowerPointFidelity: false);
+                    normalizeForPowerPointFidelity: false,
+                    slideIndexes);
             }
 
             if (string.IsNullOrEmpty(pdfPath))
             {
                 throw new InvalidOperationException("LibreOffice did not create a PDF.");
+            }
+            var selectedPdf = slideIndexes is not null;
+            if (selectedPdf)
+            {
+                int pageCount;
+                try
+                {
+                    pageCount = await PdfPageCountAsync(pdfPath, workDirectory, cancellationToken);
+                }
+                catch (Exception exception) when (exception is InvalidOperationException
+                    or System.ComponentModel.Win32Exception or IOException)
+                {
+                    pageCount = -1;
+                }
+                if (pageCount != slideIndexes!.Count)
+                {
+                    // An export filter that ignores PageRange must never map
+                    // page 2 onto a requested slide 60. Use the full PDF.
+                    await File.AppendAllTextAsync(
+                        diagnosticsPath,
+                        JsonSerializer.Serialize(new
+                        {
+                            kind = "selected-pdf-fallback",
+                            expectedPages = slideIndexes.Count,
+                            actualPages = pageCount
+                        }) + "\n",
+                        cancellationToken);
+                    pdfPath = await ConvertToPdfAsync(
+                        soffice, renderInputPath, workDirectory, MaxRenderAttempts + 1,
+                        cancellationToken, renderEnvironment, diagnosticsPath,
+                        normalizeForPowerPointFidelity, null);
+                    selectedPdf = false;
+                }
             }
             var conversionMs = Math.Round(conversionTime.Elapsed.TotalMilliseconds, 2);
 
@@ -136,21 +180,36 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
 
             var prefix = Path.Combine(outputDirectory, "slide");
             var rasterTime = Stopwatch.StartNew();
-            await RunAsync(
-                Environment.GetEnvironmentVariable("PDFTOPPM_PATH") ?? "pdftoppm",
-                [
-                    "-png",
-                    "-scale-to-x", rasterSize.Width.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    "-scale-to-y", rasterSize.Height.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    pdfPath,
-                    prefix
-                ],
-                workDirectory,
-                cancellationToken);
+            var pdftoppm = Environment.GetEnvironmentVariable("PDFTOPPM_PATH") ?? "pdftoppm";
+            var scale = new[]
+            {
+                "-png",
+                "-scale-to-x", rasterSize.Width.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "-scale-to-y", rasterSize.Height.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            };
+            if (slideIndexes is null)
+            {
+                await RunAsync(pdftoppm, [.. scale, pdfPath, prefix], workDirectory, cancellationToken);
+            }
+            else
+            {
+                foreach (var (index, ordinal) in slideIndexes.Order()
+                    .Select((index, ordinal) => (index, ordinal)))
+                    await RunAsync(
+                        pdftoppm,
+                        ["-f", (selectedPdf ? ordinal + 1 : index + 1).ToString(),
+                            "-l", (selectedPdf ? ordinal + 1 : index + 1).ToString(), "-singlefile", .. scale,
+                            pdfPath, Path.Combine(outputDirectory, $"slide-{index + 1}")],
+                        workDirectory,
+                        cancellationToken);
+            }
             var images = Directory.GetFiles(outputDirectory, "slide-*.png")
                 .OrderBy(path => SlideNumber(path))
                 .ToList();
-            if (images.Count == 0 || !images.Select(SlideNumber).SequenceEqual(Enumerable.Range(1, images.Count)))
+            var expectedNumbers = slideIndexes is null
+                ? Enumerable.Range(1, images.Count)
+                : slideIndexes.Order().Select(index => index + 1);
+            if (images.Count == 0 || !images.Select(SlideNumber).SequenceEqual(expectedNumbers))
             {
                 throw new InvalidOperationException("PDF renderer did not create slide images.");
             }
@@ -186,7 +245,8 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
         CancellationToken cancellationToken,
         IReadOnlyDictionary<string, string>? environment,
         string diagnosticsPath,
-        bool normalizeForPowerPointFidelity)
+        bool normalizeForPowerPointFidelity,
+        IReadOnlyList<int>? slideIndexes)
     {
         var profileDirectory = Path.Combine(workDirectory, $"lo-profile-{pass}");
         Directory.CreateDirectory(profileDirectory);
@@ -203,15 +263,19 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
                 diagnosticsPath,
                 $"{{\"kind\":\"pdf-pass\",\"pass\":{pass}}}\n",
                 cancellationToken);
+            var args = new List<string>
+            {
+                Environment.GetEnvironmentVariable("SPELLBOOK_LIBREOFFICE_RENDER_SCRIPT")
+                    ?? "/app/render_with_libreoffice.py",
+                renderInputPath,
+                pdfPath
+            };
+            if (slideIndexes is not null)
+                args.Add(string.Join(",", slideIndexes.Order().Select(index => index + 1)));
             await RunAsync(
                 Environment.GetEnvironmentVariable("LIBREOFFICE_PYTHON_PATH")
                     ?? "/opt/libreoffice26.8/program/python",
-                [
-                    Environment.GetEnvironmentVariable("SPELLBOOK_LIBREOFFICE_RENDER_SCRIPT")
-                        ?? "/app/render_with_libreoffice.py",
-                    renderInputPath,
-                    pdfPath
-                ],
+                args,
                 processDirectory,
                 cancellationToken,
                 environment,
@@ -219,9 +283,19 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
         }
         else
         {
+            var format = slideIndexes is null
+                ? "pdf"
+                : "pdf:impress_pdf_Export:" + JsonSerializer.Serialize(new
+                {
+                    PageRange = new
+                    {
+                        type = "string",
+                        value = string.Join(",", slideIndexes.Order().Select(index => index + 1))
+                    }
+                });
             await RunAsync(
                 soffice,
-                ["--headless", "--nologo", "--nodefault", "--nolockcheck", $"-env:UserInstallation=file://{profileDirectory}", "--convert-to", "pdf", "--outdir", pdfDirectory, renderInputPath],
+                ["--headless", "--nologo", "--nodefault", "--nolockcheck", $"-env:UserInstallation=file://{profileDirectory}", "--convert-to", format, "--outdir", pdfDirectory, renderInputPath],
                 processDirectory,
                 cancellationToken,
                 environment);
@@ -238,6 +312,46 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
     {
         var stem = Path.GetFileNameWithoutExtension(path);
         return int.TryParse(stem.Split('-').LastOrDefault(), out var value) ? value : int.MaxValue;
+    }
+
+    private static async Task<int> PdfPageCountAsync(
+        string pdfPath, string workingDirectory, CancellationToken cancellationToken)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = Environment.GetEnvironmentVariable("PDFINFO_PATH") ?? "pdfinfo",
+                WorkingDirectory = workingDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false
+            }
+        };
+        process.StartInfo.ArgumentList.Add(pdfPath);
+        ConfigureProcessEnvironment(process.StartInfo, workingDirectory);
+        process.Start();
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(CancellationToken.None);
+            await Task.WhenAll(output, error);
+            throw;
+        }
+        var text = await output;
+        _ = await error;
+        if (process.ExitCode == 0)
+            foreach (var line in text.Split('\n'))
+                if (line.StartsWith("Pages:", StringComparison.Ordinal) &&
+                    int.TryParse(line[6..].Trim(), out var count) && count > 0)
+                    return count;
+        throw new InvalidOperationException("PDF page count is unavailable.");
     }
 
     internal static bool IsRetryableLibreOfficeFailure(string message) =>

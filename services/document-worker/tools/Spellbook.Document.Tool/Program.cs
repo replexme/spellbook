@@ -50,10 +50,13 @@ switch (args[0])
         if (!result.Validation.Valid) return 1;
         break;
     }
-    case "render" when args.Length == 3:
+    case "render" when args.Length is 3 or 4:
     {
         IPresentationRenderer renderer = new LibreOfficeRenderer();
-        var images = await renderer.RenderAsync(args[1], args[2], CancellationToken.None);
+        var slideIndexes = args.Length == 4
+            ? args[3].Split(',').Select(value => int.Parse(value) - 1).ToArray()
+            : null;
+        var images = await renderer.RenderAsync(args[1], args[2], CancellationToken.None, slideIndexes);
         foreach (var image in images) Console.WriteLine(image);
         break;
     }
@@ -111,4 +114,4 @@ static async Task WriteJson<T>(string path, T value, System.Text.Json.Serializat
 }
 
 static void Usage() => Console.Error.WriteLine(
-    "Usage: inspect <source.pptx> <graph.json> | patch <source.pptx> <command.json> <candidate.pptx> | smoke-replace-first-text <source.pptx> <candidate.pptx> <text> | render <source.pptx> <output-dir> | extract-embedded-fonts <source.pptx> <output-dir> | validate-change-budget <baseline.pptx> <candidate.pptx> <budget.json> | validate-openxml <source.pptx> | preserve-unsupported <baseline.pptx> <candidate.pptx> <output.pptx> <report.json>");
+    "Usage: inspect <source.pptx> <graph.json> | patch <source.pptx> <command.json> <candidate.pptx> | smoke-replace-first-text <source.pptx> <candidate.pptx> <text> | render <source.pptx> <output-dir> [slide-numbers] | extract-embedded-fonts <source.pptx> <output-dir> | validate-change-budget <baseline.pptx> <candidate.pptx> <budget.json> | validate-openxml <source.pptx> | preserve-unsupported <baseline.pptx> <candidate.pptx> <output.pptx> <report.json>");

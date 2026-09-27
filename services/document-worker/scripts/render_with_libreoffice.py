@@ -532,7 +532,7 @@ def disable_automatic_cjk_script_spacing(shape, location):
     return changed
 
 
-def render(source_path, output_path):
+def render(source_path, output_path, page_range=None):
     source_url = uno.systemPathToFileUrl(os.path.abspath(source_path))
     output_url = uno.systemPathToFileUrl(os.path.abspath(output_path))
     with officehelper.SessionManager() as context:
@@ -554,11 +554,22 @@ def render(source_path, output_path):
             ):
                 raise RuntimeError("The input is not a presentation document")
             pages = document.getDrawPages()
+            selected_pages = None
+            if page_range:
+                selected_pages = [int(value) - 1 for value in page_range.split(",")]
+                if (
+                    not selected_pages
+                    or len(selected_pages) != len(set(selected_pages))
+                    or any(index < 0 or index >= pages.getCount() for index in selected_pages)
+                ):
+                    raise ValueError("Invalid selected slide indexes")
             changed = 0
             normalization_started = time.perf_counter()
             document.lockControllers()
             try:
-                for page_index in range(pages.getCount()):
+                for page_index in (
+                    selected_pages if selected_pages is not None else range(pages.getCount())
+                ):
                     if DEBUG_UNO or RENDER_PROGRESS:
                         print(
                             f"processing slide {page_index + 1}/{pages.getCount()}",
@@ -576,12 +587,23 @@ def render(source_path, output_path):
                 (time.perf_counter() - normalization_started) * 1000, 2
             )
             pdf_started = time.perf_counter()
+            export_properties = [
+                property_value("FilterName", "impress_pdf_Export"),
+                property_value("Overwrite", True),
+            ]
+            if page_range:
+                export_properties.append(
+                    property_value(
+                        "FilterData",
+                        uno.Any(
+                            "[]com.sun.star.beans.PropertyValue",
+                            (property_value("PageRange", page_range),),
+                        ),
+                    )
+                )
             document.storeToURL(
                 output_url,
-                (
-                    property_value("FilterName", "impress_pdf_Export"),
-                    property_value("Overwrite", True),
-                ),
+                tuple(export_properties),
             )
             pdf_ms = round((time.perf_counter() - pdf_started) * 1000, 2)
             print(
@@ -605,13 +627,13 @@ def render(source_path, output_path):
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         print(
-            "Usage: render_with_libreoffice.py <source.pptx> <output.pdf>",
+            "Usage: render_with_libreoffice.py <source.pptx> <output.pdf> [page-range]",
             file=sys.stderr,
         )
         return 2
-    render(sys.argv[1], sys.argv[2])
+    render(sys.argv[1], sys.argv[2], sys.argv[3] if len(sys.argv) == 4 else None)
     return 0
 
 

@@ -9,5 +9,6 @@ public interface IPresentationRenderer
     Task<IReadOnlyList<string>> RenderAsync(
         string pptxPath,
         string outputDirectory,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        IReadOnlyList<int>? slideIndexes = null);
 }

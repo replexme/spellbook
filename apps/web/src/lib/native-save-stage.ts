@@ -41,6 +41,13 @@ export async function stageNativeSave(
     stage.sessionId,
     stage.saveRevision,
   );
+  const [baseline] = await sql`
+    select graph_object from spellbook_versions
+    where document_id=${stage.documentId}
+      and document_object=${stage.preservationObject}
+      and status='ready'
+    order by created_at desc limit 1
+  `;
   const payload: Record<string, unknown> = {
     jobId: stage.jobId,
     callbackUrl: `${internalAppBaseUrl()}/api/internal/jobs/callback`,
@@ -48,6 +55,7 @@ export async function stageNativeSave(
     formatId: currentPresentationFormat.id,
     inputObject: stage.object,
     baselineInputObject: stage.preservationObject,
+    baselineGraphObject: baseline?.graph_object ?? null,
     outputPrefix: stage.outputPrefix,
     nativeSessionId: stage.sessionId,
     changeOrigin: policy.origin,

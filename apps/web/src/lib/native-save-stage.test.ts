@@ -22,7 +22,9 @@ describe("shared native save staging", () => {
     const sql = Object.assign(
       async (parts: TemplateStringsArray, ...values: unknown[]) => {
         statements.push({ text: parts.join("?"), values });
-        return [];
+        return parts.join("?").includes("select graph_object")
+          ? [{ graph_object: "versions/version-1/render/element-graph.json" }]
+          : [];
       },
       { json: (value: unknown) => value },
     ) as unknown as TransactionSql;
@@ -47,22 +49,24 @@ describe("shared native save staging", () => {
     expect(payload).toMatchObject({
       inputObject: "versions/version-2/document.pptx",
       baselineInputObject: "versions/version-1/document.pptx",
+      baselineGraphObject: "versions/version-1/render/element-graph.json",
       nativeSessionId: "session-1",
       changeOrigin: "ai",
       changeTaskIds: ["reviewed-task"],
     });
-    expect(statements).toHaveLength(4);
+    expect(statements).toHaveLength(5);
     expect(statements.map(({ text }) => text)).toEqual([
+      expect.stringContaining("select graph_object"),
       expect.stringContaining("pending_undo_turn_id"),
       expect.stringContaining("insert into spellbook_versions"),
       expect.stringContaining("insert into spellbook_jobs"),
       expect.stringContaining("update spellbook_native_sessions"),
     ]);
-    expect(statements[1]?.values).toContain("version-1");
-    expect(statements[1]?.values.at(-1)).toBeNull();
-    expect(statements[2]?.values).toContain(payload);
-    expect(statements[3]?.values).toContain("session-1");
-    expect(statements[3]?.text).toContain("pending_undo_turn_id=null");
+    expect(statements[2]?.values).toContain("version-1");
+    expect(statements[2]?.values.at(-1)).toBeNull();
+    expect(statements[3]?.values).toContain(payload);
+    expect(statements[4]?.values).toContain("session-1");
+    expect(statements[4]?.text).toContain("pending_undo_turn_id=null");
   });
 
   it("names the save right after an undo as that undo", async () => {
