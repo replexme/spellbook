@@ -6,6 +6,7 @@ import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
 import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import type { BrowserKeyProvider } from "./key-store";
 import type { TurnModel } from "./native-turn";
+import { compactNativeContext, INITIAL_PAGE_PREFIX } from "./native-context";
 
 /*
  * Runs the model for one request straight from this browser to the AI
@@ -112,6 +113,7 @@ export function browserTurnModel(
         streamFn: models.streamSimple.bind(models),
         getApiKey: () => apiKey,
         toolExecution: "sequential",
+        transformContext: async (messages) => compactNativeContext(messages),
       });
       let streamed = "";
       const unsubscribe = agent.subscribe((event) => {
@@ -128,13 +130,44 @@ export function browserTurnModel(
       input.signal.addEventListener("abort", abort, { once: true });
       try {
         if (input.signal.aborted) throw new Error("cancelled");
-        await agent.prompt("프레젠테이션 작업을 시작해 주세요.");
+        await agent.prompt(
+          input.initialPage
+            ? `${INITIAL_PAGE_PREFIX}\n${input.initialPage.text}`
+            : "프레젠테이션 작업을 시작해 주세요.",
+          input.initialPage?.images?.map((data) => ({
+            type: "image" as const,
+            data,
+            mimeType: "image/png" as const,
+          })),
+        );
       } finally {
         clearTimeout(deadline);
         input.signal.removeEventListener("abort", abort);
         unsubscribe();
       }
       if (input.signal.aborted) throw new Error("cancelled");
+      const providerMessages = agent.state.messages.filter(
+        (message) => message.role === "assistant",
+      );
+      input.onUsage?.({
+        calls: providerMessages.length,
+        input: providerMessages.reduce(
+          (sum, message) => sum + message.usage.input,
+          0,
+        ),
+        output: providerMessages.reduce(
+          (sum, message) => sum + message.usage.output,
+          0,
+        ),
+        cacheRead: providerMessages.reduce(
+          (sum, message) => sum + message.usage.cacheRead,
+          0,
+        ),
+        cacheWrite: providerMessages.reduce(
+          (sum, message) => sum + message.usage.cacheWrite,
+          0,
+        ),
+      });
       const last = agent.state.messages.at(-1) as
         | {
             role?: string;

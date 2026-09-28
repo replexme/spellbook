@@ -133,6 +133,31 @@ export function directTextPreservationTarget(before, after) {
         name: beforeElement.name,
         shapeIndex: beforeElement.zIndex,
       };
+      // Filling or clearing a placeholder changes this derived engine flag
+      // along with its text. It is not a second authored edit.
+      if (
+        typeof beforeElement.emptyPresentationObject === "boolean" ||
+        typeof afterElement.emptyPresentationObject === "boolean"
+      ) {
+        if (
+          typeof beforeElement.emptyPresentationObject !== "boolean" ||
+          typeof afterElement.emptyPresentationObject !== "boolean" ||
+          beforeElement.emptyPresentationObject !==
+            (beforeElement.text.length === 0) ||
+          afterElement.emptyPresentationObject !==
+            (afterElement.text.length === 0)
+        )
+          return null;
+        beforeElement.emptyPresentationObject =
+          afterElement.emptyPresentationObject;
+      }
+      if (beforeElement.text.length === 0 && afterElement.text.length > 0) {
+        // A placeholder has no text runs to describe until the first input.
+        // The engine then materializes its inherited paragraph/run defaults.
+        // Reopening the merged file must still match the complete live model.
+        beforeElement.paragraphFormats = afterElement.paragraphFormats;
+        beforeElement.runFormatting = afterElement.runFormatting;
+      }
       beforeElement.text = afterElement.text;
     }
   }

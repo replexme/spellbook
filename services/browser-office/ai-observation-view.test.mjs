@@ -42,17 +42,38 @@ test("AI sees a deck outline and full details for the requested and changed slid
   assert.equal(view.slides.length, 60);
   assert.deepEqual(view.slides[3], slides[3]);
   assert.deepEqual(view.slides[5], slides[5]);
-  assert.equal(view.slides[10].elements[0].elementId, "10/0");
-  assert.equal(
-    view.slides[10].elements[0].textLength,
-    slides[10].elements[0].text.length,
-  );
-  assert.equal(view.slides[10].elements[0].runFormatting, undefined);
+  assert.deepEqual(view.slides[10], {
+    slideIndex: 10,
+    name: "Slide 11",
+    heading: `Revenue 10 ${"x".repeat(69)}`,
+  });
+  assert.equal(view.slides[10].elements, undefined);
   assert.equal(view.images, undefined);
   assert.equal(view.readMetrics, undefined);
   assert.ok(
     JSON.stringify(view).length < JSON.stringify(observation).length / 4,
   );
+});
+
+test("a blank title does not borrow the body text as its heading", () => {
+  const view = aiObservationView({
+    revision: "r1",
+    activeSlide: 1,
+    changedSlideIndexes: [],
+    slides: [
+      {
+        slideIndex: 0,
+        name: "Opening",
+        elements: [
+          { name: "Title 1", text: "" },
+          { name: "Body 2", text: "Private body content" },
+        ],
+      },
+      { slideIndex: 1, elements: [] },
+    ],
+    images: [],
+  });
+  assert.deepEqual(view.slides[0], { slideIndex: 0, name: "Opening" });
 });
 
 test("a verified mutation can seed a later read without repeating its changed-slide demand", () => {

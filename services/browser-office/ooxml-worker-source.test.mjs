@@ -2620,6 +2620,90 @@ test("first direct text save keeps an authored placeholder name renamed by Impre
   );
 });
 
+test("first direct text save fills an empty placeholder renamed by Impress", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml";
+  const blank = strFromU8(original[part])
+    .replace(
+      "<p:nvPr/></p:nvSpPr>",
+      '<p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>',
+    )
+    .replace(
+      /<a:p><a:r>.*?<a:t>Spellbook 검증 العربية<\/a:t><\/a:r><\/a:p>/u,
+      '<a:p><a:endParaRPr sz="2400"/></a:p>',
+    );
+  assert.doesNotMatch(blank, /Spellbook 검증 العربية/u);
+  const authored = { ...original, [part]: strToU8(blank) };
+  const noEdit = withEngineSave(authored, {
+    shadow: false,
+    keepRectangleAlignment: true,
+  });
+  noEdit[part] = strToU8(
+    strFromU8(noEdit[part]).replace(
+      'id="67" name="TextBox 1"',
+      'id="67" name="PlaceHolder 1"',
+    ),
+  );
+  const edited = {
+    ...noEdit,
+    [part]: strToU8(
+      strFromU8(noEdit[part]).replace(
+        '<a:p><a:endParaRPr sz="2400"/></a:p>',
+        '<a:p><a:r><a:t>First title</a:t></a:r><a:endParaRPr sz="2400"/></a:p>',
+      ),
+    ),
+  };
+  const saved = strFromU8(
+    unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(authored),
+        zipSync(noEdit),
+        zipSync(edited),
+        ["replace_text"],
+        [
+          {
+            op: "replace_text",
+            slideIndex: 0,
+            name: "TextBox 1",
+            shapeIndex: 0,
+          },
+        ],
+      ).bytes,
+    )[part],
+  );
+  assert.match(saved, /name="TextBox 1"/u);
+  assert.match(saved, /<a:t>First title<\/a:t>/u);
+  assert.match(saved, /<a:endParaRPr sz="2400"\/>/u);
+
+  const ambiguous = {
+    ...authored,
+    [part]: strToU8(
+      strFromU8(authored[part]).replace(
+        '<p:cNvPr id="3" name="Rectangle 2"/><p:cNvSpPr/><p:nvPr/>',
+        '<p:cNvPr id="3" name="Rectangle 2"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr>',
+      ),
+    ),
+  };
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(
+        zipSync(ambiguous),
+        zipSync(noEdit),
+        zipSync(edited),
+        ["replace_text"],
+        [
+          {
+            op: "replace_text",
+            slideIndex: 0,
+            name: "TextBox 1",
+            shapeIndex: 0,
+          },
+        ],
+      ),
+    /cannot isolate direct text/u,
+  );
+});
+
 // An engine save of the rectangle as LibreOffice writes it: explicit insets,
 // no empty list style, an explicit end-of-paragraph font, lower-case colors
 // and a size rounded through 1/100 mm.

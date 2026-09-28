@@ -1083,6 +1083,11 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
           sentTextBytes: 15_000,
           imageCount: 2,
           imageBytes: 8_000,
+          providerCalls: 3,
+          providerInputTokens: 20_000,
+          providerOutputTokens: 600,
+          cacheReadTokens: 12_000,
+          cacheWriteTokens: 2_000,
         },
       },
     };
@@ -1097,6 +1102,9 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
         calls: 2,
         fullTextBytes: 120_000,
         sentTextBytes: 15_000,
+        providerCalls: 3,
+        providerInputTokens: 20_000,
+        cacheReadTokens: 12_000,
       },
     });
   });

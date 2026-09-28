@@ -26,6 +26,7 @@ import { signNativeConnectorToken } from "./native-connector-token";
 import { aiConnectorConfig } from "./ai-connector-config";
 import { aiTurnLimit, assertWithinAiTurnLimit } from "./ai-turn-limit";
 import { loadTurnSummary } from "./native-turn-summary";
+import { validatedNativeModelInput } from "./native-model-input";
 import {
   jobRedeliverySeconds,
   NATIVE_AGENT_LEASE_SECONDS,
@@ -792,28 +793,7 @@ export async function completeNativeTurn(
   const reviewed = result?.reviewed as boolean;
   const executionToken =
     typeof result?.executionToken === "string" ? result.executionToken : "";
-  const rawModelInput = result?.modelInput as
-    | Record<string, unknown>
-    | undefined;
-  const modelInputFields = [
-    "calls",
-    "fullTextBytes",
-    "sentTextBytes",
-    "imageCount",
-    "imageBytes",
-  ] as const;
-  const modelInput =
-    rawModelInput &&
-    modelInputFields.every(
-      (field) =>
-        Number.isSafeInteger(rawModelInput[field]) &&
-        (rawModelInput[field] as number) >= 0 &&
-        (rawModelInput[field] as number) < 1_000_000_000,
-    )
-      ? Object.fromEntries(
-          modelInputFields.map((field) => [field, rawModelInput[field]]),
-        )
-      : null;
+  const modelInput = validatedNativeModelInput(result?.modelInput);
   if (
     !text ||
     text.length > 8_000 ||

@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { chromium } from "@playwright/test";
+import { DOMParser } from "@xmldom/xmldom";
 import { strFromU8, unzipSync } from "fflate";
 
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
@@ -36,6 +37,25 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 900, height: 684 } });
 const errors = [];
+const firstTitleText = (slideBytes) => {
+  const document = new DOMParser().parseFromString(
+    strFromU8(slideBytes),
+    "application/xml",
+  );
+  const shape = document.getElementsByTagNameNS(
+    "http://schemas.openxmlformats.org/presentationml/2006/main",
+    "sp",
+  )[0];
+  assert.ok(shape, "First slide needs a title shape");
+  return [
+    ...shape.getElementsByTagNameNS(
+      "http://schemas.openxmlformats.org/drawingml/2006/main",
+      "t",
+    ),
+  ]
+    .map((node) => node.textContent ?? "")
+    .join("");
+};
 page.on("pageerror", (error) => errors.push(error.message));
 page.on("console", (message) => {
   if (message.type() === "error") errors.push(message.text());
@@ -159,11 +179,27 @@ try {
   const opened = await eventOf("open-complete");
   assert.ok(opened.slideCount > 1);
   let aiSaved = null;
+  let modelViewBytes = null;
   if (aiFirst) {
     const before = await nativeCall({
       operation: "observe",
       captureSlideIndexes: [],
     });
+    const view = before.modelView;
+    assert.ok(view?.detailSlideIndexes?.includes(0));
+    modelViewBytes = {
+      complete: Buffer.byteLength(JSON.stringify(before.slides)),
+      outline: Buffer.byteLength(JSON.stringify(view)),
+      focused: Buffer.byteLength(
+        JSON.stringify({
+          ...view,
+          slideCount: view.slides.length,
+          slides: view.slides.filter((slide) =>
+            view.detailSlideIndexes.includes(slide.slideIndex),
+          ),
+        }),
+      ),
+    };
     const first = before.slides[0].elements[0];
     const last = before.slides.at(-1).elements[0];
     const changed = await nativeCall({
@@ -286,7 +322,10 @@ try {
     /^ppt\/slides\/slide\d+\.xml$/u.test(name),
   );
   assert.equal(slideNames.length, opened.slideCount);
-  assert.match(strFromU8(afterParts["ppt/slides/slide1.xml"]), /MANUAL/u);
+  const previousTitle = firstTitleText(beforeParts["ppt/slides/slide1.xml"]);
+  const savedTitle = firstTitleText(afterParts["ppt/slides/slide1.xml"]);
+  assert.equal(savedTitle.split(" MANUAL").length, 2);
+  assert.equal(savedTitle.replace(" MANUAL", ""), previousTitle);
   for (const name of slideNames.filter(
     (name) => name !== "ppt/slides/slide1.xml",
   ))
@@ -301,7 +340,10 @@ try {
       slideCount: slideNames.length,
       preservedSlides: slideNames.length - 1,
       ...(aiFirst
-        ? { aiEditReads: { full: 1, slidesScanned: opened.slideCount + 1 } }
+        ? {
+            aiEditReads: { full: 1, slidesScanned: opened.slideCount + 1 },
+            modelViewBytes,
+          }
         : {}),
       outputPath,
     }) + "\n",

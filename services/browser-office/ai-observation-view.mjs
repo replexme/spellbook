@@ -17,28 +17,22 @@ export function aiObservationView(observation) {
     detailSlideIndexes: [...detailSlides].sort((a, b) => a - b),
     slides: observation.slides.map((slide) => {
       if (detailSlides.has(slide.slideIndex)) return slide;
+      const firstText = (
+        (slide.elements ?? []).find(
+          (element) =>
+            typeof element.text === "string" &&
+            /title/iu.test(`${element.kind ?? ""} ${element.name ?? ""}`),
+        ) ??
+        (slide.elements ?? []).find(
+          (element) => typeof element.text === "string",
+        )
+      )?.text;
       return {
         slideIndex: slide.slideIndex,
         name: slide.name,
-        layoutName: slide.layoutName,
-        hidden: slide.hidden,
-        detailAvailable: true,
-        elements: (slide.elements ?? []).map((element) => {
-          const text = typeof element.text === "string" ? element.text : null;
-          return {
-            elementId: element.elementId,
-            parentElementId: element.parentElementId,
-            name: element.name,
-            kind: element.kind,
-            text:
-              text === null ? null : Array.from(text).slice(0, 160).join(""),
-            ...(text !== null ? { textLength: text.length } : {}),
-            x: element.x,
-            y: element.y,
-            width: element.width,
-            height: element.height,
-          };
-        }),
+        ...(firstText
+          ? { heading: Array.from(firstText).slice(0, 80).join("") }
+          : {}),
       };
     }),
   };

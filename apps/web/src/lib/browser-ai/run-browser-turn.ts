@@ -41,6 +41,47 @@ const HEARTBEAT_MS = 15_000;
 // Longer than an observed edit batch (p90 17 s) with headroom for a slow machine.
 const EDITOR_CALL_TIMEOUT_MS = 300_000;
 
+export function requestedSlideIndexes(
+  requestText: string,
+  slideCount: number,
+  activeSlide: number,
+): number[] {
+  const named = [
+    ...requestText.matchAll(/(\d+)\s*(?:장|번\s*슬라이드|슬라이드)/gu),
+  ]
+    .map((match) => Number(match[1]) - 1)
+    .filter(
+      (index) =>
+        Number.isSafeInteger(index) && index >= 0 && index < slideCount,
+    );
+  return [...new Set(named.length ? named : [activeSlide])].slice(0, 8);
+}
+
+export async function initialPageObservations(
+  requestText: string,
+  initial: NativeObservation,
+  observe: (slideIndex: number) => Promise<NativeObservation>,
+) {
+  const pages: NativeObservation[] = [];
+  let current = initial;
+  for (const slideIndex of requestedSlideIndexes(
+    requestText,
+    initial.slides.length,
+    initial.activeSlide,
+  )) {
+    const page =
+      initial.textDetails?.slideIndex === slideIndex &&
+      initial.images.some((image) => image.slideIndex === slideIndex)
+        ? initial
+        : await observe(slideIndex);
+    if (page.revision !== initial.revision)
+      throw new Error("document_changed_during_initial_observation");
+    pages.push(page);
+    current = page;
+  }
+  return { pages, current };
+}
+
 export async function runBrowserTurn(
   job: BrowserJob,
   deps: {
@@ -183,6 +224,16 @@ export async function runBrowserTurn(
     const selected = Array.isArray(initial.selectedElementIds)
       ? (initial.selectedElementIds as string[])
       : [];
+    const { pages: initialPages, current } = await initialPageObservations(
+      job.requestText,
+      initial,
+      (slideIndex) =>
+        host.call({
+          operation: "observe",
+          detailSlideIndex: slideIndex,
+          captureSlideIndexes: [slideIndex],
+        }),
+    );
     const mode =
       job.permissionMode === "selection" && selected.length === 0
         ? ("slides" as const)
@@ -200,7 +251,8 @@ export async function runBrowserTurn(
         },
         host,
         web: browserWebTools,
-        initialObservation: initial,
+        initialObservation: current,
+        initialPages,
         signal: deps.signal,
         onText: deps.onText,
         onThinking: deps.onThinking,

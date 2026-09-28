@@ -447,11 +447,41 @@ function preserveUnaffectedSlideShapes(
       return null;
     }
   };
-  // Impress can rename a placeholder on the first unedited export. For a
-  // direct text target, its old text must identify the same position and
-  // shape kind uniquely in both copies before we pair unlike names.
+  // Impress can rename a placeholder on the first unedited export. Pair a
+  // direct text target by its unique placeholder identity at the same slide
+  // position. For a renamed ordinary shape, unique prior text is still the
+  // only safe fallback; an empty ordinary shape has no such identity.
+  const placeholderKey = (node) => {
+    const properties = optionalDirectXmlChild(
+      node,
+      presentationNamespace,
+      "nvSpPr",
+    );
+    const nonVisual =
+      properties &&
+      optionalDirectXmlChild(properties, presentationNamespace, "nvPr");
+    const placeholder =
+      nonVisual &&
+      optionalDirectXmlChild(nonVisual, presentationNamespace, "ph");
+    return placeholder
+      ? JSON.stringify(
+          ["type", "idx", "sz", "orient"].map((name) =>
+            placeholder.getAttribute(name),
+          ),
+        )
+      : null;
+  };
   const uniquelyPairedRenamedTarget = (source, baseline, index) => {
     if (targetIndexes === null || !targetIndexes.has(index)) return false;
+    const key = placeholderKey(source);
+    if (key !== null && key === placeholderKey(baseline)) {
+      const matches = (nodes) =>
+        nodes.filter(
+          (node) =>
+            node.localName === source.localName && placeholderKey(node) === key,
+        ).length;
+      return matches(authored) === 1 && matches(normalized) === 1;
+    }
     const text = shapeText(source);
     if (!text || text !== shapeText(baseline)) return false;
     const matches = (nodes) =>
@@ -1640,15 +1670,22 @@ function remapAuthoredRelationships(
 }
 
 function directXmlChild(parent, namespace, localName) {
+  const child = optionalDirectXmlChild(parent, namespace, localName);
+  if (!child)
+    throw new Error(`Native snapshot needs exactly one ${localName} node.`);
+  return child;
+}
+
+function optionalDirectXmlChild(parent, namespace, localName) {
   const matches = [...parent.childNodes].filter(
     (child) =>
       child.nodeType === 1 &&
       child.namespaceURI === namespace &&
       child.localName === localName,
   );
-  if (matches.length !== 1)
+  if (matches.length > 1)
     throw new Error(`Native snapshot needs exactly one ${localName} node.`);
-  return matches[0];
+  return matches[0] ?? null;
 }
 
 function themeEditableNodes(document) {
@@ -3931,8 +3968,41 @@ function replaceParagraphText(paragraph, value) {
   const textNodes = [
     ...paragraph.getElementsByTagNameNS(drawingNamespace, "t"),
   ];
-  if (!textNodes.length)
-    throw new Error("The browser package paragraph has no editable text run.");
+  if (!textNodes.length) {
+    if (!value) return;
+    const document = paragraph.ownerDocument;
+    const run = document.createElementNS(drawingNamespace, "a:r");
+    const endProperties = optionalDirectXmlChild(
+      paragraph,
+      drawingNamespace,
+      "endParaRPr",
+    );
+    if (endProperties) {
+      const runProperties = document.createElementNS(drawingNamespace, "a:rPr");
+      for (let index = 0; index < endProperties.attributes.length; index += 1) {
+        const attribute = endProperties.attributes.item(index);
+        runProperties.setAttributeNS(
+          attribute.namespaceURI,
+          attribute.name,
+          attribute.value,
+        );
+      }
+      for (const child of [...endProperties.childNodes])
+        runProperties.appendChild(child.cloneNode(true));
+      run.appendChild(runProperties);
+    }
+    const text = document.createElementNS(drawingNamespace, "a:t");
+    text.textContent = value;
+    if (/^\s|\s$/u.test(value))
+      text.setAttributeNS(
+        "http://www.w3.org/XML/1998/namespace",
+        "xml:space",
+        "preserve",
+      );
+    run.appendChild(text);
+    paragraph.insertBefore(run, endProperties);
+    return;
+  }
   const original = textNodes.map((node) => node.textContent ?? "").join("");
   if (original === value) return;
   let prefix = 0;

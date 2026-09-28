@@ -42,6 +42,7 @@ export interface NativeObservation {
     introducedIssueCount?: number;
     introducedIssues?: Array<Record<string, unknown>>;
   };
+  textDetails?: { slideIndex: number; elements?: unknown[] };
   [key: string]: unknown;
   modelView?: Record<string, unknown> & {
     slides?: unknown[];
@@ -86,6 +87,7 @@ export interface ToolOutput {
 export interface TurnModel {
   run(input: {
     instructions: string;
+    initialPage?: ToolOutput;
     tools: ToolSpec[];
     onTool: (
       name: string,
@@ -94,6 +96,13 @@ export interface TurnModel {
     ) => Promise<ToolOutput>;
     onText: (delta: string) => void;
     onThinking?: (delta: string) => void;
+    onUsage?: (usage: {
+      calls: number;
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+    }) => void;
     modelSettings?: ModelSettings;
     signal: AbortSignal;
     timeoutMs: number;
@@ -137,6 +146,24 @@ function isPng(base64: string) {
   );
 }
 
+function slideHeadings(state: NativeObservation): string {
+  return JSON.stringify(
+    state.slides.map((slide) => {
+      const first =
+        slide.elements.find(
+          (element) =>
+            typeof element.text === "string" &&
+            /title/iu.test(`${element.kind ?? ""} ${element.name ?? ""}`),
+        ) ?? slide.elements.find((element) => typeof element.text === "string");
+      const text = typeof first?.text === "string" ? first.text : "";
+      return {
+        slide: slide.slideIndex + 1,
+        heading: Array.from(text).slice(0, 80).join(""),
+      };
+    }),
+  );
+}
+
 export async function runNativeTurn(
   model: TurnModel,
   input: {
@@ -151,6 +178,7 @@ export async function runNativeTurn(
     host: NativeHost;
     web: WebTools;
     initialObservation?: NativeObservation;
+    initialPages?: NativeObservation[];
     signal: AbortSignal;
     onText: (delta: string) => void;
     onThinking?: (delta: string) => void;
@@ -170,6 +198,11 @@ export async function runNativeTurn(
     sentTextBytes: 0,
     imageCount: 0,
     imageBytes: 0,
+    providerCalls: 0,
+    providerInputTokens: 0,
+    providerOutputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
   };
   const content = (state: NativeObservation): ToolOutput => {
     const { modelView, ...complete } = state;
@@ -182,10 +215,30 @@ export async function runNativeTurn(
       Array.isArray(modelView?.slides) && modelView.revision === state.revision
         ? modelView
         : complete;
+    const detailSlides = Array.isArray(view.detailSlideIndexes)
+      ? view.detailSlideIndexes
+      : [];
+    const modelSlides =
+      view !== complete && Array.isArray(view.slides) ? view.slides : null;
+    const focusedView =
+      modelSlides && detailSlides.length > 0
+        ? {
+            ...view,
+            slideCount: modelSlides.length,
+            slides: modelSlides.filter(
+              (slide) =>
+                typeof slide === "object" &&
+                slide !== null &&
+                detailSlides.includes(
+                  (slide as { slideIndex?: number }).slideIndex,
+                ),
+            ),
+          }
+        : view;
     const text =
       view === complete
         ? fullText
-        : JSON.stringify({ ...view, permission: input.permission });
+        : JSON.stringify({ ...focusedView, permission: input.permission });
     const images = state.images.map(screenshotBase64);
     const bytes = new TextEncoder();
     modelInput.calls += 1;
@@ -201,6 +254,40 @@ export async function runNativeTurn(
     );
     return { ok: true, text, images };
   };
+  const initialPage = (() => {
+    const pages = (input.initialPages ?? []).flatMap((state) => {
+      const slideIndex = state.textDetails?.slideIndex;
+      const slide = state.slides.find(
+        (candidate) => candidate.slideIndex === slideIndex,
+      );
+      const image = state.images.find(
+        (candidate) => candidate.slideIndex === slideIndex,
+      );
+      return slide && image && state.revision === observed?.revision
+        ? [{ slideIndex, slide, textDetails: state.textDetails, image }]
+        : [];
+    });
+    if (!pages.length) return undefined;
+    const text = JSON.stringify({
+      revision: observed?.revision,
+      pages: pages.map(({ slideIndex, slide, textDetails }) => ({
+        slideIndex,
+        slide,
+        textDetails,
+      })),
+    });
+    const images = pages.map(({ image }) => screenshotBase64(image));
+    const bytes = new TextEncoder().encode(text).length;
+    modelInput.calls += 1;
+    modelInput.fullTextBytes += bytes;
+    modelInput.sentTextBytes += bytes;
+    modelInput.imageCount += images.length;
+    modelInput.imageBytes += images.reduce(
+      (size, image) => size + Math.floor((image.length * 3) / 4),
+      0,
+    );
+    return { ok: true, text, images };
+  })();
   const registerMutationEvidence = (state: NativeObservation): boolean => {
     if (state.visualEvidenceComplete !== true)
       throw new Error("Mutation result has incomplete visual evidence.");
@@ -639,12 +726,12 @@ export async function runNativeTurn(
     model.run({
       instructions: [
         observed && !reviewOnly
-          ? `Live document structure is ALREADY observed (Revision: ${observed.revision}, Active slide: ${observed.activeSlide + 1}번). Elements: ${JSON.stringify(observed.slides.find((s) => s.slideIndex === observed?.activeSlide)?.elements?.map((e) => ({ id: e.elementId, name: e.name, text: e.text, table: e.table })) ?? [])}. You do NOT need to call native_observe. You can immediately call native_batch_edit to apply the changes.`
+          ? `Live document revision: ${observed.revision}. Active slide: ${observed.activeSlide + 1}번. Slide headings for navigation only: ${slideHeadings(observed)}. The attached page images and full page data are the editing evidence. Request native_observe for any target page not attached before editing it.`
           : reviewOnly
             ? `This is a review-only step. The user's request was already applied to the SAME open PowerPoint document in this turn: ${JSON.stringify(input.requestText)}. Only native_observe and native_review are available; you cannot edit.`
             : "You are editing the SAME open PowerPoint document as the user. Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
         `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
-        "Observe returns a deck outline and full details for detailSlideIndexes. For an element on a summarized slide, call native_observe with its slide index before editing. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Inspect introducedIssues and the fresh screenshot after edits, correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
+        "The slide heading list is a navigation index, not enough evidence to edit. The initial attachment and native_observe return actual page image and full element details. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. The edit result includes fresh changed-slide screenshots; inspect them and call native_review directly unless you need more detail. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
         "Web search and webpage reading are fully supported via web_search and fetch_web_page. When the user asks for real-world knowledge, recent news, industry statistics, domain references, or provides a URL, proactively use web_search and fetch_web_page to obtain accurate, up-to-date facts and cite sources. NEVER claim that you cannot access the internet or that browsing is disabled.",
         ...(reviewOnly
           ? []
@@ -654,6 +741,7 @@ export async function runNativeTurn(
         `Coordinates are 1/100 mm. IDs refer to the last observed revision; the editor rebinds batch targets to the same live objects before every command. ${nativeEditContract.transaction.ordering} Do not change original text or geometry merely to hide font/rendering differences. Answer in Korean.`,
         prompt,
       ].join("\n"),
+      ...(reviewOnly ? {} : { initialPage }),
       tools: tools.filter(
         (tool) => !reviewOnly || REVIEW_ONLY_TOOLS.has(tool.name),
       ),
@@ -678,6 +766,13 @@ export async function runNativeTurn(
       },
       onText: input.onText,
       onThinking: input.onThinking,
+      onUsage: (usage) => {
+        modelInput.providerCalls += usage.calls;
+        modelInput.providerInputTokens += usage.input;
+        modelInput.providerOutputTokens += usage.output;
+        modelInput.cacheReadTokens += usage.cacheRead;
+        modelInput.cacheWriteTokens += usage.cacheWrite;
+      },
       modelSettings: input.modelSettings,
       signal: input.signal,
       timeoutMs,

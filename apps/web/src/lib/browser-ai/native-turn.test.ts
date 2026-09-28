@@ -96,6 +96,90 @@ const edit = {
 };
 
 describe("browser-run AI request", () => {
+  it("records provider cache hits separately from page payload bytes", async () => {
+    const model: TurnModel = {
+      async run(input) {
+        input.onUsage?.({
+          calls: 2,
+          input: 10_000,
+          output: 300,
+          cacheRead: 8_000,
+          cacheWrite: 0,
+        });
+        return "확인했습니다.";
+      },
+    };
+    const result = await run(model);
+    expect(result.modelInput).toMatchObject({
+      providerCalls: 2,
+      providerInputTokens: 10_000,
+      cacheReadTokens: 8_000,
+    });
+  });
+
+  it("offers a distant slide's actual page before the first model tool call", async () => {
+    const initial: NativeObservation = {
+      ...structuredClone(before),
+      selectedElementIds: [],
+      slides: Array.from({ length: 60 }, (_, slideIndex) => ({
+        slideIndex,
+        elements: [
+          {
+            elementId: `${slideIndex}/0`,
+            name: `Title ${slideIndex + 1}`,
+            text: `Before ${slideIndex + 1}`,
+          },
+        ],
+      })),
+    };
+    const mutation: NativeObservation = {
+      ...structuredClone(initial),
+      revision: "r2",
+      changedSlideIndexes: [59],
+      images: [{ slideIndex: 59, pngBase64: PNG_BASE64 }],
+    };
+    const page: NativeObservation = {
+      ...structuredClone(initial),
+      textDetails: { slideIndex: 59, elements: [] },
+      images: [{ slideIndex: 59, pngBase64: PNG_BASE64 }],
+    };
+    const host = editorHost(mutation);
+    const { model } = scriptedModel(async (tool, input) => {
+      expect(input.instructions).toContain('"slide":60');
+      expect(input.instructions).not.toContain('"id":"59/0"');
+      expect(input.initialPage?.text).toContain('"elementId":"59/0"');
+      expect(input.initialPage?.images).toEqual([PNG_BASE64]);
+      const edited = await tool("native_batch_edit", {
+        commands: [{ op: "replace_text", elementId: "59/0", text: "After" }],
+        dryRun: false,
+      });
+      expect(edited.ok).toBe(true);
+      const review = await tool("native_review", {
+        approved: true,
+        problems: [],
+        reviewedSlideIndexes: [59],
+      });
+      expect(review.ok).toBe(true);
+      return "60장 제목을 바꾸고 확인했습니다.";
+    });
+    const result = await runNativeTurn(model, {
+      requestText: "60장 제목을 바꿔줘",
+      permission: documentScope,
+      host,
+      web: { search: async () => [], readPage: async () => "" },
+      initialObservation: initial,
+      initialPages: [page],
+      signal: new AbortController().signal,
+      onText: () => undefined,
+      onTool: () => undefined,
+    });
+    expect(result).toMatchObject({ changed: true, reviewed: true });
+    expect(host.call.mock.calls.map(([request]) => request.operation)).toEqual([
+      "edit_batch",
+      "observe",
+    ]);
+  });
+
   it("uses the compact view for the model without changing the editor observation", async () => {
     const source = structuredClone(before);
     source.slides.push({

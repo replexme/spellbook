@@ -54,6 +54,44 @@ test("direct human title input scopes preservation to one named shape", () => {
   assert.equal(directTextPreservationTarget(before, after), null);
 });
 
+test("filling an empty title remains one direct text edit", () => {
+  const before = {
+    masters: [],
+    slides: [
+      {
+        elements: [
+          {
+            elementId: "0/0",
+            parentElementId: null,
+            zIndex: 0,
+            name: "Title 1",
+            text: "",
+            emptyPresentationObject: true,
+            paragraphFormats: [{ alignment: null }],
+            runFormatting: { caseMaps: [], languages: [] },
+          },
+        ],
+      },
+    ],
+  };
+  const after = structuredClone(before);
+  after.slides[0].elements[0].text = "First title";
+  after.slides[0].elements[0].emptyPresentationObject = false;
+  after.slides[0].elements[0].paragraphFormats[0].alignment = 3;
+  after.slides[0].elements[0].runFormatting = {
+    caseMaps: [0],
+    languages: ["en-US"],
+  };
+  assert.deepEqual(directTextPreservationTarget(before, after), {
+    op: "replace_text",
+    slideIndex: 0,
+    name: "Title 1",
+    shapeIndex: 0,
+  });
+  after.slides[0].elements[0].emptyPresentationObject = true;
+  assert.equal(directTextPreservationTarget(before, after), null);
+});
+
 const opening = {
   id: "{11111111-1111-4111-8111-111111111111}",
   name: "Opening",
