@@ -2546,6 +2546,80 @@ test("direct text after an earlier save targets slide order despite a different 
   assert.match(directOnlySlide, /<a:p><a:pPr algn="ctr"\/><\/a:p>/u);
 });
 
+test("first direct text save keeps an authored placeholder name renamed by Impress", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml";
+  const noEdit = withEngineSave(original, {
+    shadow: false,
+    keepRectangleAlignment: true,
+  });
+  noEdit[part] = strToU8(
+    strFromU8(noEdit[part])
+      .replace('id="67" name="TextBox 1"', 'id="67" name="PlaceHolder 1"')
+      .replace(
+        "<a:t>Spellbook 검증 العربية</a:t>",
+        "<a:t>Spellbook </a:t></a:r><a:r><a:t>검증 العربية</a:t>",
+      ),
+  );
+  const edited = {
+    ...noEdit,
+    [part]: strToU8(
+      strFromU8(noEdit[part]).replace("검증 العربية", "검증 العربية MANUAL"),
+    ),
+  };
+  const saved = strFromU8(
+    unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(original),
+        zipSync(noEdit),
+        zipSync(edited),
+        ["replace_text"],
+        [
+          {
+            op: "replace_text",
+            slideIndex: 0,
+            name: "TextBox 1",
+            shapeIndex: 0,
+          },
+        ],
+      ).bytes,
+    )[part],
+  );
+  assert.match(saved, /name="TextBox 1"/u);
+  assert.doesNotMatch(saved, /name="PlaceHolder 1"/u);
+  assert.match(saved, /Spellbook 검증 العربية MANUAL/u);
+  assert.match(saved, /<a:t>Spellbook 검증 العربية MANUAL<\/a:t>/u);
+  assert.match(saved, /<a:p><a:pPr algn="ctr"\/><\/a:p>/u);
+
+  const ambiguousOriginal = {
+    ...original,
+    [part]: strToU8(
+      strFromU8(original[part]).replace(
+        '<a:p><a:pPr algn="ctr"/></a:p>',
+        '<a:p><a:pPr algn="ctr"/><a:r><a:t>Spellbook 검증 العربية</a:t></a:r></a:p>',
+      ),
+    ),
+  };
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(
+        zipSync(ambiguousOriginal),
+        zipSync(noEdit),
+        zipSync(edited),
+        ["replace_text"],
+        [
+          {
+            op: "replace_text",
+            slideIndex: 0,
+            name: "TextBox 1",
+            shapeIndex: 0,
+          },
+        ],
+      ),
+    /cannot isolate direct text/u,
+  );
+});
+
 // An engine save of the rectangle as LibreOffice writes it: explicit insets,
 // no empty list style, an explicit end-of-paragraph font, lower-case colors
 // and a size rounded through 1/100 mm.

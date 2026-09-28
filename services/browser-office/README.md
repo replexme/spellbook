@@ -130,15 +130,29 @@ heartbeat reads the deck for a recovery checkpoint only after the engine's
 change count moved (Undo and modify events), not every 10 seconds while the
 document is unsaved.
 
+Local save check, 2026-09-28: on a 60-slide PPTX, the first human title edit
+failed because the engine's no-edit export renamed the authored `Title 1`
+placeholder to `PlaceHolder 1` and split its one text run by language. Direct
+text preservation now pairs that one target only when its prior text uniquely
+matches in the authored and no-edit slides, then applies the text delta to the
+authored runs. The first human save and an AI edit followed by a human save
+passed in a headless local browser, with the other 59 slide parts and master
+parts byte-identical. These are local checks, not a deployed-runtime result.
+Undo events give a title and context depth, not a changed-shape identity; the
+selection can be empty for AI edits and after a later Undo. Selection history
+alone cannot safely replace the complete document read used to verify scope.
+The tested shape exposed no modify listener, and its property listener did
+not report direct text input.
+
 For direct human edits and native AI transactions, the browser now keeps the
 uploaded package as the file authority. It serializes the edited model, also
 exports a model-only no-edit baseline, and applies only their package-part
 differences to the uploaded bytes. Regenerated DrawingML field GUIDs do not
 count as authored changes, nor do the chart axis ids and PowerPoint frame
 modification ids (`p14:modId`) each save draws anew. The merged package must reopen to the intended
-model state; unresolved relationship remapping fails closed. This path is
-source-implemented, not runtime-verified until the candidate product bridge
-and original-part preservation check pass.
+model state; unresolved relationship remapping fails closed. The direct-text
+path has the local browser check above; other edit families need their own
+runtime and original-part checks.
 
 The Spellbook-owned conformance shell is available at
 `http://127.0.0.1:4173/?autorun=1`. It loads the tracked public PPTX fixture,

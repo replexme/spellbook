@@ -440,6 +440,27 @@ function preserveUnaffectedSlideShapes(
         }
       : null;
   };
+  const shapeText = (node) => {
+    try {
+      return readShapeText(node);
+    } catch {
+      return null;
+    }
+  };
+  // Impress can rename a placeholder on the first unedited export. For a
+  // direct text target, its old text must identify the same position and
+  // shape kind uniquely in both copies before we pair unlike names.
+  const uniquelyPairedRenamedTarget = (source, baseline, index) => {
+    if (targetIndexes === null || !targetIndexes.has(index)) return false;
+    const text = shapeText(source);
+    if (!text || text !== shapeText(baseline)) return false;
+    const matches = (nodes) =>
+      nodes.filter(
+        (node) =>
+          node.localName === source.localName && shapeText(node) === text,
+      ).length;
+    return matches(authored) === 1 && matches(normalized) === 1;
+  };
   const hasRelationshipReference = (node) => {
     for (const element of [node, ...node.getElementsByTagName("*")])
       for (let index = 0; index < element.attributes.length; index += 1)
@@ -502,7 +523,8 @@ function preserveUnaffectedSlideShapes(
       !sourceIdentity?.id ||
       !baselineIdentity?.id ||
       source.localName !== baseline.localName ||
-      sourceIdentity.name !== baselineIdentity.name
+      (sourceIdentity.name !== baselineIdentity.name &&
+        !uniquelyPairedRenamedTarget(source, baseline, index))
     )
       continue;
     const editedShape = editedCounterpart(baseline);
@@ -520,7 +542,9 @@ function preserveUnaffectedSlideShapes(
   }
   if (
     targetIndexes !== null &&
-    [...targetIndexes].some((index) => !pairs.some((pair) => pair.index === index))
+    [...targetIndexes].some(
+      (index) => !pairs.some((pair) => pair.index === index),
+    )
   )
     return null;
   // An engine element as the author would name it: its references to other
@@ -558,7 +582,32 @@ function preserveUnaffectedSlideShapes(
     }
     // A shape the command named keeps the author's XML wherever the engine's
     // saves before and after the command agree.
-    const merged = mergeElementThreeWay(
+    let merged = null;
+    if (
+      targetIndexes?.has(index) &&
+      sourceOperations.every((operation) => operation === "replace_text")
+    ) {
+      // An imported placeholder can have one authored run but several
+      // language-specific runs in both engine exports. The XML three-way
+      // merge can import engine formatting or fail to align those trees.
+      // Carry only the live plain-text delta into the authored runs; the
+      // saved-model readback verifies the result.
+      try {
+        const priorText = readShapeText(source);
+        if (priorText === readShapeText(baseline)) {
+          const changedText = readShapeText(editedShape);
+          if (changedText !== priorText) {
+            const authoredText = source.cloneNode(true);
+            replaceShapeText(authoredText, changedText);
+            if (readShapeText(authoredText) === changedText)
+              merged = documents[2].importNode(authoredText, true);
+          }
+        }
+      } catch {
+        // Other text structures use the regular three-way merge.
+      }
+    }
+    merged ??= mergeElementThreeWay(
       documents[2],
       source,
       baseline,
