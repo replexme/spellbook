@@ -46,10 +46,44 @@ export function requestedSlideIndexes(
   slideCount: number,
   activeSlide: number,
 ): number[] {
-  const named = [
-    ...requestText.matchAll(/(\d+)\s*(?:장|번\s*슬라이드|슬라이드)/gu),
-  ]
-    .map((match) => Number(match[1]) - 1)
+  const candidates: Array<{ position: number; number: number }> = [];
+  const add = (match: RegExpExecArray, number: number, end: number) => {
+    // "3장 추가" is a quantity of new slides, not the existing third slide.
+    const tail = requestText.slice(end);
+    if (
+      /^(?:을|를)?\s*(?:추가|삽입|만들|생성)/u.test(tail) ||
+      (match[0].startsWith("슬라이드") && /^\s*(?:장|개)/u.test(tail)) ||
+      /^의\s*슬라이드/u.test(tail)
+    )
+      return;
+    candidates.push({ position: match.index, number });
+  };
+  for (const match of requestText.matchAll(/슬라이드\s*(\d+)\s*(?:번)?/gu))
+    add(match, Number(match[1]), match.index + match[0].length);
+  for (const match of requestText.matchAll(
+    /(\d+)\s*(?:번\s*)?(?:장|슬라이드)/gu,
+  ))
+    add(match, Number(match[1]), match.index + match[0].length);
+  const ordinals: Record<string, number> = {
+    첫: 1,
+    한: 1,
+    두: 2,
+    세: 3,
+    네: 4,
+    다섯: 5,
+    여섯: 6,
+    일곱: 7,
+    여덟: 8,
+    아홉: 9,
+    열: 10,
+  };
+  for (const match of requestText.matchAll(
+    /(첫|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*번째\s*(?:장|슬라이드)/gu,
+  ))
+    add(match, ordinals[match[1]], match.index + match[0].length);
+  const named = candidates
+    .sort((left, right) => left.position - right.position)
+    .map(({ number }) => number - 1)
     .filter(
       (index) =>
         Number.isSafeInteger(index) && index >= 0 && index < slideCount,

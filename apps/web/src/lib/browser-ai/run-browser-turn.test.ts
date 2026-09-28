@@ -11,6 +11,15 @@ describe("initial page selection", () => {
     expect(requestedSlideIndexes("1장과 60장 제목을 수정해", 60, 4)).toEqual([
       0, 59,
     ]);
+    expect(
+      requestedSlideIndexes("슬라이드 3과 첫 번째 장을 수정해", 60, 4),
+    ).toEqual([2, 0]);
+    expect(
+      requestedSlideIndexes("3장 추가하고 슬라이드 5를 수정해", 60, 4),
+    ).toEqual([4]);
+    expect(requestedSlideIndexes("3장 추가해", 60, 4)).toEqual([4]);
+    expect(requestedSlideIndexes("슬라이드 3장 추가해", 60, 4)).toEqual([4]);
+    expect(requestedSlideIndexes("3장의 슬라이드 추가해", 60, 4)).toEqual([4]);
   });
 
   it("uses the active page when no valid page number is given", () => {
