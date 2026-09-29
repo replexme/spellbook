@@ -53,6 +53,16 @@ async function harness() {
               inputModalities: ["text", "image"],
             },
             {
+              model: "gpt-6-astra",
+              displayName: "GPT-6 Astra",
+              isDefault: false,
+              defaultReasoningEffort: "high",
+              supportedReasoningEfforts: [
+                { reasoningEffort: "high", description: "Deep" },
+              ],
+              inputModalities: ["text", "image"],
+            },
+            {
               model: "text-only",
               defaultReasoningEffort: "high",
               supportedReasoningEfforts: [{ reasoningEffort: "high" }],
@@ -174,6 +184,43 @@ it("lets a packaged connector pin its bundled Codex executable", () => {
 });
 
 describe("structured turn isolation", () => {
+  it("enables image generation only for a supported selected model and provider", async () => {
+    const h = await harness();
+    await expect(
+      h.client.supportsImageGenerationForModel({
+        model: "account-model",
+        effort: "high",
+      }),
+    ).resolves.toBe(false);
+    await expect(
+      h.client.supportsImageGenerationForModel({
+        model: "gpt-6-astra",
+        effort: "high",
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      h.client.runStructuredTurn([], {}, 2000, {
+        tools: [],
+        onTool: vi.fn(),
+        modelSettings: { model: "account-model", effort: "high" },
+        allowImageGeneration: true,
+      }),
+    ).rejects.toThrow("Selected model does not support image generation");
+    expect(h.calls.some((call) => call.method === "thread/start")).toBe(false);
+    vi.spyOn(h.client, "providerCapabilities").mockResolvedValue({
+      imageGeneration: false,
+      namespaceTools: true,
+      webSearch: true,
+    });
+    await expect(
+      h.client.supportsImageGenerationForModel({
+        model: "gpt-6-astra",
+        effort: "high",
+      }),
+    ).resolves.toBe(false);
+    h.client.close();
+  });
+
   it("starts standard browser login and keeps device code as an explicit fallback", async () => {
     const h = await harness();
     await expect(h.client.startBrowserLogin()).resolves.toMatchObject({
@@ -201,6 +248,7 @@ describe("structured turn isolation", () => {
     const pending = h.client.runStructuredTurn([], {}, 2000, {
       tools: [],
       onTool: vi.fn(),
+      modelSettings: { model: "gpt-6-astra", effort: "high" },
       allowImageGeneration: true,
       onGeneratedImage,
     });
@@ -251,6 +299,7 @@ describe("structured turn isolation", () => {
     const pending = h.client.runStructuredTurn([], {}, 2000, {
       tools: [],
       onTool: vi.fn(),
+      modelSettings: { model: "gpt-6-astra", effort: "high" },
       allowImageGeneration: true,
       onGeneratedImage: vi.fn(async () => {
         throw new Error("generated_image_download_failed");
@@ -299,6 +348,7 @@ describe("structured turn isolation", () => {
     const h = await harness();
     expect((await h.client.models()).map((item) => item.model)).toEqual([
       "account-model",
+      "gpt-6-astra",
     ]);
     await expect(
       h.client.validateModelSettings({ model: "account-model", effort: "max" }),
@@ -379,6 +429,7 @@ describe("structured turn isolation", () => {
       tools: [],
       onTool: vi.fn(),
       conversationKey: "same-document",
+      modelSettings: { model: "gpt-6-astra", effort: "high" },
       allowImageGeneration: true,
       onGeneratedImage: vi.fn(),
     });

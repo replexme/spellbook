@@ -135,6 +135,31 @@ describe("shared open document agent", () => {
     });
   });
 
+  it("keeps image generation off for an unsupported model on a capable client", async () => {
+    const client = {
+      supportsImageGeneration: true,
+      supportsImageGenerationForModel: async () => false,
+      runStructuredTurn: async (
+        _input: unknown,
+        _schema: unknown,
+        _timeout: unknown,
+        options: AgentTurnOptions,
+      ) => {
+        expect(options.allowImageGeneration).toBe(false);
+        expect(options.onGeneratedImage).toBeUndefined();
+        return "기존 도형을 수정했습니다.";
+      },
+    } as unknown as AppServerClient;
+    await runNativeTurn(client, {
+      requestText: "도형 색을 바꿔줘",
+      host: { call: vi.fn() },
+      signal: new AbortController().signal,
+      permission,
+      onText: vi.fn(),
+      onTool: vi.fn(),
+    });
+  });
+
   it("uses explicit durable history without a connector-local conversation thread", async () => {
     let prompt = "";
     const client = {
@@ -1172,6 +1197,8 @@ describe("shared open document agent", () => {
     }));
     let invocation = 0;
     const client = {
+      supportsImageGeneration: true,
+      supportsImageGenerationForModel: async () => true,
       runStructuredTurn: async (
         _a: unknown,
         _b: unknown,
@@ -1262,6 +1289,8 @@ describe("shared open document agent", () => {
     }, restricted);
     await runNativeTurn(
       {
+        supportsImageGeneration: true,
+        supportsImageGenerationForModel: async () => true,
         runStructuredTurn: async (
           _a: unknown,
           _b: unknown,

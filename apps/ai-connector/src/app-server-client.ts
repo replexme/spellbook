@@ -13,6 +13,7 @@ import type {
   DeviceLoginResult,
   RpcNotification,
 } from "./types.js";
+import { imageGenerationModelIds } from "./ai-runtime-contract.js";
 
 interface PendingRequest {
   resolve: (value: unknown) => void;
@@ -72,6 +73,7 @@ export interface AppServerStartOptions {
 
 export interface AgentTurnClient {
   readonly supportsImageGeneration?: boolean;
+  supportsImageGenerationForModel?(settings?: ModelSettings): Promise<boolean>;
   runStructuredTurn(
     input: Array<Record<string, unknown>>,
     outputSchema: Record<string, unknown>,
@@ -188,6 +190,21 @@ export class AppServerClient {
     return this.request("modelProvider/capabilities/read", {});
   }
 
+  async supportsImageGenerationForModel(
+    settings?: ModelSettings,
+  ): Promise<boolean> {
+    const model = settings?.model ?? process.env.SPELLBOOK_CODEX_MODEL?.trim();
+    if (!model || !imageGenerationModelIds.has(model)) return false;
+    const [capabilities, models] = await Promise.all([
+      this.providerCapabilities(),
+      this.models(),
+    ]);
+    return (
+      capabilities.imageGeneration === true &&
+      models.some((item) => item.model === model)
+    );
+  }
+
   async models(): Promise<AvailableModel[]> {
     const models = new Map<string, AvailableModel>();
     const cursors = new Set<string>();
@@ -274,6 +291,11 @@ export class AppServerClient {
     timeoutMs = 300_000,
     options?: AgentTurnOptions,
   ): Promise<string> {
+    if (
+      options?.allowImageGeneration &&
+      !(await this.supportsImageGenerationForModel(options.modelSettings))
+    )
+      throw new Error("Selected model does not support image generation.");
     if (options?.modelSettings)
       await this.validateModelSettings(options.modelSettings);
     const workspace = path.join(

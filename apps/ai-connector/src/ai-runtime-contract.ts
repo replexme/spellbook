@@ -48,6 +48,22 @@ const contractsDirectory =
     "../../../contracts",
   );
 
+const imageModels = JSON.parse(
+  readFileSync(
+    path.join(contractsDirectory, "image-generation-models.json"),
+    "utf8",
+  ),
+) as { provider: string; modelIds: string[] };
+if (
+  imageModels.provider !== "codex" ||
+  !Array.isArray(imageModels.modelIds) ||
+  imageModels.modelIds.some(
+    (model) => typeof model !== "string" || !model,
+  )
+)
+  throw new Error("Invalid image generation model contract.");
+export const imageGenerationModelIds = new Set(imageModels.modelIds);
+
 export const aiRuntimeContract = JSON.parse(
   readFileSync(
     path.join(contractsDirectory, "ai-runtime-capabilities.json"),

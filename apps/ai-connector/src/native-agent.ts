@@ -775,7 +775,9 @@ export async function runNativeTurn(
   let text = await turn(
     `User request: ${input.requestText}`,
     ["slides", "document"].includes(input.permission.mode) &&
-      client.supportsImageGeneration !== false,
+      client.supportsImageGeneration === true &&
+      (await client.supportsImageGenerationForModel?.(input.modelSettings)) ===
+        true,
   );
   // Looking at the result after an edit is the product contract, not a hint.
   // A model that edits and stops is asked once more to observe and review.
