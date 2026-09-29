@@ -53,6 +53,7 @@ export class SessionManager {
 
   async status(rawEmail: string): Promise<{
     account: unknown;
+    claude: { account: unknown };
     providers: Array<{ id: "codex" | "claude_code"; connected: boolean }>;
     rateLimits: unknown;
     runtime: typeof activeAiRuntime;
@@ -85,6 +86,7 @@ export class SessionManager {
     if (codexConnected) this.loginsStarted.delete(session.email);
     return {
       account: codex.account ? codex : claude,
+      claude: { account: claude.account },
       providers: [
         { id: "codex", connected: codexConnected },
         { id: "claude_code", connected: claude.account?.type === "claude" },

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  SessionManager,
   codexSessionLocation,
   isAllowedAiIdentity,
   selectedProvider,
@@ -14,6 +15,25 @@ import {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("local AI subscription identity", () => {
+  it("exposes the local Claude login to the browser connection screen", async () => {
+    const manager = new SessionManager();
+    vi.spyOn(manager as any, "get").mockResolvedValue({
+      client: { accountRead: async () => ({ account: null }) },
+      isolated: false,
+    });
+    (manager as any).claude = {
+      accountRead: async () => ({
+        account: { type: "claude", planType: "max" },
+      }),
+    };
+    const status = await manager.status("owner@example.test");
+    expect(status.claude.account).toMatchObject({ type: "claude" });
+    expect(status.providers).toContainEqual({
+      id: "claude_code",
+      connected: true,
+    });
+  });
+
   it("allows only the authenticated self-hosted account", () => {
     vi.stubEnv("SPELLBOOK_LOCAL_EMAIL", "owner@example.test");
     expect(isAllowedAiIdentity("OWNER@example.test")).toBe(true);
