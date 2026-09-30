@@ -3726,8 +3726,24 @@ test("a direct move materializes inherited geometry on its shape and leaves desi
   assert.deepEqual(result.report.changedParts, [part]);
   const saved = unzipSync(result.bytes);
   assert.equal(parse(saved[part]).getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "off")[0].getAttribute("x"), String(x + 3600));
+  const savedShape = parse(saved[part]).getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "sp")[0];
+  const savedProperties = savedShape.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "spPr")[0];
+  assert.equal([...savedProperties.childNodes].find(node => node.nodeType === 1).localName, "xfrm",
+    "DrawingML transforms must precede geometry, fill and line properties");
   for (const [key, value] of Object.entries(original))
     if (key !== part) assert.deepEqual(saved[key], value, key);
+  const compound = parse(edited[part]);
+  compound.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "t")[0].textContent += " MANUAL";
+  const compoundEdited = { ...edited, [part]: strToU8(new XMLSerializer().serializeToString(compound)) };
+  const combined = preserveOriginalPptxParts(zipSync(original), zipSync(engine), zipSync(compoundEdited),
+    ["replace_text", "move"], [{ op: "replace_text", slideIndex: 0, shapeIndex: 0, name },
+      { op: "move", slideIndex: 0, shapeIndex: 0, name }]);
+  assert.deepEqual(combined.report.changedParts, [part]);
+  const combinedSaved = unzipSync(combined.bytes);
+  assert.match(strFromU8(combinedSaved[part]), / MANUAL/u);
+  assert.equal(parse(combinedSaved[part]).getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "off")[0].getAttribute("x"), String(x + 3600));
+  for (const [key, value] of Object.entries(original))
+    if (key !== part) assert.deepEqual(combinedSaved[key], value, key);
 });
 
 test("a direct SmartArt move changes its original frame position without rewriting design or diagrams", async () => {
