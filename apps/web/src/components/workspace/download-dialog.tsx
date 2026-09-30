@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  Banner,
   Button,
+  ButtonLink,
   CheckList,
   Dialog,
   FileMark,
@@ -16,9 +18,16 @@ import { fileSize, when } from "../copy";
 export function downloadChecks(
   summary: DocumentSummary | null,
   saved: boolean,
+  saveFailed = false,
 ): CheckItem[] {
   const items: CheckItem[] = [];
-  if (saved && summary?.version)
+  if (saveFailed)
+    items.push({
+      tone: "warn",
+      label: "이번 변경은 아직 저장되지 않았어요",
+      evidence: "editor save failure",
+    });
+  else if (saved && summary?.version)
     items.push({
       tone: "ok",
       label: `마지막 변경까지 저장했어요 · ${when(summary.version.createdAt)}`,
@@ -53,9 +62,11 @@ export function DownloadDialog({
   open,
   onClose,
   fileName,
+  lastSavedUrl,
   summary,
   loading,
   saved,
+  saveFailed,
   busy,
   waiting = false,
   onDownload,
@@ -63,9 +74,11 @@ export function DownloadDialog({
   open: boolean;
   onClose: () => void;
   fileName: string;
+  lastSavedUrl: string;
   summary: DocumentSummary | null;
   loading: boolean;
   saved: boolean;
+  saveFailed: boolean;
   busy: boolean;
   /** Another save is still running; download after it finishes. */
   waiting?: boolean;
@@ -79,6 +92,9 @@ export function DownloadDialog({
       dismissible={!busy}
       footer={
         <>
+          {saveFailed && summary?.version ? (
+            <ButtonLink href={lastSavedUrl}>마지막 저장본 내려받기</ButtonLink>
+          ) : null}
           <Button onClick={onClose} disabled={busy}>
             취소
           </Button>
@@ -98,6 +114,14 @@ export function DownloadDialog({
         </>
       }
     >
+      {saveFailed ? (
+        <Banner tone="danger" role="alert">
+          이번 변경은 저장되지 않았어요.{" "}
+          {summary?.version
+            ? "마지막 저장본을 내려받거나, 창을 닫고 편집 내용을 확인한 뒤 다시 저장할 수 있어요."
+            : "창을 닫고 편집 내용을 확인한 뒤 다시 저장해 주세요."}
+        </Banner>
+      ) : null}
       <div className="file-line">
         <FileMark />
         <div>
@@ -113,7 +137,7 @@ export function DownloadDialog({
         </p>
       ) : (
         <CheckList
-          items={downloadChecks(summary, saved)}
+          items={downloadChecks(summary, saved, saveFailed)}
           label="내려받기 전 확인"
         />
       )}

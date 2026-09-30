@@ -227,12 +227,12 @@ export function checksFor(summary: TurnSummary, outcome: Outcome): CheckItem[] {
     summary.unchangedSlides === total - changed
   )
     items.push({
-      tone: "ok",
+      tone: "na",
       label:
         changed === 1
-          ? "다른 슬라이드는 바뀌지 않음"
-          : `나머지 ${summary.unchangedSlides}장은 바뀌지 않음`,
-      evidence: "editor before/after states compared slide by slide",
+          ? "편집기 비교에서 다른 슬라이드 변경은 감지되지 않았어요"
+          : `편집기 비교에서 나머지 ${summary.unchangedSlides}장 변경은 감지되지 않았어요`,
+      evidence: "editor state comparison; saved PPTX parts not verified",
     });
   return items;
 }

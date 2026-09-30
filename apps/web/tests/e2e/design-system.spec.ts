@@ -306,6 +306,9 @@ test.describe("file home", () => {
     const id = "55555555-5555-4555-8555-555555555555";
     const preview = await slidePng(page, "2026 하반기 사업계획", true);
     let checks = 0;
+    await page.route("**/api/documents/uploads", (route) =>
+      route.fulfill({ json: { direct: false } }),
+    );
     await page.route("**/api/documents", async (route) => {
       if (route.request().method() === "POST")
         return route.fulfill({ status: 201, json: { id } });
@@ -463,6 +466,7 @@ test.describe("workspace", () => {
     page: Page,
     options: {
       restored?: () => boolean;
+      saveFailed?: () => boolean;
       summary?: typeof summary | typeof undoable;
     } = {},
   ) {
@@ -543,9 +547,9 @@ test.describe("workspace", () => {
                 ]
               : [],
             session: {
-              status: "active",
+              status: options.saveFailed?.() ? "failed" : "active",
               saveRevision: ++saveRevision,
-              error: null,
+              error: options.saveFailed?.() ? "test_save_validation_failed" : null,
               workingVersionId: "v-after",
               editorLocked: false,
             },
@@ -680,6 +684,31 @@ test.describe("workspace", () => {
       .frame({ name: "spellbook-office" })!
       .evaluate(() => (window as unknown as { calls: string[] }).calls);
 
+  test("a failed download save offers the last saved file and releases the dialog", async ({ page }) => {
+    let failed = false;
+    await mockWorkspace(page, { saveFailed: () => failed });
+    await page.goto(`/documents/${id}`);
+    await expect(page.getByRole("status").filter({ hasText: "저장됨" })).toBeVisible();
+    await page.frame({ name: "spellbook-office" })!.evaluate(() => {
+      parent.postMessage(JSON.stringify({ MessageId: "Doc_ModifiedStatus", Values: { Modified: true } }), "*");
+    });
+    await page.getByRole("button", { name: "PPTX 내려받기" }).click();
+    const dialog = page.getByRole("dialog", { name: "내려받기" });
+    await dialog.getByRole("button", { name: "저장하고 내려받기" }).click();
+    await expect.poll(() => editorCalls(page)).toContain("Action_Save");
+    failed = true;
+    await expect(dialog.getByRole("alert")).toContainText("이번 변경은 저장되지 않았어요");
+    await expect(dialog.getByRole("link", { name: "마지막 저장본 내려받기" })).toHaveAttribute("href", `/api/documents/${id}/download`);
+    await expect(dialog.getByRole("button", { name: "취소" })).toBeEnabled();
+    await expect(dialog.getByRole("button", { name: "저장하고 내려받기" })).toBeEnabled();
+    await shot(page, "workspace-save-failed");
+    await page.setViewportSize(viewports.phone);
+    await expectNoHorizontalOverflow(page);
+    await shot(page, "workspace-save-failed-phone");
+    await dialog.getByRole("button", { name: "취소" }).click();
+    await expect(dialog).toHaveCount(0);
+  });
+
   test("an AI request leaves one card: what changed, what was checked, and a way back", async ({
     page,
   }) => {
@@ -706,7 +735,9 @@ test.describe("workspace", () => {
     await expect(
       card.getByText("슬라이드 밖으로 나간 요소 없음"),
     ).toBeVisible();
-    await expect(card.getByText("다른 슬라이드는 바뀌지 않음")).toBeVisible();
+    await expect(
+      card.getByText("편집기 비교에서 다른 슬라이드 변경은 감지되지 않았어요"),
+    ).toBeVisible();
     await expect(
       card.getByRole("img", { name: "3번 슬라이드 수정 후" }),
     ).toBeVisible();
@@ -714,7 +745,7 @@ test.describe("workspace", () => {
     await expect(card.getByText("후 · 저장본 미리보기")).toBeVisible();
     await expect(panel.getByText("범위 · 이 슬라이드").first()).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "AI 모델: Codex · 보통" }),
+      page.getByRole("button", { name: "AI 모델: GPT E2E · 보통" }),
     ).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await shot(page, "workspace-result-desktop");
@@ -850,6 +881,12 @@ test.describe("workspace", () => {
   }) => {
     await mockWorkspace(page);
     await page.goto(`/documents/${id}`);
+    await page
+      .getByRole("button", { name: /^AI가 바꿀 수 있는 범위:/ })
+      .click();
+    await page
+      .getByRole("menuitemradio", { name: /지금 선택한 제목 1개만 바꿔요/ })
+      .click();
     await expect(
       page.getByRole("button", {
         name: "AI가 바꿀 수 있는 범위: 선택 · 제목 (3번)",
@@ -885,6 +922,12 @@ test.describe("workspace", () => {
     const { chatCalls } = await mockWorkspace(page);
     await page.goto(`/documents/${id}`);
     const box = page.getByRole("textbox", { name: "AI에게 요청" });
+    await page
+      .getByRole("button", { name: /^AI가 바꿀 수 있는 범위:/ })
+      .click();
+    await page
+      .getByRole("menuitemradio", { name: /지금 선택한 제목 1개만 바꿔요/ })
+      .click();
     await expect(
       page.getByRole("button", {
         name: /^AI가 바꿀 수 있는 범위: 선택 · 제목/,

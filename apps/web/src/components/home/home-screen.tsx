@@ -16,6 +16,7 @@ import {
   Spinner,
 } from "@/design-system";
 import type { AiConnectorConfig } from "@/lib/ai-connector-config";
+import { browserEngineSupported } from "@/lib/browser-engine-support";
 import type { LibraryDocument } from "@/lib/history-types";
 import { failureShort, megabytes } from "@/lib/upload-reasons";
 import { useAiAccount } from "@/lib/use-ai-account";
@@ -113,6 +114,9 @@ export function HomeScreen({
   const [sort, setSort] = useState<Sort>("updated");
   const [view, setView] = useState<View>("grid");
   const [dragging, setDragging] = useState(false);
+  const [browserSupported, setBrowserSupported] = useState<boolean | null>(
+    null,
+  );
   const [importing, setImporting] = useState<File | null>(null);
   const [renaming, setRenaming] = useState<LibraryDocument | null>(null);
   const [deleting, setDeleting] = useState<LibraryDocument | null>(null);
@@ -140,6 +144,7 @@ export function HomeScreen({
   }, []);
 
   useEffect(() => {
+    setBrowserSupported(browserEngineSupported());
     void load();
     warmEditor();
     try {
@@ -238,6 +243,12 @@ export function HomeScreen({
         ) : null}
       </AppTop>
       <main className="app-main">
+        {browserSupported === false ? (
+          <Banner tone="warn" role="alert">
+            이 브라우저에서는 PPTX를 편집할 수 없어요. 파일을 가져오기 전에 PC의
+            최신 Chrome·Edge 또는 Android의 최신 Chrome에서 열어 주세요.
+          </Banner>
+        ) : null}
         {loading ? (
           <p className="home-status" role="status">
             <Spinner /> 파일을 불러오고 있어요

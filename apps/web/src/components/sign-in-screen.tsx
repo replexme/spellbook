@@ -41,6 +41,10 @@ export function SignInScreen({
               연결된 계정으로 로그인해요. 문서와 작업 기록은 계정마다 따로
               보관해요.
             </p>
+            <p className="signin-note">
+              <a href="https://spellbook.my/terms/">이용약관</a> ·{" "}
+              <a href="https://spellbook.my/privacy/">개인정보처리방침</a>
+            </p>
           </div>
         ) : (
           <form className="signin-form" action="/auth/login" method="post">

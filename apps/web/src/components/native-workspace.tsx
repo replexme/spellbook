@@ -914,6 +914,10 @@ export function NativeWorkspace({
               : "browser_document_save_failed",
         });
         pendingSaveRevision.current = null;
+        downloadAfterRevision.current = null;
+        setDownload((current) =>
+          current ? { ...current, busy: false } : current,
+        );
         editorModified.current = true;
         // A running AI request's edits are saved after it; nothing failed.
         if (
@@ -926,9 +930,7 @@ export function NativeWorkspace({
         }
         setSaveState("저장 실패");
         setError(
-          cause instanceof Error
-            ? cause.message
-            : "브라우저에서 PPTX를 저장하지 못했어요.",
+          "이 파일의 변경을 안전하게 저장하지 못했어요. 편집 내용을 확인하고 다시 시도해 주세요.",
         );
       }
     },
@@ -1059,6 +1061,9 @@ export function NativeWorkspace({
                   pendingBrowserSave.current = null;
                   pendingSaveRevision.current = null;
                   downloadAfterRevision.current = null;
+                  setDownload((current) =>
+                    current ? { ...current, busy: false } : current,
+                  );
                   editorModified.current = true;
                   const waiting = pendingTurn.current;
                   pendingTurn.current = null;
@@ -1103,6 +1108,25 @@ export function NativeWorkspace({
             }
             if (result.data?.type === "error") {
               browserOpening.current = false;
+              if (pendingSaveRevision.current !== null) {
+                pendingSaveRevision.current = null;
+                downloadAfterRevision.current = null;
+                editorModified.current = true;
+                setDownload((current) =>
+                  current ? { ...current, busy: false } : current,
+                );
+                setSaveState("저장 실패");
+                const waiting = pendingTurn.current;
+                pendingTurn.current = null;
+                if (waiting) {
+                  setBusy(false);
+                  setText(waiting.draft);
+                }
+                setError(
+                  "이 파일의 변경을 안전하게 저장하지 못했어요. 편집 내용을 확인하고 다시 시도해 주세요.",
+                );
+                return;
+              }
               setError(
                 typeof result.data.error === "string"
                   ? result.data.error
@@ -1430,8 +1454,14 @@ export function NativeWorkspace({
         }
         pendingTurn.current = null;
         pendingSaveRevision.current = null;
+        downloadAfterRevision.current = null;
+        setDownload((current) =>
+          current ? { ...current, busy: false } : current,
+        );
         setSaveState("저장 실패");
-        setError(response.session.error ?? "저장한 파일을 검사하지 못했어요.");
+        setError(
+          "저장한 파일을 안전하게 확인하지 못했어요. 마지막 저장본은 유지돼요.",
+        );
         if (waiting) {
           setBusy(false);
           setText(waiting.draft);
@@ -2485,9 +2515,11 @@ export function NativeWorkspace({
         open={Boolean(download)}
         onClose={() => setDownload(null)}
         fileName={launch.fileName}
+        lastSavedUrl={`/api/documents/${launch.documentId}/download`}
         summary={download?.summary ?? null}
         loading={download?.loading ?? false}
         saved={saveState === "저장됨"}
+        saveFailed={saveState === "저장 실패"}
         busy={download?.busy ?? false}
         waiting={!download?.busy && saveState.endsWith("중…")}
         onDownload={startDownload}
