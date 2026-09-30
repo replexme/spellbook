@@ -657,6 +657,21 @@ test("native insertion checks retained live formatting, indexed references and i
     persistedDirectSlideTopologyMatches(before, live, reopened, report),
     true,
   );
+  live.slides[1].masterName = "Title Slide";
+  reopened.slides[1].masterName = "Generated unique master";
+  assert.equal(persistedDirectSlideTopologyMatches(before, live, reopened, report), false);
+  const importedDesign = { sourceMaster: "ppt/slideMasters/slideMaster1.xml",
+    importedMaster: "ppt/slideMasters/slideMaster2.xml", importedLayout: "ppt/slideLayouts/slideLayout12.xml" };
+  assert.equal(persistedDirectSlideTopologyMatches(before, live, reopened,
+    { ...report, topologyImportedDesign: importedDesign }), true);
+  reopened.slides[1].layout = 11;
+  live.slides[1].layout = 1;
+  assert.equal(persistedDirectSlideTopologyMatches(before, live, reopened,
+    { ...report, topologyImportedDesign: importedDesign }), false, "layout identity remains mandatory");
+  delete live.slides[1].masterName;
+  delete reopened.slides[1].masterName;
+  delete live.slides[1].layout;
+  delete reopened.slides[1].layout;
   live.slides[2].elements[0].paragraphFormats[0].topMargin = 500;
   assert.equal(
     persistedDirectSlideTopologyMatches(before, live, reopened, report),

@@ -3666,6 +3666,45 @@ test("native slide insertion retains original masters and native placeholder con
   );
 });
 
+test("native insertion imports a genuinely new layout by edited identity and preserves its authored owner", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  original["ppt/slides/_rels/slide1.xml.rels"] = strToU8(strFromU8(original["ppt/slides/_rels/slide1.xml.rels"])
+    .replace("slideLayout7.xml", "slideLayout1.xml"));
+  const bytes = zipSync(original);
+  const baseline = engineTopologyFixture(original);
+  const added = unzipSync(applyOoxmlCommand(bytes, {
+    op: "duplicate_slide", slideIndex: 0, insertIndex: 1,
+  }).bytes);
+  added[slidePaths(added)[1]] = strToU8(strFromU8(added[slidePaths(added)[1]])
+    .replace("Spellbook 검증 العربية", "New layout content"));
+  const edited = engineTopologyFixture(added);
+  // The exporter moved the old title layout to layout2, then used the old
+  // layout1 path and name for a distinct tx layout on the inserted slide.
+  edited["ppt/slideLayouts/slideLayout2.xml"] = original["ppt/slideLayouts/slideLayout1.xml"];
+  edited["ppt/slideLayouts/_rels/slideLayout2.xml.rels"] = original["ppt/slideLayouts/_rels/slideLayout1.xml.rels"];
+  edited["ppt/slideLayouts/slideLayout1.xml"] = strToU8(strFromU8(original["ppt/slideLayouts/slideLayout1.xml"])
+    .replace('type="title"', 'type="tx"'));
+  edited["ppt/slides/_rels/slide1.xml.rels"] = strToU8(strFromU8(edited["ppt/slides/_rels/slide1.xml.rels"])
+    .replace("slideLayout1.xml", "slideLayout2.xml"));
+  const preserve = () => preserveOriginalPptxParts(bytes, zipSync(baseline), zipSync(edited), null);
+  const result = preserve();
+  const saved = unzipSync(result.bytes);
+  const proof = result.report.topologyImportedDesign;
+  assert.equal(proof.sourceMaster, "ppt/slideMasters/slideMaster1.xml");
+  assert.notEqual(proof.importedMaster, proof.sourceMaster);
+  assert.match(strFromU8(saved[proof.importedLayout]), /type="tx"/u);
+  assert.match(strFromU8(saved[proof.importedLayout.replace("/slideLayouts/", "/slideLayouts/_rels/") + ".rels"]),
+    new RegExp(proof.importedMaster.split("/").at(-1).replace(".", "\\."), "u"));
+  const master = new DOMParser().parseFromString(strFromU8(saved[proof.importedMaster]), "application/xml");
+  assert.equal(master.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "sldLayoutId").length, 1);
+  for (const [part, value] of Object.entries(original))
+    if (/^ppt\/(slides|slideMasters|slideLayouts|theme)\//u.test(part))
+      assert.deepEqual(saved[part], value, part);
+  edited["ppt/slideLayouts/_rels/slideLayout1.xml.rels"] = strToU8(strFromU8(edited["ppt/slideLayouts/_rels/slideLayout1.xml.rels"])
+    .replace("slideMaster1.xml", "slideMaster999.xml"));
+  assert.throws(preserve, /cannot identify one authored master/u);
+});
+
 test("a direct move materializes inherited geometry on its shape and leaves design parts intact", async () => {
   const engine = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
   const part = "ppt/slides/slide1.xml";

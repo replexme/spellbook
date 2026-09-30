@@ -576,10 +576,17 @@ export function persistedDirectSlideTopologyMatches(
       topology.index >= live.slides.length
     )
       return false;
-    const inserted = (slide) => ({
-      slides: [topologySlideState(slide)],
-      masters: [],
-    });
+    const inserted = (slide) => {
+      const state = topologySlideState(slide);
+      // A new layout uses a clone of its proven authored master. Reopening
+      // generates a unique engine display name when the old layout already
+      // has the same name. Ownership and design are proven by the worker;
+      // all concrete layout, background and shape properties remain checked.
+      const design = report.topologyImportedDesign;
+      if (design?.sourceMaster && design.importedMaster && design.importedLayout)
+        delete state.masterName;
+      return { slides: [state], masters: [] };
+    };
     if (
       intendedDocumentMutationDifferences(
         {

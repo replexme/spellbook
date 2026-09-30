@@ -1776,6 +1776,7 @@ function mergeDirectSlideTopology(
   edited,
   topology,
   sourceTargets,
+  designProof,
 ) {
   const context = openPackage(originalBytes, { requireSimpleTopology: false });
   if (topology.kind === "delete") {
@@ -1838,6 +1839,68 @@ function mergeDirectSlideTopology(
     parseXml(edited, contentTypesPath),
   );
   const imported = new Set();
+  const retainedNativeSlides = topology.paths.filter((_, index) => index !== topology.index);
+  const authoredMasterForLayout = (layout) => {
+    const nativeMasters = relationshipsOfType(edited, layout, "slideMaster");
+    if (nativeMasters.length !== 1) throw new Error("Native layout has no unique master.");
+    const owners = new Set();
+    orderedSlidePaths(original).forEach((slide, index) => {
+      const nativeLayouts = relationshipsOfType(edited, retainedNativeSlides[index], "slideLayout");
+      const nativeOwners = nativeLayouts.flatMap(({ target }) => relationshipsOfType(edited, target, "slideMaster"));
+      if (!nativeOwners.some(({ target }) => target === nativeMasters[0].target)) return;
+      const layouts = relationshipsOfType(original, slide, "slideLayout");
+      for (const { target } of layouts)
+        for (const owner of relationshipsOfType(original, target, "slideMaster")) owners.add(owner.target);
+    });
+    if (owners.size !== 1) throw new Error("Native layout cannot identify one authored master from retained slides.");
+    return [...owners][0];
+  };
+  const cloneMasterForLayout = (source, layout) => {
+    const destination = nextPartPath(context.entries, source);
+    const master = parseXml(original, source);
+    const relationships = parseXml(original, relationshipsPath(source));
+    for (const relationship of relationshipElements(relationships))
+      if (relationship.getAttribute("Type").endsWith("/slideLayout")) relationship.parentNode.removeChild(relationship);
+    const layoutRelationship = relationships.createElementNS(packageRelationshipNamespace, "Relationship");
+    const layoutId = nextRelationshipId(relationships);
+    layoutRelationship.setAttribute("Id", layoutId);
+    layoutRelationship.setAttribute("Type", `${relationshipAttributeNamespace}/slideLayout`);
+    layoutRelationship.setAttribute("Target", relativePart(destination, layout));
+    relationships.documentElement.appendChild(layoutRelationship);
+    const layoutIds = requiredElement(master, presentationNamespace, "sldLayoutIdLst");
+    while (layoutIds.firstChild) layoutIds.removeChild(layoutIds.firstChild);
+    const layoutEntry = master.createElementNS(presentationNamespace, "p:sldLayoutId");
+    const maximumLayoutId = Math.max(...Object.keys(original)
+      .filter(part => /^ppt\/slideMasters\/slideMaster[^/]+\.xml$/u.test(part))
+      .flatMap(part => Array.from(parseXml(original, part).getElementsByTagNameNS(presentationNamespace, "sldLayoutId")))
+      .map(node => Number(node.getAttribute("id"))));
+    if (!Number.isSafeInteger(maximumLayoutId) || maximumLayoutId < 2147483648 || maximumLayoutId >= 0xffffffff)
+      throw new Error("PPTX layout identifiers are invalid.");
+    layoutEntry.setAttribute("id", String(maximumLayoutId + 1));
+    layoutEntry.setAttributeNS(relationshipAttributeNamespace, "r:id", layoutId);
+    layoutIds.appendChild(layoutEntry);
+    context.entries[destination] = serializeXml(master);
+    context.entries[relationshipsPath(destination)] = serializeXml(relationships);
+    copyContentType(context, source, destination);
+    imported.add(destination);
+    imported.add(relationshipsPath(destination));
+    const registry = requiredElement(context.presentation, presentationNamespace, "sldMasterIdLst");
+    const maximum = Math.max(...xmlElementChildren(registry).map(node => Number(node.getAttribute("id"))));
+    if (!Number.isSafeInteger(maximum) || maximum < 2147483648 || maximum >= 0xffffffff)
+      throw new Error("PPTX master identifiers are invalid.");
+    const id = nextRelationshipId(context.relationships);
+    const masterRelationship = context.relationships.createElementNS(packageRelationshipNamespace, "Relationship");
+    masterRelationship.setAttribute("Id", id);
+    masterRelationship.setAttribute("Type", `${relationshipAttributeNamespace}/slideMaster`);
+    masterRelationship.setAttribute("Target", relativePart(presentationPath, destination));
+    context.relationships.documentElement.appendChild(masterRelationship);
+    const entry = context.presentation.createElementNS(presentationNamespace, "p:sldMasterId");
+    entry.setAttribute("id", String(maximum + 1));
+    entry.setAttributeNS(relationshipAttributeNamespace, "r:id", id);
+    registry.appendChild(entry);
+    Object.assign(designProof, { sourceMaster: source, importedMaster: destination, importedLayout: layout });
+    return destination;
+  };
   const importPart = (source, destination) => {
     if (copied.size > 500)
       throw new Error("Slide dependency graph exceeds the safe copy limit.");
@@ -1860,15 +1923,21 @@ function mergeDirectSlideTopology(
       const kind = relationship.getAttribute("Type").split("/").at(-1);
       let mapped = copied.get(target);
       if (!mapped && kind === "slideLayout") {
-        mapped = resolvePart(
-          destination,
-          remapSlideLayoutTarget(
-            source,
-            relationship.getAttribute("Target"),
-            original,
-            noEdit,
-          ),
-        );
+        // Export can renumber layouts and create a new layout with an old
+        // name but a different type. Use the edited identity, never the old
+        // path or a name-only fallback. A genuinely new layout gets its own
+        // copy of the proven authored master, leaving existing designs intact.
+        const identity = slideLayoutIdentity(edited, target);
+        const owner = authoredMasterForLayout(target);
+        const candidates = Object.keys(original).filter(part => /^ppt\/slideLayouts\/slideLayout[^/]+\.xml$/u.test(part))
+          .filter(part => {
+            const candidate = slideLayoutIdentity(original, part);
+            return candidate.name === identity.name && candidate.type === identity.type &&
+              relationshipsOfType(original, part, "slideMaster").some(master => master.target === owner);
+          });
+        if (candidates.length === 1) mapped = candidates[0];
+      } else if (!mapped && kind === "slideMaster" && /^ppt\/slideLayouts\//u.test(source)) {
+        mapped = cloneMasterForLayout(authoredMasterForLayout(source), destination);
       } else if (!mapped && kind === "notesMaster") {
         const masters = relationshipsOfType(
           original,
@@ -2911,6 +2980,7 @@ export function preserveOriginalPptxParts(
     targetIndexesBySlide?.size === 1
       ? [...targetIndexesBySlide.keys()][0]
       : null;
+  const topologyImportedDesign = {};
   const topologyPatch = topology
     ? mergeDirectSlideTopology(
         originalBytes,
@@ -2919,6 +2989,7 @@ export function preserveOriginalPptxParts(
         edited,
         topology,
         sourceTargets,
+        topologyImportedDesign,
       )
     : null;
   const merged = topologyPatch ?? {};
@@ -3230,6 +3301,7 @@ export function preserveOriginalPptxParts(
           ])
         : null,
       topologyAligned: topologyPaths !== null,
+      topologyImportedDesign: topologyImportedDesign.importedMaster ? topologyImportedDesign : null,
       topology: topology
         ? { kind: topology.kind, index: topology.index }
         : null,
