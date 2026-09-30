@@ -364,8 +364,11 @@ function applyAuthoredGeometryDelta(
   operations,
 ) {
   const transform = (shape) => {
-    const matches = shape.getElementsByTagNameNS(drawingNamespace, "xfrm");
-    return matches.length === 1 ? matches[0] : null;
+    const frame = optionalDirectXmlChild(shape, presentationNamespace, "xfrm");
+    if (frame) return frame;
+    const properties = optionalDirectXmlChild(shape, presentationNamespace,
+      shape.localName === "grpSp" ? "grpSpPr" : "spPr");
+    return properties && optionalDirectXmlChild(properties, drawingNamespace, "xfrm");
   };
   const transforms = [merged, source, baseline, edited].map(transform);
   if (transforms.some((node) => !node)) return false;
@@ -633,6 +636,15 @@ function preserveUnaffectedSlideShapes(
   );
   for (const pair of pairs) {
     const { source, baseline, editedShape, index } = pair;
+    if (targetIndexes?.has(index) && sourceOperations.every(operation => ["move", "resize"].includes(operation))) {
+      // Geometry can be applied to the original frame/group wrapper without
+      // importing the engine's children or relationship IDs. Keep diagram
+      // parts, picture contents and style exactly as authored.
+      const moved = documents[2].importNode(source, true);
+      if (!applyAuthoredGeometryDelta(moved, source, baseline, editedShape, sourceOperations)) return null;
+      replacements.push({ pair, editedShape, restored: false, node: moved });
+      continue;
+    }
     if (hasRelationshipReference(source)) continue;
     if (
       additiveOnly ||

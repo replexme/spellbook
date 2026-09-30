@@ -278,6 +278,28 @@ test("one human shape move scopes preservation without admitting a second edit",
   assert.equal(directMovePreservationTarget(before, after), null);
 });
 
+test("a group translation includes only its unchanged descendants", () => {
+  const before = { slides: [{ elements: [
+    { elementId: "0/0", parentElementId: null, zIndex: 0, name: "Group", x: 10, y: 20 },
+    { elementId: "0/0/0", parentElementId: "0/0", x: 11, y: 21, text: "Child" },
+    { elementId: "0/0/0/0", parentElementId: "0/0/0", x: 12, y: 22 },
+    { elementId: "0/1", parentElementId: null, zIndex: 1, name: "Other", x: 30, y: 40 },
+  ] }] };
+  const after = structuredClone(before);
+  for (const element of after.slides[0].elements.slice(0, 3)) element.x += 5;
+  assert.deepEqual(directMovePreservationTarget(before, after), {
+    op: "move", slideIndex: 0, name: "Group", shapeIndex: 0,
+  });
+  after.slides[0].elements[1].x++;
+  assert.equal(directMovePreservationTarget(before, after), null);
+  after.slides[0].elements[1].x--;
+  after.slides[0].elements[1].text = "Changed";
+  assert.equal(directMovePreservationTarget(before, after), null);
+  after.slides[0].elements[1].text = "Child";
+  after.slides[0].elements[3].x++;
+  assert.equal(directMovePreservationTarget(before, after), null);
+});
+
 test("a revision-only Office save cannot hide a document or package change", () => {
   const before = { slides: [{ elements: [{ text: "Typed" }] }], masters: [] };
   const sections = [{ id: "A", startSlideIndex: 0 }];

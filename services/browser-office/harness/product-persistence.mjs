@@ -316,6 +316,8 @@ export function directMovePreservationTarget(before, after) {
   const baseline = structuredClone(before);
   const edited = structuredClone(after);
   let target = null;
+  let descendants = new Set();
+  let translation = null;
   for (
     let slideIndex = 0;
     slideIndex < baseline.slides.length;
@@ -337,8 +339,19 @@ export function directMovePreservationTarget(before, after) {
         beforeElement?.y === afterElement?.y
       )
         continue;
+      if (target && descendants.has(beforeElement.elementId)) {
+        if (
+          afterElement.elementId !== beforeElement.elementId ||
+          afterElement.x - beforeElement.x !== translation.x ||
+          afterElement.y - beforeElement.y !== translation.y
+        ) return null;
+        beforeElement.x = afterElement.x;
+        beforeElement.y = afterElement.y;
+        continue;
+      }
       if (
         target ||
+        beforeElement?.parentElementId != null ||
         typeof beforeElement?.name !== "string" ||
         !beforeElement.name ||
         beforeElement.name !== afterElement?.name ||
@@ -355,6 +368,13 @@ export function directMovePreservationTarget(before, after) {
         name: beforeElement.name,
         shapeIndex: beforeElement.zIndex,
       };
+      translation = { x: afterElement.x - beforeElement.x, y: afterElement.y - beforeElement.y };
+      descendants = new Set([beforeElement.elementId]);
+      // The observation enumerates a group before its nested children.
+      // Accept only descendants translated by the same vector; formatting,
+      // structure and every unrelated object must still compare exactly.
+      for (const element of beforeElements)
+        if (descendants.has(element.parentElementId)) descendants.add(element.elementId);
       beforeElement.x = afterElement.x;
       beforeElement.y = afterElement.y;
     }

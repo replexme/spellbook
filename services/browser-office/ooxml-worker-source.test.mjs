@@ -3666,6 +3666,28 @@ test("native slide insertion retains original masters and native placeholder con
   );
 });
 
+test("a direct SmartArt move changes its original frame position without rewriting design or diagrams", async () => {
+  const bytes = new Uint8Array(await readFile(new URL("../../eval/public/downloads/lo-smartart-org.pptx", import.meta.url)));
+  const original = unzipSync(bytes);
+  const part = "ppt/slides/slide1.xml";
+  const baseline = { ...original };
+  baseline[part] = strToU8(strFromU8(original[part])
+    .replace('id="4" name="Diagram 3"', 'id="65" name="Diagram 3"')
+    .replace('x="1524000"', 'x="1523880"'));
+  const edited = { ...baseline };
+  edited[part] = strToU8(strFromU8(baseline[part])
+    .replace('id="65" name="Diagram 3"', 'id="66" name="Diagram 3"')
+    .replace('x="1523880"', 'x="1739880"'));
+  edited["ppt/slideMasters/slideMaster1.xml"] = strToU8(strFromU8(original["ppt/slideMasters/slideMaster1.xml"]).replace('name="', 'name="Engine '));
+  const result = preserveOriginalPptxParts(bytes, zipSync(baseline), zipSync(edited), ["move"],
+    [{ op: "move", slideIndex: 0, shapeIndex: 0, name: "Diagram 3" }]);
+  assert.deepEqual(result.report.changedParts, [part]);
+  const saved = unzipSync(result.bytes);
+  assert.match(strFromU8(saved[part]), /x="1740000"/u);
+  for (const [name, value] of Object.entries(original))
+    if (name !== part) assert.deepEqual(saved[name], value, name);
+});
+
 test("topology permits only bounded connected-line export rounding and retains source bytes", async () => {
   const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
   const part = "ppt/slides/slide1.xml";
