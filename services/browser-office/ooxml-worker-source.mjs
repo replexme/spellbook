@@ -371,6 +371,18 @@ function applyAuthoredGeometryDelta(
     return properties && optionalDirectXmlChild(properties, drawingNamespace, "xfrm");
   };
   const transforms = [merged, source, baseline, edited].map(transform);
+  if (!transforms[0] && !transforms[1] && transforms[2]) {
+    // A placeholder can inherit its entire transform from the layout.
+    // Moving it makes that effective geometry explicit on this shape only;
+    // no layout or master may be rewritten. Persisted-model comparison
+    // still checks its size, rotation and every other authored property.
+    const properties = optionalDirectXmlChild(merged, presentationNamespace,
+      merged.localName === "grpSp" ? "grpSpPr" : "spPr");
+    if (!properties) return false;
+    transforms[0] = merged.ownerDocument.importNode(transforms[2], true);
+    properties.appendChild(transforms[0]);
+    transforms[1] = transforms[2];
+  }
   if (transforms.some((node) => !node)) return false;
   for (const [tag, attributes] of [
     ["off", operations.includes("move") ? ["x", "y"] : []],
@@ -642,7 +654,8 @@ function preserveUnaffectedSlideShapes(
       // parts, picture contents and style exactly as authored.
       const moved = documents[2].importNode(source, true);
       if (!applyAuthoredGeometryDelta(moved, source, baseline, editedShape, sourceOperations)) return null;
-      replacements.push({ pair, editedShape, restored: false, node: moved });
+      // The geometry changed, but every shape ID still comes from source.
+      replacements.push({ pair, editedShape, restored: true, node: moved });
       continue;
     }
     if (hasRelationshipReference(source)) continue;

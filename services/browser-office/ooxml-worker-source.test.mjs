@@ -3666,6 +3666,31 @@ test("native slide insertion retains original masters and native placeholder con
   );
 });
 
+test("a direct move materializes inherited geometry on its shape and leaves design parts intact", async () => {
+  const engine = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml";
+  const original = { ...engine };
+  const parse = bytes => new DOMParser().parseFromString(strFromU8(bytes), "application/xml");
+  const document = parse(original[part]);
+  const shape = document.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "sp")[0];
+  const transform = shape.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "xfrm")[0];
+  const properties = shape.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "cNvPr")[0];
+  const name = properties.getAttribute("name");
+  const x = Number(transform.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "off")[0].getAttribute("x"));
+  transform.parentNode.removeChild(transform);
+  original[part] = strToU8(new XMLSerializer().serializeToString(document));
+  const changed = parse(engine[part]);
+  changed.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "off")[0].setAttribute("x", String(x + 3600));
+  const edited = { ...engine, [part]: strToU8(new XMLSerializer().serializeToString(changed)) };
+  const result = preserveOriginalPptxParts(zipSync(original), zipSync(engine), zipSync(edited), ["move"],
+    [{ op: "move", slideIndex: 0, shapeIndex: 0, name }]);
+  assert.deepEqual(result.report.changedParts, [part]);
+  const saved = unzipSync(result.bytes);
+  assert.equal(parse(saved[part]).getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "off")[0].getAttribute("x"), String(x + 3600));
+  for (const [key, value] of Object.entries(original))
+    if (key !== part) assert.deepEqual(saved[key], value, key);
+});
+
 test("a direct SmartArt move changes its original frame position without rewriting design or diagrams", async () => {
   const bytes = new Uint8Array(await readFile(new URL("../../eval/public/downloads/lo-smartart-org.pptx", import.meta.url)));
   const original = unzipSync(bytes);
