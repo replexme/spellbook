@@ -171,10 +171,18 @@ test("native command probe is enabled explicitly per conformance session", async
   );
   assert.equal(replacementMedia.status, 200);
   assert.equal(replacementMedia.headers.get("content-type"), "audio/wav");
+  const sameSizeImage = await fetch(
+    `${origin}/api/documents/probe/assets/00000000-0000-4000-8000-000000000005`,
+  );
+  assert.equal(sameSizeImage.status, 200);
+  assert.equal(sameSizeImage.headers.get("content-type"), "image/png");
+  const sameSizeBytes = Buffer.from(await sameSizeImage.arrayBuffer());
+  assert.equal(sameSizeBytes.readUInt32BE(16), 2);
+  assert.equal(sameSizeBytes.readUInt32BE(20), 1);
   assert.equal(
     (
       await fetch(
-        `${origin}/api/documents/probe/assets/00000000-0000-4000-8000-000000000005`,
+        `${origin}/api/documents/probe/assets/00000000-0000-4000-8000-000000000006`,
       )
     ).status,
     404,

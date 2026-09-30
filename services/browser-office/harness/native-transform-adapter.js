@@ -1579,6 +1579,9 @@
     };
 
     return Object.freeze({
+      // Content-addressed pixel digests contain no UNO objects or document
+      // references. Reuse them across live and saved-model reads.
+      pictureContentDigests: new Map(),
       supportedOperations,
       supportsTransform,
       transformSlides,

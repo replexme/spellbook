@@ -1507,27 +1507,63 @@ function spellbookDocumentOperation(request) {
     );
   }
 
+  let assetReflection;
+  const invokeAsset = (object, interfaceName, method, args = []) => {
+    if (typeof object?.[method] === "function")
+      return object[method](...args);
+    assetReflection ??= uno.componentContext
+      .getServiceManager()
+      .createInstanceWithContext(
+        "com.sun.star.reflection.CoreReflection",
+        uno.componentContext,
+      );
+    const parameters = { val: args };
+    const result = assetReflection
+      .forName(interfaceName)
+      .getMethod(method)
+      .invoke(object, parameters);
+    return { result, args: parameters.val };
+  };
+
+  function assetStreamDigest(input) {
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const output = { val: [] };
+      let count;
+      if (typeof input.readBytes === "function")
+        count = Number(input.readBytes(output, 65536));
+      else {
+        const read = invokeAsset(
+          input,
+          "com.sun.star.io.XInputStream",
+          "readBytes",
+          [new uno.Any(uno.type.sequence(uno.type.byte), []), 65536],
+        );
+        count = Number(read.result);
+        output.val = read.args[0];
+      }
+      if (!count) break;
+      if (count < 0 || count > 65536 || total + count > 64 * 1024 * 1024)
+        return null;
+      const chunk = Uint8Array.from(output.val, (byte) => Number(byte) & 255);
+      if (chunk.length !== count) return null;
+      chunks.push(chunk);
+      total += count;
+    }
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.length;
+    }
+    return sha256Bytes(bytes);
+  }
+
   function sourceContentDigest(url) {
     let input;
     let stream;
     const openedStorages = [];
-    let reflection;
-    const invoke = (object, interfaceName, method, args = []) => {
-      if (typeof object?.[method] === "function")
-        return object[method](...args);
-      reflection ??= uno.componentContext
-        .getServiceManager()
-        .createInstanceWithContext(
-          "com.sun.star.reflection.CoreReflection",
-          uno.componentContext,
-        );
-      const parameters = { val: args };
-      const result = reflection
-        .forName(interfaceName)
-        .getMethod(method)
-        .invoke(object, parameters);
-      return { result, args: parameters.val };
-    };
     try {
       if (typeof url !== "string" || !url) return null;
       if (url.startsWith("vnd.sun.star.Package:")) {
@@ -1545,7 +1581,7 @@ function spellbookDocumentOperation(request) {
           openedStorages.push(storage);
         }
         stream = storage.cloneStreamElement(segments.at(-1));
-        const opened = invoke(
+        const opened = invokeAsset(
           stream,
           "com.sun.star.io.XStream",
           "getInputStream",
@@ -1560,46 +1596,15 @@ function spellbookDocumentOperation(request) {
           )
           .openFileRead(url);
       } else return null; // Do not fetch external linked assets during a read.
-      const chunks = [];
-      let total = 0;
-      for (;;) {
-        const output = { val: [] };
-        let count;
-        if (typeof input.readBytes === "function")
-          count = Number(input.readBytes(output, 65536));
-        else {
-          const read = invoke(
-            input,
-            "com.sun.star.io.XInputStream",
-            "readBytes",
-            [new uno.Any(uno.type.sequence(uno.type.byte), []), 65536],
-          );
-          count = Number(read.result);
-          output.val = read.args[0];
-        }
-        if (!count) break;
-        if (count < 0 || count > 65536 || total + count > 64 * 1024 * 1024)
-          return null;
-        const chunk = Uint8Array.from(output.val, (byte) => Number(byte) & 255);
-        if (chunk.length !== count) return null;
-        chunks.push(chunk);
-        total += count;
-      }
-      const bytes = new Uint8Array(total);
-      let offset = 0;
-      for (const chunk of chunks) {
-        bytes.set(chunk, offset);
-        offset += chunk.length;
-      }
-      return sha256Bytes(bytes);
+      return assetStreamDigest(input);
     } catch (_) {
       return null;
     } finally {
       try {
-        if (input) invoke(input, "com.sun.star.io.XInputStream", "closeInput");
+        if (input) invokeAsset(input, "com.sun.star.io.XInputStream", "closeInput");
       } catch (_) {}
       try {
-        if (stream) invoke(stream, "com.sun.star.lang.XComponent", "dispose");
+        if (stream) invokeAsset(stream, "com.sun.star.lang.XComponent", "dispose");
       } catch (_) {}
       for (const storage of openedStorages.reverse()) {
         try {
@@ -1634,6 +1639,23 @@ function spellbookDocumentOperation(request) {
     return {
       transparency: safeProperty(shape, "Transparency"),
       pixelContentSha256: (() => {
+        const cache = request.nativeAdapter?.pictureContentDigests;
+        let key = null;
+        // A new XGraphic wrapper is returned on every read. Cache by the
+        // current compressed content, never by wrapper, shape, URL or size.
+        // GraphicStream is the loaded native asset; linked sources are not
+        // opened by observation. Some generated graphics lack a stream.
+        const graphic = safeProperty(shape, "Graphic");
+        if (cache instanceof Map && safeProperty(graphic, "Linked") === false) {
+          const input = safeProperty(shape, "GraphicStream");
+          if (input) {
+            try { key = assetStreamDigest(input); } catch (_) {}
+            finally {
+              try { invokeAsset(input, "com.sun.star.io.XInputStream", "closeInput"); } catch (_) {}
+            }
+          }
+        }
+        if (key && cache.has(key)) return cache.get(key);
         const pixels = safeCall(bitmap, "getDIB");
         const mask = safeCall(bitmap, "getMaskDIB");
         if (!pixels?.length || !mask) return null;
@@ -1647,7 +1669,12 @@ function spellbookDocumentOperation(request) {
           Uint8Array.from(mask, (byte) => Number(byte) & 255),
           4 + pixels.length,
         );
-        return sha256Bytes(bytes);
+        const digest = sha256Bytes(bytes);
+        if (key) {
+          if (cache.size >= 256) cache.delete(cache.keys().next().value);
+          cache.set(key, digest);
+        }
+        return digest;
       })(),
       sourcePixelSize: {
         width: Number(sourcePixelSize.Width),
