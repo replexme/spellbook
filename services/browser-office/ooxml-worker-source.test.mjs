@@ -9,11 +9,31 @@ import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 import {
   applyOoxmlCommand,
   inspectOoxmlDocument,
+  inspectOoxmlDocumentWithAssets,
   preserveOriginalPptxParts,
   verifyPersistedElementMutation,
   remapPartRelationshipIds,
 } from "./ooxml-worker-source.mjs";
 import { persistedSlideTopologyMatches } from "./harness/product-persistence.mjs";
+
+test("package inspection fingerprints asset bytes, including same-size replacement", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const entries = unzipSync(source);
+  entries["ppt/media/proof.wav"] = new Uint8Array([1, 2, 3, 4]);
+  const before = await inspectOoxmlDocumentWithAssets(zipSync(entries));
+  assert.equal(
+    before.assetHashes["ppt/media/proof.wav"],
+    createHash("sha256").update(entries["ppt/media/proof.wav"]).digest("hex"),
+  );
+  entries["ppt/media/proof.wav"] = new Uint8Array([4, 3, 2, 1]);
+  const after = await inspectOoxmlDocumentWithAssets(zipSync(entries));
+  assert.notEqual(
+    before.assetHashes["ppt/media/proof.wav"],
+    after.assetHashes["ppt/media/proof.wav"],
+  );
+  assert.deepEqual(before.slideIds, after.slideIds);
+  assert.deepEqual(before.sections, after.sections);
+});
 
 test("browser OOXML commands produce deterministic package bytes", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
@@ -3634,8 +3654,16 @@ test("native slide insertion retains original masters and native placeholder con
       "unrelated edited content",
     ),
   );
-  assert.throws(() => preserveOriginalPptxParts(bytes, zipSync(baseline), zipSync(edited), null),
-    /no unambiguous retained-content correspondence/u);
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(
+        bytes,
+        zipSync(baseline),
+        zipSync(edited),
+        null,
+      ),
+    /no unambiguous retained-content correspondence/u,
+  );
 });
 
 test("new placeholders keep live alignment and autofit without touching old design parts", async () => {
@@ -3821,25 +3849,64 @@ test("native duplication clones an unambiguous authored slide without adding tex
   );
 });
 
-
 test("regenerated slide names cannot shift existing picture opacity during duplication", async () => {
-  const source = new Uint8Array(await readFile(new URL("../../eval/public/downloads/poi-picture-transparency.pptx", import.meta.url)));
+  const source = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/downloads/poi-picture-transparency.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
   const baseline = unzipSync(source);
-  const edited = unzipSync(applyOoxmlCommand(source, { op: "duplicate_slide", slideIndex: 0, insertIndex: 1 }).bytes);
+  const edited = unzipSync(
+    applyOoxmlCommand(source, {
+      op: "duplicate_slide",
+      slideIndex: 0,
+      insertIndex: 1,
+    }).bytes,
+  );
   for (const entries of [baseline, edited])
     slidePaths(entries).forEach((part, index) => {
-      const xml = new DOMParser().parseFromString(strFromU8(entries[part]), "application/xml");
-      xml.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "cSld")[0].setAttribute("name", `page${index + 1}`);
+      const xml = new DOMParser().parseFromString(
+        strFromU8(entries[part]),
+        "application/xml",
+      );
+      xml
+        .getElementsByTagNameNS(
+          "http://schemas.openxmlformats.org/presentationml/2006/main",
+          "cSld",
+        )[0]
+        .setAttribute("name", `page${index + 1}`);
       entries[part] = strToU8(new XMLSerializer().serializeToString(xml));
     });
   const intent = [{ op: "native_slide_topology", slideIndex: 1 }];
-  const result = preserveOriginalPptxParts(source, zipSync(baseline), zipSync(edited), null, intent);
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(baseline),
+    zipSync(edited),
+    null,
+    intent,
+  );
   assert.deepEqual(result.report.topology, { kind: "insert", index: 1 });
   assert.deepEqual(result.report.topologyExistingContentChanges, []);
   const saved = unzipSync(result.bytes);
-  for (const part of slidePaths(baseline)) assert.deepEqual(saved[part], unzipSync(source)[part], part);
+  for (const part of slidePaths(baseline))
+    assert.deepEqual(saved[part], unzipSync(source)[part], part);
   // An insertion hint is not permission to replace an unedited picture.
   const changed = slidePaths(edited)[3];
-  edited[changed] = strToU8(strFromU8(edited[changed]).replace('amt="40000"', 'amt="50000"'));
-  assert.throws(() => preserveOriginalPptxParts(source, zipSync(baseline), zipSync(edited), null, intent), /no unambiguous retained-content correspondence/u);
+  edited[changed] = strToU8(
+    strFromU8(edited[changed]).replace('amt="40000"', 'amt="50000"'),
+  );
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(
+        source,
+        zipSync(baseline),
+        zipSync(edited),
+        null,
+        intent,
+      ),
+    /no unambiguous retained-content correspondence/u,
+  );
 });

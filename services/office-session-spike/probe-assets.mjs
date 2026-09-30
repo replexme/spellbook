@@ -6,6 +6,8 @@ export const PROBE_REPLACEMENT_IMAGE_ASSET_ID =
   "00000000-0000-4000-8000-000000000003";
 export const PROBE_REPLACEMENT_MEDIA_ASSET_ID =
   "00000000-0000-4000-8000-000000000004";
+export const PROBE_SAME_SIZE_IMAGE_ASSET_ID =
+  "00000000-0000-4000-8000-000000000005";
 
 const probeWav = (sampleValue) => {
   const sampleRate = 8000;
@@ -52,6 +54,16 @@ export const probeAssets = new Map([
   [
     PROBE_REPLACEMENT_MEDIA_ASSET_ID,
     { mediaType: "audio/wav", bytes: probeWav(160) },
+  ],
+  [
+    PROBE_SAME_SIZE_IMAGE_ASSET_ID,
+    {
+      mediaType: "image/png",
+      bytes: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADklEQVQImWNgYPj/H4QBDfsD/XAe1dEAAAAASUVORK5CYII=",
+        "base64",
+      ),
+    },
   ],
 ]);
 

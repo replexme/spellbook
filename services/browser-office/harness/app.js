@@ -563,15 +563,18 @@ function preserveNativeSnapshot(
 // The browser engine keeps no slide sections; the package holds them. Each
 // engine request carries the sections of the package it observes, so its
 // observation and revision cover them as the Office engine's do.
-const packageSectionsByBytes = new WeakMap();
+const packageMetadataByBytes = new WeakMap();
+async function packageMetadataOf(bytes) {
+  if (!bytes) return { sections: [], assetHashes: {} };
+  if (!packageMetadataByBytes.has(bytes)) {
+    const pending = inspectPackage(bytes).then((result) => result.report);
+    packageMetadataByBytes.set(bytes, pending);
+    pending.catch(() => packageMetadataByBytes.delete(bytes));
+  }
+  return packageMetadataByBytes.get(bytes);
+}
 async function packageSectionsOf(bytes) {
-  if (!bytes) return [];
-  if (!packageSectionsByBytes.has(bytes))
-    packageSectionsByBytes.set(
-      bytes,
-      (await inspectPackage(bytes)).report.sections,
-    );
-  return packageSectionsByBytes.get(bytes);
+  return (await packageMetadataOf(bytes)).sections;
 }
 
 const mediaFileExtensions = Object.freeze({
@@ -603,6 +606,7 @@ async function requestNative(nativeRequest) {
         ...nativeRequest,
         ...(mediaPath ? { assetPath: mediaPath } : {}),
         packageSections: await packageSectionsOf(currentBytes),
+        packageAssetHashes: (await packageMetadataOf(currentBytes)).assetHashes,
       },
     });
   } finally {
@@ -655,6 +659,7 @@ async function serializeNativeDocument({
       path: outputPath,
       detailSlideIndex,
       packageSections: await packageSectionsOf(bytes),
+      packageAssetHashes: (await packageMetadataOf(bytes)).assetHashes,
     });
     return { bytes, observation: saved.value };
   } finally {
@@ -698,6 +703,7 @@ async function inspectNativeDocumentBytes(bytes, detailSlideIndex) {
       path,
       detailSlideIndex,
       packageSections: await packageSectionsOf(bytes),
+      packageAssetHashes: (await packageMetadataOf(bytes)).assetHashes,
     });
     return observed.value;
   } finally {

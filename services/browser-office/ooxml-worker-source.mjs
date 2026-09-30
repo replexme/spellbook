@@ -1512,7 +1512,9 @@ function directSlideTopologyPaths(original, noEdit, edited, sourceTargets) {
   // collision with another retained slide's old name. Never use them to veto
   // a content match. A recorded insertion position may disambiguate identical
   // adjacent slides, but it cannot bypass retained-content equality.
-  const intent = sourceTargets?.find((target) => target.op === "native_slide_topology");
+  const intent = sourceTargets?.find(
+    (target) => target.op === "native_slide_topology",
+  );
   const baselineBytes = baseline.map((part) =>
     topologySlideBytes(noEdit, part),
   );
@@ -2814,8 +2816,15 @@ export function preserveOriginalPptxParts(
   const topology = humanEdit
     ? directSlideTopologyPaths(original, noEdit, rawEdited, sourceTargets)
     : null;
-  if (humanEdit && orderedSlidePaths(original).length !== orderedSlidePaths(rawEdited).length && !topology)
-    throw new Error("Native slide topology has no unambiguous retained-content correspondence.");
+  if (
+    humanEdit &&
+    orderedSlidePaths(original).length !==
+      orderedSlidePaths(rawEdited).length &&
+    !topology
+  )
+    throw new Error(
+      "Native slide topology has no unambiguous retained-content correspondence.",
+    );
   const topologyPaths = topology?.paths ?? null;
   const edited = alignEngineSlideParts(original, rawEdited, topologyPaths);
   const expandedBytes = [original, noEdit, edited].reduce(
@@ -3395,10 +3404,38 @@ export function inspectOoxmlDocument(input) {
   if (input.byteLength > maximumInputBytes)
     throw new Error("PPTX exceeds the browser inspection limit.");
   const context = openPackage(input, { requireSimpleTopology: false });
+  return packageObservation(context);
+}
+
+function packageObservation(context) {
   return {
     sections: readSections(context),
     slideIds: currentSlideIds(context).map((slide) => slide.getAttribute("id")),
   };
+}
+
+export async function inspectOoxmlDocumentWithAssets(input) {
+  if (!(input instanceof Uint8Array) || input.byteLength > maximumInputBytes)
+    throw new Error("Invalid PPTX inspection input.");
+  const context = openPackage(input, { requireSimpleTopology: false });
+  const assetHashes = Object.fromEntries(
+    await Promise.all(
+      Object.entries(context.entries)
+        .filter(([name]) => name.startsWith("ppt/media/"))
+        .map(async ([name, bytes]) => {
+          const digest = new Uint8Array(
+            await crypto.subtle.digest("SHA-256", bytes),
+          );
+          return [
+            name,
+            Array.from(digest, (byte) =>
+              byte.toString(16).padStart(2, "0"),
+            ).join(""),
+          ];
+        }),
+    ),
+  );
+  return { ...packageObservation(context), assetHashes };
 }
 
 function openPackage(input, { requireSimpleTopology }) {
@@ -5309,7 +5346,7 @@ function relativePart(source, target) {
 }
 
 if (typeof self !== "undefined")
-  self.onmessage = (event) => {
+  self.onmessage = async (event) => {
     const {
       requestId,
       bytes,
@@ -5324,7 +5361,7 @@ if (typeof self !== "undefined")
       if (operation === "inspect") {
         self.postMessage({
           requestId,
-          report: inspectOoxmlDocument(new Uint8Array(bytes)),
+          report: await inspectOoxmlDocumentWithAssets(new Uint8Array(bytes)),
         });
       } else if (operation === "preserve-native") {
         const result = preserveOriginalPptxParts(

@@ -13,6 +13,7 @@ import {
   PROBE_MEDIA_ASSET_ID as MEDIA_ASSET_ID,
   PROBE_REPLACEMENT_IMAGE_ASSET_ID as REPLACEMENT_IMAGE_ASSET_ID,
   PROBE_REPLACEMENT_MEDIA_ASSET_ID as REPLACEMENT_MEDIA_ASSET_ID,
+  PROBE_SAME_SIZE_IMAGE_ASSET_ID as SAME_SIZE_IMAGE_ASSET_ID,
 } from "./probe-assets.mjs";
 import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
 
@@ -187,6 +188,28 @@ try {
     if (image?.picture?.sourcePixelSize?.width !== 2)
       throw new Error(
         "Image replacement did not preserve the target identity and change its content.",
+      );
+    const imageDigest = image.picture.pixelContentSha256;
+    if (!/^[a-f0-9]{64}$/u.test(imageDigest ?? ""))
+      throw new Error("Image pixels are not observable.");
+    await editWithHistory(
+      {
+        op: "replace_image",
+        assetId: SAME_SIZE_IMAGE_ASSET_ID,
+        elementId: image.elementId,
+        slideIndex,
+      },
+      true,
+    );
+    image = topLevelElements().find(
+      (element) => element.stableId === imageStableId,
+    );
+    if (
+      image?.picture?.sourcePixelSize?.width !== 2 ||
+      image.picture.pixelContentSha256 === imageDigest
+    )
+      throw new Error(
+        "Same-size image replacement did not change the observed pixels.",
       );
     // A runtime that cannot host media (the browser build compiles avmedia
     // out) is planned without the media operations; follow that plan.

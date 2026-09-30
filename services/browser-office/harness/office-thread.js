@@ -78,11 +78,13 @@ function assetSignatureIsValid(bytes, mediaType) {
 // The product sends them with each request, and every observation this
 // thread makes for that request includes them.
 let packageSections = [];
+let packageAssetHashes = {};
 
 function observeDocument(request = {}) {
   return spellbookDocumentOperation({
     operation: "observe",
     packageSections,
+    packageAssetHashes,
     ...request,
     captureSlideIndexes: [],
     mutationContracts: spellbookMutationContracts,
@@ -116,11 +118,17 @@ function withSavedDocumentModel(path, operation) {
   }
 }
 
-function inspectSavedDocument(path, detailSlideIndex, savedSections) {
+function inspectSavedDocument(
+  path,
+  detailSlideIndex,
+  savedSections,
+  savedAssets,
+) {
   return withSavedDocumentModel(path, (created) =>
     spellbookDocumentOperation({
       operation: "observe",
       packageSections: savedSections,
+      packageAssetHashes: savedAssets,
       captureSlideIndexes: [],
       ...(Number.isSafeInteger(detailSlideIndex) ? { detailSlideIndex } : {}),
       mutationContracts: spellbookMutationContracts,
@@ -623,6 +631,7 @@ function start() {
           packageSections = Array.isArray(nativeRequest.packageSections)
             ? nativeRequest.packageSections
             : [];
+          packageAssetHashes = nativeRequest.packageAssetHashes ?? {};
           const changesBefore = documentChangeCount();
           let observedBefore = null;
           if (
@@ -774,6 +783,7 @@ function start() {
               Array.isArray(event.data.packageSections)
                 ? event.data.packageSections
                 : [],
+              event.data.packageAssetHashes ?? {},
             ),
           });
           break;
