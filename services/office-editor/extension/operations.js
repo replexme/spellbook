@@ -675,7 +675,10 @@ function spellbookDocumentOperation(request) {
     // (often speaker notes) instead of the real later difference.
     return null;
   };
-  const documentStateJson = stableJson;
+  // Property-state metadata describes how UNO obtained a value. Impress can
+  // recalculate it during an edit or package reload without changing that
+  // value; keep it for persistence masks, outside content/revision equality.
+  const documentStateJson = (value) => stableJson(withoutPropertyStates(value));
   const transactionState = (state) => ({
     slides: state.slides,
     masters: state.masters,
@@ -1027,6 +1030,14 @@ function spellbookDocumentOperation(request) {
         paragraphs.push({
           paragraphId: `${elementId}:p${paragraphIndex}`,
           paragraphIndex,
+          ...(alignmentOnShape
+            ? {
+                propertyStates: collectPropertyStates(paragraph, [
+                  ["topMargin", "ParaTopMargin"],
+                  ["bottomMargin", "ParaBottomMargin"],
+                ]),
+              }
+            : {}),
           // An empty text body keeps no paragraph of its own, so the shape
           // carries its alignment and PPTX export writes it from there.
           alignment: alignmentOnShape
@@ -1447,6 +1458,7 @@ function spellbookDocumentOperation(request) {
     )
       return null;
     return {
+      transparency: safeProperty(shape, "Transparency"),
       sourcePixelSize: {
         width: Number(sourcePixelSize.Width),
         height: Number(sourcePixelSize.Height),
@@ -8586,7 +8598,9 @@ function spellbookDocumentOperation(request) {
       const copy = { ...value };
       delete copy.alignedWith;
       delete copy.overlapsWith;
-      return JSON.stringify(copy);
+      // Property-state observations can change when Impress recalculates an
+      // unrelated empty paragraph. Compare its values, not this metadata.
+      return documentStateJson(copy);
     };
     const structural = [
       "duplicate_element",

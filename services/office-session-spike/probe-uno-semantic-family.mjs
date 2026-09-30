@@ -199,16 +199,17 @@ try {
       );
       let media = topLevelElements().find((element) => element.media);
       if (!media) throw new Error("Inserted media was not observed.");
-      await editWithHistory({
-        op: "set_media_playback",
-        elementId: media.elementId,
-        mediaPlayback: {
-          loop: media.media.loop !== true,
-          muted: media.media.muted !== true,
-          volumeDb: -1200,
-          zoom: "fit",
-        },
-      });
+      if (expectedOperations?.includes("set_media_playback"))
+        await editWithHistory({
+          op: "set_media_playback",
+          elementId: media.elementId,
+          mediaPlayback: {
+            loop: media.media.loop !== true,
+            muted: media.media.muted !== true,
+            volumeDb: -1200,
+            zoom: "fit",
+          },
+        });
       media = topLevelElements().find(
         (element) => element.stableId === media.stableId,
       );

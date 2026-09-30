@@ -154,6 +154,19 @@ function withoutObservationOnlyFields(value) {
   return value;
 }
 
+// Playback settings are outside the supported PPTX mutation contract: the
+// pinned engine does not save them, and their round-trip equality is optional.
+// Keep the media source and every other media property in the integrity check.
+function withoutMediaPlaybackSettings(slides) {
+  for (const slide of slides)
+    for (const element of slide.elements ?? []) {
+      if (!element.media || typeof element.media !== "object") continue;
+      for (const property of ["loop", "muted", "volumeDb", "zoom"])
+        delete element.media[property];
+    }
+  return slides;
+}
+
 function withoutMergedContinuationFormatting(slides) {
   for (const slide of slides) {
     for (const element of slide.elements ?? []) {
@@ -508,49 +521,51 @@ export function normalizeDocumentPersistenceState(
       const rightIdentity = `${right.name ?? ""}\u0000${right.layout ?? ""}\u0000${stableJson(right)}`;
       return leftIdentity.localeCompare(rightIdentity, "en");
     });
-  const slides = withTableSizeFromGrid(
-    withoutFontworkTextAnchor(
-      withoutPresetEditorMetadata(
-        withSavedAnimationContainers(
-          withoutInactiveFooterValues(
-            withoutInactiveStyleValues(
-              withCanonicalShapeIdentity(
-                withoutTransientEmptyPlaceholderDefaults(
-                  withoutMergedContinuationFormatting(
-                    (state?.slides ?? []).map(
-                      ({ masterIndex: _masterIndex, ...slide }, index) => {
-                        const {
-                          masterIndex: _authoredMasterIndex,
-                          ...authoredSlide
-                        } =
-                          authoredArrayEntry(
-                            slide,
-                            authoredBy?.slides,
-                            index,
-                          ) ?? {};
-                        const normalized = withoutObservationOnlyFields(
-                          withoutComputedPropertyValues(
-                            structuredClone(slide),
-                            authoredSlide,
-                          ),
-                        );
-                        if (normalized.transition) {
+  const slides = withoutMediaPlaybackSettings(
+    withTableSizeFromGrid(
+      withoutFontworkTextAnchor(
+        withoutPresetEditorMetadata(
+          withSavedAnimationContainers(
+            withoutInactiveFooterValues(
+              withoutInactiveStyleValues(
+                withCanonicalShapeIdentity(
+                  withoutTransientEmptyPlaceholderDefaults(
+                    withoutMergedContinuationFormatting(
+                      (state?.slides ?? []).map(
+                        ({ masterIndex: _masterIndex, ...slide }, index) => {
                           const {
-                            effect: _effect,
-                            speed: _speed,
-                            ...persistedTransition
-                          } = normalized.transition;
-                          normalized.transition = persistedTransition;
-                        }
-                        return normalized;
-                      },
+                            masterIndex: _authoredMasterIndex,
+                            ...authoredSlide
+                          } =
+                            authoredArrayEntry(
+                              slide,
+                              authoredBy?.slides,
+                              index,
+                            ) ?? {};
+                          const normalized = withoutObservationOnlyFields(
+                            withoutComputedPropertyValues(
+                              structuredClone(slide),
+                              authoredSlide,
+                            ),
+                          );
+                          if (normalized.transition) {
+                            const {
+                              effect: _effect,
+                              speed: _speed,
+                              ...persistedTransition
+                            } = normalized.transition;
+                            normalized.transition = persistedTransition;
+                          }
+                          return normalized;
+                        },
+                      ),
                     ),
                   ),
                 ),
+                authoredBy?.slides,
               ),
               authoredBy?.slides,
             ),
-            authoredBy?.slides,
           ),
         ),
       ),

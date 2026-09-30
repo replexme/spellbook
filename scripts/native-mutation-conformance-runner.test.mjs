@@ -87,7 +87,6 @@ test("execution plan assigns a real PPTX and bounded operation routes to every s
       "insert_media",
       "replace_image",
       "replace_media",
-      "set_media_playback",
     ],
   );
 });

@@ -15,7 +15,7 @@
     }
   },
   "aiExposure": {
-    "operationCount": 95,
+    "operationCount": 94,
     "policy": "Expose every bounded operation except format-excluded mutations. Before execution, authorize against the current document permission and the live editor engine patch level. Availability records release-evidence maturity; it does not silently remove an implemented operation from the model schema."
   },
   "transaction": {
@@ -1019,7 +1019,7 @@
         "target": "element",
         "execution": "native_transform",
         "identityEffect": "preserve",
-        "availability": "runtime_validation_required",
+        "availability": "format_excluded",
         "minEnginePatch": 27
       },
       "set_smartart_node": {
@@ -1208,7 +1208,6 @@
       "crop_image",
       "replace_image",
       "replace_media",
-      "set_media_playback",
       "set_smartart_node",
       "add_smartart_node",
       "delete_smartart_node",
@@ -1241,7 +1240,6 @@
     "replace_image",
     "insert_media",
     "replace_media",
-    "set_media_playback",
     "set_smartart_node",
     "add_smartart_node",
     "delete_smartart_node",
@@ -1253,6 +1251,11 @@
     "move_animation_effect"
   ],
   "formatExcludedOperations": [
+    {
+      "op": "set_media_playback",
+      "format": "pptx",
+      "reason": "The pinned LibreOffice engine does not serialize loop, mute, volume or zoom changes into PPTX. Playback-settings editing is excluded; media insertion and replacement remain supported."
+    },
     {
       "op": "set_printable",
       "format": "pptx",
@@ -1374,7 +1377,6 @@
           "replace_image",
           "insert_media",
           "replace_media",
-          "set_media_playback",
           "set_smartart_node",
           "add_smartart_node",
           "delete_smartart_node",

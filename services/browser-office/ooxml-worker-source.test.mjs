@@ -566,6 +566,7 @@ test("native snapshot keeps authored properties across a direct slide addition",
     zipSync(noEdit),
     zipSync(edited),
     null,
+    [{ op: "native_slide_topology", slideIndex: 1 }],
   );
   assert.equal(inspectOoxmlDocument(result.bytes).slideIds.length, 2);
   assert.deepEqual(
@@ -3508,4 +3509,337 @@ test("relationship remapping leaves an empty relationship id alone", () => {
   );
   assert.match(remapped, /r:embed="rId5"/u);
   assert.match(remapped, /r:id=""/u);
+});
+
+// Model engine save behavior with public fixtures: renamed old slides, empty
+// paragraph normalization, renumbered package paths and extra native masters.
+function engineTopologyFixture(entries, renameExisting = false) {
+  const next = { ...entries };
+  const paths = slidePaths(entries);
+  const renamed = new Map(
+    paths.map((part, index) => [part, `ppt/slides/slide${index + 1}.xml`]),
+  );
+  for (const part of paths) {
+    delete next[part];
+    delete next[part.replace("/slides/", "/slides/_rels/") + ".rels"];
+  }
+  for (const [part, value] of Object.entries(entries)) {
+    const owner = part.replace(/\/_rels\/([^/]+)\.rels$/u, "/$1");
+    const destination = renamed.get(owner);
+    if (destination)
+      next[
+        part === owner
+          ? destination
+          : destination.replace("/slides/", "/slides/_rels/") + ".rels"
+      ] = value;
+  }
+  for (const [part, value] of Object.entries(next)) {
+    if (!part.endsWith(".rels")) continue;
+    let xml = strFromU8(value);
+    for (const [old, target] of renamed)
+      xml = xml.replaceAll(
+        `Target="${old.replace("ppt/", "")}"`,
+        `Target="__${target}__"`,
+      );
+    xml = xml.replace(
+      /Target="__(ppt\/[^"]+)__"/gu,
+      (_, target) => `Target="${target.replace("ppt/", "")}"`,
+    );
+    next[part] = strToU8(xml);
+  }
+  if (renameExisting) {
+    const part = paths[0];
+    const mapped = renamed.get(part);
+    next[mapped] = strToU8(
+      strFromU8(next[mapped])
+        .replace('name="Original A"', 'name="regenerated name"')
+        .replace(
+          '<a:pPr marR="0" defTabSz="457200"><a:lnSpc><a:spcPct val="100000"/></a:lnSpc></a:pPr>',
+          "",
+        ),
+    );
+  }
+  return next;
+}
+
+test("native slide insertion retains original masters and native placeholder contents despite regenerated names", async () => {
+  let bytes = new Uint8Array(await readFile(fixtureUrl));
+  bytes = applyOoxmlCommand(bytes, {
+    op: "duplicate_slide",
+    slideIndex: 0,
+    insertIndex: 1,
+  }).bytes;
+  let original = unzipSync(bytes);
+  const paths = slidePaths(original);
+  paths.forEach((part, index) => {
+    original[part] = strToU8(
+      strFromU8(original[part])
+        .replace(
+          "<p:cSld",
+          `<p:cSld name="Original ${index === 0 ? "A" : "B"}"`,
+        )
+        .replace(
+          "</p:txBody>",
+          '<a:p><a:pPr marR="0" defTabSz="457200"><a:lnSpc><a:spcPct val="100000"/></a:lnSpc></a:pPr><a:endParaRPr/></a:p></p:txBody>',
+        ),
+    );
+  });
+  bytes = zipSync(original);
+  const added = unzipSync(
+    applyOoxmlCommand(bytes, {
+      op: "duplicate_slide",
+      slideIndex: 0,
+      insertIndex: 1,
+    }).bytes,
+  );
+  const inserted = slidePaths(added)[1];
+  added[inserted] = strToU8(
+    strFromU8(added[inserted])
+      .replace('name="Original A"', 'name="Native New"')
+      .replace("Spellbook 검증 العربية", "Native placeholder text"),
+  );
+  const baseline = engineTopologyFixture(original);
+  const edited = engineTopologyFixture(added, true);
+  for (const entries of [baseline, edited]) {
+    entries["ppt/slideMasters/slideMaster2.xml"] =
+      original["ppt/slideMasters/slideMaster1.xml"];
+    entries["ppt/slideMasters/_rels/slideMaster2.xml.rels"] =
+      original["ppt/slideMasters/_rels/slideMaster1.xml.rels"];
+    entries["ppt/slideLayouts/_rels/slideLayout1.xml.rels"] = strToU8(
+      strFromU8(
+        entries["ppt/slideLayouts/_rels/slideLayout1.xml.rels"],
+      ).replace("slideMaster1.xml", "slideMaster2.xml"),
+    );
+  }
+  const result = preserveOriginalPptxParts(
+    bytes,
+    zipSync(baseline),
+    zipSync(edited),
+    null,
+  );
+  assert.equal(result.report.topologyAligned, true);
+  assert.deepEqual(result.report.topology, { kind: "insert", index: 1 });
+  assert.deepEqual(result.report.topologyExistingContentChanges, []);
+  const merged = unzipSync(result.bytes);
+  for (const [part, value] of Object.entries(original))
+    if (/^ppt\/(slides|slideMasters|slideLayouts|theme)\//u.test(part))
+      assert.deepEqual(merged[part], value, part);
+  const savedNew = slidePaths(merged)[1];
+  assert.match(strFromU8(merged[savedNew]), /Native placeholder text/u);
+  assert.equal(merged["ppt/slideMasters/slideMaster2.xml"], undefined);
+  // A concurrent content edit cannot be mistaken for save normalization.
+  edited["ppt/slides/slide1.xml"] = strToU8(
+    strFromU8(edited["ppt/slides/slide1.xml"]).replace(
+      "Spellbook 검증 العربية",
+      "unrelated edited content",
+    ),
+  );
+  assert.throws(() => preserveOriginalPptxParts(bytes, zipSync(baseline), zipSync(edited), null),
+    /no unambiguous retained-content correspondence/u);
+});
+
+test("new placeholders keep live alignment and autofit without touching old design parts", async () => {
+  const bytes = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(bytes);
+  const added = unzipSync(
+    applyOoxmlCommand(bytes, {
+      op: "add_slide",
+      templateSlideIndex: 0,
+      insertIndex: 1,
+    }).bytes,
+  );
+  const newPart = slidePaths(added)[1];
+  const doc = new DOMParser().parseFromString(
+    strFromU8(added[newPart]),
+    "application/xml",
+  );
+  const ns = "http://schemas.openxmlformats.org/presentationml/2006/main";
+  const tree = doc.getElementsByTagNameNS(ns, "spTree")[0];
+  const shape = (id, body) =>
+    `<p:sp xmlns:p="${ns}" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:nvSpPr><p:cNvPr id="${id}" name="Generated ${id}"/><p:cNvSpPr/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:spPr/>${body}</p:sp>`;
+  const body =
+    "<p:txBody><a:bodyPr><a:noAutofit/></a:bodyPr><a:p><a:pPr><a:buNone/></a:pPr><a:endParaRPr/></a:p></p:txBody>";
+  for (const xml of [shape(2, body), shape(3, "")])
+    tree.appendChild(
+      doc.importNode(
+        new DOMParser().parseFromString(xml, "application/xml").documentElement,
+        true,
+      ),
+    );
+  added[newPart] = strToU8(new XMLSerializer().serializeToString(doc));
+  const baseline = engineTopologyFixture(original);
+  const edited = engineTopologyFixture(added);
+  const elements = [
+    {
+      parentElementId: null,
+      objectName: "Authored title",
+      text: "",
+      paragraphAlignment: 3,
+      textAutoGrowHeight: true,
+      textMargins: { bottom: 100 },
+      propertyStates: {
+        paragraphAlignment: "DIRECT_VALUE",
+        textAutoGrowHeight: "DIRECT_VALUE",
+        "textMargins.bottom": "DIRECT_VALUE",
+      },
+      paragraphFormats: [{ topMargin: 0, bottomMargin: 0 }],
+    },
+    { parentElementId: null, objectName: "Non-text object", text: null },
+  ];
+  const result = preserveOriginalPptxParts(
+    bytes,
+    zipSync(baseline),
+    zipSync(edited),
+    null,
+    [{ op: "native_slide_topology", slideIndex: 1, elements }],
+  );
+  const saved = unzipSync(result.bytes);
+  const xml = strFromU8(saved[slidePaths(saved)[1]]);
+  assert.match(xml, /name="Authored title"/u);
+  assert.match(xml, /<a:spAutoFit\/>/u);
+  assert.match(xml, /bIns="36000"/u);
+  assert.match(xml, /<a:lvl1pPr[^>]*algn="ctr"/u);
+  assert.match(xml, /<a:spcBef><a:spcPts val="0"\/><\/a:spcBef>/u);
+  assert.ok(
+    xml.indexOf("<a:spcBef>") < xml.indexOf("<a:buNone/>"),
+    "DrawingML child order must remain valid",
+  );
+  for (const [part, value] of Object.entries(original))
+    if (/^ppt\/(slides|slideMasters|slideLayouts|theme)\//u.test(part))
+      assert.deepEqual(saved[part], value, part);
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(
+        bytes,
+        zipSync(baseline),
+        zipSync(edited),
+        null,
+        [{ op: "native_slide_topology", slideIndex: 1, elements: [] }],
+      ),
+    /every new shape/u,
+  );
+});
+
+test("native duplication clones an unambiguous authored slide without adding text bodies to decoration", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(source);
+  const ns = "http://schemas.openxmlformats.org/presentationml/2006/main";
+  const xml = strFromU8(original["ppt/slides/slide1.xml"]);
+  original["ppt/slides/slide1.xml"] = strToU8(
+    xml.replace(
+      "</p:spTree>",
+      `<p:sp><p:nvSpPr><p:cNvPr id="91" name="Decoration"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="9144000" cy="36000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:sp></p:spTree>`,
+    ),
+  );
+  const before = zipSync(original);
+  const baseline = { ...original };
+  baseline["ppt/slides/slide1.xml"] = strToU8(
+    strFromU8(original["ppt/slides/slide1.xml"])
+      .replace(
+        '<p:cNvPr id="91" name="Decoration"',
+        '<p:cNvPr id="91" name="Decoration"',
+      )
+      .replace(
+        "</p:sp></p:spTree>",
+        '<p:txBody><a:bodyPr tIns="-8640" bIns="-8640"/><a:p><a:pPr/><a:endParaRPr/></a:p></p:txBody></p:sp></p:spTree>',
+      ),
+  );
+  const edited = engineTopologyFixture(
+    unzipSync(
+      applyOoxmlCommand(zipSync(baseline), {
+        op: "duplicate_slide",
+        slideIndex: 0,
+        insertIndex: 1,
+      }).bytes,
+    ),
+  );
+  const inserted = "ppt/slides/slide2.xml";
+  const doc = new DOMParser().parseFromString(
+    strFromU8(edited[inserted]),
+    "application/xml",
+  );
+  const tree = doc.getElementsByTagNameNS(ns, "spTree")[0];
+  const shapes = [...tree.childNodes].filter(
+    (node) =>
+      node.nodeType === 1 &&
+      ["sp", "pic", "graphicFrame", "cxnSp", "grpSp"].includes(node.localName),
+  );
+  const elements = shapes.map((shape, index) => {
+    const props = shape.getElementsByTagNameNS(ns, "cNvPr")[0];
+    props.setAttribute("name", `Duplicated ${index}`);
+    const paragraphs = [
+      ...shape.getElementsByTagNameNS(
+        "http://schemas.openxmlformats.org/drawingml/2006/main",
+        "p",
+      ),
+    ];
+    return {
+      parentElementId: null,
+      objectName: `Duplicated ${index}`,
+      text: paragraphs
+        .map((p) =>
+          [
+            ...p.getElementsByTagNameNS(
+              "http://schemas.openxmlformats.org/drawingml/2006/main",
+              "t",
+            ),
+          ]
+            .map((t) => t.textContent)
+            .join(""),
+        )
+        .join("\n"),
+      presentationObject: false,
+      textMargins: { top: 125, bottom: 125 },
+      propertyStates: {
+        "textMargins.top": "DIRECT_VALUE",
+        "textMargins.bottom": "DIRECT_VALUE",
+      },
+    };
+  });
+  edited[inserted] = strToU8(new XMLSerializer().serializeToString(doc));
+  const result = preserveOriginalPptxParts(
+    before,
+    zipSync(baseline),
+    zipSync(edited),
+    null,
+    [{ op: "native_slide_topology", slideIndex: 1, elements }],
+  );
+  const saved = unzipSync(result.bytes);
+  assert.deepEqual(
+    saved["ppt/slides/slide1.xml"],
+    original["ppt/slides/slide1.xml"],
+  );
+  const savedDoc = new DOMParser().parseFromString(
+    strFromU8(saved[slidePaths(saved)[1]]),
+    "application/xml",
+  );
+  const decoration = [...savedDoc.getElementsByTagNameNS(ns, "sp")].at(-1);
+  assert.equal(decoration.getElementsByTagNameNS(ns, "txBody").length, 0);
+  assert.equal(
+    decoration.getElementsByTagNameNS(ns, "cNvPr")[0].getAttribute("name"),
+    elements.at(-1).objectName,
+  );
+});
+
+
+test("regenerated slide names cannot shift existing picture opacity during duplication", async () => {
+  const source = new Uint8Array(await readFile(new URL("../../eval/public/downloads/poi-picture-transparency.pptx", import.meta.url)));
+  const baseline = unzipSync(source);
+  const edited = unzipSync(applyOoxmlCommand(source, { op: "duplicate_slide", slideIndex: 0, insertIndex: 1 }).bytes);
+  for (const entries of [baseline, edited])
+    slidePaths(entries).forEach((part, index) => {
+      const xml = new DOMParser().parseFromString(strFromU8(entries[part]), "application/xml");
+      xml.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "cSld")[0].setAttribute("name", `page${index + 1}`);
+      entries[part] = strToU8(new XMLSerializer().serializeToString(xml));
+    });
+  const intent = [{ op: "native_slide_topology", slideIndex: 1 }];
+  const result = preserveOriginalPptxParts(source, zipSync(baseline), zipSync(edited), null, intent);
+  assert.deepEqual(result.report.topology, { kind: "insert", index: 1 });
+  assert.deepEqual(result.report.topologyExistingContentChanges, []);
+  const saved = unzipSync(result.bytes);
+  for (const part of slidePaths(baseline)) assert.deepEqual(saved[part], unzipSync(source)[part], part);
+  // An insertion hint is not permission to replace an unedited picture.
+  const changed = slidePaths(edited)[3];
+  edited[changed] = strToU8(strFromU8(edited[changed]).replace('amt="40000"', 'amt="50000"'));
+  assert.throws(() => preserveOriginalPptxParts(source, zipSync(baseline), zipSync(edited), null, intent), /no unambiguous retained-content correspondence/u);
 });

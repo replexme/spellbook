@@ -20,7 +20,14 @@ import {
   reusableAiObservationForSlide,
 } from "/harness/ai-observation-view.mjs";
 import {
+  directDeletePreservationTarget,
+  directMovePreservationTarget,
+  directTextGeometryPreservationTarget,
   directTextPreservationTarget,
+  isRevisionOnlyNativeSnapshot,
+  normalizeDirectEditPersistenceState,
+  persistedDirectDeletionMatches,
+  persistedDirectSlideTopologyMatches,
   persistedSectionsMatch,
   persistedSlideTopologyMatches,
 } from "/harness/product-persistence.mjs";
@@ -35,7 +42,7 @@ import {
   normalizeDocumentPersistenceState,
   persistenceStateFromObservation,
   withAuthoredUntargetedShapes,
-} from "/harness/persistence-evidence.mjs";
+} from "/office-session-spike/persistence-evidence.mjs";
 import {
   acknowledgedSaveHasLaterChanges,
   canReuseSaveAcknowledgementObservation,
@@ -2074,29 +2081,90 @@ async function checkpointLiveNativeState(live, reason, retryCount = 0) {
       ? liveExportBaseline.bytes
       : null;
   liveExportBaseline = null;
-  const directTextTarget = directTextPreservationTarget(
-    normalizeDocumentPersistenceState(
-      persistenceStateFromObservation(reconciledObservation),
-    ),
-    normalizeDocumentPersistenceState(persistenceStateFromObservation(live)),
+  const priorState = normalizeDirectEditPersistenceState(
+    persistenceStateFromObservation(reconciledObservation),
   );
-  // When the only model difference is one text value, preserve every other
-  // shape and package part exactly as the author saved it. Other direct edits
-  // continue through the human budget.
+  const liveState = normalizeDirectEditPersistenceState(
+    persistenceStateFromObservation(live),
+  );
+  const directTarget =
+    directTextPreservationTarget(priorState, liveState) ??
+    directTextGeometryPreservationTarget(priorState, liveState) ??
+    directMovePreservationTarget(priorState, liveState) ??
+    directDeletePreservationTarget(priorState, liveState);
+  const directOperations =
+    directTarget?.operations ?? (directTarget ? [directTarget.op] : null);
+  const directTargets =
+    directOperations?.map((op) => ({ ...directTarget, op })) ?? null;
+  // A single observed text or position edit is bounded to its shape and
+  // slide. Other direct edits continue through the human budget.
   const preserved = await preserveAndInspectNativeDocument(
     previousState.currentBytes,
     live.textDetails?.slideIndex,
-    directTextTarget ? ["replace_text"] : null,
-    directTextTarget ? [directTextTarget] : null,
+    directOperations,
+    directTargets ??
+      (live.slides.length === reconciledObservation.slides.length + 1
+        ? [
+            {
+              op: "native_slide_topology",
+              slideIndex: live.activeSlide,
+              elements: live.slides[live.activeSlide]?.elements,
+            },
+          ]
+        : null),
     baselineBytes,
   );
   const afterBytes = preserved.bytes;
+  if (
+    isRevisionOnlyNativeSnapshot(
+      priorState,
+      liveState,
+      reconciledObservation.sections,
+      live.sections,
+      previousState.currentBytes,
+      afterBytes,
+    )
+  ) {
+    reconciledModelRevision = live.revision;
+    unreconciledModelRevision = "";
+    try {
+      rememberReconciledObservation(live);
+      await persistCheckpoint();
+    } catch (error) {
+      restoreProductEditState(previousState);
+      unreconciledModelRevision = live.revision;
+      throw error;
+    }
+    liveExportBaseline = {
+      revision: live.revision,
+      bytes: preserved.serialized,
+    };
+    return true;
+  }
   try {
-    assertPersistedNativeIntent(
-      reconciledObservation,
-      live,
-      preserved.observation,
+    const reopenedState = normalizeDocumentPersistenceState(
+      persistenceStateFromObservation(preserved.observation),
     );
+    const deletionVerified = persistedDirectDeletionMatches(
+      priorState,
+      liveState,
+      reopenedState,
+      directTarget,
+      preserved.report,
+    );
+    const topologyVerified = persistedDirectSlideTopologyMatches(
+      persistenceStateFromObservation(reconciledObservation),
+      persistenceStateFromObservation(live),
+      persistenceStateFromObservation(preserved.observation),
+      preserved.report,
+    );
+    if (!deletionVerified && !topologyVerified)
+      assertPersistedNativeIntent(
+        reconciledObservation,
+        live,
+        preserved.observation,
+        preserved.report,
+      );
   } catch (error) {
     if (
       retryCount < 2 &&

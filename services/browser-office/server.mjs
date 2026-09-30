@@ -26,6 +26,15 @@ export function buildRoutes(
   const runtimeRoot = options.runtimeRoot ?? path.join(root, "runtime");
   const runtimeIdentity = options.runtimeIdentity;
   const routes = new Map([
+    ...["persistence-evidence.mjs", "document-state-evidence.mjs"].map(
+      (name) => [
+        `/office-session-spike/${name}`,
+        route(
+          path.join(repositoryRoot, "services/office-session-spike", name),
+          "text/javascript; charset=utf-8",
+        ),
+      ],
+    ),
     [
       "/",
       route(path.join(root, "harness/index.html"), "text/html; charset=utf-8"),

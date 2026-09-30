@@ -14,10 +14,10 @@ const conformance = JSON.parse(
 test("native mutation plan covers every operation through family fixtures", () => {
   const plan = buildConformancePlan(capabilities, conformance);
 
-  assert.equal(plan.summary.operations, 95);
-  assert.equal(plan.summary.families, 22);
+  assert.equal(plan.summary.operations, 94);
+  assert.equal(plan.summary.families, 21);
   assert.equal(plan.summary.scenarios, 13);
-  assert.equal(plan.summary.nativeTests, 32);
+  assert.equal(plan.summary.nativeTests, 31);
   assert.equal(Object.keys(plan.scenarios)[0], "table-structure");
   assert.equal(Object.keys(plan.scenarios).at(-1), "general-native-surface");
   assert.deepEqual(
@@ -43,6 +43,33 @@ test("scenario order is complete and cannot silently drift from the contract", (
     () => buildConformancePlan(capabilities, invalid),
     /Invalid conformance executionOrder.*missing=table-structure/,
   );
+});
+
+test("PPTX playback settings stay unexposed while media assets remain executable", () => {
+  const operation = "set_media_playback";
+  assert.equal(
+    capabilities.mutationModel.operations[operation].availability,
+    "format_excluded",
+  );
+  assert.ok(
+    capabilities.formatExcludedOperations.some(
+      ({ op, reason }) => op === operation && reason.includes("serialize"),
+    ),
+  );
+  assert.ok(
+    !capabilities.toolInputSchema.properties.op.enum.includes(operation),
+  );
+  assert.ok(
+    !Object.values(capabilities.operationGroups).flat().includes(operation),
+  );
+  const plan = buildConformancePlan(capabilities, conformance);
+  assert.equal(plan.families.media_playback, undefined);
+  assert.deepEqual(plan.families.media_asset.operations.sort(), [
+    "insert_image",
+    "insert_media",
+    "replace_image",
+    "replace_media",
+  ]);
 });
 
 test("engine patch selection removes unavailable operations without hand-maintained lists", () => {

@@ -19,7 +19,7 @@
     "runtime_verified": "Typed operation, permission check, live readback, native Undo and browser-session probe all pass.",
     "runtime_verified_auxiliary_tool": "The same safety and browser-session gates pass, but the operation still travels through a specialized asset tool rather than the native edit schema.",
     "engine_patch_ready": "A bounded adapter and isolated source patch exist for the declared undo-v level. Promotion still requires the compiled native suite, browser Undo/save/reopen/playback evidence where applicable, and independent PowerPoint release validation.",
-    "format_excluded": "The human editor may expose a local property, but the target document format has no interoperable representation, so AI mutation is intentionally unavailable.",
+    "format_excluded": "The target format or the pinned engine cannot preserve the edited property, so AI mutation is intentionally unavailable.",
     "observation_verified": "The live browser editor exposes stable, bounded structure for this family and the observation was checked on a representative public PPTX; mutation safety is a separate state.",
     "runtime_validation_required": "A bounded typed adapter exists and its immediate browser transaction passes, but save/reopen, visual or native-application release gates remain.",
     "typed_adapter_required": "The human editor has the capability, but the AI still needs a bounded schema, readback and Undo test.",
@@ -39,7 +39,7 @@
       "policy": "Every observed Impress UI command is routed to a product semantic family. Routing proves inventory coverage only; it does not make a raw UNO command an AI tool or satisfy that family's runtime release gates."
     },
     "aiToolExposure": {
-      "count": 97,
+      "count": 94,
       "source": "native-edit-capabilities.json#toolInputSchema.properties.op.enum",
       "runtimeGuard": "The connector checks the live editor patch level and document permission before every operation."
     },
@@ -132,20 +132,22 @@
       "replace_image",
       "insert_media",
       "replace_media",
-      "set_media_playback",
       "set_smartart_node",
       "add_smartart_node",
       "delete_smartart_node",
       "set_fontwork",
-      "set_3d_material",
-      "set_equation_source",
       "set_reading_order",
       "add_animation_effect",
       "remove_animation_effect",
       "replace_animation_effect",
       "move_animation_effect"
     ],
-    "formatExcluded": ["set_printable"],
+    "formatExcluded": [
+      "set_media_playback",
+      "set_printable",
+      "set_3d_material",
+      "set_equation_source"
+    ],
     "enginePatchReadyTransactions": [],
     "runtimeVerifiedAuxiliaryTools": [],
     "runtimeVerifiedTransactions": ["multi_command_slide_structure"]

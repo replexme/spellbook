@@ -46,6 +46,58 @@ test("product persistence admission checks changed semantics across save/reopen"
   );
 });
 
+test("optional media playback settings do not hide media source or geometry loss", () => {
+  const before = {
+    slides: [
+      {
+        elements: [
+          {
+            objectName: "Video",
+            x: 100,
+            media: {
+              sourceId: "ppt/media/video1.mp4",
+              loop: true,
+              muted: true,
+              volumeDb: -1200,
+              zoom: "fit",
+              mimeType: "video/mp4",
+            },
+          },
+        ],
+      },
+    ],
+    masters: [],
+  };
+  const reopened = structuredClone(before);
+  Object.assign(reopened.slides[0].elements[0].media, {
+    loop: false,
+    muted: false,
+    volumeDb: 0,
+    zoom: "original",
+  });
+  assert.deepEqual(
+    normalizeDocumentPersistenceState(before),
+    normalizeDocumentPersistenceState(reopened),
+  );
+  assert.equal(
+    before.slides[0].elements[0].media.loop,
+    true,
+    "normalization must not mutate the observation",
+  );
+  reopened.slides[0].elements[0].media.sourceId = "ppt/media/wrong.mp4";
+  assert.notDeepEqual(
+    normalizeDocumentPersistenceState(before),
+    normalizeDocumentPersistenceState(reopened),
+  );
+  reopened.slides[0].elements[0].media.sourceId =
+    before.slides[0].elements[0].media.sourceId;
+  reopened.slides[0].elements[0].x = 900;
+  assert.notDeepEqual(
+    normalizeDocumentPersistenceState(before),
+    normalizeDocumentPersistenceState(reopened),
+  );
+});
+
 test("product persistence admission compares rebuilt animation containers in their saved form", () => {
   const indefinite = { trigger: null, offset: null, repeat: 0 };
   const effect = (duration) => ({

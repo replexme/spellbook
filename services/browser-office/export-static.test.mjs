@@ -178,3 +178,12 @@ test("Korean fonts, font rules and the engine settings ship in the runtime folde
     ],
   );
 });
+
+test("product persistence dependencies are included in the static release", () => {
+  const written = new Set(plan().files.map(({ file }) => `/${file}`));
+  for (const module of [
+    "persistence-evidence.mjs",
+    "document-state-evidence.mjs",
+  ])
+    assert.ok(written.has(`/office-session-spike/${module}`));
+});

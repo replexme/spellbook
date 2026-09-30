@@ -243,3 +243,21 @@ test("browser conformance reuses an exact fixture and captures one PPTX save", a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("product persistence shared imports resolve in browser and exported site", () => {
+  const routes = buildRoutes();
+  const module = readFileSync(
+    new URL("./harness/product-persistence.mjs", import.meta.url),
+    "utf8",
+  );
+  for (const [, specifier] of module.matchAll(/from\s+"([^"]+)"/gu)) {
+    const url = new URL(
+      specifier,
+      "http://localhost/harness/product-persistence.mjs",
+    );
+    assert.ok(routes.has(url.pathname), `${url.pathname} has no route`);
+    const dependency = readFileSync(routes.get(url.pathname).file, "utf8");
+    for (const [, child] of dependency.matchAll(/from\s+"([^"]+)"/gu))
+      assert.ok(routes.has(new URL(child, url).pathname));
+  }
+});

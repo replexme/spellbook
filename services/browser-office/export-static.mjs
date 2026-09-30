@@ -41,6 +41,10 @@ function served(route) {
   return (
     route === "/workspace" ||
     route.startsWith("/harness/") ||
+    [
+      "/office-session-spike/persistence-evidence.mjs",
+      "/office-session-spike/document-state-evidence.mjs",
+    ].includes(route) ||
     route.startsWith(RUNTIME_PREFIX)
   );
 }

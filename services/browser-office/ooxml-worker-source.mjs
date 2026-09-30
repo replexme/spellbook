@@ -353,6 +353,44 @@ function mergeElementThreeWay(document, source, baseline, edited) {
   return merged;
 }
 
+// Impress rounds an imported shape's original position on its first export.
+// A direct keyboard move must apply the exported delta to the author's
+// coordinates, otherwise the rounding offset is added to the saved shape.
+function applyAuthoredGeometryDelta(
+  merged,
+  source,
+  baseline,
+  edited,
+  operations,
+) {
+  const transform = (shape) => {
+    const matches = shape.getElementsByTagNameNS(drawingNamespace, "xfrm");
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const transforms = [merged, source, baseline, edited].map(transform);
+  if (transforms.some((node) => !node)) return false;
+  for (const [tag, attributes] of [
+    ["off", operations.includes("move") ? ["x", "y"] : []],
+    ["ext", operations.includes("resize") ? ["cx", "cy"] : []],
+  ]) {
+    if (!attributes.length) continue;
+    const nodes = transforms.map((node) =>
+      optionalDirectXmlChild(node, drawingNamespace, tag),
+    );
+    if (nodes.some((node) => !node)) return false;
+    for (const attribute of attributes) {
+      if (nodes.some((node) => !node.hasAttribute(attribute))) return false;
+      const values = nodes.map((node) => Number(node.getAttribute(attribute)));
+      if (values.some((value) => !Number.isSafeInteger(value))) return false;
+      const result = values[1] + values[3] - values[2];
+      if (!Number.isSafeInteger(result) || (tag === "ext" && result <= 0))
+        return false;
+      nodes[0].setAttribute(attribute, String(result));
+    }
+  }
+  return true;
+}
+
 // Impress rewrites extended document properties on export. Apply only the
 // fields that differ between its two saves to the author's original XML.
 // TotalTime is save duration, already excluded by sameEngineExportPart.
@@ -643,6 +681,21 @@ function preserveUnaffectedSlideShapes(
       baseline,
       editedShape,
     );
+    if (
+      merged &&
+      targetIndexes?.has(index) &&
+      sourceOperations.some(
+        (operation) => operation === "move" || operation === "resize",
+      ) &&
+      !applyAuthoredGeometryDelta(
+        merged,
+        source,
+        baseline,
+        editedShape,
+        sourceOperations,
+      )
+    )
+      return null;
     if (merged)
       replacements.push({ pair, editedShape, restored: false, node: merged });
   }
@@ -757,6 +810,91 @@ function preserveUnaffectedSlideShapes(
   )
     return null;
   return serializeXml(documents[2]);
+}
+
+function removeDirectShapeFromOriginal(
+  part,
+  originalBytes,
+  noEditBytes,
+  editedBytes,
+  index,
+  name,
+) {
+  if (!originalBytes || !noEditBytes || !editedBytes) return null;
+  const documents = [originalBytes, noEditBytes, editedBytes].map((bytes) =>
+    parseXml({ [part]: bytes }, part),
+  );
+  const [authored, baseline, edited] = documents.map(topLevelSlideShapes);
+  if (
+    !authored ||
+    !baseline ||
+    !edited ||
+    authored.length !== baseline.length ||
+    baseline.length !== edited.length + 1 ||
+    index < 0 ||
+    index >= baseline.length
+  )
+    return null;
+  const identity = (node) => {
+    const properties = node.getElementsByTagNameNS(
+      presentationNamespace,
+      "cNvPr",
+    )[0];
+    return (
+      properties && {
+        id: properties.getAttribute("id"),
+        name: properties.getAttribute("name"),
+      }
+    );
+  };
+  const removed = authored[index];
+  const removedId = identity(removed)?.id;
+  if (
+    !removedId ||
+    identity(removed)?.name !== name ||
+    removed.localName !== baseline[index].localName ||
+    [removed, ...removed.getElementsByTagName("*")].some((node) =>
+      Array.from(node.attributes).some(
+        (attribute) =>
+          attribute.namespaceURI === relationshipAttributeNamespace,
+      ),
+    ) ||
+    shapeReferences(documents[0]).some(
+      ({ element, attribute }) => element.getAttribute(attribute) === removedId,
+    )
+  )
+    return null;
+  const retained = baseline.filter((_, shapeIndex) => shapeIndex !== index);
+  const uniqueText = (node, collection) => {
+    try {
+      const text = readShapeText(node);
+      return text &&
+        collection.filter((candidate) => {
+          try {
+            return readShapeText(candidate) === text;
+          } catch {
+            return false;
+          }
+        }).length === 1
+        ? text
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  if (
+    retained.some(
+      (node, shapeIndex) =>
+        node.localName !== edited[shapeIndex].localName ||
+        (identity(node)?.name !== identity(edited[shapeIndex])?.name &&
+          (!uniqueText(node, baseline) ||
+            uniqueText(node, baseline) !==
+              uniqueText(edited[shapeIndex], edited))),
+    )
+  )
+    return null;
+  removed.parentNode.removeChild(removed);
+  return serializeXml(documents[0]);
 }
 
 function topLevelSlideShapes(document) {
@@ -1242,13 +1380,15 @@ function assertChangedReferencesResolve(merged, changedParts) {
 // the author's names follow any order once slides were added, duplicated or
 // moved. Give the engine's parts the author's names for the same positions,
 // so that every comparison meets one slide under one name.
-function alignEngineSlideParts(original, engine) {
-  const authored = orderedSlidePaths(original);
+function alignEngineSlideParts(original, engine, targetPaths = null) {
+  const authored = targetPaths ?? orderedSlidePaths(original);
   const saved = orderedSlidePaths(engine);
   if (
     !authored.length ||
     authored.length !== saved.length ||
-    authored.some((part) => !part || !original[part]) ||
+    authored.some(
+      (part) => !part || (targetPaths === null && !original[part]),
+    ) ||
     saved.some((part) => !part || !engine[part])
   )
     return engine;
@@ -1326,6 +1466,395 @@ function alignEngineSlideParts(original, engine) {
   return aligned;
 }
 
+// When a person adds or removes one slide in Office, its export renumbers the
+// later slide parts. Pair the unchanged engine slides with the no-edit export
+// before doing the three-way merge. Ambiguous or concurrent slide edits stay
+// on the conservative path and are refused by the saved-model check.
+function topologySlideBytes(entries, part, ignoreShapeNames = false) {
+  const document = parseXml(entries, part);
+  document
+    .getElementsByTagNameNS(presentationNamespace, "cSld")[0]
+    ?.removeAttribute("name");
+  if (ignoreShapeNames)
+    for (const shape of document.getElementsByTagNameNS(
+      presentationNamespace,
+      "cNvPr",
+    ))
+      shape.removeAttribute("name");
+  for (const paragraph of document.getElementsByTagNameNS(
+    drawingNamespace,
+    "p",
+  )) {
+    if (
+      xmlElementChildren(paragraph).some((child) =>
+        ["r", "fld", "br"].includes(child.localName),
+      )
+    )
+      continue;
+    for (const properties of [
+      ...paragraph.getElementsByTagNameNS(drawingNamespace, "pPr"),
+    ])
+      properties.parentNode.removeChild(properties);
+  }
+  return serializeXml(document);
+}
+
+function directSlideTopologyPaths(original, noEdit, edited, sourceTargets) {
+  const baseline = orderedSlidePaths(noEdit);
+  const saved = orderedSlidePaths(edited);
+  const authored = orderedSlidePaths(original);
+  if (
+    baseline.length !== authored.length ||
+    Math.abs(saved.length - baseline.length) !== 1
+  )
+    return null;
+  // cSld names can be regenerated from the slide's position, including a
+  // collision with another retained slide's old name. Never use them to veto
+  // a content match. A recorded insertion position may disambiguate identical
+  // adjacent slides, but it cannot bypass retained-content equality.
+  const intent = sourceTargets?.find((target) => target.op === "native_slide_topology");
+  const baselineBytes = baseline.map((part) =>
+    topologySlideBytes(noEdit, part),
+  );
+  const savedBytes = saved.map((part) => topologySlideBytes(edited, part));
+  const comparisons = new Map();
+  const matches = (baseIndex, savedIndex) => {
+    const key = `${baseIndex}/${savedIndex}`;
+    if (!comparisons.has(key))
+      comparisons.set(
+        key,
+        sameEngineExportPart(
+          baseline[baseIndex],
+          baselineBytes[baseIndex],
+          savedBytes[savedIndex],
+        ),
+      );
+    return comparisons.get(key);
+  };
+  const candidates = [];
+  if (saved.length === baseline.length + 1) {
+    for (let insert = 0; insert < saved.length; insert += 1) {
+      if (
+        baseline.every((_, index) =>
+          matches(index, index < insert ? index : index + 1),
+        )
+      )
+        candidates.push(insert);
+    }
+    const selected = candidates.length === 1 ? candidates[0]
+      : candidates.includes(intent?.slideIndex) ? intent.slideIndex : null;
+    if (selected === null) return null;
+    const newPart =
+      saved.find((part) => !original[part]) ??
+      (() => {
+        let ordinal = 1;
+        while (
+          original[`ppt/slides/slide${ordinal}.xml`] ||
+          edited[`ppt/slides/slide${ordinal}.xml`]
+        )
+          ordinal += 1;
+        return `ppt/slides/slide${ordinal}.xml`;
+      })();
+    const targetPaths = authored.slice();
+    targetPaths.splice(selected, 0, newPart);
+    return { kind: "insert", index: selected, paths: targetPaths };
+  }
+  for (let removed = 0; removed < baseline.length; removed += 1) {
+    if (
+      saved.every((_, index) =>
+        matches(index < removed ? index : index + 1, index),
+      )
+    )
+      candidates.push(removed);
+  }
+  const selected = candidates.length === 1 ? candidates[0]
+    : candidates.includes(intent?.slideIndex) ? intent.slideIndex : null;
+  if (selected === null) return null;
+  return {
+    kind: "delete",
+    index: selected,
+    paths: authored.filter((_, index) => index !== selected),
+  };
+}
+
+// Impress can omit a newly created placeholder's explicit empty-paragraph
+// alignment and a duplicated title's auto-grow state from its native export.
+// Write the exact live properties into ONLY the new slide, then verify those
+// properties through the ordinary native persisted-intent comparator.
+function preserveInsertedShapeProperties(entries, part, intent) {
+  if (!intent?.elements) return;
+  const document = parseXml(entries, part);
+  const shapes = topLevelSlideShapes(document);
+  const observed = intent.elements.filter(
+    (element) => !element.parentElementId,
+  );
+  if (shapes.length !== observed.length)
+    throw new Error("Native insertion cannot identify every new shape.");
+  const direct = (element, field) =>
+    [0, "0", "DIRECT_VALUE"].includes(element.propertyStates?.[field]);
+  for (const [index, shape] of shapes.entries()) {
+    const element = observed[index];
+    const properties = shape.getElementsByTagNameNS(
+      presentationNamespace,
+      "cNvPr",
+    )[0];
+    if (
+      typeof element.objectName === "string" &&
+      element.objectName &&
+      properties
+    )
+      properties.setAttribute("name", element.objectName);
+    const body = optionalDirectXmlChild(shape, presentationNamespace, "txBody");
+    if (!body) continue;
+    if (readShapeText(shape) !== element.text)
+      throw new Error(
+        "Native insertion text does not match the observed shape.",
+      );
+    const bodyProperties = directXmlChild(body, drawingNamespace, "bodyPr");
+    for (const [side, attribute] of [
+      ["left", "lIns"],
+      ["right", "rIns"],
+      ["top", "tIns"],
+      ["bottom", "bIns"],
+    ]) {
+      const value = element.textMargins?.[side];
+      if (
+        bodyProperties &&
+        direct(element, `textMargins.${side}`) &&
+        Number.isFinite(value)
+      )
+        bodyProperties.setAttribute(attribute, String(Math.round(value * 360)));
+    }
+    if (
+      bodyProperties &&
+      direct(element, "textAutoGrowHeight") &&
+      typeof element.textAutoGrowHeight === "boolean"
+    ) {
+      for (const child of xmlElementChildren(bodyProperties))
+        if (["noAutofit", "normAutofit", "spAutoFit"].includes(child.localName))
+          bodyProperties.removeChild(child);
+      bodyProperties.appendChild(
+        document.createElementNS(
+          drawingNamespace,
+          element.textAutoGrowHeight ? "a:spAutoFit" : "a:noAutofit",
+        ),
+      );
+    }
+    if (
+      element.text !== "" ||
+      !shape.getElementsByTagNameNS(presentationNamespace, "ph").length
+    )
+      continue;
+    const paragraphs = [...body.getElementsByTagNameNS(drawingNamespace, "p")];
+    if (paragraphs.length !== 1) continue;
+    const paragraph = paragraphs[0];
+    const paragraphProperties = ensureParagraphProperties(paragraph);
+    // UNO ParagraphAdjust is LEFT, RIGHT, BLOCK, CENTER, STRETCH.
+    const alignment = ["l", "r", "just", "ctr", "dist"][
+      element.paragraphAlignment
+    ];
+    if (direct(element, "paragraphAlignment") && alignment)
+      paragraphProperties.setAttribute("algn", alignment);
+    const format = element.paragraphFormats?.[0];
+    for (const [field, name] of [
+      ["topMargin", "spcBef"],
+      ["bottomMargin", "spcAft"],
+    ]) {
+      if (!Number.isFinite(format?.[field])) continue;
+      for (const previous of [
+        ...paragraphProperties.getElementsByTagNameNS(drawingNamespace, name),
+      ])
+        previous.parentNode.removeChild(previous);
+      const spacing = document.createElementNS(drawingNamespace, `a:${name}`);
+      const points = document.createElementNS(drawingNamespace, "a:spcPts");
+      points.setAttribute(
+        "val",
+        String(Math.round((format[field] * 7200) / 2540)),
+      );
+      spacing.appendChild(points);
+      const successor = xmlElementChildren(paragraphProperties).find(
+        (child) =>
+          !["lnSpc", ...(name === "spcAft" ? ["spcBef"] : [])].includes(
+            child.localName,
+          ),
+      );
+      paragraphProperties.insertBefore(spacing, successor ?? null);
+    }
+    // Empty presentation objects use list-style defaults on import; there is
+    // no text run onto which the importer can apply paragraph properties.
+    let listStyle = optionalDirectXmlChild(body, drawingNamespace, "lstStyle");
+    if (!listStyle) {
+      listStyle = document.createElementNS(drawingNamespace, "a:lstStyle");
+      body.insertBefore(listStyle, paragraph);
+    }
+    for (const name of ["defPPr", "lvl1pPr"]) {
+      const existing = optionalDirectXmlChild(
+        listStyle,
+        drawingNamespace,
+        name,
+      );
+      if (existing) listStyle.removeChild(existing);
+      const defaults = document.createElementNS(drawingNamespace, `a:${name}`);
+      for (const attribute of [...paragraphProperties.attributes])
+        defaults.setAttribute(attribute.name, attribute.value);
+      for (const child of [...paragraphProperties.childNodes])
+        defaults.appendChild(child.cloneNode(true));
+      const following = xmlElementChildren(listStyle).find(
+        (child) => name === "defPPr" || /^lvl[2-9]pPr$/u.test(child.localName),
+      );
+      listStyle.insertBefore(defaults, following ?? null);
+    }
+  }
+  entries[part] = serializeXml(document);
+}
+
+// Keep every surviving author's part, and transplant the inserted native
+// slide itself (including its placeholders). Import only its dependencies;
+// reconnect layouts to their authored owners instead of admitting the
+// engine's one-master-per-layout presentation.
+function mergeDirectSlideTopology(
+  originalBytes,
+  original,
+  noEdit,
+  edited,
+  topology,
+  sourceTargets,
+) {
+  const context = openPackage(originalBytes, { requireSimpleTopology: false });
+  if (topology.kind === "delete") {
+    deleteSlide(context, { op: "delete_slide", slideIndex: topology.index });
+    return context.entries;
+  }
+  if (context.slideIds.length >= 200)
+    throw new Error("The browser document slide limit is 200.");
+  const newSlide = topology.paths[topology.index];
+  const intent = sourceTargets?.find(
+    (target) =>
+      target.op === "native_slide_topology" &&
+      target.slideIndex === topology.index,
+  );
+  // A duplicate can be matched to one whole native baseline slide after only
+  // generated identities and empty-paragraph save noise are removed. Clone its
+  // authored package instead of introducing export-created text bodies on
+  // non-text decoration (thin rectangles otherwise acquire clamped margins).
+  const baselinePaths = orderedSlidePaths(noEdit);
+  const mayBeClone = intent?.elements?.some(
+    (element) =>
+      !(
+        element.presentationObject === true &&
+        element.emptyPresentationObject === true
+      ),
+  );
+  const newFingerprint = mayBeClone
+    ? topologySlideBytes(edited, newSlide, true)
+    : null;
+  const cloneSources = mayBeClone
+    ? baselinePaths.filter((part) =>
+        sameEngineExportPart(
+          part,
+          topologySlideBytes(noEdit, part, true),
+          newFingerprint,
+        ),
+      )
+    : [];
+  if (cloneSources.length === 1) {
+    const changed = new Set();
+    clonePart(
+      context,
+      orderedSlidePaths(original)[baselinePaths.indexOf(cloneSources[0])],
+      newSlide,
+      new Map([[cloneSources[0], newSlide]]),
+      changed,
+    );
+    preserveInsertedShapeProperties(context.entries, newSlide, intent);
+    registerSlide(
+      context,
+      newSlide,
+      topology.index,
+      changed,
+      readSections(context),
+    );
+    return context.entries;
+  }
+  const copied = new Map([[newSlide, newSlide]]);
+  const importedTypes = contentTypeDeclarations(
+    parseXml(edited, contentTypesPath),
+  );
+  const imported = new Set();
+  const importPart = (source, destination) => {
+    if (copied.size > 500)
+      throw new Error("Slide dependency graph exceeds the safe copy limit.");
+    if (!edited[source] || original[destination])
+      throw new Error(`Native topology cannot import ${source}.`);
+    context.entries[destination] = edited[source];
+    imported.add(destination);
+    copyContentType(
+      context,
+      source,
+      destination,
+      declaredContentType(importedTypes, source),
+    );
+    const related = relationshipsPath(source);
+    if (!edited[related]) return;
+    const relationships = parseXml(edited, related);
+    for (const relationship of relationshipElements(relationships)) {
+      if (relationship.getAttribute("TargetMode") === "External") continue;
+      const target = resolvePart(source, relationship.getAttribute("Target"));
+      const kind = relationship.getAttribute("Type").split("/").at(-1);
+      let mapped = copied.get(target);
+      if (!mapped && kind === "slideLayout") {
+        mapped = resolvePart(
+          destination,
+          remapSlideLayoutTarget(
+            source,
+            relationship.getAttribute("Target"),
+            original,
+            noEdit,
+          ),
+        );
+      } else if (!mapped && kind === "notesMaster") {
+        const masters = relationshipsOfType(
+          original,
+          presentationPath,
+          "notesMaster",
+        );
+        if (masters.length === 1) mapped = masters[0].target;
+        else
+          throw new Error(
+            "Native topology cannot identify the authored notes master.",
+          );
+      } else if (!mapped && kind === "slide" && original[target])
+        mapped = target;
+      else if (
+        !mapped &&
+        !["notesSlide", "comments"].includes(kind) &&
+        original[target] &&
+        samePartBytes(original[target], edited[target])
+      )
+        mapped = target;
+      if (!mapped) {
+        mapped = nextPartPath(context.entries, target);
+        copied.set(target, mapped);
+        importPart(target, mapped);
+      }
+      relationship.setAttribute("Target", relativePart(destination, mapped));
+    }
+    context.entries[relationshipsPath(destination)] =
+      serializeXml(relationships);
+    imported.add(relationshipsPath(destination));
+  };
+  importPart(newSlide, newSlide);
+  preserveInsertedShapeProperties(context.entries, newSlide, intent);
+  registerSlide(
+    context,
+    newSlide,
+    topology.index,
+    imported,
+    readSections(context),
+  );
+  return context.entries;
+}
+
 function orderedSlidePaths(entries) {
   if (!entries[presentationPath] || !entries[presentationRelationshipsPath])
     return [];
@@ -1366,14 +1895,25 @@ function shapeTargetsBySlide(original, scopes) {
 }
 
 // The observation and the OOXML merge both enumerate top-level slide shapes
-// in their slide order. A direct text edit keeps that position even when the
-// live placeholder name differs from the author's cNvPr name.
-function directTextTargetIndexesBySlide(original, operations, targets) {
+// in their slide order. A direct edit keeps that position even when the live
+// placeholder name differs from the author's cNvPr name.
+function directShapeTargetIndexesBySlide(original, operations, targets) {
   if (
-    operations?.length !== 1 ||
-    operations[0] !== "replace_text" ||
-    targets?.length !== 1 ||
-    targets[0]?.op !== "replace_text" ||
+    !Array.isArray(operations) ||
+    operations.length < 1 ||
+    operations.length > 3 ||
+    !operations.every((operation) =>
+      ["replace_text", "move", "resize", "delete_element"].includes(operation),
+    ) ||
+    !Array.isArray(targets) ||
+    targets.length !== operations.length ||
+    !targets.every(
+      (target, index) =>
+        target?.op === operations[index] &&
+        target.slideIndex === targets[0].slideIndex &&
+        target.shapeIndex === targets[0].shapeIndex &&
+        target.name === targets[0].name,
+    ) ||
     !Number.isSafeInteger(targets[0].slideIndex) ||
     !Number.isSafeInteger(targets[0].shapeIndex) ||
     targets[0].shapeIndex < 0
@@ -2270,7 +2810,14 @@ export function preserveOriginalPptxParts(
   }
   const original = unzipSync(originalBytes);
   const noEdit = alignEngineSlideParts(original, unzipSync(noEditBytes));
-  const edited = alignEngineSlideParts(original, unzipSync(editedBytes));
+  const rawEdited = unzipSync(editedBytes);
+  const topology = humanEdit
+    ? directSlideTopologyPaths(original, noEdit, rawEdited, sourceTargets)
+    : null;
+  if (humanEdit && orderedSlidePaths(original).length !== orderedSlidePaths(rawEdited).length && !topology)
+    throw new Error("Native slide topology has no unambiguous retained-content correspondence.");
+  const topologyPaths = topology?.paths ?? null;
+  const edited = alignEngineSlideParts(original, rawEdited, topologyPaths);
   const expandedBytes = [original, noEdit, edited].reduce(
     (total, entries) =>
       total +
@@ -2292,11 +2839,29 @@ export function preserveOriginalPptxParts(
     ? shapeTargetsBySlide(original, shapeScopes)
     : null;
   const targetIndexesBySlide = targetNamesBySlide
-    ? directTextTargetIndexesBySlide(original, sourceOperations, sourceTargets)
+    ? directShapeTargetIndexesBySlide(original, sourceOperations, sourceTargets)
     : null;
-  const merged = {};
+  const directDeletionPart =
+    sourceOperations.length === 1 &&
+    sourceOperations[0] === "delete_element" &&
+    targetIndexesBySlide?.size === 1
+      ? [...targetIndexesBySlide.keys()][0]
+      : null;
+  const topologyPatch = topology
+    ? mergeDirectSlideTopology(
+        originalBytes,
+        original,
+        noEdit,
+        edited,
+        topology,
+        sourceTargets,
+      )
+    : null;
+  const merged = topologyPatch ?? {};
   const editedSlides = [];
-  const semanticPatchedParts = [];
+  const semanticPatchedParts = topologyPatch
+    ? changedPackageParts(original, topologyPatch)
+    : [];
   const suppressedNoopParts = [];
   const suppressedOutOfBudgetParts = [];
   const semanticMasterThemePatch =
@@ -2306,12 +2871,16 @@ export function preserveOriginalPptxParts(
   const presentationPartsPatch = semanticMasterThemePatch
     ? null
     : mergePresentationParts(original, noEdit, edited);
-  const paths = new Set([
-    ...Object.keys(original),
-    ...Object.keys(noEdit),
-    ...Object.keys(edited),
-    ...Object.keys(semanticMasterThemePatch ?? {}),
-  ]);
+  const paths = new Set(
+    topologyPatch
+      ? []
+      : [
+          ...Object.keys(original),
+          ...Object.keys(noEdit),
+          ...Object.keys(edited),
+          ...Object.keys(semanticMasterThemePatch ?? {}),
+        ],
+  );
   for (const part of [...paths].sort()) {
     // No current native command edits package core properties. Impress
     // updates modified time, lastModifiedBy and revision as a save side
@@ -2325,6 +2894,13 @@ export function preserveOriginalPptxParts(
       budget.allowedCategories.has(classifyNativePackagePart(part)) &&
       (budget.allowPartCreationOrDeletion ||
         Boolean(original[part]) === Boolean(edited[part]));
+    const existingSlideContentDuringTopology =
+      topologyPaths !== null &&
+      Boolean(original[part]) &&
+      Boolean(edited[part]) &&
+      /^ppt\/(?:slides|notesSlides|notesMasters|slideMasters|slideLayouts|theme)\//u.test(
+        part,
+      );
     // A command confined to named shapes leaves every other slide as authored.
     const untargetedSlide =
       targetNamesBySlide !== null &&
@@ -2335,7 +2911,9 @@ export function preserveOriginalPptxParts(
       part !== "docProps/core.xml" &&
       engineChanged &&
       withinBudget &&
-      !untargetedSlide;
+      !untargetedSlide &&
+      !existingSlideContentDuringTopology &&
+      !(directDeletionPart && part === relationshipsPath(directDeletionPart));
     // The author's copy of an unchanged part is kept, but its .rels may be the
     // engine's renumbered copy by now (.rels sort before their part). Rebind
     // the kept part's r:* references to the same relationships; when one no
@@ -2387,18 +2965,29 @@ export function preserveOriginalPptxParts(
         )
       : null;
     const semanticShapePatch = authoredChange
-      ? preserveUnaffectedSlideShapes(
-          part,
-          original[part],
-          noEdit[part],
-          semanticTableInsetPatch ?? edited[part],
-          sourceOperations,
-          targetNamesBySlide?.get(part) ?? null,
-          targetIndexesBySlide?.get(part) ?? null,
-        )
+      ? directDeletionPart === part
+        ? removeDirectShapeFromOriginal(
+            part,
+            original[part],
+            noEdit[part],
+            edited[part],
+            [...targetIndexesBySlide.get(part)][0],
+            sourceTargets[0].name,
+          )
+        : preserveUnaffectedSlideShapes(
+            part,
+            original[part],
+            noEdit[part],
+            semanticTableInsetPatch ?? edited[part],
+            sourceOperations,
+            targetNamesBySlide?.get(part) ?? null,
+            targetIndexesBySlide?.get(part) ?? null,
+          )
       : null;
     if (targetIndexesBySlide?.has(part) && semanticShapePatch === null)
-      throw new Error(`Native snapshot cannot isolate direct text in ${part}.`);
+      throw new Error(
+        `Native snapshot cannot isolate direct ${sourceOperations[0] === "replace_text" ? "text" : sourceOperations[0] === "delete_element" ? "deletion" : "move"} in ${part}.`,
+      );
     const semanticExtendedPropertiesPatch =
       authoredChange &&
       part === "docProps/app.xml" &&
@@ -2447,13 +3036,15 @@ export function preserveOriginalPptxParts(
             ? semanticSlideSizePatch
               ? mergeSlideSizeIntoOriginal(original, noEdit, edited)
               : part.endsWith(".rels")
-                ? remapAuthoredRelationships(
-                    part,
-                    edited[part],
-                    original,
-                    noEdit,
-                    sourceOperations,
-                  )
+                ? edited[part]
+                  ? remapAuthoredRelationships(
+                      part,
+                      edited[part],
+                      original,
+                      noEdit,
+                      sourceOperations,
+                    )
+                  : undefined
                 : (relationshipRemap ??
                   semanticShapePatch ??
                   semanticTableInsetPatch ??
@@ -2503,6 +3094,41 @@ export function preserveOriginalPptxParts(
       changedPackageParts(original, merged),
     ),
   );
+  // A no-op Office export can add a master or layout that the later edit
+  // references without changing that part's bytes. The three-way merge sees
+  // no delta and would otherwise omit the newly required part.
+  for (let iteration = 0; iteration < maximumEntries; iteration += 1) {
+    const missing = [...reachableParts(merged)].filter((part) => !merged[part]);
+    if (!missing.length) break;
+    let restored = 0;
+    for (const part of missing) {
+      if (
+        original[part] ||
+        !noEdit[part] ||
+        !edited[part] ||
+        !sameEngineExportPart(part, noEdit[part], edited[part]) ||
+        !budget.allowedCategories.has(classifyNativePackagePart(part))
+      )
+        continue;
+      merged[part] = edited[part];
+      semanticPatchedParts.push(part);
+      restored += 1;
+      if (part.endsWith(".xml")) {
+        const related = relationshipsPath(part);
+        if (
+          !merged[related] &&
+          noEdit[related] &&
+          edited[related] &&
+          sameEngineExportPart(related, noEdit[related], edited[related]) &&
+          budget.allowedCategories.has(classifyNativePackagePart(related))
+        ) {
+          merged[related] = edited[related];
+          semanticPatchedParts.push(related);
+        }
+      }
+    }
+    if (!restored) break;
+  }
   const contentTypes = reconcileContentTypes(merged, original, edited);
   if (contentTypes) {
     merged[contentTypesPath] = contentTypes;
@@ -2538,6 +3164,20 @@ export function preserveOriginalPptxParts(
             slideIndex,
             names ? [...names] : null,
           ])
+        : null,
+      topologyAligned: topologyPaths !== null,
+      topology: topology
+        ? { kind: topology.kind, index: topology.index }
+        : null,
+      topologyExistingContentChanges: topology
+        ? changedParts.filter(
+            (part) =>
+              original[part] &&
+              merged[part] &&
+              /^ppt\/(?:slides|notesSlides|notesMasters|slideMasters|slideLayouts|theme)\//u.test(
+                part,
+              ),
+          )
         : null,
     },
   };
@@ -4154,6 +4794,37 @@ function createSlide(context, command) {
     entries[newSlideRelationshipsPath] = serializeXml(slideRelationships);
     changedParts.add(newSlideRelationshipsPath);
   }
+  registerSlide(
+    context,
+    newSlidePath,
+    insertIndex,
+    changedParts,
+    sectionsBefore,
+  );
+  return {
+    operation: command.op,
+    sourceIndex,
+    insertIndex,
+    slideCount: slideIds.length + 1,
+    changedParts: [...changedParts].sort(),
+  };
+}
+
+function registerSlide(
+  context,
+  newSlidePath,
+  insertIndex,
+  changedParts,
+  sectionsBefore,
+) {
+  const {
+    entries,
+    presentation,
+    relationships,
+    contentTypes,
+    slideIdList,
+    slideIds,
+  } = context;
   const newRelationshipId = nextRelationshipId(relationships);
   const newRelationship = relationships.createElementNS(
     packageRelationshipNamespace,
@@ -4209,13 +4880,6 @@ function createSlide(context, command) {
   changedParts.add(contentTypesPath);
   changedParts.add(presentationRelationshipsPath);
   changedParts.add(presentationPath);
-  return {
-    operation: command.op,
-    sourceIndex,
-    insertIndex,
-    slideCount: slideIds.length + 1,
-    changedParts: [...changedParts].sort(),
-  };
 }
 
 function moveSlide(context, command) {
