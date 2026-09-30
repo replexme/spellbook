@@ -628,6 +628,19 @@ test("native insertion checks retained live formatting, indexed references and i
     "a concurrent empty paragraph format edit cannot be lost",
   );
   live.slides[2].elements[0].paragraphFormats[0].topMargin = 0;
+  before.slides[1].elements[0].connector = {
+    startElementId: "1/0", endElementId: "1/1", startGluePoint: 0,
+  };
+  live.slides[2].elements[0].connector = {
+    startElementId: "2/0", endElementId: "2/1", startGluePoint: 0,
+  };
+  reopened.slides[2].elements[0].connector = structuredClone(live.slides[2].elements[0].connector);
+  assert.equal(persistedDirectSlideTopologyMatches(before, live, reopened, report), true,
+    "connection addresses shift with their retained slide");
+  live.slides[2].elements[0].connector.startElementId = "2/1";
+  assert.equal(persistedDirectSlideTopologyMatches(before, live, reopened, report), false,
+    "changing which shape is connected remains an authored change");
+  live.slides[2].elements[0].connector.startElementId = "2/0";
   reopened.slides[1].elements[0].x = 100;
   assert.equal(
     persistedDirectSlideTopologyMatches(before, live, reopened, report),

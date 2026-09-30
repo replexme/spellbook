@@ -1499,6 +1499,36 @@ function topologySlideBytes(entries, part, ignoreShapeNames = false) {
   return serializeXml(document);
 }
 
+// Connected lines recalculate their bounding box when the engine exports a
+// retained slide again. Endpoint rounding is at most one 1/100 mm per end.
+// This is only a topology correspondence check: retained source parts are
+// copied unchanged, and the product must separately prove their live model
+// did not change. Other geometry, connection targets and styles stay exact.
+function topologyConnectorRoundingMatches(part, beforeBytes, afterBytes) {
+  const before = parseXml({ [part]: beforeBytes }, part);
+  const after = parseXml({ [part]: afterBytes }, part);
+  const left = [...before.getElementsByTagNameNS(presentationNamespace, "cxnSp")];
+  const right = [...after.getElementsByTagNameNS(presentationNamespace, "cxnSp")];
+  if (left.length !== right.length || !left.length) return false;
+  let adjusted = false;
+  for (let index = 0; index < left.length; index++) {
+    if (!["stCxn", "endCxn"].some(tag => left[index].getElementsByTagNameNS(drawingNamespace, tag).length)) continue;
+    for (const [tag, axes, tolerance] of [["off", ["x", "y"], 360], ["ext", ["cx", "cy"], 720]]) {
+      const a = left[index].getElementsByTagNameNS(drawingNamespace, tag)[0];
+      const b = right[index].getElementsByTagNameNS(drawingNamespace, tag)[0];
+      if (!a || !b) return false;
+      for (const axis of axes) {
+        if (!a.hasAttribute(axis) || !b.hasAttribute(axis)) return false;
+        const first = Number(a.getAttribute(axis));
+        const second = Number(b.getAttribute(axis));
+        if (!Number.isSafeInteger(first) || !Number.isSafeInteger(second) || Math.abs(first - second) > tolerance) return false;
+        if (first !== second) { b.setAttribute(axis, a.getAttribute(axis)); adjusted = true; }
+      }
+    }
+  }
+  return adjusted && sameEngineExportPart(part, beforeBytes, serializeXml(after));
+}
+
 function directSlideTopologyPaths(original, noEdit, edited, sourceTargets) {
   const baseline = orderedSlidePaths(noEdit);
   const saved = orderedSlidePaths(edited);
@@ -1529,7 +1559,7 @@ function directSlideTopologyPaths(original, noEdit, edited, sourceTargets) {
           baseline[baseIndex],
           baselineBytes[baseIndex],
           savedBytes[savedIndex],
-        ),
+        ) || topologyConnectorRoundingMatches(baseline[baseIndex], baselineBytes[baseIndex], savedBytes[savedIndex]),
       );
     return comparisons.get(key);
   };

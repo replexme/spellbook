@@ -2164,6 +2164,8 @@ async function checkpointLiveNativeState(live, reason, retryCount = 0) {
       persistenceStateFromObservation(preserved.observation),
       preserved.report,
     );
+    if (preserved.report.topologyAligned && !topologyVerified)
+      throw new Error("browser_native_topology_retained_model_changed");
     if (!deletionVerified && !topologyVerified)
       assertPersistedNativeIntent(
         reconciledObservation,

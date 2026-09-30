@@ -3666,6 +3666,32 @@ test("native slide insertion retains original masters and native placeholder con
   );
 });
 
+test("topology permits only bounded connected-line export rounding and retains source bytes", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml";
+  original[part] = strToU8(strFromU8(original[part]).replace("</p:spTree>",
+    '<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="91" name="Connected"/><p:cNvCxnSpPr><a:stCxn id="2" idx="0"/></p:cNvCxnSpPr><p:nvPr/></p:nvCxnSpPr><p:spPr><a:xfrm><a:off x="1000" y="2000"/><a:ext cx="3000" cy="4000"/></a:xfrm></p:spPr></p:cxnSp></p:spTree>'));
+  const bytes = zipSync(original);
+  const baseline = engineTopologyFixture(original);
+  const added = unzipSync(applyOoxmlCommand(bytes, { op: "duplicate_slide", slideIndex: 0, insertIndex: 1 }).bytes);
+  added[slidePaths(added)[1]] = strToU8(strFromU8(added[slidePaths(added)[1]]).replace("Spellbook 검증 العربية", "Inserted content"));
+  const edited = engineTopologyFixture(added);
+  const engineXml = strFromU8(edited[part]);
+  const preserve = () => preserveOriginalPptxParts(bytes, zipSync(baseline), zipSync(edited), null,
+    [{ op: "native_slide_topology", slideIndex: 1 }]);
+  edited[part] = strToU8(engineXml.replace('x="1000" y="2000"', 'x="1360" y="2000"').replace('cx="3000" cy="4000"', 'cx="3000" cy="4720"'));
+  assert.deepEqual(unzipSync(preserve().bytes)[part], original[part]);
+  for (const xml of [
+    engineXml.replace('x="1000" y="2000"', 'x="1361" y="2000"'),
+    engineXml.replace('cx="3000" cy="4000"', 'cx="3000" cy="4721"'),
+    engineXml.replace('x="1000" y="2000"', 'y="2000"'),
+    engineXml.replace('id="2" idx="0"', 'id="3" idx="0"'),
+  ]) {
+    edited[part] = strToU8(xml);
+    assert.throws(preserve, /no unambiguous retained-content correspondence/u);
+  }
+});
+
 test("new placeholders keep live alignment and autofit without touching old design parts", async () => {
   const bytes = new Uint8Array(await readFile(fixtureUrl));
   const original = unzipSync(bytes);

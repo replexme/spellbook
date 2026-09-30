@@ -482,6 +482,8 @@ function topologySlideState(slide) {
           "paragraphId",
           "animationId",
           "targetElementId",
+          "startElementId",
+          "endElementId",
         ].includes(key)
       )
         value[key] = address(value[key]);
