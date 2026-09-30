@@ -1682,20 +1682,23 @@ function preserveInsertedShapeProperties(entries, part, intent) {
       )
         bodyProperties.setAttribute(attribute, String(Math.round(value * 360)));
     }
-    if (
-      bodyProperties &&
-      direct(element, "textAutoGrowHeight") &&
-      typeof element.textAutoGrowHeight === "boolean"
-    ) {
-      for (const child of xmlElementChildren(bodyProperties))
-        if (["noAutofit", "normAutofit", "spAutoFit"].includes(child.localName))
-          bodyProperties.removeChild(child);
-      bodyProperties.appendChild(
-        document.createElementNS(
-          drawingNamespace,
-          element.textAutoGrowHeight ? "a:spAutoFit" : "a:noAutofit",
-        ),
-      );
+    const autoFitMode = direct(element, "textAutoGrowHeight") && element.textAutoGrowHeight === true
+      ? "spAutoFit"
+      : direct(element, "textFitToSize")
+        ? { NONE: "noAutofit", AUTOFIT: "normAutofit" }[element.textFitToSize]
+        : direct(element, "textAutoGrowHeight") && element.textAutoGrowHeight === false
+          ? "noAutofit" : null;
+    if (bodyProperties && autoFitMode) {
+      const modes = xmlElementChildren(bodyProperties)
+        .filter(child => ["noAutofit", "normAutofit", "spAutoFit"].includes(child.localName));
+      // Keep authored scaling attributes when the existing mode already
+      // matches. Grow-height=false does not mean automatic text fitting=false.
+      if (modes.length !== 1 || modes[0].localName !== autoFitMode) {
+        for (const child of modes) bodyProperties.removeChild(child);
+        const successor = xmlElementChildren(bodyProperties)
+          .find(child => ["scene3d", "sp3d", "flatTx", "extLst"].includes(child.localName));
+        bodyProperties.insertBefore(document.createElementNS(drawingNamespace, `a:${autoFitMode}`), successor ?? null);
+      }
     }
     if (
       element.text !== "" ||

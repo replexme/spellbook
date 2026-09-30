@@ -3871,6 +3871,16 @@ test("native duplication clones an unambiguous authored slide without adding tex
       `<p:sp><p:nvSpPr><p:cNvPr id="91" name="Decoration"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="9144000" cy="36000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:sp></p:spTree>`,
     ),
   );
+  const authored = new DOMParser().parseFromString(strFromU8(original["ppt/slides/slide1.xml"]), "application/xml");
+  const drawingNs = "http://schemas.openxmlformats.org/drawingml/2006/main";
+  const authoredBody = authored.getElementsByTagNameNS(drawingNs, "bodyPr")[0];
+  for (const child of [...authoredBody.childNodes])
+    if (["noAutofit", "normAutofit", "spAutoFit"].includes(child.localName)) authoredBody.removeChild(child);
+  const fitting = authored.createElementNS(drawingNs, "a:normAutofit");
+  fitting.setAttribute("fontScale", "90000");
+  fitting.setAttribute("lnSpcReduction", "10000");
+  authoredBody.appendChild(fitting);
+  original["ppt/slides/slide1.xml"] = strToU8(new XMLSerializer().serializeToString(authored));
   const before = zipSync(original);
   const baseline = { ...original };
   baseline["ppt/slides/slide1.xml"] = strToU8(
@@ -3930,7 +3940,11 @@ test("native duplication clones an unambiguous authored slide without adding tex
         .join("\n"),
       presentationObject: false,
       textMargins: { top: 125, bottom: 125 },
+      textAutoGrowHeight: false,
+      textFitToSize: index === 0 ? "AUTOFIT" : "NONE",
       propertyStates: {
+        textAutoGrowHeight: "DIRECT_VALUE",
+        textFitToSize: "DIRECT_VALUE",
         "textMargins.top": "DIRECT_VALUE",
         "textMargins.bottom": "DIRECT_VALUE",
       },
@@ -3953,6 +3967,10 @@ test("native duplication clones an unambiguous authored slide without adding tex
     strFromU8(saved[slidePaths(saved)[1]]),
     "application/xml",
   );
+  const savedFitting = savedDoc.getElementsByTagNameNS(drawingNs, "normAutofit")[0];
+  assert.ok(savedFitting, "grow-height=false must preserve automatic fitting");
+  assert.equal(savedFitting.getAttribute("fontScale"), "90000");
+  assert.equal(savedFitting.getAttribute("lnSpcReduction"), "10000");
   const decoration = [...savedDoc.getElementsByTagNameNS(ns, "sp")].at(-1);
   assert.equal(decoration.getElementsByTagNameNS(ns, "txBody").length, 0);
   assert.equal(
