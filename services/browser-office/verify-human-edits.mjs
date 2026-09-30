@@ -18,6 +18,8 @@ const arg = (name) => {
 const inputPath = path.resolve(arg("--input"));
 const runtimeDirectory = path.resolve(arg("--runtime"));
 const scenario = arg("--scenario");
+if (!["type", "type-move", "move", "delete", "newslide", "dupslide", "delslide"].includes(scenario))
+  throw new Error(`Unknown scenario: ${scenario}`);
 const label = arg("--label");
 const captureUi = process.argv.includes("--capture-ui")
   ? path.resolve(arg("--capture-ui"))
@@ -56,8 +58,11 @@ if (diagnosticRaw) {
     const source = await response.text();
     const marker = "const requestId = `ooxml-preserve-${++requestSequence}`;";
     assert(source.includes(marker));
+    const topologyMarker = "const topologyVerified = persistedDirectSlideTopologyMatches(";
+    assert(source.includes(topologyMarker));
     await route.fulfill({ response, body: source.replace(marker,
-      `globalThis.__humanSnapshot = { original, noEdit, edited, sourceOperations, sourceTargets };\n  ${marker}`) });
+      `globalThis.__humanSnapshot = { original, noEdit, edited, sourceOperations, sourceTargets };\n  ${marker}`).replace(topologyMarker,
+      `globalThis.__humanTopology = { before: persistenceStateFromObservation(reconciledObservation), live: persistenceStateFromObservation(live), reopened: persistenceStateFromObservation(preserved.observation), report: preserved.report };\n    ${topologyMarker}`) });
   });
 }
 
@@ -154,6 +159,31 @@ const engineState = async () => {
   };
 };
 
+async function capturePrivateSnapshots() {
+  if (diagnosticRaw) {
+    await mkdir(diagnosticRaw, { recursive: true, mode: 0o700 });
+    for (const kind of ["original", "noEdit", "edited"]) {
+      const encoded = await page.evaluate((key) => {
+        const bytes = globalThis.__humanSnapshot?.[key];
+        if (!bytes) return null;
+        let binary = "";
+        for (let i = 0; i < bytes.length; i += 32768)
+          binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+        return btoa(binary);
+      }, kind);
+      if (encoded) await writeFile(path.join(diagnosticRaw, `${kind}.pptx`),
+        Buffer.from(encoded, "base64"), { mode: 0o600 });
+    }
+    const intent = await page.evaluate(() => ({
+      sourceOperations: globalThis.__humanSnapshot?.sourceOperations,
+      sourceTargets: globalThis.__humanSnapshot?.sourceTargets,
+    }));
+    await writeFile(path.join(diagnosticRaw, "intent.json"), JSON.stringify(intent, null, 2), { mode: 0o600 });
+    const topology = await page.evaluate(() => globalThis.__humanTopology ?? null);
+    if (topology) await writeFile(path.join(diagnosticRaw, "topology.json"), JSON.stringify(topology), { mode: 0o600 });
+  }
+}
+
 const partsDiff = (before, after) => {
   const names = new Set([...Object.keys(before), ...Object.keys(after)]);
   const changed = [];
@@ -238,10 +268,10 @@ try {
       const item = selection?.selected?.[0];
       if (item && selection.activeSlide === 0) {
         result.selectionKeys ??= Object.keys(item).join(",");
-        if (scenario !== "type" || item.hasText === true || item.text)
+        if (!["type", "type-move"].includes(scenario) || item.hasText === true || item.text)
           return item;
         if (
-          scenario === "type" &&
+          ["type", "type-move"].includes(scenario) &&
           item.kind &&
           /text|title|shape|placeholder/iu.test(String(item.kind))
         )
@@ -274,7 +304,9 @@ try {
       kind: target.kind,
       name: String(target.name ?? "").replace(/[^\x20-\x7e]/gu, "?"),
     };
-    if (scenario === "type") {
+    if (["type", "type-move"].includes(scenario)) {
+      if (scenario === "type-move")
+        for (let i = 0; i < 6; i += 1) await page.keyboard.press("ArrowRight");
       await page.keyboard.press("F2");
       await page.waitForTimeout(800);
       await page.keyboard.press("End");
@@ -292,26 +324,6 @@ try {
   const checkpointStarted = Date.now();
   const afterState = await engineState();
   result.checkpointMs = Date.now() - checkpointStarted;
-  if (diagnosticRaw) {
-    await mkdir(diagnosticRaw, { recursive: true, mode: 0o700 });
-    for (const kind of ["original", "noEdit", "edited"]) {
-      const encoded = await page.evaluate((key) => {
-        const bytes = globalThis.__humanSnapshot?.[key];
-        if (!bytes) return null;
-        let binary = "";
-        for (let i = 0; i < bytes.length; i += 32768)
-          binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
-        return btoa(binary);
-      }, kind);
-      if (encoded) await writeFile(path.join(diagnosticRaw, `${kind}.pptx`),
-        Buffer.from(encoded, "base64"), { mode: 0o600 });
-    }
-    const intent = await page.evaluate(() => ({
-      sourceOperations: globalThis.__humanSnapshot?.sourceOperations,
-      sourceTargets: globalThis.__humanSnapshot?.sourceTargets,
-    }));
-    await writeFile(path.join(diagnosticRaw, "intent.json"), JSON.stringify(intent, null, 2));
-  }
   const before =
     beforeState.elements.find((e) => e.id === target?.elementId) ??
     beforeState.elements.find((e) => e.name === target?.name);
@@ -319,8 +331,8 @@ try {
     afterState.elements.find((e) => e.id === target?.elementId) ??
     afterState.elements.find((e) => e.name === target?.name);
   result.engineApplied =
-    scenario === "type"
-      ? Boolean(after?.text?.includes("MANUAL"))
+    ["type", "type-move"].includes(scenario)
+      ? Boolean(after?.text?.includes("MANUAL") && (scenario !== "type-move" || (before && after.x !== before.x)))
       : scenario === "move"
         ? Boolean(before && after && after.x !== before.x)
         : scenario === "delete"
@@ -424,7 +436,7 @@ try {
     const slide1After = after["ppt/slides/slide1.xml"]
       ? strFromU8(after["ppt/slides/slide1.xml"])
       : "";
-    if (scenario === "type")
+    if (["type", "type-move"].includes(scenario))
       result.textPresent = slide1After.includes("MANUAL");
     if (["newslide", "dupslide", "delslide"].includes(scenario))
       result.slidesAfter = Object.keys(after).filter((n) =>
@@ -445,7 +457,7 @@ try {
       result.note =
         "SILENT LOSS: edit applied in engine but the saved file has no change";
     if (
-      ["type", "move", "delete"].includes(scenario) &&
+      ["type", "type-move", "move", "delete"].includes(scenario) &&
       (!changed.includes("ppt/slides/slide1.xml") ||
         result.unrelatedParts.length > 0 ||
         result.otherSlidesIdentical !== true ||
@@ -461,6 +473,8 @@ try {
     result.error = String(error.message).slice(0, 1000);
   }
 } finally {
+  await capturePrivateSnapshots().catch(error => { result.captureError = error.message; });
+  if (captureUi) await page.screenshot({ path: `${captureUi}-result.png` }).catch(error => { result.captureUiError = error.message; });
   result.metrics = await page
     .evaluate(() => globalThis.spellbookBrowserOffice?.diagnostics?.() ?? null)
     .catch(() => null);
