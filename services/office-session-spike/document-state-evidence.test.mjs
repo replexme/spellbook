@@ -129,3 +129,41 @@ test("layout issue bounds follow the element geometry quantization", () => {
     null,
   );
 });
+
+test("complete bounds constrain each edge rather than adding independent position and size tolerances", () => {
+  const expected = [
+    {
+      elements: [
+        { x: 100, y: 200, width: 900, height: 450, text: "unchanged" },
+      ],
+    },
+  ];
+  const actual = structuredClone(expected);
+  Object.assign(actual[0].elements[0], {
+    x: 98,
+    y: 198,
+    width: 904,
+    height: 454,
+  });
+  assert.equal(
+    firstDocumentStateDifference(expected, actual),
+    null,
+    "opposite edges remain within two units even when the derived extent differs by four",
+  );
+  actual[0].elements[0].text = "lost edit";
+  assert.ok(
+    firstDocumentStateDifference(expected, actual),
+    "text remains exact",
+  );
+  actual[0].elements[0].text = "unchanged";
+  Object.assign(actual[0].elements[0], { x: 102, width: 902 });
+  assert.deepEqual(
+    firstDocumentStateDifference(expected, actual),
+    {
+      path: "slides[0].elements[0].bounds.right",
+      expected: 1000,
+      actual: 1004,
+    },
+    "individually tolerated fields must not compound into a larger outline shift",
+  );
+});

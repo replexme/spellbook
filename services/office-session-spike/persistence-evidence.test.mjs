@@ -1535,3 +1535,26 @@ test("persistence compares a table's size as its rows and columns add up", () =>
     .elements;
   assert.equal(table.height, 2060);
 });
+
+test("persisted changes and canonical observations use the same bounded physical outline", () => {
+  const shape = { x: 100, y: 200, width: 900, height: 450, text: "Before" };
+  const before = { slides: [{ elements: [shape] }], masters: [] };
+  const expected = structuredClone(before);
+  expected.slides[0].elements[0].text = "After";
+  const observed = structuredClone(expected);
+  Object.assign(observed.slides[0].elements[0], { x: 98, width: 904 });
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({ before, expected, observed }),
+    [],
+  );
+  assert.deepEqual(formatCanonicalDifferences(expected, observed), []);
+  Object.assign(observed.slides[0].elements[0], { x: 102, width: 902 });
+  for (const differences of [
+    intendedDocumentMutationDifferences({ before, expected, observed }),
+    formatCanonicalDifferences(expected, observed),
+  ]) {
+    assert.equal(differences[0].path, "$.slides[0].elements[0].bounds.right");
+    assert.equal(differences[0].expected, 1000);
+    assert.equal(differences[0].observed, 1004);
+  }
+});

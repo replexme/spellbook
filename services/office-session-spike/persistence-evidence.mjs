@@ -1,6 +1,7 @@
 import {
   firstDocumentStateDifference,
   quantizedGeometryEquivalent,
+  quantizedOutlineDifference,
   undoDocumentStateEquivalent,
 } from "./document-state-evidence.mjs";
 
@@ -815,11 +816,20 @@ function collectExactDifferences(
       differences.push({ path, expected, observed, invariant });
       return;
     }
+    const outline = allowFormatCanonicalization
+      ? quantizedOutlineDifference(expected, observed, path)
+      : undefined;
+    if (outline) {
+      const { actual, ...difference } = outline;
+      differences.push({ ...difference, observed: actual, invariant });
+    }
     const keys = [
       ...new Set([...Object.keys(expected), ...Object.keys(observed)]),
     ].sort();
     for (const key of keys) {
       if (differences.length >= limit) break;
+      if (outline !== undefined && ["x", "y", "width", "height"].includes(key))
+        continue;
       collectExactDifferences(
         expected[key],
         observed[key],
@@ -915,6 +925,15 @@ function collectPersistenceDeltaDifferences(
   }
 
   if (expectedKind === "object") {
+    const outline = quantizedOutlineDifference(expected, observed, path);
+    if (outline) {
+      const { actual, ...difference } = outline;
+      differences.push({
+        ...difference,
+        observed: actual,
+        invariant: "intended-change",
+      });
+    }
     const keys = [
       ...new Set([
         ...Object.keys(before),
@@ -923,7 +942,9 @@ function collectPersistenceDeltaDifferences(
         ...Object.keys(observed),
       ]),
     ].sort();
-    for (const key of keys)
+    for (const key of keys) {
+      if (outline !== undefined && ["x", "y", "width", "height"].includes(key))
+        continue;
       collectPersistenceDeltaDifferences(
         before[key],
         expected[key],
@@ -933,6 +954,7 @@ function collectPersistenceDeltaDifferences(
         differences,
         limit,
       );
+    }
     return;
   }
 

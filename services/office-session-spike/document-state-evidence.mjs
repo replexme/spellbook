@@ -1,8 +1,6 @@
-// A persisted size is derived from two quantized edges. Each edge may move by
-// one 1/100 mm model unit while converting OOXML EMUs through Impress, so the
-// maximum serialization-only outline drift is two units (0.02 mm). At the
-// 1280 px verification export this is roughly a tenth of a pixel; three units
-// or any non-geometry difference remains a failure.
+// A model coordinate may quantize by two 1/100 mm units (0.02 mm).
+// Complete shape bounds enforce that limit on each physical edge; standalone
+// slide/table sizes keep the same scalar limit. Non-geometry values stay exact.
 const GEOMETRY_QUANTIZATION = 2;
 
 export function quantizedGeometryEquivalent(expected, actual) {
@@ -13,6 +11,38 @@ export function quantizedGeometryEquivalent(expected, actual) {
     Number.isFinite(actual) &&
     Math.abs(expected - actual) <= GEOMETRY_QUANTIZATION
   );
+}
+
+// Compare the physical outline, not position and extent independently: a
+// two-unit shift plus a two-unit wider box must not admit a four-unit edge
+// change. Opposite edges may each quantize by two units, making their derived
+// width differ by four while the entire outline remains within the limit.
+export function quantizedOutlineDifference(expected, actual, path) {
+  if (
+    !/(?:^|\.)elements\[\d+\]$|\.layoutIssues\[\d+\]\.bounds$/.test(path) ||
+    ![expected, actual].every(
+      (box) =>
+        box &&
+        ["x", "y", "width", "height"].every((key) => Number.isFinite(box[key])),
+    )
+  )
+    return undefined;
+  for (const [edge, field, extent] of [
+    ["left", "x", null],
+    ["top", "y", null],
+    ["right", "x", "width"],
+    ["bottom", "y", "height"],
+  ]) {
+    const before = expected[field] + (extent ? expected[extent] : 0);
+    const after = actual[field] + (extent ? actual[extent] : 0);
+    if (!quantizedGeometryEquivalent(before, after))
+      return {
+        path: `${path}.bounds.${edge}`,
+        expected: before,
+        actual: after,
+      };
+  }
+  return null;
 }
 
 function isQuantizedGeometryPath(path) {
@@ -50,8 +80,12 @@ export function firstDocumentStateDifference(
     typeof actual !== "object"
   )
     return { path, expected, actual };
+  const outline = quantizedOutlineDifference(expected, actual, path);
+  if (outline) return outline;
   const keys = [...new Set([...Object.keys(expected), ...Object.keys(actual)])];
   for (const key of keys) {
+    if (outline === null && ["x", "y", "width", "height"].includes(key))
+      continue;
     const childPath = Array.isArray(expected)
       ? `${path}[${key}]`
       : `${path}.${key}`;
