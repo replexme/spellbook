@@ -22,6 +22,8 @@ The file is rejected or marked with warnings when the engine cannot safely promi
 
 ## Fidelity language
 
+The current browser corpus includes a SmartArt import with overlapping labels and missing connector lines before any edit. Local apply, Undo/Redo and save/reopen checks do not establish visual fidelity. Direct movement of this imported SmartArt is refused when the reopened model has a different object structure; the original diagram parts and last saved package remain intact. This is a remaining prerelease limitation, not a completed fidelity fix.
+
 - **Structurally valid** means the edited package opens and only allowed package parts changed.
 - **Visually reviewed** means before/after renders were supplied to the review loop and its evidence was internally consistent.
 - **PowerPoint-faithful** requires comparison against a PowerPoint reference corpus on supported operating systems. LibreOffice-to-LibreOffice similarity does not prove it.
