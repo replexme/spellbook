@@ -8,6 +8,7 @@ import { chromium } from "@playwright/test";
 import { strFromU8, unzipSync } from "fflate";
 
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
+import { buildHarness } from "./build-harness.mjs";
 import { createHarnessServer } from "./server.mjs";
 
 const arg = (name) => {
@@ -36,6 +37,7 @@ const diagnosticRaw = process.argv.includes("--diagnostic-raw")
 const input = new Uint8Array(await readFile(inputPath));
 
 const runtime = await admitCandidateRuntime({ runtimeDirectory });
+await buildHarness();
 const server = createHarnessServer({
   runtimeRoot: runtime.runtimeDirectory,
   browserProbeSource: inputPath,

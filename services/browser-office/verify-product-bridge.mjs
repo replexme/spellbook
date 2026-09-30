@@ -8,6 +8,7 @@ import { chromium } from "@playwright/test";
 import { strFromU8, unzipSync } from "fflate";
 
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
+import { buildHarness } from "./build-harness.mjs";
 import { readRepositoryIdentity } from "./repository-identity.mjs";
 import { createHarnessServer } from "./server.mjs";
 import { applyOoxmlCommand } from "./ooxml-worker-source.mjs";
@@ -66,6 +67,7 @@ const candidateRuntime = candidateRuntimePath
   ? await admitCandidateRuntime({ runtimeDirectory: candidateRuntimePath })
   : null;
 
+await buildHarness();
 const server = createHarnessServer(
   candidateRuntime
     ? {

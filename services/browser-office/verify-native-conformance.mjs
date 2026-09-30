@@ -13,6 +13,7 @@ import {
   withNoopSaveBaseline,
 } from "../../scripts/native-mutation-conformance-runner.mjs";
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
+import { buildHarness } from "./build-harness.mjs";
 import { readRepositoryIdentity } from "./repository-identity.mjs";
 import { createHarnessServer } from "./server.mjs";
 
@@ -305,7 +306,8 @@ async function runBrowserProbe({
   env = {},
   logPath,
 }) {
-  const server = createHarnessServer({
+  await buildHarness();
+const server = createHarnessServer({
     runtimeRoot: candidateRuntime.runtimeDirectory,
     runtimeIdentity: candidateRuntime.runtimeIdentity,
     upstream: candidateRuntime.upstream,
