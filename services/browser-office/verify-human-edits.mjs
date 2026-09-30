@@ -252,6 +252,7 @@ try {
   result.openMs = Date.now() - openStarted;
   result.stage = "editing";
   await page.waitForTimeout(3500);
+  if (captureUi) await page.screenshot({ path: `${captureUi}-before.png` });
 
   // Focus the canvas without selecting anything, then Tab to the first object.
   const canvas = page.locator("#qtcanvas");
