@@ -457,6 +457,7 @@ function mutateAsset(request) {
 
 function storeDocument(path, requestId) {
   if (!model) throw new Error("No browser Office document is open.");
+  const documentChangesBefore = documentChangeCount();
   model.storeToURL(`file://${path}`, [
     property("FilterName", zetajs.type.string, "Impress Office Open XML"),
     property("Overwrite", zetajs.type.boolean, true),
@@ -465,6 +466,8 @@ function storeDocument(path, requestId) {
     requestId,
     path,
     modified: model.isModified(),
+    documentChangesBefore,
+    documentChangesAfter: documentChangeCount(),
   });
 }
 

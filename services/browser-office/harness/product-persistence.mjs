@@ -5,6 +5,29 @@ import {
 
 /* SPDX-License-Identifier: MPL-2.0 */
 
+// A save must describe the model revision that was observed. The browser
+// engine counts modifications and Undo/Redo events; a changed count makes
+// an export stale even when a later semantic comparison looks equivalent.
+export function assertNativeSnapshotVersion(expected, before, after) {
+  if (
+    expected !== null &&
+    expected !== undefined &&
+    !Number.isSafeInteger(expected)
+  )
+    throw new Error("browser_native_snapshot_version_invalid");
+  if (
+    Number.isSafeInteger(expected) &&
+    (before !== expected || after !== expected)
+  )
+    throw new Error("browser_native_document_changed_during_snapshot");
+  if (
+    Number.isSafeInteger(before) &&
+    Number.isSafeInteger(after) &&
+    before !== after
+  )
+    throw new Error("browser_native_document_changed_during_snapshot");
+}
+
 // A package-only edit must survive an Office reload before it enters the
 // browser journal. Compare authored identity and order, then verify the
 // inspector's derived slideCount against the complete saved slide order.

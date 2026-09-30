@@ -20,6 +20,7 @@ import {
   reusableAiObservationForSlide,
 } from "/harness/ai-observation-view.mjs";
 import {
+  assertNativeSnapshotVersion,
   directDeletePreservationTarget,
   directMovePreservationTarget,
   directTextGeometryPreservationTarget,
@@ -586,6 +587,8 @@ const mediaFileExtensions = Object.freeze({
   "video/webm": "webm",
 });
 
+const nativeVersionsByObservation = new WeakMap();
+
 async function requestNative(nativeRequest) {
   // The engine reads audio and video with its own file calls, which go to
   // this page's file system, not the engine thread's copy; write the file
@@ -601,7 +604,7 @@ async function requestNative(nativeRequest) {
     FS.writeFile(mediaPath, new Uint8Array(nativeRequest.assetBytes));
   }
   try {
-    return await request("native", {
+    const result = await request("native", {
       nativeRequest: {
         ...nativeRequest,
         ...(mediaPath ? { assetPath: mediaPath } : {}),
@@ -609,6 +612,9 @@ async function requestNative(nativeRequest) {
         packageAssetHashes: (await packageMetadataOf(currentBytes)).assetHashes,
       },
     });
+    if (result.value && typeof result.value === "object" && Number.isSafeInteger(result.documentChanges))
+      nativeVersionsByObservation.set(result.value, result.documentChanges);
+    return result;
   } finally {
     if (mediaPath)
       try {
@@ -642,10 +648,12 @@ function verifyPreparedSlideTopology(command, report) {
 async function serializeNativeDocument({
   inspect = false,
   detailSlideIndex,
+  expectedDocumentChanges = null,
 } = {}) {
   const outputPath = `/tmp/spellbook/native-${++requestSequence}.pptx`;
   try {
-    await request("store", { path: outputPath });
+    const stored = await request("store", { path: outputPath });
+    assertNativeSnapshotVersion(expectedDocumentChanges, stored.documentChangesBefore, stored.documentChangesAfter);
     const bytes = FS.readFile(outputPath).slice();
     if (
       bytes.byteLength < 4 ||
@@ -719,6 +727,7 @@ async function preserveAndInspectNativeDocument(
   sourceOperations,
   sourceTargets = null,
   baselineBytes = null,
+  expectedDocumentChanges = null,
 ) {
   const measure = async (name, work) => {
     const startedAt = performance.now();
@@ -733,7 +742,7 @@ async function preserveAndInspectNativeDocument(
   };
   markBrowserProbePhase("snapshot:serialize");
   const serialized = await measure("serialize", () =>
-    serializeNativeDocument(),
+    serializeNativeDocument({ expectedDocumentChanges }),
   );
   markBrowserProbePhase("snapshot:normalize");
   const noEdit =
@@ -2043,6 +2052,16 @@ async function persistCheckpoint() {
 }
 
 async function checkpointLiveNativeState(live, reason, retryCount = 0) {
+  try {
+    return await checkpointLiveNativeStateOnce(live, reason, retryCount);
+  } catch (error) {
+    if (retryCount < 2 && error?.message === "browser_native_document_changed_during_snapshot")
+      return checkpointLiveNativeState(await observeNativeDocument(), reason, retryCount + 1);
+    throw error;
+  }
+}
+
+async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
   if (
     !live ||
     typeof live.revision !== "string" ||
@@ -2064,7 +2083,7 @@ async function checkpointLiveNativeState(live, reason, retryCount = 0) {
   });
   if (knownState) {
     try {
-      const serialized = await serializeNativeDocument();
+      const serialized = await serializeNativeDocument({ expectedDocumentChanges: nativeVersionsByObservation.get(live) ?? null });
       currentBytes = knownState.bytes;
       reconciledModelRevision = live.revision;
       unreconciledModelRevision = "";
@@ -2119,6 +2138,7 @@ async function checkpointLiveNativeState(live, reason, retryCount = 0) {
           ]
         : null),
     baselineBytes,
+    nativeVersionsByObservation.get(live) ?? null,
   );
   const afterBytes = preserved.bytes;
   if (

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assertNativeSnapshotVersion,
   directDeletePreservationTarget,
   directMovePreservationTarget,
   directTextGeometryPreservationTarget,
@@ -13,6 +14,19 @@ import {
   persistedSectionsMatch,
   persistedSlideTopologyMatches,
 } from "./harness/product-persistence.mjs";
+
+test("native snapshot must use the observed revision through serialization", () => {
+  assert.doesNotThrow(() => assertNativeSnapshotVersion(7, 7, 7));
+  assert.throws(() => assertNativeSnapshotVersion(7, 8, 8), /document_changed_during_snapshot/);
+  assert.throws(() => assertNativeSnapshotVersion(7, 7, 8), /document_changed_during_snapshot/);
+  // Undo back to the same semantic content still advances the event counter.
+  assert.throws(() => assertNativeSnapshotVersion(7, 9, 9), /document_changed_during_snapshot/);
+  assert.throws(() => assertNativeSnapshotVersion(7, null, null), /document_changed_during_snapshot/);
+  assert.throws(() => assertNativeSnapshotVersion("7", 7, 7), /snapshot_version_invalid/);
+  // Engines without the event listener continue to require semantic proof.
+  assert.doesNotThrow(() => assertNativeSnapshotVersion(null, null, null));
+  assert.throws(() => assertNativeSnapshotVersion(null, 7, 8), /document_changed_during_snapshot/);
+});
 
 test("empty paragraph provenance cannot widen a direct text edit's scope", () => {
   const before = {
