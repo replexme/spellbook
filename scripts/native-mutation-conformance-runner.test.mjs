@@ -274,10 +274,11 @@ test("only extension connection timeouts qualify for read-only session retry", (
   );
 });
 
-test("the runner reopens the latest save after the WOPI version settles", async () => {
+test("the runner reopens the latest save after the WOPI version settles", async (context) => {
+  context.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 0 });
   let receiptReads = 0;
 
-  const saved = await waitForSavedFile(
+  const pending = waitForSavedFile(
     {
       receipt: () => ({
         version: receiptReads++ < 2 ? 1 : 2,
@@ -287,5 +288,11 @@ test("the runner reopens the latest save after the WOPI version settles", async 
     { timeoutMs: 200, settleMs: 25, pollMs: 5 },
   );
 
-  assert.equal(saved, "/tmp/conformance-session/saved-2.pptx");
+  // Advance the virtual clock between observations so CPU contention cannot
+  // turn the synthetic first version into a falsely settled save.
+  for (let step = 0; step < 10; step++) {
+    context.mock.timers.tick(5);
+    await Promise.resolve();
+  }
+  assert.equal(await pending, "/tmp/conformance-session/saved-2.pptx");
 });
