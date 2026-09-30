@@ -126,6 +126,7 @@ export function ModelControl({
                       : "Codex · "}
                     {item.displayName}
                     {item.isDefault ? " · 추천" : ""}
+                    {item.imageGeneration === true ? " · 이미지 생성 가능" : ""}
                   </option>
                 ))}
               </select>
@@ -171,6 +172,7 @@ export function ModelControl({
                     (item) => item.reasoningEffort === value?.effort,
                   )?.description
                 }
+                {` · ${model.imageGeneration === true ? "이미지 생성 가능" : "이미지 생성 미지원"}`}
               </small>
             ) : null}
           </>

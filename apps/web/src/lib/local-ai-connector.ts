@@ -52,6 +52,7 @@ export function readLocalConnectorSession(
 
 export async function pairLocalConnector(
   connectorOrigin: string,
+  intent: "codex" | "claude" = "codex",
   runtime = browserRuntime(),
 ): Promise<LocalConnectorSession> {
   const exactOrigin = exactLoopbackOrigin(connectorOrigin);
@@ -70,7 +71,7 @@ export async function pairLocalConnector(
     const response = await runtime.fetch(`${exactOrigin}/v1/pairings`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ challenge }),
+      body: JSON.stringify({ challenge, intent }),
       cache: "no-store",
     });
     const value = (await response.json()) as { approvalUrl?: unknown };

@@ -93,7 +93,7 @@ type AccountResponse = {
   rateLimitInfo?: RateLimitInfo | null;
   /** The account the browser's API keys are stored under. */
   keyScope?: string;
-  /** The Claude subscription connected on the server, if any. */
+  /** The Claude subscription visible to the selected connector, if any. */
   claude?: { account?: AiAccount | null } | null;
 };
 
@@ -123,6 +123,7 @@ export function useAiAccount(config: AiConnectorConfig) {
   const [localSession, setLocalSession] =
     useState<LocalConnectorSession | null>(null);
   const [waitingForBrowserLogin, setWaitingForBrowserLogin] = useState(false);
+  const [waitingForClaudeLogin, setWaitingForClaudeLogin] = useState(false);
   const [keyScope, setKeyScope] = useState<string | null>(null);
   const [claudeSignIn, setClaudeSignIn] = useState<ClaudeSignIn | null>(null);
   const [claudeMessage, setClaudeMessage] = useState("");
@@ -166,6 +167,10 @@ export function useAiAccount(config: AiConnectorConfig) {
           setWaitingForBrowserLogin(false);
           setMessage("");
         }
+        if (value.claude?.account) {
+          setWaitingForClaudeLogin(false);
+          setClaudeMessage("");
+        }
         return value;
       }
       const response = await fetch("/api/ai/account/status", {
@@ -208,10 +213,22 @@ export function useAiAccount(config: AiConnectorConfig) {
   }, [load]);
 
   useEffect(() => {
-    if (!deviceLogin && !waitingForBrowserLogin) return;
+    if (!deviceLogin && !waitingForBrowserLogin && !waitingForClaudeLogin)
+      return;
     const timer = window.setInterval(() => void load(), 3000);
     return () => window.clearInterval(timer);
-  }, [deviceLogin, waitingForBrowserLogin, load]);
+  }, [deviceLogin, waitingForBrowserLogin, waitingForClaudeLogin, load]);
+
+  useEffect(() => {
+    if (!waitingForClaudeLogin) return;
+    const timer = window.setTimeout(() => {
+      setWaitingForClaudeLogin(false);
+      setClaudeMessage(
+        "Claude Code 로그인이 완료되지 않았어요. 연결 확인을 눌러 다시 시도해 주세요.",
+      );
+    }, 5 * 60_000);
+    return () => window.clearTimeout(timer);
+  }, [waitingForClaudeLogin]);
 
   const connect = useCallback(async () => {
     setConnecting(true);
@@ -262,17 +279,22 @@ export function useAiAccount(config: AiConnectorConfig) {
   }, [deviceLogin]);
 
   const disconnect = useCallback(async () => {
-    if (connectorOrigin && localSession) {
+    if (connectorOrigin) {
       try {
-        await callLocalConnector(
-          connectorOrigin,
-          "/v1/account/logout",
-          localSession,
-        );
+        if (localSession)
+          await callLocalConnector(
+            connectorOrigin,
+            "/v1/pairings/revoke",
+            localSession,
+          );
       } finally {
         window.sessionStorage.removeItem(LOCAL_CONNECTOR_SESSION_KEY);
         setLocalSession(null);
+        setAccountResponse(null);
+        setDeviceLogin(null);
         setWaitingForBrowserLogin(false);
+        setWaitingForClaudeLogin(false);
+        setClaudeMessage("");
       }
     } else await fetch("/api/ai/account/logout", { method: "POST" });
     setAccountResponse(null);
@@ -354,9 +376,44 @@ export function useAiAccount(config: AiConnectorConfig) {
     [browserKeys],
   );
 
-  // Claude's sign-in page shows a code that the person pastes back here.
+  // In local mode, pairing only grants this browser access to the official
+  // Claude Code login already held on the person's computer.
   const connectClaude = useCallback(async () => {
     setClaudeMessage("");
+    if (connectorOrigin) {
+      let startingClaudeLogin = false;
+      try {
+        const session =
+          localSession ?? (await pairLocalConnector(connectorOrigin, "claude"));
+        setLocalSession(session);
+        const value = await callLocalConnector<AccountResponse>(
+          connectorOrigin,
+          "/v1/account/status",
+          session,
+        );
+        setAccountResponse(value);
+        setStatus("ready");
+        if (!value.claude?.account) {
+          startingClaudeLogin = true;
+          await callLocalConnector(
+            connectorOrigin,
+            "/v1/claude/login",
+            session,
+          );
+          setWaitingForClaudeLogin(true);
+          setClaudeMessage(
+            "공식 Claude Code 로그인 화면에서 승인을 기다리고 있어요.",
+          );
+        }
+      } catch {
+        setClaudeMessage(
+          startingClaudeLogin
+            ? "Claude Code 로그인 창을 열지 못했어요. 이 컴퓨터에 Claude Code가 설치돼 있는지 확인해 주세요."
+            : "이 컴퓨터에서 Spellbook 연결 앱을 실행하고 새 창에서 연결을 허용해 주세요.",
+        );
+      }
+      return;
+    }
     const response = await fetch("/api/ai/account/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -379,7 +436,7 @@ export function useAiAccount(config: AiConnectorConfig) {
       verificationUrl: value.verificationUrl,
       loginReference: value.loginReference,
     });
-  }, []);
+  }, [connectorOrigin, localSession]);
 
   const completeClaude = useCallback(
     async (code: string) => {
@@ -407,13 +464,31 @@ export function useAiAccount(config: AiConnectorConfig) {
   );
 
   const disconnectClaude = useCallback(async () => {
+    if (connectorOrigin) {
+      try {
+        if (localSession)
+          await callLocalConnector(
+            connectorOrigin,
+            "/v1/pairings/revoke",
+            localSession,
+          );
+      } finally {
+        window.sessionStorage.removeItem(LOCAL_CONNECTOR_SESSION_KEY);
+        setLocalSession(null);
+        setAccountResponse(null);
+        setClaudeMessage("");
+        setWaitingForBrowserLogin(false);
+        setWaitingForClaudeLogin(false);
+      }
+      return;
+    }
     await fetch("/api/ai/account/logout", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ provider: "claude_code" }),
     });
     await load();
-  }, [load]);
+  }, [connectorOrigin, localSession, load]);
 
   const localRequest = useCallback(
     async <T>(path: string, body?: unknown): Promise<T> => {

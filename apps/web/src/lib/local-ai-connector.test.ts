@@ -48,60 +48,65 @@ describe("local AI connector browser client", () => {
     });
   });
 
-  it("opens the exact local approval page and accepts only its matching challenge", async () => {
-    const connectorOrigin = "http://127.0.0.1:43127";
-    const state = storage();
-    let listener: ((event: MessageEvent) => void) | undefined;
-    let requestedChallenge = "";
-    const popup = {
-      close: vi.fn(),
-      location: {
-        replace: vi.fn((url: string) => {
-          queueMicrotask(() =>
-            listener?.({
-              origin: connectorOrigin,
-              source: popup,
-              data: {
-                type: "spellbook.local-connector.paired",
-                token: "t".repeat(64),
-                challenge: requestedChallenge,
-                expiresAt: 10_000,
-              },
-            } as unknown as MessageEvent),
-          );
-        }),
-      },
-    };
-    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
-      requestedChallenge = JSON.parse(String(init?.body)).challenge;
-      return Response.json(
-        {
-          approvalUrl: `${connectorOrigin}/pair/12345678-abcd-abcd-abcd-123456789012`,
+  it.each(["codex", "claude"] as const)(
+    "opens the exact %s approval page and accepts only its matching challenge",
+    async (intent) => {
+      const connectorOrigin = "http://127.0.0.1:43127";
+      const state = storage();
+      let listener: ((event: MessageEvent) => void) | undefined;
+      let requestedChallenge = "";
+      const popup = {
+        close: vi.fn(),
+        location: {
+          replace: vi.fn((url: string) => {
+            queueMicrotask(() =>
+              listener?.({
+                origin: connectorOrigin,
+                source: popup,
+                data: {
+                  type: "spellbook.local-connector.paired",
+                  token: "t".repeat(64),
+                  challenge: requestedChallenge,
+                  expiresAt: 10_000,
+                },
+              } as unknown as MessageEvent),
+            );
+          }),
         },
-        { status: 201 },
+      };
+      const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body));
+        requestedChallenge = body.challenge;
+        expect(body.intent).toBe(intent);
+        return Response.json(
+          {
+            approvalUrl: `${connectorOrigin}/pair/12345678-abcd-abcd-abcd-123456789012`,
+          },
+          { status: 201 },
+        );
+      });
+      const session = await pairLocalConnector(connectorOrigin, intent, {
+        fetch: fetcher as typeof fetch,
+        open: vi.fn(() => popup as unknown as Window),
+        addMessageListener: (value) => {
+          listener = value;
+        },
+        removeMessageListener: (value) => {
+          if (listener === value) listener = undefined;
+        },
+        storage: state,
+        randomBytes: () => new Uint8Array(32),
+        setTimer: () => 1,
+        clearTimer: vi.fn(),
+        now: () => 1_000,
+      });
+      expect(session.challenge).toBe(requestedChallenge);
+      expect(popup.location.replace).toHaveBeenCalledWith(
+        `${connectorOrigin}/pair/12345678-abcd-abcd-abcd-123456789012`,
       );
-    });
-    const session = await pairLocalConnector(connectorOrigin, {
-      fetch: fetcher as typeof fetch,
-      open: vi.fn(() => popup as unknown as Window),
-      addMessageListener: (value) => {
-        listener = value;
-      },
-      removeMessageListener: (value) => {
-        if (listener === value) listener = undefined;
-      },
-      storage: state,
-      randomBytes: () => new Uint8Array(32),
-      setTimer: () => 1,
-      clearTimer: vi.fn(),
-      now: () => 1_000,
-    });
-    expect(session.challenge).toBe(requestedChallenge);
-    expect(popup.location.replace).toHaveBeenCalledWith(
-      `${connectorOrigin}/pair/12345678-abcd-abcd-abcd-123456789012`,
-    );
-    expect(readLocalConnectorSession(state, 1_000)).toEqual(session);
-  });
+      expect(readLocalConnectorSession(state, 1_000)).toEqual(session);
+    },
+  );
 
   it("does not leave a message listener or timer after the connector is unavailable", async () => {
     let listener: ((event: MessageEvent) => void) | undefined;
@@ -109,7 +114,7 @@ describe("local AI connector browser client", () => {
     const clearTimer = vi.fn();
     const popup = { close: vi.fn() };
     await expect(
-      pairLocalConnector("http://127.0.0.1:43127", {
+      pairLocalConnector("http://127.0.0.1:43127", "codex", {
         fetch: vi
           .fn()
           .mockResolvedValue(

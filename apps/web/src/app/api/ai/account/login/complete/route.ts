@@ -1,11 +1,14 @@
 import { HttpError, requireSession, routeError } from "@/lib/http";
 import { callAiAccount } from "@/lib/workers";
 import { claudeLoginCookie } from "@/lib/claude-login";
+import { aiConnectorConfig } from "@/lib/ai-connector-config";
 
 /** Hands the code Claude's sign-in page showed to the waiting sign-in. */
 export async function POST(request: Request) {
   try {
     const session = await requireSession(request);
+    if (aiConnectorConfig().mode === "local")
+      throw new HttpError(410, "local_connector_required");
     const body = (await request.json().catch(() => ({}))) as {
       code?: unknown;
       loginReference?: unknown;

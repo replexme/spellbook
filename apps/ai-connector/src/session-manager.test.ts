@@ -34,6 +34,35 @@ describe("local AI subscription identity", () => {
     });
   });
 
+  it("labels image generation only when the selected Codex model and runtime allow it", async () => {
+    const manager = new SessionManager();
+    let enabled = true;
+    vi.spyOn(manager as any, "get").mockResolvedValue({
+      client: {
+        accountRead: async () => ({ account: { type: "chatgpt" } }),
+        models: async () => [
+          { provider: "codex", model: "gpt-6-astra" },
+          { provider: "codex", model: "text-only" },
+        ],
+        providerCapabilities: async () => ({ imageGeneration: enabled }),
+      },
+    });
+    (manager as any).claude = {
+      accountRead: async () => ({ account: null }),
+    };
+    expect(
+      (await manager.models("owner@example.test")).map(
+        (model) => model.imageGeneration,
+      ),
+    ).toEqual([true, false]);
+    enabled = false;
+    expect(
+      (await manager.models("owner@example.test")).map(
+        (model) => model.imageGeneration,
+      ),
+    ).toEqual([false, false]);
+  });
+
   it("allows only the authenticated self-hosted account", () => {
     vi.stubEnv("SPELLBOOK_LOCAL_EMAIL", "owner@example.test");
     expect(isAllowedAiIdentity("OWNER@example.test")).toBe(true);

@@ -14,6 +14,7 @@ const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 export interface LocalConnectorAccounts {
   status(identity: string): Promise<unknown>;
   startBrowserLogin(identity: string): Promise<unknown>;
+  startClaudeBrowserLogin(): Promise<unknown>;
   startLogin(identity: string): Promise<unknown>;
   logout(identity: string): Promise<void>;
   models(identity: string): Promise<unknown>;
@@ -82,18 +83,30 @@ async function handle(
     );
     let authUrl: string | null = null;
     let loginStartFailed = false;
-    try {
-      const state = (await options.accounts.status(options.identity)) as {
-        account?: { account?: { type?: string } | null } | null;
-      };
-      if (!state.account?.account) {
-        const login = (await options.accounts.startBrowserLogin(
-          options.identity,
-        )) as { authUrl?: unknown };
-        authUrl = safeAuthUrl(login.authUrl);
+    if (session.intent === "codex") {
+      try {
+        const state = (await options.accounts.status(options.identity)) as {
+          account?: { account?: { type?: string } | null } | null;
+        };
+        if (!state.account?.account) {
+          const login = (await options.accounts.startBrowserLogin(
+            options.identity,
+          )) as { authUrl?: unknown };
+          authUrl = safeAuthUrl(login.authUrl);
+        }
+      } catch {
+        loginStartFailed = true;
       }
-    } catch {
-      loginStartFailed = true;
+    } else {
+      try {
+        const state = (await options.accounts.status(options.identity)) as {
+          claude?: { account?: unknown } | null;
+        };
+        if (!state.claude?.account)
+          await options.accounts.startClaudeBrowserLogin();
+      } catch {
+        loginStartFailed = true;
+      }
     }
     return pairedPage(
       response,
@@ -101,6 +114,7 @@ async function handle(
       connectorOrigin,
       authUrl,
       loginStartFailed,
+      session.intent,
     );
   }
 
@@ -123,9 +137,13 @@ async function handle(
 
   if (url.pathname === "/v1/pairings") {
     const body = await readJson(request);
+    const intent = body.intent ?? "codex";
+    if (intent !== "codex" && intent !== "claude")
+      throw new Error("invalid_pairing_intent");
     const pairing = options.authority.begin(
       origin,
       requiredString(body, "challenge"),
+      intent,
     );
     return json(response, 201, {
       pairing,
@@ -135,8 +153,19 @@ async function handle(
 
   const token = bearerToken(request);
   options.authority.verify(origin, token);
+  if (url.pathname === "/v1/pairings/revoke") {
+    options.authority.revoke(origin, token);
+    return json(response, 200, { status: "disconnected" });
+  }
   if (url.pathname === "/v1/account/status") {
     return json(response, 200, await options.accounts.status(options.identity));
+  }
+  if (url.pathname === "/v1/claude/login") {
+    return json(
+      response,
+      200,
+      await options.accounts.startClaudeBrowserLogin(),
+    );
   }
   if (url.pathname === "/v1/account/login") {
     const body = await readJson(request);
@@ -276,6 +305,7 @@ function approvalPage(
   approval: {
     id: string;
     origin: string;
+    intent: "codex" | "claude";
     confirmationSecret: string;
     expiresAt: number;
   },
@@ -286,7 +316,7 @@ function approvalPage(
   html(
     response,
     200,
-    `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Spellbook AI 연결 승인</title></head><body><main><div class="mark">S</div><p class="eyebrow">SPELLBOOK LOCAL CONNECTOR</p><h1>이 사이트에 AI 사용을 허용할까요?</h1><p class="copy"><strong>${escapeHtml(approval.origin)}</strong>에서 이 컴퓨터의 Codex 구독을 사용하려고 합니다.</p><ul><li>문서에서 허용한 범위만 읽고 수정합니다.</li><li>Codex 로그인 정보는 이 컴퓨터 밖으로 보내지 않습니다.</li><li>연결은 ${escapeHtml(expires)}에 자동 만료됩니다.</li></ul><form method="post" action="${action}"><input type="hidden" name="confirmationSecret" value="${escapeHtml(approval.confirmationSecret)}"><button type="submit">연결 허용</button></form><p class="cancel">허용하지 않으려면 이 창을 닫으세요.</p></main></body></html>`,
+    `<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Spellbook AI 연결 승인</title></head><body><main><div class="mark">S</div><p class="eyebrow">SPELLBOOK LOCAL CONNECTOR</p><h1>이 사이트에 AI 사용을 허용할까요?</h1><p class="copy"><strong>${escapeHtml(approval.origin)}</strong>에서 이 컴퓨터의 Spellbook AI 연결 앱을 사용하려고 합니다.</p><ul><li>연결된 Codex·Claude Code 구독에 접근할 수 있습니다.</li><li>문서에서 허용한 범위만 읽고 수정합니다.</li><li>구독 로그인 정보는 Spellbook 서버에 보관하지 않습니다.</li><li>연결은 ${escapeHtml(expires)}에 자동 만료됩니다.</li></ul><form method="post" action="${action}"><input type="hidden" name="confirmationSecret" value="${escapeHtml(approval.confirmationSecret)}"><button type="submit">연결 허용</button></form><p class="cancel">허용하지 않으려면 이 창을 닫으세요.</p></main></body></html>`,
     connectorOrigin,
     style(),
   );
@@ -303,6 +333,7 @@ function pairedPage(
   connectorOrigin: string,
   authUrl: string | null,
   loginStartFailed: boolean,
+  intent: "codex" | "claude",
 ): void {
   const nonce = randomBytes(18).toString("base64url");
   const payload = JSON.stringify({
@@ -318,7 +349,7 @@ function pairedPage(
   const next = authUrl
     ? `window.location.replace(${JSON.stringify(authUrl).replaceAll("<", "\\u003c")})`
     : loginStartFailed
-      ? "document.getElementById('status').textContent='OpenAI 로그인 화면을 열지 못했습니다. Spellbook에서 다시 시도해 주세요.'"
+      ? `document.getElementById('status').textContent=${JSON.stringify(intent === "claude" ? "Claude Code 로그인을 시작하지 못했습니다. 이 컴퓨터의 Claude Code 설치와 로그인을 확인해 주세요." : "OpenAI 로그인 화면을 열지 못했습니다. Spellbook에서 다시 시도해 주세요.")}`
       : "window.close()";
   html(
     response,

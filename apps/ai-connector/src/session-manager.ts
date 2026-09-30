@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { AppServerClient, type AgentTurnClient } from "./app-server-client.js";
 import { PiAgentClient } from "./pi-agent-client.js";
-import { activeAiRuntime } from "./ai-runtime-contract.js";
+import { activeAiRuntime, imageGenerationModelIds } from "./ai-runtime-contract.js";
 import { ClaudeCodeClient, isClaudeModel } from "./claude-code-client.js";
 import type { ModelSettings } from "../../../contracts/ai-models.js";
 import type { AvailableModel } from "./types.js";
@@ -109,6 +109,10 @@ export class SessionManager {
     return session.client.startBrowserLogin();
   }
 
+  async startClaudeBrowserLogin(): Promise<unknown> {
+    return this.claude.startBrowserLogin();
+  }
+
   async logout(rawEmail: string): Promise<void> {
     const session = await this.get(rawEmail);
     await session.client.logout();
@@ -121,8 +125,22 @@ export class SessionManager {
     const session = await this.get(rawEmail);
     const models: AvailableModel[] = [];
     const codex = await session.client.accountRead();
-    if (codex.account?.type === "chatgpt")
-      models.push(...(await session.client.models()));
+    if (codex.account?.type === "chatgpt") {
+      const [catalog, capabilities] = await Promise.all([
+        session.client.models(),
+        session.client.providerCapabilities().catch(() => ({
+          imageGeneration: false,
+        })),
+      ]);
+      models.push(
+        ...catalog.map((item) => ({
+          ...item,
+          imageGeneration:
+            capabilities.imageGeneration === true &&
+            imageGenerationModelIds.has(item.model),
+        })),
+      );
+    }
     const claude = await this.claude.accountRead().catch(() => ({
       account: null,
       requiresClaudeAuth: true,

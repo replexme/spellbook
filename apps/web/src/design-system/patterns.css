@@ -2278,6 +2278,15 @@ ol.connect {
   .signin-main {
     padding: var(--ds-space-8) var(--ds-space-5);
   }
+
+  .conn-card:not(.is-expanded) {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .conn-card-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 480px) {

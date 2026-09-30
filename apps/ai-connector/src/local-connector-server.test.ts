@@ -46,6 +46,7 @@ async function harness() {
     startBrowserLogin: vi
       .fn()
       .mockResolvedValue({ type: "chatgpt", authUrl: "https://auth.example" }),
+    startClaudeBrowserLogin: vi.fn().mockResolvedValue({ status: "started" }),
     startLogin: vi.fn().mockResolvedValue({ type: "chatgptDeviceCode" }),
     logout: vi.fn().mockResolvedValue(undefined),
     models,
@@ -117,14 +118,17 @@ async function pair(connectorOrigin: string) {
   return payload.token;
 }
 
-async function pendingConfirmation(connectorOrigin: string) {
+async function pendingConfirmation(
+  connectorOrigin: string,
+  intent: "codex" | "claude" = "codex",
+) {
   const begin = await fetch(`${connectorOrigin}/v1/pairings`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       origin: productOrigin,
     },
-    body: JSON.stringify({ challenge }),
+    body: JSON.stringify({ challenge, intent }),
   });
   expect(begin.status).toBe(201);
   const started = (await begin.json()) as { approvalUrl: string };
@@ -173,6 +177,26 @@ function postConfirmation(
 }
 
 describe("local connector HTTP boundary", () => {
+  it("pairs Claude Code and starts only its official device login", async () => {
+    const h = await harness();
+    const started = await pendingConfirmation(h.connectorOrigin, "claude");
+    const approval = await fetch(started.approvalUrl);
+    const approvalHtml = await approval.text();
+    expect(approvalHtml).toContain("Codex·Claude Code 구독");
+    expect(approvalHtml).toContain("Spellbook 서버에 보관하지 않습니다");
+    const confirmed = await postConfirmation(
+      `${started.approvalUrl}/confirm`,
+      started.confirmationSecret,
+      "same-origin",
+    );
+    expect(confirmed.status).toBe(200);
+    expect(confirmed.body).toContain("spellbook.local-connector.paired");
+    expect(confirmed.body).not.toContain("auth.example");
+    expect(h.accounts.startBrowserLogin).not.toHaveBeenCalled();
+    expect(h.accounts.startClaudeBrowserLogin).toHaveBeenCalledOnce();
+    expect(h.accounts.status).toHaveBeenCalledOnce();
+  });
+
   it("accepts Chromium's opaque loopback form origin only with same-origin navigation metadata", async () => {
     const h = await harness();
     const started = await pendingConfirmation(h.connectorOrigin);
@@ -274,6 +298,40 @@ describe("local connector HTTP boundary", () => {
       headers,
     });
     expect(revoked.status).toBe(403);
+  });
+
+  it("can unpair this browser without logging out the local AI accounts", async () => {
+    const h = await harness();
+    const token = await pair(h.connectorOrigin);
+    const headers = { authorization: `Bearer ${token}`, origin: productOrigin };
+    const unpair = await fetch(`${h.connectorOrigin}/v1/pairings/revoke`, {
+      method: "POST",
+      headers,
+    });
+    expect(unpair.status).toBe(200);
+    expect(h.accounts.logout).not.toHaveBeenCalled();
+    const status = await fetch(`${h.connectorOrigin}/v1/account/status`, {
+      method: "POST",
+      headers,
+    });
+    expect(status.status).toBe(403);
+  });
+
+  it("requires the paired browser capability to retry Claude Code login", async () => {
+    const h = await harness();
+    const token = await pair(h.connectorOrigin);
+    const path = `${h.connectorOrigin}/v1/claude/login`;
+    const denied = await fetch(path, {
+      method: "POST",
+      headers: { origin: productOrigin },
+    });
+    expect(denied.status).toBe(403);
+    const accepted = await fetch(path, {
+      method: "POST",
+      headers: { origin: productOrigin, authorization: `Bearer ${token}` },
+    });
+    expect(accepted.status).toBe(200);
+    expect(h.accounts.startClaudeBrowserLogin).toHaveBeenCalledOnce();
   });
 
   it("accepts one product-scoped native job without trusting its account identity", async () => {

@@ -232,9 +232,18 @@ export function SettingsScreen({
                   </Banner>
                 ) : (
                   <Banner tone="warn" role="status">
-                    ⚠️ <strong>현재 연결된 AI가 없습니다.</strong> 아래에서
-                    Google Gemini, OpenAI, Claude 등의 API 키 또는 구독을 등록해
-                    주세요.
+                    {ai.hasAnyConnection ? (
+                      <>
+                        다음 요청에 사용할 AI를 선택해 주세요. 아래에서{" "}
+                        <strong>[이 AI 사용하기]</strong>를 누르면 돼요.
+                      </>
+                    ) : (
+                      <>
+                        ⚠️ <strong>현재 연결된 AI가 없습니다.</strong> 아래에서
+                        Google Gemini, OpenAI, Claude 등의 API 키 또는 구독을
+                        등록해 주세요.
+                      </>
+                    )}
                   </Banner>
                 )}
               </div>
@@ -715,7 +724,9 @@ export function SettingsScreen({
                         ]
                           .filter(Boolean)
                           .join(" · ")
-                      : "내 ChatGPT (Plus/Pro/Team) 구독 계정을 장치 코드로 연동해요."}
+                      : ai.mode === "local"
+                        ? "이 컴퓨터의 Codex 구독 로그인을 연결 앱에서 확인해요. 로그인 정보는 서버에 맡기지 않아요."
+                        : "내 ChatGPT (Plus/Pro/Team) 구독 계정을 장치 코드로 연동해요."}
                   </small>
 
                   {isCodexRateLimited ? (
@@ -723,7 +734,9 @@ export function SettingsScreen({
                       <Banner tone="warn" role="status">
                         ⚠️ <strong>OpenAI Codex 사용량 한도 도달</strong>: 이번
                         주기 메시지 한도를 모두 소모했습니다.
-                        {codexResetTime ? ` (${codexResetTime} 리셋 예정)` : ""}{" "}
+                        {codexResetTime
+                          ? ` (${codexResetTime} 리셋 예정)`
+                          : ""}{" "}
                         위의 Google Gemini나 다른 공급자 API 키를 등록하여 즉시
                         작업을 이어갈 수 있습니다.
                       </Banner>
@@ -752,11 +765,24 @@ export function SettingsScreen({
                       variant="danger-quiet"
                       size="sm"
                       onClick={async () => {
-                        await ai.disconnect();
-                        notify("ChatGPT 구독 연결이 해제되었습니다.");
+                        try {
+                          await ai.disconnect();
+                        } catch {
+                          notify(
+                            "이 브라우저 연결은 해제했어요. 연결 앱의 승인 취소는 확인하지 못했어요.",
+                          );
+                          return;
+                        }
+                        notify(
+                          ai.mode === "local"
+                            ? "이 브라우저와 연결 앱의 연결을 해제했어요."
+                            : "ChatGPT 구독 연결이 해제되었습니다.",
+                        );
                       }}
                     >
-                      연결 해제
+                      {ai.mode === "local"
+                        ? "이 브라우저 연결 해제"
+                        : "연결 해제"}
                     </Button>
                   </div>
                 ) : (
@@ -781,9 +807,13 @@ export function SettingsScreen({
                         ]
                           .filter(Boolean)
                           .join(" · ")
-                      : "내 Claude(Pro/Max) 구독으로 로그인해요. Claude 로그인 페이지에 나온 코드를 여기에 붙여 넣으면 연결돼요."}
+                      : ai.mode === "local"
+                        ? "이 컴퓨터의 Claude Code 구독 로그인을 연결 앱에서 확인해요. 로그인 정보는 서버에 맡기지 않아요."
+                        : "내 Claude(Pro/Max) 구독으로 로그인해요. Claude 로그인 페이지에 나온 코드를 여기에 붙여 넣으면 연결돼요."}
                   </small>
-                  {!claudeProvider?.connected && ai.claudeSignIn ? (
+                  {!claudeProvider?.connected &&
+                  ai.mode !== "local" &&
+                  ai.claudeSignIn ? (
                     <div
                       style={{
                         marginTop: "0.75rem",
@@ -848,13 +878,34 @@ export function SettingsScreen({
                         variant="danger-quiet"
                         size="sm"
                         onClick={async () => {
-                          await ai.disconnectClaude();
-                          notify("Claude 구독 연결이 해제되었습니다.");
+                          try {
+                            await ai.disconnectClaude();
+                          } catch {
+                            notify(
+                              "이 브라우저 연결은 해제했어요. 연결 앱의 승인 취소는 확인하지 못했어요.",
+                            );
+                            return;
+                          }
+                          notify(
+                            ai.mode === "local"
+                              ? "이 브라우저와 연결 앱의 연결을 해제했어요."
+                              : "Claude 구독 연결이 해제되었습니다.",
+                          );
                         }}
                       >
-                        연결 해제
+                        {ai.mode === "local"
+                          ? "이 브라우저 연결 해제"
+                          : "연결 해제"}
                       </Button>
                     </>
+                  ) : ai.mode === "local" ? (
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => void ai.connectClaude()}
+                    >
+                      Claude Code 연결 확인
+                    </Button>
                   ) : ai.claudeSignIn ? (
                     <ButtonLink
                       size="sm"

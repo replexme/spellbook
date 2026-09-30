@@ -62,4 +62,24 @@ describe("API keys kept in the browser", () => {
     );
     expect(maskApiKey("sk-ant-123456789")).toBe("sk-ant...6789");
   });
+
+  it("keeps a Claude API key when switching to and from a Claude subscription", () => {
+    writeBrowserKeys("account-a", {
+      active: "anthropic_api",
+      keys: { anthropic_api: "sk-ant-123456789" },
+    });
+    writeBrowserKeys("account-a", {
+      ...readBrowserKeys("account-a"),
+      active: "claude_code",
+    });
+    expect(readBrowserKeys("account-a")).toEqual({
+      active: "claude_code",
+      keys: { anthropic_api: "sk-ant-123456789" },
+    });
+    writeBrowserKeys("account-a", {
+      ...readBrowserKeys("account-a"),
+      active: "anthropic_api",
+    });
+    expect(readBrowserKeys("account-a").active).toBe("anthropic_api");
+  });
 });

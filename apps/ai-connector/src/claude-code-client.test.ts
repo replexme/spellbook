@@ -1,9 +1,16 @@
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  chmodSync,
+  readFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ClaudeCodeClient,
   claudeTurnArguments,
   isClaudeModel,
   readClaudeAuthStatus,
@@ -66,6 +73,25 @@ describe("Claude Code subscription adapter", () => {
   it("uses an explicitly installed unmodified Claude Code binary", () => {
     expect(resolveClaudeBinary("/opt/homebrew/bin/claude")).toBe(
       "/opt/homebrew/bin/claude",
+    );
+  });
+
+  it("starts the installed Claude Code subscription browser flow", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "spellbook-claude-"));
+    temporaryDirectories.push(directory);
+    const binary = path.join(directory, "claude");
+    const marker = path.join(directory, "login-args");
+    writeFileSync(binary, `#!/bin/sh\nprintf '%s' "$*" > '${marker}'\n`);
+    chmodSync(binary, 0o700);
+    const client = new ClaudeCodeClient(binary);
+    const [first, second] = await Promise.all([
+      client.startBrowserLogin(),
+      client.startBrowserLogin(),
+    ]);
+    expect(first).toEqual({ status: "started" });
+    expect(second).toEqual({ status: "pending" });
+    await vi.waitFor(() =>
+      expect(readFileSync(marker, "utf8")).toBe("auth login --claudeai"),
     );
   });
 

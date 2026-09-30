@@ -18,6 +18,8 @@ export interface AvailableModel {
     description: string;
   }>;
   isDefault: boolean;
+  /** True only when this connected runtime currently permits image generation. */
+  imageGeneration?: boolean;
 }
 export interface ModelSettings {
   provider?: AiProviderId;

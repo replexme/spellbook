@@ -198,6 +198,9 @@ export function ModelMenu({
                         추천
                       </span>
                     ) : null}
+                    {item.imageGeneration === true ? (
+                      <span className="ds-badge">이미지 생성 가능</span>
+                    ) : null}
                   </>
                 }
                 onSelect={() => {
@@ -243,7 +246,9 @@ export function ModelMenu({
               </div>
             ) : null}
             <p className="ds-menu-section composer-menu-foot">
-              다음 요청부터 적용돼요.
+              {model
+                ? `${model.imageGeneration === true ? "이미지 생성 가능" : "이미지 생성 미지원"} · 다음 요청부터 적용돼요.`
+                : "다음 요청부터 적용돼요."}
             </p>
           </>
         )

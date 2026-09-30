@@ -20,7 +20,7 @@ export const BROWSER_KEY_PROVIDERS = [
 ] as const;
 export type BrowserKeyProvider = (typeof BROWSER_KEY_PROVIDERS)[number];
 
-/** A subscription connected on the server, chosen in this browser. */
+/** A subscription connected through the selected connector, chosen here. */
 export type SubscriptionChoice = "codex" | "claude_code";
 
 export interface BrowserKeys {

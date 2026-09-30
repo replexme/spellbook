@@ -8,11 +8,13 @@ import {
 const MIN_SECRET_BYTES = 32;
 const MIN_CHALLENGE_LENGTH = 32;
 const MAX_CHALLENGE_LENGTH = 128;
+export type PairingIntent = "codex" | "claude";
 
 interface PendingPairing {
   id: string;
   origin: string;
   challenge: string;
+  intent: PairingIntent;
   confirmationSecret: string;
   expiresAt: number;
 }
@@ -28,6 +30,7 @@ export interface PairingRequest {
   id: string;
   origin: string;
   challenge: string;
+  intent: PairingIntent;
   expiresAt: number;
 }
 
@@ -39,6 +42,7 @@ export interface PairedSession {
   token: string;
   origin: string;
   challenge: string;
+  intent: PairingIntent;
   expiresAt: number;
 }
 
@@ -62,7 +66,11 @@ export class LocalPairingAuthority {
     this.allowedOrigins = new Set(normalized);
   }
 
-  begin(rawOrigin: string, challenge: string): PairingRequest {
+  begin(
+    rawOrigin: string,
+    challenge: string,
+    intent: PairingIntent = "codex",
+  ): PairingRequest {
     this.cleanup();
     const origin = this.requireAllowedOrigin(rawOrigin);
     if (this.pending.size >= 32) throw new Error("too_many_pairing_requests");
@@ -76,6 +84,7 @@ export class LocalPairingAuthority {
       id: randomUUID(),
       origin,
       challenge,
+      intent,
       confirmationSecret: randomBytes(32).toString("base64url"),
       expiresAt: this.now() + this.pendingTtlMs,
     };
@@ -111,6 +120,7 @@ export class LocalPairingAuthority {
       token: this.sign(claims),
       origin: pairing.origin,
       challenge: pairing.challenge,
+      intent: pairing.intent,
       expiresAt: claims.expiresAt,
     };
   }
@@ -183,6 +193,7 @@ function publicPairing(pairing: PendingPairing): PairingRequest {
     id: pairing.id,
     origin: pairing.origin,
     challenge: pairing.challenge,
+    intent: pairing.intent,
     expiresAt: pairing.expiresAt,
   };
 }

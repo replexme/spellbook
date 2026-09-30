@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import {
   execFile,
   spawn,
+  type ChildProcess,
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
 import fs from "node:fs/promises";
@@ -59,6 +60,7 @@ interface ToolServer {
 export class ClaudeCodeClient implements AgentTurnClient {
   readonly supportsImageGeneration = false;
   private readonly conversationSessions = new Map<string, string>();
+  private loginProcess: ChildProcess | null = null;
 
   constructor(private readonly binary = resolveClaudeBinary()) {}
 
@@ -81,6 +83,34 @@ export class ClaudeCodeClient implements AgentTurnClient {
         : null,
       requiresClaudeAuth: !status.loggedIn,
     };
+  }
+
+  async startBrowserLogin(): Promise<{ status: "started" | "pending" }> {
+    if (this.loginProcess && this.loginProcess.exitCode === null)
+      return { status: "pending" };
+    const child = spawn(this.binary, ["auth", "login", "--claudeai"], {
+      env: restrictedClaudeEnvironment(),
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    this.loginProcess = child;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        child.once("spawn", resolve);
+        child.once("error", reject);
+      });
+    } catch (error) {
+      if (this.loginProcess === child) this.loginProcess = null;
+      throw error;
+    }
+    const timeout = setTimeout(() => child.kill(), 5 * 60_000);
+    timeout.unref();
+    child.once("exit", () => {
+      clearTimeout(timeout);
+      if (this.loginProcess === child) this.loginProcess = null;
+    });
+    child.unref();
+    return { status: "started" };
   }
 
   async models(): Promise<AvailableModel[]> {

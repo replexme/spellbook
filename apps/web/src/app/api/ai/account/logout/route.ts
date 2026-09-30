@@ -1,9 +1,12 @@
-import { requireSession, routeError } from "@/lib/http";
+import { HttpError, requireSession, routeError } from "@/lib/http";
 import { callAiAccount } from "@/lib/workers";
+import { aiConnectorConfig } from "@/lib/ai-connector-config";
 
 export async function POST(request: Request) {
   try {
     const session = await requireSession(request);
+    if (aiConnectorConfig().mode === "local")
+      throw new HttpError(410, "local_connector_required");
     const body = (await request.json().catch(() => ({}))) as {
       provider?: unknown;
     };

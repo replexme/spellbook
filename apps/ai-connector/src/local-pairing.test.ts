@@ -17,6 +17,7 @@ describe("local connector pairing", () => {
     expect(pairing).toMatchObject({
       origin: "https://spellbook.replex.me",
       challenge,
+      intent: "codex",
       expiresAt: 121_000,
     });
     expect(pairing).not.toHaveProperty("confirmationSecret");
@@ -43,6 +44,22 @@ describe("local connector pairing", () => {
       authority.verify("https://spellbook.replex.me", session.token),
     ).toThrow("invalid_connector_session");
     now += 1;
+  });
+
+  it("keeps the selected provider through local approval", () => {
+    const authority = new LocalPairingAuthority(secret, [
+      "https://spellbook.replex.me",
+    ]);
+    const pairing = authority.begin(
+      "https://spellbook.replex.me",
+      challenge,
+      "claude",
+    );
+    const approval = authority.approval(pairing.id);
+    expect(approval.intent).toBe("claude");
+    expect(
+      authority.confirm(pairing.id, approval.confirmationSecret).intent,
+    ).toBe("claude");
   });
 
   it("rejects expired pairings and sessions", () => {

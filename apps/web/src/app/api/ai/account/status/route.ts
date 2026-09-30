@@ -1,11 +1,17 @@
 import { requireSession, routeError } from "@/lib/http";
 import { callAiAccount } from "@/lib/workers";
+import { aiConnectorConfig } from "@/lib/ai-connector-config";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   try {
     const session = await requireSession(request);
+    if (aiConnectorConfig().mode === "local")
+      return Response.json(
+        { account: null, claude: null, keyScope: session.accountId },
+        { headers: { "cache-control": "no-store" } },
+      );
     let rawStatus: any = null;
     try {
       rawStatus = (await callAiAccount(
