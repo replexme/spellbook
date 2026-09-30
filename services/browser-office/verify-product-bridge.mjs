@@ -12,6 +12,7 @@ import { readRepositoryIdentity } from "./repository-identity.mjs";
 import { createHarnessServer } from "./server.mjs";
 import { applyOoxmlCommand } from "./ooxml-worker-source.mjs";
 import { firstDocumentStateDifference } from "../office-session-spike/document-state-evidence.mjs";
+import { normalizeDocumentPersistenceState } from "../office-session-spike/persistence-evidence.mjs";
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
@@ -811,14 +812,19 @@ try {
   if (laterRedone.revision !== laterEdit.revision) {
     // When native Redo misses the recorded revision the product reopens the
     // saved package; that state must match the edit within the documented
-    // 0.02 mm geometry quantization (a Korean interface lays out a text box
-    // that fits its text one unit apart on Redo).
+    // 0.02 mm geometry quantization and shared authored-property rules.
+    // Reimport can report an unchanged margin as DIRECT_VALUE rather than
+    // DEFAULT_VALUE; its numeric value must still match. This is the same
+    // persistence comparator used by the product, not a raw engine hash.
     const redone = await nativeTask(page, "observe-after-redo", {
       operation: "observe",
     });
     assert.equal(
       JSON.stringify(
-        firstDocumentStateDifference(laterEdit.slides, redone.slides),
+        firstDocumentStateDifference(
+          normalizeDocumentPersistenceState(laterEdit).slides,
+          normalizeDocumentPersistenceState(redone, { authoredBy: laterEdit }).slides,
+        ),
       ),
       "null",
     );
