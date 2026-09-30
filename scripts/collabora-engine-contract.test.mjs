@@ -157,7 +157,9 @@ test("runtime mutation contracts are generated from the public capability model"
   assert.equal(operations.set_object_interaction.minEnginePatch, 18);
   assert.equal(operations.set_object_interaction.family, "object_interaction");
   const exposedOperations = capabilities.toolInputSchema.properties.op.enum;
-  assert.equal(exposedOperations.length, 95);
+  assert.equal(exposedOperations.length, 94);
+  assert.equal(operations.set_media_playback.availability, "format_excluded");
+  assert.equal(exposedOperations.includes("set_media_playback"), false);
   assert.equal(new Set(exposedOperations).size, exposedOperations.length);
   assert.deepEqual(
     exposedOperations.slice().sort(),

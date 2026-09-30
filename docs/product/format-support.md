@@ -4,7 +4,7 @@ This page is the user-facing support truth. “Planned” means architecture onl
 
 | Format                 | Status                        | Direct browser editing | AI observation/edit/review           | Editable download |
 | ---------------------- | ----------------------------- | ---------------------- | ------------------------------------ | ----------------- |
-| PowerPoint `.pptx`     | Prerelease under verification | Impress in browser WASM   | Implemented for supported operations | Implemented       |
+| PowerPoint `.pptx`     | Prerelease under verification | Impress (browser WASM / WOPI)   | Implemented for supported operations | Implemented       |
 | Word `.docx`           | Planned                       | Not exposed            | Not implemented                      | Not exposed       |
 | Spellbook `.spellbook` | Planned                       | Not implemented        | Not implemented                      | Not exposed       |
 
