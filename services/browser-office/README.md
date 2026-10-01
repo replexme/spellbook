@@ -1,5 +1,56 @@
 # Browser Office runtime
 
+## Local two-engine comparison
+
+`verify-engine-comparison.mjs` runs a single input/scenario matrix against the
+admitted native runtime and an experimental ONLYOFFICE browser component.
+It runs each browser sequentially and headlessly. Start it with `nice -n 15`
+on macOS; do not run the native PowerPoint exporter for this background test.
+Commit the integration code first: the runner rejects dirty integration sources
+and invalidates evidence if the source changes during execution.
+
+The experimental candidate is a separate checkout of
+[agentbridges-ai/onlyoffice-browser](https://github.com/agentbridges-ai/onlyoffice-browser),
+not an admitted production engine or the official DocumentServer deployment.
+Build its public component API with `pnpm run build:lib`, prepare its documented
+font assets, and start its production preview on a loopback address. No vendor
+source patch is required. The verifier serves its own local diagnostic host
+using that public API; internal presentation SDK selection and slide methods
+are explicitly version-dependent.
+
+Keep the input manifest, private PPTX files, saved files and screenshots outside
+Git. A manifest contains `inputs`, each with `label`, `path`, and `scenarios`.
+Optional `expectedSha256` pins a public fixture. Scenarios are `roundtrip`,
+`type`, `type-move`, `move`, `delete`, `newslide`, `dupslide`, and `delslide`.
+The native verifier also supports `unobserved-picture-mode` with
+`--coverage-boundary save|observe|heartbeat|ack|before-ai`; it injects a real
+omitted UNO-property edit only into the test response, never into shipped code.
+
+```sh
+nice -n 15 node services/browser-office/verify-engine-comparison.mjs \
+  --manifest /private/tmp/engine-comparison-inputs.json \
+  --native-runtime /private/tmp/admitted-native-runtime \
+  --candidate-root /private/tmp/onlyoffice-browser \
+  --origin http://127.0.0.1:38767 \
+  --output /private/tmp/engine-comparison-results
+```
+
+The report distinguishes applied edits, raw candidate export/reopen and native
+product-preserved saves, original and saved OpenXML validation, package rewrite
+scope, history, timing and approximate task resource use. It also trials the
+existing preservation worker against candidate exports; a produced package is
+not a production admission and still needs candidate-engine readback of the
+complete intended change. Geometry/text-only candidate snapshots do not prove
+all chart, table, style, media, animation or relationship semantics. Screenshots
+must be inspected separately; API presence, valid XML and export speed are not
+visual fidelity or complete AI-contract proof. Provider authentication and
+PowerPoint reopen are separate gates.
+
+The candidate's `save-failure` diagnostic rejects the real host save callback
+and checks that its write count stays zero and dirty state survives. It does
+not provide our product's OPFS recovery, server revision protocol or AI edit
+permission checks. Those must be implemented and tested before adoption.
+
 This directory builds and verifies the browser editor: LibreOffice compiled to
 WebAssembly, run in the user's browser. The managed Spellbook service serves it
 on its own site and has made it the default editor (2026-09-26).
