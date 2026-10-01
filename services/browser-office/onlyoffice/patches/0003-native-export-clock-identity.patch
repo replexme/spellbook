@@ -1,0 +1,154 @@
+diff --git a/src/lib/native-save-identity.ts b/src/lib/native-save-identity.ts
+new file mode 100644
+index 0000000..dbd8b3b
+--- /dev/null
++++ b/src/lib/native-save-identity.ts
+@@ -0,0 +1,58 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++// Pinned sdkjs 9.3 CCore.toStream generates attribute 5 from the clock on
++// every export. It is not a document edit. Retain all other native bytes.
++// This is export-content evidence, not a complete document-version API.
++export function nativeSaveContentIdentity(input: Uint8Array): Uint8Array {
++  let bytes = input;
++  if (new TextDecoder().decode(input.subarray(0, 5)) === 'UFBUW') {
++    const text = new TextDecoder().decode(input);
++    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(text)) throw new Error('Malformed native base64');
++    bytes = Uint8Array.from(atob(text), (char) => char.charCodeAt(0));
++  }
++  const header = new TextDecoder().decode(bytes.subarray(0, 11));
++  if (!header.startsWith('PPTY;')) return bytes;
++  if (header !== 'PPTY;v10;0;') throw new Error('Unsupported native presentation version');
++  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
++  const uint32 = (at: number) => {
++    if (at < 0 || at + 4 > bytes.length) throw new Error('Truncated native presentation');
++    return view.getUint32(at, true);
++  };
++  if (bytes.length < 161) throw new Error('Truncated native main table');
++  let core: number | undefined;
++  for (let i = 0; i < 30; i++) {
++    const at = 11 + i * 5;
++    const type = bytes[at];
++    if (type === 0) break;
++    if (type === 2) {
++      if (core !== undefined) throw new Error('Duplicate native core table');
++      core = uint32(at + 1);
++    }
++  }
++  if (core === undefined) return bytes;
++  const end = core + 5 + uint32(core + 1);
++  if (core < 161 || core + 6 >= end || end > bytes.length || bytes[core] !== 2 || bytes[core + 5] !== 250)
++    throw new Error('Invalid native core record');
++  let at = core + 6;
++  let clock: number | undefined;
++  const seen = new Set<number>();
++  while (at < end && bytes[at] !== 251) {
++    const tag = bytes[at];
++    if (tag > 5 || seen.has(tag)) throw new Error('Unknown native core attribute');
++    seen.add(tag);
++    const characters = uint32(at + 1);
++    const start = at + 5;
++    const next = start + characters * 2;
++    if (next > end) throw new Error('Truncated native core attribute');
++    if (tag === 5) {
++      const timestamp = new TextDecoder('utf-16le').decode(bytes.subarray(start, next));
++      if (characters !== 20 || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(timestamp) ||
++          Number.isNaN(Date.parse(timestamp))) throw new Error('Unknown native export clock');
++      clock = start;
++    }
++    at = next;
++  }
++  if (at >= end || bytes[at] !== 251 || clock === undefined) throw new Error('Missing native export clock');
++  const identity = bytes.slice();
++  identity.fill(0, clock, clock + 40);
++  return identity;
++}
+diff --git a/src/lib/office-editor-runtime.ts b/src/lib/office-editor-runtime.ts
+index 1fe040f..02aac45 100644
+--- a/src/lib/office-editor-runtime.ts
++++ b/src/lib/office-editor-runtime.ts
+@@ -18,6 +18,7 @@ import {
+ } from './onlyoffice-mock-server';
+ import type { BinConversionResult, DocumentMediaMap, SaveEvent } from './document-types';
+ import { assertGeneratedFontAssetsAvailable } from './font-assets';
++import { nativeSaveContentIdentity } from './native-save-identity';
+ 
+ const ONLYOFFICE_BROWSER_BUILD_VERSION = '9.3.0';
+ const ONLYOFFICE_BROWSER_BUILD_NUMBER = 140;
+@@ -3242,8 +3243,10 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+   private matchesNativeSnapshot(snapshot: NativeSaveSnapshot): boolean {
+     try {
+       const current = this.getNativeSaveData();
+-      return current.length === snapshot.data.length &&
+-        current.every((value, index) => value === snapshot.data[index]) &&
++      const currentIdentity = nativeSaveContentIdentity(current);
++      const savedIdentity = nativeSaveContentIdentity(snapshot.data);
++      return currentIdentity.length === savedIdentity.length &&
++        currentIdentity.every((value, index) => value === savedIdentity[index]) &&
+         snapshot.media === this.nativeMediaIdentity();
+     } catch {
+       // Missing readback cannot prove the current document was persisted.
+diff --git a/test/unit/native-save-identity.test.ts b/test/unit/native-save-identity.test.ts
+new file mode 100644
+index 0000000..2dbcb63
+--- /dev/null
++++ b/test/unit/native-save-identity.test.ts
+@@ -0,0 +1,59 @@
++import { describe, expect, it } from 'vitest';
++import { nativeSaveContentIdentity } from '../../src/lib/native-save-identity';
++
++function native(clock: string, title = 'Title', created = '2020-01-01T00:00:00Z') {
++  const string = (tag: number, value: string) => {
++    const result = new Uint8Array(5 + value.length * 2);
++    const view = new DataView(result.buffer);
++    result[0] = tag;
++    view.setUint32(1, value.length, true);
++    for (let i = 0; i < value.length; i++) view.setUint16(5 + i * 2, value.charCodeAt(i), true);
++    return result;
++  };
++  const fields = [string(0, title), string(4, created), string(5, clock)];
++  const size = fields.reduce((n, bytes) => n + bytes.length, 0);
++  const result = new Uint8Array(161 + 5 + 1 + size + 1 + 4);
++  result.set(new TextEncoder().encode('PPTY;v10;0;'));
++  result[11] = 2;
++  const view = new DataView(result.buffer);
++  view.setUint32(12, 161, true);
++  result[161] = 2;
++  view.setUint32(162, 1 + size + 1, true);
++  result[166] = 250;
++  let at = 167;
++  for (const field of fields) { result.set(field, at); at += field.length; }
++  result[at] = 251;
++  result.set([1, 2, 3, 4], at + 1); // unrelated document bytes
++  return result;
++}
++
++describe('pinned presentation native export identity', () => {
++  it('ignores only the generated clock in both binary and base64 input, without modifying either', () => {
++    const first = native('2026-10-01T01:01:01Z');
++    const later = native('2026-10-01T01:02:02Z');
++    const original = first.slice();
++    const encoded = new TextEncoder().encode(btoa(String.fromCharCode(...later)));
++    expect(nativeSaveContentIdentity(first)).toEqual(nativeSaveContentIdentity(encoded));
++    expect(first).toEqual(original);
++  });
++  it('retains authored title, creation date and unrelated native bytes', () => {
++    const first = native('2026-10-01T01:01:01Z');
++    for (const different of [
++      native('2026-10-01T01:02:02Z', 'Other'),
++      native('2026-10-01T01:02:02Z', 'Title', '2021-01-01T00:00:00Z'),
++    ]) expect(nativeSaveContentIdentity(first)).not.toEqual(nativeSaveContentIdentity(different));
++    const changed = first.slice(); changed[changed.length - 1]++;
++    expect(nativeSaveContentIdentity(first)).not.toEqual(nativeSaveContentIdentity(changed));
++  });
++  it('rejects unknown presentation versions, attributes and malformed clock/record lengths', () => {
++    const version = native('2026-10-01T01:01:01Z'); version[7] = 49;
++    const attribute = native('2026-10-01T01:01:01Z'); attribute[167] = 9;
++    const length = native('2026-10-01T01:01:01Z'); new DataView(length.buffer).setUint32(162, 0xffffffff, true);
++    for (const bytes of [version, attribute, length, native('2026-99-01T01:01:01Z')])
++      expect(() => nativeSaveContentIdentity(bytes)).toThrow();
++  });
++  it('keeps non-presentation binary evidence exact', () => {
++    const bytes = new Uint8Array([9, 8, 7]);
++    expect(nativeSaveContentIdentity(bytes)).toEqual(bytes);
++  });
++});
