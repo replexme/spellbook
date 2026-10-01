@@ -118,6 +118,15 @@ accumulating two feature-specific code paths. It does not claim full browser
 parity: commands whose contract requires a Spellbook engine patch remain
 unavailable on the stock ZetaOffice binary.
 
+Product `/workspace` now requires a verified runtime before opening a document
+or accessing its recovery journal. Stock binaries remain available for isolated
+diagnostic probes; they cannot enter product editing because saved-package
+readback is unsafe there. Run
+`node services/browser-office/verify-product-runtime-refusal.mjs` to verify real
+host refusal, unchanged storage and a queue that remains usable after refusal. Run
+the product verifier with `--candidate-runtime <verified-runtime-directory>`
+for the admitted edit/save/history/recovery path.
+
 The browser-native transform adapter is a fail-closed registry rather than a
 second operation program. Its candidate implementation covers slide names,
 visibility and transitions plus bounded object metadata, text-box geometry,

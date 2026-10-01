@@ -626,7 +626,11 @@ async function requestNative(nativeRequest) {
         packageAssetHashes: (await packageMetadataOf(currentBytes)).assetHashes,
       },
     });
-    if (result.value && typeof result.value === "object" && Number.isSafeInteger(result.documentChanges))
+    if (
+      result.value &&
+      typeof result.value === "object" &&
+      Number.isSafeInteger(result.documentChanges)
+    )
       nativeVersionsByObservation.set(result.value, result.documentChanges);
     return result;
   } finally {
@@ -809,7 +813,8 @@ function liveExportBaselineAt(liveRevision) {
 function bindOpenExportBaseline(revision) {
   if (liveExportBaseline && liveExportBaseline.revision === null) {
     liveExportBaseline.revision = revision;
-    checkpointedDocumentChanges = nativeVersionsBySerializedBytes.get(liveExportBaseline.bytes) ?? null;
+    checkpointedDocumentChanges =
+      nativeVersionsBySerializedBytes.get(liveExportBaseline.bytes) ?? null;
   }
 }
 
@@ -2229,7 +2234,8 @@ async function refreshReconciledNativeBaseline(observation) {
   });
   liveExportBaseline = { revision: observation.revision, bytes };
   rememberReconciledObservation(observation);
-  checkpointedDocumentChanges = nativeVersionsBySerializedBytes.get(bytes) ?? changes;
+  checkpointedDocumentChanges =
+    nativeVersionsBySerializedBytes.get(bytes) ?? changes;
 }
 
 async function checkpointLiveNativeState(live, reason, retryCount = 0) {
@@ -2595,6 +2601,13 @@ function exportProductDocument(options = {}) {
 }
 
 async function openProductDocument(message) {
+  // Product edits depend on safe saved-package readback and exact history.
+  // Diagnostic stock runtimes may load the harness, but must not open a
+  // product document or its recovery journal before their build is admitted.
+  if (!patchedBrowserRuntimeAdmitted())
+    throw new Error(
+      "Browser Office requires a verified runtime before opening product documents.",
+    );
   if (
     typeof message.requestId !== "string" ||
     typeof message.fileName !== "string" ||
@@ -2926,7 +2939,9 @@ async function handleProductHostMessage(message) {
         status: afterStatus,
         reconciledRevision: reconciledModelRevision,
       });
-      const afterAcknowledgement = acknowledgementUnchanged ? live : await observeNativeDocument();
+      const afterAcknowledgement = acknowledgementUnchanged
+        ? live
+        : await observeNativeDocument();
       if (acknowledgementUnchanged) {
         // setModified(false) advances the event counter and resets automatic
         // export author/revision metadata. It is an acknowledged housekeeping
@@ -3258,12 +3273,16 @@ function connectProductHost(event) {
       };
     if (browserProbeMode && typeof hostEvent.data?.id === "string")
       browserProbePhaseTrace = [{ phase: "queued", at: Date.now() }];
-    void enqueueProductOperation(() =>
-      handleProductHostMessage(message),
-    ).finally(() => {
+    const releaseTask = () => {
       if (typeof message?.id === "string")
         productTasksInFlight.delete(message.id);
-    });
+    };
+    // The queue already reports failures to the host. Consume rejection here
+    // too: finally() would create an unhandled browser promise on refusal.
+    void enqueueProductOperation(() => handleProductHostMessage(message)).then(
+      releaseTask,
+      releaseTask,
+    );
   };
   hostPort.start();
   postHost({ type: "ready", protocolVersion: 1 });

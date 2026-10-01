@@ -135,8 +135,12 @@ must pass the same engine readback as the native snapshot. If readback disagrees
 with a live native edit, the coordinator preserves that actual native result
 through the existing scoped original/no-edit/edited merge and verifies it again.
 It does not expand the operation's package budget. A failure in either path
-retains the existing rollback behavior. The older stock runtime must pass
-readback too; it cannot silently use the candidate-runtime fallback.
+retains the existing rollback behavior. Product documents require an admitted
+runtime before document opening or recovery storage access. The older stock
+runtime can serve the diagnostic harness, but its unsafe saved-package readback
+is not admitted to product editing. It cannot bypass validation or silently use
+the candidate-runtime fallback. Expected refusals are reported through the host
+queue without creating an unhandled browser promise.
 
 Admission records bind the candidate SHA-256, observed model revision and
 normalized saved-state SHA-256. OPFS stores that record with its byte-checked
