@@ -4188,6 +4188,48 @@ test("regenerated slide names cannot shift existing picture opacity during dupli
   );
 });
 
+test("text preservation retains authored formatting and the auto-fit size delta", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml";
+  const namespaces = {
+    p: "http://schemas.openxmlformats.org/presentationml/2006/main",
+    a: "http://schemas.openxmlformats.org/drawingml/2006/main",
+  };
+  const edit = (bytes, callback) => {
+    const document = new DOMParser().parseFromString(strFromU8(bytes), "application/xml");
+    const shape = document.getElementsByTagNameNS(namespaces.p, "sp")[0];
+    callback(shape);
+    return strToU8(new XMLSerializer().serializeToString(document));
+  };
+  const find = (shape, tag) => shape.getElementsByTagNameNS(namespaces.a, tag)[0];
+  original[part] = edit(original[part], shape => {
+    if (!find(shape, "spAutoFit"))
+      find(shape, "bodyPr").appendChild(shape.ownerDocument.createElementNS(namespaces.a, "a:spAutoFit"));
+    find(shape, "ext").setAttribute("cx", "6660798");
+    find(shape, "ext").setAttribute("cy", "2031325");
+    find(shape, "rPr").setAttribute("altLang", "ko-KR");
+  });
+  const baseline = { ...original, [part]: edit(original[part], shape => {
+    find(shape, "rPr").removeAttribute("altLang");
+    find(shape, "rPr").setAttribute("lang", "engine-language");
+  }) };
+  const edited = { ...baseline, [part]: edit(baseline[part], shape => {
+    find(shape, "t").textContent += " MANUAL";
+    find(shape, "ext").setAttribute("cx", "6841565");
+    find(shape, "ext").setAttribute("cy", "2012040");
+  }) };
+  const result = preserveOriginalPptxParts(zipSync(original), zipSync(baseline), zipSync(edited),
+    ["replace_text"], [{ op: "replace_text", slideIndex: 0, shapeIndex: 0 }]);
+  const saved = new DOMParser().parseFromString(strFromU8(unzipSync(result.bytes)[part]), "application/xml");
+  const shape = saved.getElementsByTagNameNS(namespaces.p, "sp")[0];
+  assert.equal(find(shape, "ext").getAttribute("cx"), "6841565");
+  assert.equal(find(shape, "ext").getAttribute("cy"), "2012040");
+  assert.equal(find(shape, "rPr").getAttribute("altLang"), "ko-KR");
+  assert.notEqual(find(shape, "rPr").getAttribute("lang"), "engine-language");
+  assert.match(find(shape, "t").textContent, / MANUAL$/u);
+  assert.equal(shape.getElementsByTagNameNS(namespaces.a, "spAutoFit").length, 1);
+});
+
 test("restoring an authored transition preserves ancestor-only Requires prefix bindings against a conflicting destination", async () => {
   const fixture = new Uint8Array(await readFile(fixtureUrl));
   const { entries, slidePath } = withAuthoredTransitionSound(fixture);

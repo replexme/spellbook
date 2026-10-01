@@ -753,8 +753,9 @@ function preserveUnaffectedSlideShapes(
       // An imported placeholder can have one authored run but several
       // language-specific runs in both engine exports. The XML three-way
       // merge can import engine formatting or fail to align those trees.
-      // Carry only the live plain-text delta into the authored runs; the
-      // saved-model readback verifies the result.
+      // Keep the authored runs while carrying both the live text delta and
+      // its shape-property delta. Auto-fit can resize a text box during an
+      // edit even though the command did not explicitly request a resize.
       try {
         const priorText = readShapeText(source);
         if (priorText === readShapeText(baseline)) {
@@ -762,8 +763,17 @@ function preserveUnaffectedSlideShapes(
           if (changedText !== priorText) {
             const authoredText = source.cloneNode(true);
             replaceShapeText(authoredText, changedText);
-            if (readShapeText(authoredText) === changedText)
+            const properties = [source, baseline, editedShape].map((shape) =>
+              optionalDirectXmlChild(shape, presentationNamespace, "spPr"),
+            );
+            const changedProperties = properties.every(Boolean)
+              ? mergeElementThreeWay(documents[2], ...properties)
+              : null;
+            if (readShapeText(authoredText) === changedText && changedProperties) {
               merged = importOoxmlSubtree(documents[2], authoredText, true);
+              merged.replaceChild(changedProperties,
+                optionalDirectXmlChild(merged, presentationNamespace, "spPr"));
+            }
           }
         }
       } catch {
