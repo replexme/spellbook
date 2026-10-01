@@ -433,6 +433,60 @@ function withoutPresetEditorMetadata(slides) {
 }
 
 function withSavedAnimationContainers(slides) {
+  const defaultSequenceFields = new Set([
+    "animationId",
+    "kind",
+    "nodeType",
+    "semanticNodeType",
+    "begin",
+    "duration",
+    "end",
+    "fill",
+    "restart",
+    "target",
+    "attributeName",
+    "preset",
+    "childCount",
+    "children",
+  ]);
+  // Impress can materialize an empty main sequence during layout/history
+  // reads; PPTX reload keeps just the timing root. Remove only this exact
+  // default, targetless leaf container. Authored effects and timing survive.
+  for (const slide of slides) {
+    const animations = slide.animations;
+    if (!animations || animations.truncated || animations.effects?.length)
+      continue;
+    let removed = 0;
+    for (const root of animations.roots ?? []) {
+      if (root.semanticNodeType !== EFFECT_NODE_TIMING_ROOT) continue;
+      root.children = (root.children ?? []).filter((node) => {
+        const empty =
+          node.nodeType === ANIMATION_NODE_SEQ &&
+          node.semanticNodeType === EFFECT_NODE_MAIN_SEQUENCE &&
+          Object.keys(node).every((key) => defaultSequenceFields.has(key)) &&
+          [null, undefined, "animcore::SequenceTimeContainer"].includes(
+            node.kind,
+          ) &&
+          node.target == null &&
+          !node.attributeName &&
+          Object.keys(node.preset ?? {}).length === 0 &&
+          node.begin == null &&
+          node.end == null &&
+          [null, undefined, 0, "indefinite"].includes(node.duration) &&
+          [null, undefined, ANIMATION_FILL_DEFAULT].includes(node.fill) &&
+          [null, undefined, 0].includes(node.restart) &&
+          node.childCount === 0 &&
+          Array.isArray(node.children) &&
+          !node.children.length;
+        if (empty) removed++;
+        return !empty;
+      });
+      if (removed && Number.isSafeInteger(root.childCount))
+        root.childCount = root.children.length;
+    }
+    if (removed && Number.isSafeInteger(animations.nodeCount))
+      animations.nodeCount -= removed;
+  }
   const visit = (node) => {
     if (!node || typeof node !== "object") return;
     const effectNodeType = node.semanticNodeType;

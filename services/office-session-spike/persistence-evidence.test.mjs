@@ -235,6 +235,67 @@ test("optional media playback settings do not hide media source or geometry loss
   );
 });
 
+test("empty native main sequences normalize without masking effects or authored timing", () => {
+  const empty = {
+    nodeType: 2,
+    semanticNodeType: 4,
+    target: null,
+    preset: {},
+    begin: null,
+    end: null,
+    duration: 0,
+    fill: 0,
+    restart: 0,
+    childCount: 0,
+    children: [],
+  };
+  const root = {
+    nodeType: 1,
+    semanticNodeType: 5,
+    duration: null,
+    fill: 0,
+    restart: 0,
+    childCount: 1,
+    children: [empty],
+  };
+  const state = (candidate) => ({
+    slides: [
+      {
+        animations: {
+          nodeCount: 2,
+          truncated: false,
+          roots: [candidate],
+          effects: [],
+        },
+      },
+    ],
+    masters: [],
+  });
+  const expected = normalizeDocumentPersistenceState(state(root));
+  assert.equal(expected.slides[0].animations.nodeCount, 1);
+  assert.deepEqual(expected.slides[0].animations.roots[0].children, []);
+  for (const changed of [
+    { ...empty, unknownTimingProperty: true },
+    { ...empty, duration: 0.4 },
+    { ...empty, begin: 1 },
+    { ...empty, preset: { id: "ooo-entrance-appear" } },
+    { ...empty, target: { elementId: "0/0" } },
+    { ...empty, childCount: 1, children: [{ nodeType: 5, duration: 0.3 }] },
+  ]) {
+    const actual = normalizeDocumentPersistenceState(
+      state({ ...root, children: [changed] }),
+    );
+    assert.equal(actual.slides[0].animations.roots[0].children.length, 1);
+    assert.notDeepEqual(actual, expected);
+  }
+  const truncated = state(root);
+  truncated.slides[0].animations.truncated = true;
+  assert.equal(
+    normalizeDocumentPersistenceState(truncated).slides[0].animations.nodeCount,
+    2,
+  );
+});
+
 test("product persistence admission compares rebuilt animation containers in their saved form", () => {
   const indefinite = { trigger: null, offset: null, repeat: 0 };
   const effect = (duration) => ({
