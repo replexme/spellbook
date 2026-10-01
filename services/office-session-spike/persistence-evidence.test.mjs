@@ -133,6 +133,56 @@ test("product persistence admission checks changed semantics across save/reopen"
   );
 });
 
+test("shape insertion keeps retained properties bound to their no-op baseline", () => {
+  const before = {
+    slides: [
+      {
+        elements: [
+          { name: "Text", text: "Title" },
+          { name: "Original", textMargins: { left: 337 }, fillColor: 1 },
+        ],
+      },
+    ],
+    masters: [],
+  };
+  const expected = structuredClone(before);
+  expected.slides[0].elements.push({
+    name: "Copy",
+    textMargins: { left: 337 },
+    fillColor: 1,
+  });
+  const baseline = structuredClone(before);
+  baseline.slides[0].elements[1].textMargins.left = 250;
+  const observed = structuredClone(expected);
+  observed.slides[0].elements[1].textMargins.left = 250;
+  const report = {
+    persistenceBefore: before,
+    persistenceExpected: expected,
+    persistenceBaseline: baseline,
+  };
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({ before, expected, observed }),
+    [],
+  );
+  assert.deepEqual(documentPersistenceDeltaDifferences(report, observed), []);
+  observed.slides[0].elements[2].textMargins.left = 250;
+  assert.equal(
+    intendedDocumentMutationDifferences({ before, expected, observed })[0].path,
+    "$.slides[0].elements[2].textMargins.left",
+  );
+  observed.slides[0].elements[2].textMargins.left = 337;
+  observed.slides[0].elements[1].textMargins.left = 300;
+  assert.equal(
+    documentPersistenceDeltaDifferences(report, observed)[0].invariant,
+    "unchanged-after-normalization",
+  );
+  observed.slides[0].elements[1].textMargins.left = 250;
+  observed.slides[0].elements.reverse();
+  assert.ok(
+    intendedDocumentMutationDifferences({ before, expected, observed }).length,
+  );
+});
+
 test("optional media playback settings do not hide media source or geometry loss", () => {
   const before = {
     slides: [

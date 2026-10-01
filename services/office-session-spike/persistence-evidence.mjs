@@ -900,6 +900,61 @@ function collectPersistenceDeltaDifferences(
       baseline.length !== observed.length ||
       expected.length !== observed.length
     ) {
+      // Adding/removing a shape changes array length, not every property of
+      // every retained shape. Bind unique authored names and keep strict
+      // order/count/identity checks. New objects still need a complete readback.
+      if (/\.elements$/u.test(path)) {
+        const byName = (elements) => {
+          const result = new Map();
+          for (const element of elements) {
+            const name = element?.objectName || element?.name;
+            if (typeof name !== "string" || !name || result.has(name))
+              return null;
+            result.set(name, element);
+          }
+          return result;
+        };
+        const originalNames = byName(before);
+        const savedBaselineNames = byName(baseline);
+        const expectedNames = byName(expected);
+        const observedNames = byName(observed);
+        const observedOrder = observedNames ? [...observedNames.keys()] : [];
+        if (
+          originalNames &&
+          savedBaselineNames &&
+          expectedNames &&
+          observedNames &&
+          expected.length === observed.length &&
+          [...expectedNames.keys()].every(
+            (name, index) => name === observedOrder[index],
+          )
+        ) {
+          for (const [index, element] of expected.entries()) {
+            const name = element.objectName || element.name;
+            if (originalNames.has(name) && savedBaselineNames.has(name))
+              collectPersistenceDeltaDifferences(
+                originalNames.get(name),
+                element,
+                savedBaselineNames.get(name),
+                observed[index],
+                `${path}[${index}]`,
+                differences,
+                limit,
+              );
+            else
+              collectExactDifferences(
+                element,
+                observed[index],
+                `${path}[${index}]`,
+                "intended-change",
+                differences,
+                limit,
+                true,
+              );
+          }
+          return;
+        }
+      }
       collectExactDifferences(
         expected,
         observed,
