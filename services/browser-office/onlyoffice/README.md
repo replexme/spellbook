@@ -66,3 +66,11 @@ and the Open XML SDK chart-style schema. The pinned ONLYOFFICE core
 MIME; the repair is an adapter experiment while those native defects remain.
 Independent SDK validation, actual repaired-artifact reopen, visual review,
 and complete product-contract checks remain required.
+
+`--readback-state <captured-intent.json> --scenarios roundtrip` runs only a
+read-only reopen of an existing package and compares it with that file's
+captured `edited` projection. It writes no artifact and records zero host
+writes. `--readback-slide <index>` selects the page for its screenshot. Kinds,
+text and geometry are covered; full style/source bindings are not implied.
+Regular edit trials also select the original edited page before the reopened
+screenshot, so newly added slides are visually compared on the same page.

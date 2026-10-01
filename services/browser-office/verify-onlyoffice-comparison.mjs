@@ -28,6 +28,9 @@ const outputRoot = path.resolve(flag("--output"));
 const candidateRoot = path.resolve(flag("--candidate-root"));
 const origin = new URL(flag("--origin"));
 const repairStructure = process.argv.includes("--repair-structure");
+const readbackStatePath = flag("--readback-state", null);
+const readbackSlide = Number(flag("--readback-slide", "0"));
+assert(Number.isInteger(readbackSlide) && readbackSlide >= 0);
 assert(
   ["127.0.0.1", "localhost"].includes(origin.hostname),
   "Local candidate origin required",
@@ -55,7 +58,24 @@ assert(
 await mkdir(outputRoot, { recursive: true, mode: 0o700 });
 if (repairStructure) await buildHarness();
 const source = await readFile(inputPath);
-assertComparisonMarkerAbsent(source);
+if (!readbackStatePath) assertComparisonMarkerAbsent(source);
+const expectedStateBytes = readbackStatePath
+  ? await readFile(path.resolve(readbackStatePath))
+  : null;
+const expectedState = expectedStateBytes
+  ? JSON.parse(expectedStateBytes.toString("utf8")).edited
+  : null;
+if (readbackStatePath) {
+  assert(
+    Array.isArray(expectedState?.slides),
+    "Readback requires captured edited state",
+  );
+  assert.deepEqual(
+    scenarios,
+    ["roundtrip"],
+    "Readback must not execute edits or saves",
+  );
+}
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const candidate = readRepositoryIdentity(candidateRoot);
 const integration = readRepositoryIdentity(
@@ -96,10 +116,15 @@ const report = {
   sourceBytes: source.length,
   candidate,
   integration,
-  timingScope:
-    "candidate editor readiness / raw engine export; excludes product preservation and server acknowledgement",
+  timingScope: repairStructure
+    ? "candidate readiness / export including browser repair and host callback; excludes original-part preservation and runtime clean reconciliation"
+    : "candidate readiness / raw export including host callback; excludes product preservation and runtime clean reconciliation",
   inputSetup:
     "version-pinned internal SDK selects the target; text and arrow/delete edits use headless browser keyboard",
+  expectedStateSha256: expectedStateBytes ? sha(expectedStateBytes) : null,
+  readbackScope: readbackStatePath
+    ? "read-only reopen against captured kinds/text/geometry; excludes complete source preservation and product admission"
+    : null,
   cases: [],
   engineApiMethods: null,
   externalRequestCount: 0,
@@ -279,6 +304,37 @@ try {
       item.openMs = ms;
       const before = await snapshot(frame);
       item.originalSlideCount = before.slides.length;
+      if (expectedState) {
+        item.stage = "preserved-package-readback";
+        item.reopenDifferences = differences(expectedState, before);
+        assert(
+          readbackSlide < before.slides.length,
+          "Readback slide unavailable",
+        );
+        await frame.evaluate(
+          (index) => window.Asc.editor.WordControl.Thumbnails.SelectPage(index),
+          readbackSlide,
+        );
+        await page.waitForTimeout(100);
+        item.visualSlideIndex = await frame.evaluate(
+          () => window.Asc.editor.WordControl.m_oLogicDocument.CurPage,
+        );
+        assert.equal(item.visualSlideIndex, readbackSlide);
+        await writeFile(
+          path.join(outputRoot, "opened-model.json"),
+          JSON.stringify(before, null, 2),
+          { mode: 0o600 },
+        );
+        await page.screenshot({ path: path.join(outputRoot, "readback.png") });
+        item.writeCount = await page.evaluate(
+          () => window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount,
+        );
+        assert.equal(item.writeCount, 0);
+        item.status = item.reopenDifferences.length
+          ? "preserved-package-model-differs"
+          : "preserved-package-model-readback-verified";
+        continue;
+      }
       if (!report.engineApiMethods)
         report.engineApiMethods = await frame.evaluate(() => {
           const a = window.Asc.editor;
@@ -472,6 +528,9 @@ try {
       }
       await page.waitForTimeout(350);
       const edited = await snapshot(frame);
+      item.visualSlideIndex = await frame.evaluate(
+        () => window.Asc.editor.WordControl.m_oLogicDocument.CurPage,
+      );
       const b = before.slides[0]?.shapes,
         a = edited.slides[0]?.shapes;
       const targetIndex = item.setup?.index;
@@ -573,6 +632,21 @@ try {
       ({ frame, ms } = await open(page));
       item.reopenMs = ms;
       item.reopenDifferences = differences(edited, await snapshot(frame));
+      assert(
+        Number.isInteger(item.visualSlideIndex),
+        "Edited slide index unavailable",
+      );
+      await frame.evaluate(
+        (index) => window.Asc.editor.WordControl.Thumbnails.SelectPage(index),
+        item.visualSlideIndex,
+      );
+      await page.waitForTimeout(100);
+      assert.equal(
+        await frame.evaluate(
+          () => window.Asc.editor.WordControl.m_oLogicDocument.CurPage,
+        ),
+        item.visualSlideIndex,
+      );
       await page.screenshot({
         path: path.join(outputRoot, `${scenario}-reopened.png`),
       });
@@ -637,6 +711,7 @@ if (
       ![
         "raw-export-reopen-verified",
         "repaired-export-reopen-verified",
+        "preserved-package-model-readback-verified",
         "host-failure-keeps-dirty",
         "late-ack-second-save-history-reopen-verified",
       ].includes(c.status),

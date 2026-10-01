@@ -419,6 +419,11 @@ try {
       (c) =>
         c.engine === "onlyoffice" && c.status === "raw-export-reopen-verified",
     ).length,
+    onlyofficeRepairedVerified: report.cases.filter(
+      (c) =>
+        c.engine === "onlyoffice" &&
+        c.status === "repaired-export-reopen-verified",
+    ).length,
     refused: report.cases.filter((c) => c.outcome === "refused").length,
     errors: report.cases.filter(
       (c) =>
