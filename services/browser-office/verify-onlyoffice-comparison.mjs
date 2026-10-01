@@ -312,7 +312,7 @@ try {
           "Readback slide unavailable",
         );
         await frame.evaluate(
-          (index) => window.Asc.editor.WordControl.Thumbnails.SelectPage(index),
+          (index) => window.Asc.editor.WordControl.GoToPage(index),
           readbackSlide,
         );
         await page.waitForTimeout(100);
@@ -637,7 +637,7 @@ try {
         "Edited slide index unavailable",
       );
       await frame.evaluate(
-        (index) => window.Asc.editor.WordControl.Thumbnails.SelectPage(index),
+        (index) => window.Asc.editor.WordControl.GoToPage(index),
         item.visualSlideIndex,
       );
       await page.waitForTimeout(100);
