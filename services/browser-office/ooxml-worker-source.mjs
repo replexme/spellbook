@@ -112,7 +112,7 @@ function samePartBytes(left, right) {
   return true;
 }
 
-function sameEngineExportPart(part, left, right) {
+function sameEngineExportPart(part, left, right, canonical = false) {
   if (samePartBytes(left, right)) return true;
   if (!left || !right || !part.endsWith(".xml")) return false;
   const normalized = (bytes) => {
@@ -165,9 +165,77 @@ function sameEngineExportPart(part, left, right) {
       "modId",
     ))
       modification.setAttribute("val", "__office_modification__");
+    if (canonical) {
+      // Impress updates the display text of date/footer/slide-number master
+      // placeholders while reading/exporting. Normalize only its blank and
+      // default labels, and numbers inside an actual slide-number field.
+      // Authored footer/date text and all other properties stay significant.
+      if (/^ppt\/slideMasters\/slide\w+\.xml$/u.test(part))
+        for (const shape of document.getElementsByTagNameNS(presentationNamespace, "sp")) {
+          const ph = shape.getElementsByTagNameNS(presentationNamespace, "ph")[0];
+          const type = ph?.getAttribute("type");
+          const defaults = { dt: ["<날짜/시간>", "<date/time>"],
+            ftr: ["<바닥글>", "<footer>"], sldNum: ["<숫자>", "<number>"] }[type];
+          if (!defaults) continue;
+          for (const text of shape.getElementsByTagNameNS(drawingNamespace, "t")) {
+            const value = text.textContent;
+            const slideNumber = type === "sldNum" && /^\d+$/u.test(value) &&
+              text.parentNode?.namespaceURI === drawingNamespace &&
+              text.parentNode?.localName === "fld" &&
+              text.parentNode?.getAttribute("type") === "slidenum";
+            if (!value.trim() || defaults.includes(value) || slideNumber)
+              text.textContent = `__office_placeholder_${type}__`;
+          }
+        }
+      const tree = (node) => {
+        if (node.nodeType === 9) return tree(node.documentElement);
+        if (node.nodeType !== 1) return [node.nodeType, node.nodeValue];
+        const hasElements = [...node.childNodes].some(child => child.nodeType === 1);
+        return [node.namespaceURI ?? "", node.localName,
+          [...node.attributes].filter(a => a.namespaceURI !== "http://www.w3.org/2000/xmlns/")
+            .map(a => [a.namespaceURI ?? "", a.localName, a.value])
+            .sort((a,b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+          [...node.childNodes].filter(child => !(hasElements && child.nodeType === 3 && !child.nodeValue.trim())).map(tree)];
+      };
+      return strToU8(JSON.stringify(tree(document)));
+    }
     return serializeXml(document);
   };
   return samePartBytes(normalized(left), normalized(right));
+}
+
+// Compare two exports of the same live model, before any preservation budget
+// can discard changes. A semantic observation covers only supported fields;
+// it cannot establish that an otherwise changed export is a no-op.
+export function nativeExportDifferences(baselineBytes, candidateBytes) {
+  for (const bytes of [baselineBytes, candidateBytes]) {
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > maximumInputBytes)
+      throw new TypeError("Native snapshot inputs must be bounded PPTX bytes.");
+    inspectZipPackage(bytes);
+  }
+  const baseline = unzipSync(baselineBytes);
+  const candidate = unzipSync(candidateBytes);
+  const normalizeCoreSaveTime = (part, bytes) => {
+    if (part !== "docProps/core.xml" || !bytes) return bytes;
+    const document = parseXml({ [part]: bytes }, part);
+    for (const modified of document.getElementsByTagNameNS(
+      "http://purl.org/dc/terms/",
+      "modified",
+    ))
+      modified.textContent = "__office_save_time__";
+    return serializeXml(document);
+  };
+  return [...new Set([...Object.keys(baseline), ...Object.keys(candidate)])]
+    .filter(
+      (part) =>
+        !sameEngineExportPart(
+          part,
+          normalizeCoreSaveTime(part, baseline[part]),
+          normalizeCoreSaveTime(part, candidate[part]),
+          true,
+        ),
+    )
+    .sort();
 }
 
 const xmlElementChildren = (node) =>
@@ -5494,6 +5562,16 @@ if (typeof self !== "undefined")
         self.postMessage({
           requestId,
           report: await inspectOoxmlDocumentWithAssets(new Uint8Array(bytes)),
+        });
+      } else if (operation === "compare-native-export") {
+        self.postMessage({
+          requestId,
+          report: {
+            changedParts: nativeExportDifferences(
+              new Uint8Array(noEditBytes),
+              new Uint8Array(editedBytes),
+            ),
+          },
         });
       } else if (operation === "preserve-native") {
         const result = preserveOriginalPptxParts(

@@ -19,9 +19,24 @@ const arg = (name) => {
 const inputPath = path.resolve(arg("--input"));
 const runtimeDirectory = path.resolve(arg("--runtime"));
 const scenario = arg("--scenario");
-if (!["type", "type-move", "move", "delete", "newslide", "dupslide", "delslide"].includes(scenario))
+if (
+  ![
+    "roundtrip",
+    "type",
+    "type-move",
+    "move",
+    "delete",
+    "newslide",
+    "dupslide",
+    "delslide",
+    "unobserved-picture-mode",
+  ].includes(scenario)
+)
   throw new Error(`Unknown scenario: ${scenario}`);
 const label = arg("--label");
+const coverageBoundary = process.argv.includes("--coverage-boundary") ? arg("--coverage-boundary") : "save";
+if (!["save","observe","heartbeat","ack","before-ai"].includes(coverageBoundary))
+  throw new Error("Unknown observation-coverage boundary");
 const captureUi = process.argv.includes("--capture-ui")
   ? path.resolve(arg("--capture-ui"))
   : null;
@@ -51,6 +66,36 @@ const browser = await chromium.launch({
   args: ["--use-gl=angle", "--use-angle=swiftshader"],
 });
 const page = await browser.newPage({ viewport: { width: 900, height: 684 } });
+if (scenario === "unobserved-picture-mode") {
+  // Test-only fault injection: change a real UNO property omitted from the
+  // current observation. Do not add a hidden mutation operation to the app.
+  await page.route("**/harness/operations.js", async (route) => {
+    const response = await route.fetch();
+    const source = await response.text();
+    const marker = "  const pages = model.getDrawPages();";
+    assert(source.includes(marker));
+    await route.fulfill({
+      response,
+      body: source.replace(
+        marker,
+        `${marker}
+  if (request.__coverageProbe) {
+    const page = pages.getByIndex(0);
+    const shape = Array.from({length:page.getCount()}, (_,i)=>page.getByIndex(i))
+      .find(s=>String(s.getShapeType()).endsWith("GraphicObjectShape"));
+    if (!shape) throw new Error("No picture for observation-coverage probe");
+    const before = shape.getPropertyValue("GraphicColorMode");
+    const color = uno.idl.com.sun.star.drawing.ColorMode;
+    shape.setPropertyValue("GraphicColorMode", new uno.Any(uno.type.enum(color), color.GREYS));
+    model.setModified(true);
+    const after = shape.getPropertyValue("GraphicColorMode");
+    return { before:Number(before?.value ?? before), after:Number(after?.value ?? after) };
+  }
+`,
+      ),
+    });
+  });
+}
 // Private captures are enabled only in this local verifier, never in the
 // shipped app. Retain both engine exports so a failed correspondence can be
 // reproduced without changing the live document or weakening its checks.
@@ -147,6 +192,7 @@ const engineState = async () => {
   });
   const first = observed?.slides?.[0]?.elements ?? [];
   return {
+    ...(scenario === "unobserved-picture-mode" ? { sourceSlides:observed.slides } : {}),
     slideCount: observed?.slides?.length ?? 0,
     firstSlideElements: first.length,
     elements: first.map((e) => ({
@@ -271,7 +317,11 @@ try {
       const item = selection?.selected?.[0];
       if (item && selection.activeSlide === 0) {
         result.selectionKeys ??= Object.keys(item).join(",");
-        if (!["type", "type-move"].includes(scenario) || item.hasText === true || item.text)
+        if (
+          !["type", "type-move"].includes(scenario) ||
+          item.hasText === true ||
+          item.text
+        )
           return item;
         if (
           ["type", "type-move"].includes(scenario) &&
@@ -286,7 +336,52 @@ try {
 
   const beforeState = await engineState();
   let target = null;
-  if (["newslide", "dupslide", "delslide"].includes(scenario)) {
+  if (scenario === "roundtrip") {
+    result.engineApplied = true;
+  } else if (scenario === "unobserved-picture-mode") {
+    let pendingSave = null;
+    if (coverageBoundary === "ack") {
+      await page.evaluate(() => globalThis.__spellbookProductHost.port.postMessage({
+        type:"command",messageId:"Action_Save",values:{Notify:true},
+      }));
+      pendingSave=await waitEvent("save");
+      if (pendingSave.error) throw new Error(pendingSave.error);
+    }
+    result.controlledProperty = await nativeCall({
+      operation: "selection",
+      __coverageProbe: true,
+    });
+    result.engineApplied =
+      result.controlledProperty.before !== result.controlledProperty.after;
+    if (!result.engineApplied)
+      throw new Error("Coverage probe did not change the engine");
+    result.coverageBoundary=coverageBoundary;
+    if (coverageBoundary === "heartbeat") {
+      await page.waitForTimeout(12_000);
+      result.heartbeatUnreconciled = await page.evaluate(() => globalThis.spellbookBrowserOffice.diagnostics().unreconciledModelRevision);
+      assert(result.heartbeatUnreconciled,"Autosave must retain the unknown change as unreconciled");
+    }
+    if (["observe","before-ai","ack"].includes(coverageBoundary)) {
+      if (coverageBoundary === "ack") {
+        await page.evaluate(requestId => globalThis.__spellbookProductHost.port.postMessage({
+          type:"save-result",requestId,ok:true,revision:'"coverage-server-accepted-baseline"',
+        }),pendingSave.requestId);
+        const response=await waitEvent("save-response");
+        result.outcome=response.success ? "incorrectly-acknowledged" : "refused";
+        result.error=response.error; result.acknowledgementModified=response.modified;
+      } else {
+        const target=beforeState.elements[0];
+        const request=coverageBoundary === "observe" ? {operation:"observe",captureSlideIndexes:[]} : {
+          operation:"edit",expectedRevision:beforeState.revision,expectedSlides:JSON.stringify(beforeState.sourceSlides),
+          command:{op:"move",elementId:target.id,x:target.x+100,y:target.y},
+          permission:{mode:"document",slideIndexes:[],elementIds:[]},suppressCapture:true,
+        };
+        try { await nativeCall(request); result.outcome="incorrectly-accepted"; }
+        catch(error) { result.outcome="refused";result.error=error.message; }
+      }
+      throw Object.assign(new Error("Coverage boundary checked"),{skip:true});
+    }
+  } else if (["newslide", "dupslide", "delslide"].includes(scenario)) {
     const itemY = { newslide: 16, dupslide: 49, delslide: 145 }[scenario];
     await page.mouse.click(369, 15);
     await page.waitForTimeout(1000);
@@ -325,7 +420,11 @@ try {
   }
   result.stage = "checking-edit";
   const checkpointStarted = Date.now();
-  const afterState = await engineState();
+  // Saving must independently reject the unknown change. Observing it first
+  // would exercise the AI-observe guard and conceal a missing save guard.
+  const afterState = ["roundtrip", "unobserved-picture-mode"].includes(scenario)
+    ? beforeState
+    : await engineState();
   result.checkpointMs = Date.now() - checkpointStarted;
   const before =
     beforeState.elements.find((e) => e.id === target?.elementId) ??
@@ -333,9 +432,15 @@ try {
   const after =
     afterState.elements.find((e) => e.id === target?.elementId) ??
     afterState.elements.find((e) => e.name === target?.name);
-  result.engineApplied =
-    ["type", "type-move"].includes(scenario)
-      ? Boolean(after?.text?.includes("MANUAL") && (scenario !== "type-move" || (before && after.x !== before.x)))
+  result.engineApplied = ["roundtrip", "unobserved-picture-mode"].includes(
+    scenario,
+  )
+    ? result.engineApplied
+    : ["type", "type-move"].includes(scenario)
+      ? Boolean(
+          after?.text?.includes("MANUAL") &&
+            (scenario !== "type-move" || (before && after.x !== before.x)),
+        )
       : scenario === "move"
         ? Boolean(before && after && after.x !== before.x)
         : scenario === "delete"
@@ -453,6 +558,7 @@ try {
     )
       result.note = "PRESERVATION FAILURE: an existing content part changed";
     if (
+      scenario !== "roundtrip" &&
       result.engineApplied &&
       (changed.length === 0 ||
         (changed.length === 1 && changed[0].startsWith("docProps")))
@@ -476,8 +582,15 @@ try {
     result.error = String(error.message).slice(0, 1000);
   }
 } finally {
-  await capturePrivateSnapshots().catch(error => { result.captureError = error.message; });
-  if (captureUi) await page.screenshot({ path: `${captureUi}-result.png` }).catch(error => { result.captureUiError = error.message; });
+  await capturePrivateSnapshots().catch((error) => {
+    result.captureError = error.message;
+  });
+  if (captureUi)
+    await page
+      .screenshot({ path: `${captureUi}-result.png` })
+      .catch((error) => {
+        result.captureUiError = error.message;
+      });
   result.metrics = await page
     .evaluate(() => globalThis.spellbookBrowserOffice?.diagnostics?.() ?? null)
     .catch(() => null);
@@ -491,8 +604,18 @@ try {
     .catch(() => []);
   if (receiptPath)
     await writeFile(receiptPath, JSON.stringify(result, null, 2) + "\n");
+  if (scenario === "unobserved-picture-mode") {
+    result.coverageGuardPassed =
+      result.engineApplied === true &&
+      result.outcome === "refused" &&
+      result.error === "browser_native_unobserved_change" &&
+      Boolean(result.metrics?.unreconciledModelRevision);
+    // Record the assertion too, not only the engine's refusal message.
+    if (receiptPath)
+      await writeFile(receiptPath, JSON.stringify(result, null, 2) + "\n");
+    if (!result.coverageGuardPassed) process.exitCode = 1;
+  } else if (result.outcome !== "saved" || result.note) process.exitCode = 1;
   process.stdout.write(JSON.stringify(result) + "\n");
-  if (result.outcome !== "saved" || result.note) process.exitCode = 1;
   await browser.close();
   await new Promise((resolve) => server.close(resolve));
 }

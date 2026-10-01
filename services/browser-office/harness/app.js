@@ -588,6 +588,7 @@ const mediaFileExtensions = Object.freeze({
 });
 
 const nativeVersionsByObservation = new WeakMap();
+const nativeVersionsBySerializedBytes = new WeakMap();
 
 async function requestNative(nativeRequest) {
   // The engine reads audio and video with its own file calls, which go to
@@ -655,6 +656,8 @@ async function serializeNativeDocument({
     const stored = await request("store", { path: outputPath });
     assertNativeSnapshotVersion(expectedDocumentChanges, stored.documentChangesBefore, stored.documentChangesAfter);
     const bytes = FS.readFile(outputPath).slice();
+    if (Number.isSafeInteger(stored.documentChangesAfter))
+      nativeVersionsBySerializedBytes.set(bytes, stored.documentChangesAfter);
     if (
       bytes.byteLength < 4 ||
       bytes.byteLength > hostMaximumBytes ||
@@ -780,8 +783,10 @@ function liveExportBaselineAt(liveRevision) {
 
 // Binds the save taken at open to the revision observed right after it.
 function bindOpenExportBaseline(revision) {
-  if (liveExportBaseline && liveExportBaseline.revision === null)
+  if (liveExportBaseline && liveExportBaseline.revision === null) {
     liveExportBaseline.revision = revision;
+    checkpointedDocumentChanges = nativeVersionsBySerializedBytes.get(liveExportBaseline.bytes) ?? null;
+  }
 }
 
 function assertPersistedNativeIntent(
@@ -1179,7 +1184,13 @@ async function prepareProductPackageMutation(nativeRequest) {
     !nativeRequest.expectedRevision
   )
     throw new Error("browser_package_revision_changed");
-  if (nativeRequest.expectedRevision !== reconciledModelRevision) {
+  const beforeStatus = await request("status");
+  if (
+    nativeRequest.expectedRevision !== reconciledModelRevision ||
+    !Number.isSafeInteger(beforeStatus.documentChanges) ||
+    beforeStatus.documentChanges !== checkpointedDocumentChanges ||
+    unreconciledModelRevision
+  ) {
     const live = await observeNativeDocument();
     if (live.revision !== nativeRequest.expectedRevision)
       throw new Error("browser_package_revision_changed");
@@ -1561,6 +1572,8 @@ async function commitProductPackageReload(prepared) {
     productRedoHistory.length = 0;
     reconciledModelRevision = after.revision;
     unreconciledModelRevision = "";
+    bindOpenExportBaseline(after.revision);
+    rememberReconciledObservation(after);
     currentSlideCount = Array.isArray(after.slides)
       ? after.slides.length
       : currentSlideCount;
@@ -1589,6 +1602,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
   const previousState = captureProductEditState();
   if (prepared.persistence === "native_snapshot") {
     if (nativeValue.revision === prepared.beforeRevision) {
+      await refreshReconciledNativeBaseline(nativeValue);
       reconciledModelRevision = nativeValue.revision;
       unreconciledModelRevision = "";
       return;
@@ -1688,6 +1702,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
     throw new Error("Browser native and package edits disagree.");
   }
   if (!prepared.mutation.report.changedParts.length) {
+    await refreshReconciledNativeBaseline(nativeValue);
     reconciledModelRevision = nativeValue.revision;
     unreconciledModelRevision = "";
     return nativeValue;
@@ -1746,6 +1761,10 @@ async function commitProductPackageMutation(prepared, nativeValue) {
   productRedoHistory.length = 0;
   reconciledModelRevision = nativeValue.revision;
   unreconciledModelRevision = "";
+  if (packageAuthoritative) {
+    bindOpenExportBaseline(nativeValue.revision);
+    rememberReconciledObservation(nativeValue);
+  }
   currentSlideCount = prepared.mutation.report.slideCount;
   try {
     await persistCheckpoint();
@@ -1859,9 +1878,10 @@ async function restoreProductHistoryPackage({
 async function undoProductMutation() {
   const previous = productUndoHistory.at(-1);
   if (!previous) return false;
-  liveExportBaseline = null;
   const previousState = captureProductEditState();
   const current = await observeNativeDocument();
+  if (nativeVersionsByObservation.get(current) !== checkpointedDocumentChanges)
+    return false;
   if (current.revision !== reconciledModelRevision) {
     unreconciledModelRevision = current.revision;
     return false;
@@ -1897,6 +1917,7 @@ async function undoProductMutation() {
   reconciledModelRevision = reached.revision;
   unreconciledModelRevision = "";
   try {
+    await refreshReconciledNativeBaseline(reached);
     rebaseCommandsToSavedBase("undo");
     await persistCheckpoint();
   } catch (error) {
@@ -1914,11 +1935,12 @@ async function undoProductMutation() {
 async function redoProductMutation() {
   const next = productRedoHistory.at(-1);
   if (!next) return false;
-  liveExportBaseline = null;
   const previousState = captureProductEditState();
   if ((await sha256(currentBytes)) !== (await sha256(next.beforeBytes)))
     throw new Error("Browser redo base no longer matches the package history.");
   const current = await observeNativeDocument();
+  if (nativeVersionsByObservation.get(current) !== checkpointedDocumentChanges)
+    return false;
   if (current.revision !== reconciledModelRevision) {
     unreconciledModelRevision = current.revision;
     return false;
@@ -1989,6 +2011,7 @@ async function redoProductMutation() {
   reconciledModelRevision = reached.revision;
   unreconciledModelRevision = "";
   try {
+    await refreshReconciledNativeBaseline(reached);
     rebaseCommandsToSavedBase("redo");
     await persistCheckpoint();
   } catch (error) {
@@ -2051,6 +2074,19 @@ async function persistCheckpoint() {
   trimSessionProductHistory(productUndoHistory, productRedoHistory);
 }
 
+// Restoring a known package/history state must also restore its export
+// baseline and event version, otherwise the next harmless history event
+// either looks unknown or silently bypasses the coverage guard.
+async function refreshReconciledNativeBaseline(observation) {
+  const changes = nativeVersionsByObservation.get(observation) ?? null;
+  const bytes = await serializeNativeDocument({
+    expectedDocumentChanges: changes,
+  });
+  liveExportBaseline = { revision: observation.revision, bytes };
+  rememberReconciledObservation(observation);
+  checkpointedDocumentChanges = nativeVersionsBySerializedBytes.get(bytes) ?? changes;
+}
+
 async function checkpointLiveNativeState(live, reason, retryCount = 0) {
   try {
     return await checkpointLiveNativeStateOnce(live, reason, retryCount);
@@ -2062,13 +2098,46 @@ async function checkpointLiveNativeState(live, reason, retryCount = 0) {
 }
 
 async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
-  if (
-    !live ||
-    typeof live.revision !== "string" ||
-    !live.revision ||
-    live.revision === reconciledModelRevision
-  )
+  if (!live || typeof live.revision !== "string" || !live.revision)
     return false;
+  if (live.revision === reconciledModelRevision) {
+    const changes = nativeVersionsByObservation.get(live) ?? null;
+    if (
+      Number.isSafeInteger(changes) &&
+      changes === checkpointedDocumentChanges
+    )
+      return false;
+    try {
+      const baseline = liveExportBaselineAt(live.revision);
+      if (!baseline) throw new Error("browser_native_baseline_unavailable");
+      const candidate = await serializeNativeDocument({
+        expectedDocumentChanges: changes,
+      });
+      const requestId = `native-noop-${++requestSequence}`;
+      const report = await new Promise((resolve, reject) => {
+        mutationPending.set(requestId, { resolve, reject });
+        ooxmlWorker.postMessage(
+          {
+            requestId,
+            operation: "compare-native-export",
+            noEditBytes: baseline.buffer,
+            editedBytes: candidate.slice().buffer,
+          },
+          [baseline.buffer],
+        );
+      });
+      if (report.report.changedParts.length)
+        throw new Error("browser_native_unobserved_change");
+      liveExportBaseline = { revision: live.revision, bytes: candidate };
+      checkpointedDocumentChanges = changes;
+      unreconciledModelRevision = "";
+      return false;
+    } catch (error) {
+      unreconciledModelRevision = live.revision;
+      reportHostModified(true);
+      throw error;
+    }
+  }
   const previousState = captureProductEditState();
   const beforeRevision = previousState.reconciledModelRevision;
   if (reconciledObservation?.revision !== beforeRevision)
@@ -2083,7 +2152,9 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
   });
   if (knownState) {
     try {
-      const serialized = await serializeNativeDocument({ expectedDocumentChanges: nativeVersionsByObservation.get(live) ?? null });
+      const serialized = await serializeNativeDocument({
+        expectedDocumentChanges: nativeVersionsByObservation.get(live) ?? null,
+      });
       currentBytes = knownState.bytes;
       reconciledModelRevision = live.revision;
       unreconciledModelRevision = "";
@@ -2299,6 +2370,7 @@ async function exportProductDocumentNow({ checkpoint = true } = {}) {
     throw new Error("No browser Office document is open.");
   const observeStartedAt = performance.now();
   let live;
+  let verifiedCacheHit = false;
   try {
     const status = await request("status");
     if (
@@ -2308,6 +2380,7 @@ async function exportProductDocumentNow({ checkpoint = true } = {}) {
       !unreconciledModelRevision
     ) {
       live = reconciledObservation;
+      verifiedCacheHit = true;
       performance.measure("spellbook-native-read:save-cache-hit", {
         start: observeStartedAt,
         end: performance.now(),
@@ -2315,8 +2388,6 @@ async function exportProductDocumentNow({ checkpoint = true } = {}) {
     } else {
       const observed = await observeNativeDocumentChanges();
       live = observed.value;
-      if (live.revision === reconciledModelRevision)
-        noteCheckpointedDocumentChanges(observed);
     }
   } finally {
     performance.measure("spellbook-persist:save-observe", {
@@ -2324,7 +2395,7 @@ async function exportProductDocumentNow({ checkpoint = true } = {}) {
       end: performance.now(),
     });
   }
-  if (live.revision !== reconciledModelRevision) {
+  if (!verifiedCacheHit) {
     const reconcileStartedAt = performance.now();
     try {
       await checkpointLiveNativeState(live, "manual_save");
@@ -2585,11 +2656,10 @@ async function handleProductHostMessage(message) {
       if (!handled) {
         await request("dispatch", { unoCommand: command });
         const live = await observeNativeDocument();
-        if (live.revision !== reconciledModelRevision)
-          await checkpointLiveNativeState(
-            live,
-            `manual_${command.toLowerCase()}`,
-          );
+        await checkpointLiveNativeState(
+          live,
+          `manual_${command.toLowerCase()}`,
+        );
         const status = await request("status");
         reportHostModified(
           Boolean(status.modified) || Boolean(unreconciledModelRevision),
@@ -2656,8 +2726,7 @@ async function handleProductHostMessage(message) {
       hostRevision = message.revision;
       const acknowledgedRead = await observeNativeDocumentChanges();
       const live = acknowledgedRead.value;
-      if (live.revision !== reconciledModelRevision)
-        await checkpointLiveNativeState(live, "manual_after_save_request");
+      await checkpointLiveNativeState(live, "manual_after_save_request");
       const hasLaterChanges = acknowledgedSaveHasLaterChanges(
         saved,
         currentBytes,
@@ -2676,21 +2745,22 @@ async function handleProductHostMessage(message) {
         commands.length = 0;
       }
       const afterStatus = !hasLaterChanges ? await request("status") : null;
-      const afterAcknowledgement = canReuseSaveAcknowledgementObservation({
+      const acknowledgementUnchanged = canReuseSaveAcknowledgementObservation({
         observation: live,
         documentChanges: acknowledgedRead.documentChanges,
         markSaved,
         status: afterStatus,
         reconciledRevision: reconciledModelRevision,
-      })
-        ? live
-        : await observeNativeDocument();
-      if (afterAcknowledgement.revision !== reconciledModelRevision)
-        await checkpointLiveNativeState(
-          afterAcknowledgement,
-          "manual_after_save_acknowledgement",
-        );
-      else rememberReconciledObservation(afterAcknowledgement);
+      });
+      const afterAcknowledgement = acknowledgementUnchanged ? live : await observeNativeDocument();
+      if (acknowledgementUnchanged) {
+        // setModified(false) advances the event counter and resets automatic
+        // export author/revision metadata. It is an acknowledged housekeeping
+        // event, not permission to ignore a later unobserved user edit.
+        nativeVersionsByObservation.set(afterAcknowledgement, afterStatus.documentChanges);
+        await refreshReconciledNativeBaseline(afterAcknowledgement);
+      } else await checkpointLiveNativeState(afterAcknowledgement, "manual_after_save_acknowledgement");
+      rememberReconciledObservation(afterAcknowledgement);
       const modified = acknowledgedSaveHasLaterChanges(
         saved,
         currentBytes,
@@ -2877,6 +2947,13 @@ async function handleProductHostMessage(message) {
           Boolean(unreconciledModelRevision),
       );
       if (value?.revision === reconciledModelRevision) {
+        // Keep the original engine reply: presentation of the AI view clones
+        // it and would lose the version bound to the observation.
+        if (nativeResult?.value?.revision === reconciledModelRevision)
+          await checkpointLiveNativeState(
+            nativeResult.value,
+            "same_revision_ai_observe",
+          );
         rememberReconciledObservation(value);
         if (nativeResult) noteCheckpointedDocumentChanges(nativeResult);
       }
@@ -3175,9 +3252,8 @@ function startProductHeartbeat() {
         lastCheckpointAt = Date.now();
         const observedLive = await observeNativeDocumentChanges();
         const live = observedLive.value;
-        if (live.revision !== reconciledModelRevision)
-          await checkpointLiveNativeState(live, "manual_autosave");
-        else await persistCheckpoint();
+        await checkpointLiveNativeState(live, "manual_autosave");
+        await persistCheckpoint();
         noteCheckpointedDocumentChanges(observedLive);
         lastCheckpointAt = Date.now();
       }

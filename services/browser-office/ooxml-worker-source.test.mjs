@@ -13,8 +13,67 @@ import {
   preserveOriginalPptxParts,
   verifyPersistedElementMutation,
   remapPartRelationshipIds,
+  nativeExportDifferences,
 } from "./ooxml-worker-source.mjs";
 import { persistedSlideTopologyMatches } from "./harness/product-persistence.mjs";
+
+test("same-observation proof detects changes before a preservation budget drops them", () => {
+  const picture =
+    '<p:pic xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:blip/></p:pic>';
+  const parts = {
+    "ppt/slides/slide1.xml": strToU8(picture),
+    "ppt/media/image1.png": new Uint8Array([1, 2, 3]),
+    "docProps/core.xml": strToU8(
+      '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/"><dc:title>Keep</dc:title><dcterms:created>2000</dcterms:created><dcterms:modified>2001</dcterms:modified></cp:coreProperties>',
+    ),
+  };
+  const before = zipSync(parts);
+  assert.deepEqual(
+    nativeExportDifferences(before, zipSync(parts, { level: 0 })),
+    [],
+  );
+  parts["ppt/slides/slide1.xml"] = strToU8(
+    picture.replace("<a:blip/>", "<a:blip><a:grayscl/></a:blip>"),
+  );
+  assert.deepEqual(nativeExportDifferences(before, zipSync(parts)), [
+    "ppt/slides/slide1.xml",
+  ]);
+  parts["ppt/slides/slide1.xml"] = strToU8(picture);
+  const core = strFromU8(parts["docProps/core.xml"]);
+  parts["docProps/core.xml"] = strToU8(core.replace(">2001<", ">2002<"));
+  assert.deepEqual(nativeExportDifferences(before, zipSync(parts)), []);
+  parts["docProps/core.xml"] = strToU8(core.replace(">Keep<", ">Changed<"));
+  assert.deepEqual(nativeExportDifferences(before, zipSync(parts)), [
+    "docProps/core.xml",
+  ]);
+  parts["docProps/core.xml"] = strToU8(core.replace(">2000<", ">Changed<"));
+  assert.deepEqual(nativeExportDifferences(before, zipSync(parts)), [
+    "docProps/core.xml",
+  ]);
+  parts["docProps/core.xml"] = strToU8(core);
+  parts["ppt/media/image1.png"] = new Uint8Array([3, 2, 1]);
+  assert.deepEqual(nativeExportDifferences(before, zipSync(parts)), [
+    "ppt/media/image1.png",
+  ]);
+});
+
+
+test("coverage proof ignores XML layout and attribute order, but retains authored text spaces", () => {
+  const pack = xml => zipSync({ "ppt/slides/slide1.xml": strToU8(xml) });
+  const before = pack('<a:root xmlns:a="urn:test" first="1" second="2"><a:t> keep </a:t></a:root>');
+  const indented = pack('<b:root second="2" first="1" xmlns:b="urn:test">\n  <b:t> keep </b:t>\n</b:root>');
+  assert.deepEqual(nativeExportDifferences(before, indented), []);
+  assert.deepEqual(nativeExportDifferences(before, pack('<a:root xmlns:a="urn:test" first="1" second="2"><a:t>keep</a:t></a:root>')), ["ppt/slides/slide1.xml"]);
+});
+
+test("coverage proof only normalizes engine-generated master field display", () => {
+  const pack = text => zipSync({ "ppt/slideMasters/slideMaster1.xml": strToU8(
+    `<p:sldMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:sp><p:nvSpPr><p:nvPr><p:ph type="ftr"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>${text}</a:t></a:r></a:p></p:txBody></p:sp></p:sldMaster>`
+  ) });
+  const before=pack(" ");
+  assert.deepEqual(nativeExportDifferences(before,pack("&lt;바닥글&gt;")),[]);
+  assert.deepEqual(nativeExportDifferences(before,pack("Authored footer")),["ppt/slideMasters/slideMaster1.xml"]);
+});
 
 test("package inspection fingerprints asset bytes, including same-size replacement", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
