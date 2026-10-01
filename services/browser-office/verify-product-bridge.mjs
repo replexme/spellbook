@@ -711,6 +711,9 @@ try {
   });
   assert.notEqual(editedForSave.revision, before.revision);
   const save = await requestProductSave(page, { duplicate: true });
+  // The harness's DOM save control must also use the product host transaction,
+  // not download its last local buffer around the shared admission boundary.
+  await evaluateRenderer(page, () => document.querySelector("#save").click(), undefined, "request product save through DOM control");
   await page.waitForTimeout(100);
   assert.equal(
     (await hostEventCount(page, "save")) - save.previousCount,

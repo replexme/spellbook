@@ -875,6 +875,18 @@ async function admitProductArtifact(
   });
 }
 
+async function admitProductHistoryArtifact(bytes, live) {
+  try {
+    // Native history returning to an already verified digest/revision pair
+    // restores that artifact; it is not a new mutation to validate against a
+    // different import projection. Reopened/expired pairs need fresh admission.
+    return await productArtifacts.require(bytes, live.revision);
+  } catch (error) {
+    if (error.message !== "browser_artifact_not_verified") throw error;
+    return admitProductArtifact(bytes, live);
+  }
+}
+
 async function mutate(command) {
   if (!currentBytes) throw new Error("Open a PPTX before editing slides.");
   const before = currentBytes.slice();
@@ -1964,7 +1976,7 @@ async function restoreProductPackageSnapshot(bytes, errorCode, recovery = {}) {
     )
       await request("show-slide", { slideIndex: recovery.activeSlide });
     const restored = await observeNativeDocument();
-    await admitProductArtifact(currentBytes, restored);
+    await admitProductHistoryArtifact(currentBytes, restored);
     reconciledModelRevision = restored.revision;
     unreconciledModelRevision = "";
     bindOpenExportBaseline(restored.revision);
@@ -2042,7 +2054,7 @@ async function undoProductMutation() {
   reconciledModelRevision = reached.revision;
   unreconciledModelRevision = "";
   try {
-    await admitProductArtifact(currentBytes, reached);
+    await admitProductHistoryArtifact(currentBytes, reached);
     await refreshReconciledNativeBaseline(reached);
     rebaseCommandsToSavedBase("undo");
     await persistCheckpoint();
@@ -2137,7 +2149,7 @@ async function redoProductMutation() {
   reconciledModelRevision = reached.revision;
   unreconciledModelRevision = "";
   try {
-    await admitProductArtifact(currentBytes, reached);
+    await admitProductHistoryArtifact(currentBytes, reached);
     await refreshReconciledNativeBaseline(reached);
     rebaseCommandsToSavedBase("redo");
     await persistCheckpoint();
@@ -2300,7 +2312,7 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
       unreconciledModelRevision = "";
       currentSlideCount = live.slides.length;
       rememberReconciledObservation(live);
-      await admitProductArtifact(currentBytes, live);
+      await admitProductHistoryArtifact(currentBytes, live);
       await persistCheckpoint();
       liveExportBaseline = {
         revision: live.revision,
@@ -3713,6 +3725,7 @@ async function saveBrowserProbeDocument() {
 
 saveButton.addEventListener("click", async () => {
   if (browserProbeMode) return saveBrowserProbeDocument();
+  if (productMode) return enqueueProductOperation(saveProductDocument);
   if (!currentBytes) throw new Error("Open a PPTX before saving.");
   await recordBytes("manual-save", currentBytes, currentSlideCount, {
     operation: "export_current_candidate",

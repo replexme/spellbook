@@ -145,6 +145,11 @@ Legacy checkpoints retain their existing replay/revision checks and also pass
 fresh admission; migrations retain any existing admission record. Opening
 another document clears the session authority. Save pins its admitted pair
 until acknowledgement so later edits cannot evict an in-flight save's evidence.
+Native Undo/Redo that reaches an already admitted digest/revision pair reuses
+that exact proof. Comparing the same historical artifact anew against another
+import projection can reject harmless automatic object names. An expired pair
+or a reopened document with another revision still requires fresh admission;
+this does not exempt new mutations or changed authored names from verification.
 
 The authority retains at most four saved-state inspections and 128 admission
 records, plus the pinned save; it retains no additional document byte buffers.
