@@ -347,7 +347,8 @@ try {
           { timeout: 30000 },
         );
         item.latestAckToCleanMs = performance.now() - reconciliationStart;
-        item.saveUntilVerifiedCleanMs = currentSave.ms + item.latestAckToCleanMs;
+        item.saveUntilVerifiedCleanMs =
+          currentSave.ms + item.latestAckToCleanMs;
         item.afterLatestAck = await page.evaluate(() =>
           window.__ONLYOFFICE_SAVE_E2E__.getStatus(),
         );
