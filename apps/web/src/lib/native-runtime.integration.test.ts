@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Session } from "./models";
+import { isolatedPostgresTestUrl } from "./postgres-test-schema";
 
 const workers = vi.hoisted(() => ({
   enqueueWorkerJob: vi.fn(),
@@ -97,9 +98,8 @@ beforeAll(async () => {
     "integration-wopi-secret-that-is-long-enough",
   );
   vi.stubEnv("SPELLBOOK_INTERNAL_TOKEN", "integration-internal-token");
-  await db().unsafe(
-    `create schema "${schema}"; set search_path to "${schema}"`,
-  );
+  vi.stubEnv("SPELLBOOK_DB_POOL_MAX", "4");
+  vi.stubEnv("DATABASE_URL", await isolatedPostgresTestUrl(schema));
   const actual = await vi.importActual<typeof import("./db")>("./db");
   await actual.ensureSchema();
 });
@@ -158,6 +158,18 @@ const observation = {
 };
 
 describe.skipIf(!enabled)("durable native editor orchestration", () => {
+  it("isolates the schema on every concurrent pool connection", async () => {
+    const rows = await Promise.all(
+      Array.from({ length: 4 }, () =>
+        db()`select current_schema() as schema, pg_backend_pid() as pid, pg_sleep(0.05)`,
+      ),
+    );
+    expect(new Set(rows.map((result) => result[0].pid)).size).toBe(4);
+    expect(rows.map((result) => result[0].schema)).toEqual(
+      Array(4).fill(schema),
+    );
+  });
+
   it("streams committed events without idle polling and resumes from a durable cursor", async () => {
     const f = await fixture();
     const token = signWopiToken({

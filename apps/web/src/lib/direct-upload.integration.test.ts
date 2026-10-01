@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import postgres from "postgres";
+import { isolatedPostgresTestUrl } from "./postgres-test-schema";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Session } from "./models";
 
@@ -40,14 +40,7 @@ beforeAll(async () => {
   if (!enabled) return;
   vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://spellbook.integration.invalid");
   vi.stubEnv("SPELLBOOK_WOPI_SECRET", "direct-upload-test-secret-1234567890");
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) throw new Error("DATABASE_URL is required.");
-  const administrator = postgres(databaseUrl, { max: 1, prepare: false });
-  await administrator.unsafe(`create schema "${testSchema}"`);
-  await administrator.end();
-  const isolatedUrl = new URL(databaseUrl);
-  isolatedUrl.searchParams.set("options", `-csearch_path=${testSchema}`);
-  vi.stubEnv("DATABASE_URL", isolatedUrl.toString());
+  vi.stubEnv("DATABASE_URL", await isolatedPostgresTestUrl(testSchema));
   const actual = await vi.importActual<typeof import("./db")>("./db");
   await actual.ensureSchema();
 });

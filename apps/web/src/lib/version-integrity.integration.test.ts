@@ -9,7 +9,7 @@ import {
   vi,
 } from "vitest";
 import type { Session } from "./models";
-import postgres from "postgres";
+import { isolatedPostgresTestUrl } from "./postgres-test-schema";
 
 const storage = vi.hoisted(() => ({ getJsonObject: vi.fn() }));
 vi.mock("./storage", () => ({
@@ -70,18 +70,7 @@ const graph = {
 beforeAll(async () => {
   if (!enabled) return;
   vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://spellbook.integration.invalid");
-  // Create the isolated schema before the application pool starts, then make
-  // PostgreSQL set that search_path on every pool connection. A one-session
-  // SET leaks concurrent tests into the default schema as soon as the pool
-  // opens a second connection.
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) throw new Error("DATABASE_URL is required.");
-  const administrator = postgres(databaseUrl, { max: 1, prepare: false });
-  await administrator.unsafe(`create schema "${testSchema}"`);
-  await administrator.end();
-  const isolatedUrl = new URL(databaseUrl);
-  isolatedUrl.searchParams.set("options", `-csearch_path=${testSchema}`);
-  vi.stubEnv("DATABASE_URL", isolatedUrl.toString());
+  vi.stubEnv("DATABASE_URL", await isolatedPostgresTestUrl(testSchema));
   const actual = await vi.importActual<typeof import("./db")>("./db");
   await actual.ensureSchema();
 });
