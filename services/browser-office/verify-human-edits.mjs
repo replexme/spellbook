@@ -35,6 +35,9 @@ if (
 )
   throw new Error(`Unknown scenario: ${scenario}`);
 const label = arg("--label");
+const saveBeforeObserve = process.argv.includes("--save-before-observe");
+if (saveBeforeObserve && scenario === "unobserved-picture-mode")
+  throw new Error("Immediate-save timing is separate from observation-coverage probes.");
 const coverageBoundary = process.argv.includes("--coverage-boundary") ? arg("--coverage-boundary") : "save";
 if (!["save","observe","heartbeat","ack","before-ai"].includes(coverageBoundary))
   throw new Error("Unknown observation-coverage boundary");
@@ -125,6 +128,24 @@ const result = {
   sourceBytes: input.length,
   stage: "opening",
 };
+
+async function requestProductSave() {
+  const previousCount = await page.evaluate(
+    () => globalThis.__spellbookProductHost.events.filter((e) => e.type === "save").length,
+  );
+  const startedAt = Date.now();
+  await page.evaluate(() =>
+    globalThis.__spellbookProductHost.port.postMessage({
+      type: "command", messageId: "Action_Save", values: { Notify: true },
+    }),
+  );
+  const saved = await waitEvent("save", previousCount, 180_000);
+  result.saveMs = Date.now() - startedAt;
+  result.saveTimingScope = saveBeforeObserve
+    ? "save-message-including-pending-checkpoint"
+    : "save-message-after-observation";
+  return saved;
+}
 
 async function waitEvent(type, previousCount = 0, timeout = 120_000) {
   await page.waitForFunction(
@@ -428,6 +449,9 @@ try {
     await page.waitForTimeout(1500);
   }
   result.stage = "checking-edit";
+  // Measure the real Save path before a verifier observation can trigger or
+  // wait behind autosave. Confirm the native edit independently afterwards.
+  let saved = saveBeforeObserve ? await requestProductSave() : null;
   const checkpointStarted = Date.now();
   // Saving must independently reject the unknown change. Observing it first
   // would exercise the AI-observe guard and conceal a missing save guard.
@@ -435,6 +459,7 @@ try {
     ? beforeState
     : await engineState();
   result.checkpointMs = Date.now() - checkpointStarted;
+  result.checkpointTimingScope = "post-edit-host-observation-including-queue-wait";
   const before =
     beforeState.elements.find((e) => e.id === target?.elementId) ??
     beforeState.elements.find((e) => e.name === target?.name);
@@ -472,22 +497,7 @@ try {
   }
 
   result.stage = "saving";
-  const beforeSave = await page.evaluate(
-    () =>
-      globalThis.__spellbookProductHost.events.filter((e) => e.type === "save")
-        .length,
-  );
-  const saveStarted = Date.now();
-  await page.evaluate(() =>
-    globalThis.__spellbookProductHost.port.postMessage({
-      type: "command",
-      messageId: "Action_Save",
-      values: { Notify: true },
-    }),
-  );
-  const saved = await waitEvent("save", beforeSave, 180_000);
-  result.saveMs = Date.now() - saveStarted;
-  result.saveTimingScope = "save-message-after-checkpoint";
+  saved ??= await requestProductSave();
   if (saved.error) {
     result.outcome = "refused";
     result.error = String(saved.error).slice(0, 220);
