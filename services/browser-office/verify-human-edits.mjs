@@ -1,5 +1,6 @@
 // One direct edit on a freshly opened PPTX, followed by Save. Keep private
 // inputs and outputs outside Git; the single JSON result contains no content.
+import { comparisonEditMarker as editMarker, assertComparisonMarkerAbsent } from "./comparison-input.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -50,6 +51,7 @@ const diagnosticRaw = process.argv.includes("--diagnostic-raw")
   ? path.resolve(arg("--diagnostic-raw"))
   : null;
 const input = new Uint8Array(await readFile(inputPath));
+assertComparisonMarkerAbsent(input);
 
 const runtime = await admitCandidateRuntime({ runtimeDirectory });
 await buildHarness();
@@ -413,7 +415,7 @@ try {
       await page.keyboard.press("F2");
       await page.waitForTimeout(800);
       await page.keyboard.press("End");
-      await page.keyboard.type(" MANUAL", { delay: 60 });
+      await page.keyboard.type(` ${editMarker}`, { delay: 60 });
       await page.waitForTimeout(800);
       await page.keyboard.press("Escape");
     } else if (scenario === "move") {
@@ -443,7 +445,8 @@ try {
     ? result.engineApplied
     : ["type", "type-move"].includes(scenario)
       ? Boolean(
-          after?.text?.includes("MANUAL") &&
+          after?.text?.includes(editMarker) &&
+            after.text !== before?.text &&
             (scenario !== "type-move" || (before && after.x !== before.x)),
         )
       : scenario === "move"
@@ -550,7 +553,7 @@ try {
       ? strFromU8(after["ppt/slides/slide1.xml"])
       : "";
     if (["type", "type-move"].includes(scenario))
-      result.textPresent = slide1After.includes("MANUAL");
+      result.textPresent = slide1After.includes(editMarker);
     if (["newslide", "dupslide", "delslide"].includes(scenario))
       result.slidesAfter = Object.keys(after).filter((n) =>
         /^ppt\/slides\/slide\d+\.xml$/u.test(n),

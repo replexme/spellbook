@@ -1,4 +1,8 @@
 /* SPDX-License-Identifier: MPL-2.0 */
+import {
+  comparisonEditMarker as editMarker,
+  assertComparisonMarkerAbsent,
+} from "./comparison-input.mjs";
 // Diagnostic candidate adapter, deliberately separate from production engine
 // admission. Private documents/results belong outside the repository.
 import assert from "node:assert/strict";
@@ -47,6 +51,7 @@ assert(
 );
 await mkdir(outputRoot, { recursive: true, mode: 0o700 });
 const source = await readFile(inputPath);
+assertComparisonMarkerAbsent(source);
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const candidate = readRepositoryIdentity(candidateRoot);
 const integration = readRepositoryIdentity(
@@ -75,7 +80,7 @@ const packageDelta = (bytes) => {
     markerInPackage: Object.entries(after).some(
       ([k, v]) =>
         /^ppt\/slides\/slide\d+\.xml$/u.test(k) &&
-        strFromU8(v).includes("MANUAL"),
+        strFromU8(v).includes(editMarker),
     ),
   };
 };
@@ -141,7 +146,12 @@ async function snapshot(frame) {
   return frame.evaluate(() => {
     const m = window.Asc.editor.WordControl.m_oLogicDocument;
     const shape = (x) => ({
-      text: x.getContentText?.() ?? null,
+      // Selection-text getters return null for some authored line breaks.
+      // Read the whole document content without changing ApplyToAll/selection.
+      text:
+        x.getDocContent?.()?.GetText?.({ Numbering: false }) ??
+        x.getContentText?.() ??
+        null,
       x: x.x,
       y: x.y,
       w: x.extX,
@@ -321,7 +331,7 @@ try {
           }
           if (["type", "type-move"].includes(scenario)) {
             await page.keyboard.press("End");
-            await page.keyboard.insertText(" MANUAL");
+            await page.keyboard.insertText(` ${editMarker}`);
             await page.keyboard.press("Escape");
           }
           if (scenario === "delete") await page.keyboard.press("Delete");
@@ -335,7 +345,9 @@ try {
       const moved =
         Number.isFinite(a?.[targetIndex]?.x) &&
         a[targetIndex].x !== b?.[targetIndex]?.x;
-      const typed = a?.[targetIndex]?.text?.includes("MANUAL") === true;
+      const typed =
+        a?.[targetIndex]?.text?.includes(editMarker) === true &&
+        a[targetIndex].text !== b?.[targetIndex]?.text;
       item.engineApplied =
         scenario === "roundtrip" || scenario === "save-failure"
           ? true
