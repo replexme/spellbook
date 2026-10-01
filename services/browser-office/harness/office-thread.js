@@ -471,7 +471,15 @@ function storeDocument(path, requestId) {
   });
 }
 
-function closeDocument() {
+function closeDocument({ expectedDocumentChanges } = {}) {
+  // Check and close in one engine-thread action. A later human edit must
+  // never be overwritten by recovery of an earlier failed native request.
+  if (
+    expectedDocumentChanges !== undefined &&
+    (!Number.isSafeInteger(expectedDocumentChanges) ||
+      expectedDocumentChanges !== documentChangeCount())
+  )
+    throw new Error("browser_native_document_changed_before_rollback");
   batchObservation = null;
   if (!model) return;
   try {
@@ -538,7 +546,7 @@ function openDocument(path, requestId) {
   post("document-ready", { requestId, slideCount: slideCount() });
 }
 
-function reportError(error, requestId) {
+function reportError(error, requestId, nativeChangesBefore = null) {
   let message = error instanceof Error ? error.message : String(error);
   if (error instanceof WebAssembly.Exception) {
     try {
@@ -557,6 +565,8 @@ function reportError(error, requestId) {
   post("error", {
     requestId,
     message,
+    nativeChangesBefore,
+    documentChanges: documentChangeCount(),
   });
 }
 
@@ -573,6 +583,7 @@ function start() {
   });
   zetajs.mainPort.onmessage = (event) => {
     const { command, requestId } = event.data;
+    let nativeChangesBefore = null;
     try {
       switch (command) {
         case "open":
@@ -636,6 +647,7 @@ function start() {
             : [];
           packageAssetHashes = nativeRequest.packageAssetHashes ?? {};
           const changesBefore = documentChangeCount();
+          nativeChangesBefore = changesBefore;
           let observedBefore = null;
           if (
             nativeRequest.operation === "edit_batch" &&
@@ -806,14 +818,16 @@ function start() {
           break;
         }
         case "close":
-          closeDocument();
+          closeDocument({
+            expectedDocumentChanges: event.data.expectedDocumentChanges,
+          });
           post("close-complete", { requestId });
           break;
         default:
           throw new Error(`Unknown browser Office command: ${command}`);
       }
     } catch (error) {
-      reportError(error, requestId);
+      reportError(error, requestId, nativeChangesBefore);
     }
   };
   post("runtime-ready");

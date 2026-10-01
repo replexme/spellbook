@@ -26,6 +26,7 @@ import {
   directMovePreservationTarget,
   directTextGeometryPreservationTarget,
   directTextPreservationTarget,
+  failedNativeMutationRecoveryVersion,
   isRevisionOnlyNativeSnapshot,
   normalizeDirectEditPersistenceState,
   persistedDirectDeletionMatches,
@@ -309,8 +310,12 @@ function settle(message) {
   const waiter = pending.get(message.requestId);
   if (!waiter) return;
   pending.delete(message.requestId);
-  if (message.command === "error") waiter.reject(new Error(message.message));
-  else waiter.resolve(message);
+  if (message.command === "error") {
+    const error = new Error(message.message);
+    error.nativeChangesBefore = message.nativeChangesBefore;
+    error.documentChanges = message.documentChanges;
+    waiter.reject(error);
+  } else waiter.resolve(message);
 }
 
 async function sha256(bytes) {
@@ -320,16 +325,16 @@ async function sha256(bytes) {
     .join("");
 }
 
-async function writeAndOpen(bytes, name = "document.pptx") {
+async function writeAndOpen(bytes, name = "document.pptx", recovery = {}) {
+  if (engineDocumentOpen) {
+    await request("close", recovery);
+    if (productMode) clearNativeProductHistoryAvailability();
+    engineDocumentOpen = false;
+  }
   liveExportBaseline = null;
   currentBytes = bytes.slice();
   filename = name;
   activePath = `/tmp/spellbook/${name.replace(/[^a-zA-Z0-9._-]/gu, "-")}`;
-  if (engineDocumentOpen) {
-    if (productMode) clearNativeProductHistoryAvailability();
-    await request("close");
-    engineDocumentOpen = false;
-  }
   try {
     FS.mkdir("/tmp/spellbook");
   } catch {}
@@ -1879,9 +1884,15 @@ async function replayRecoveredCommands(base, recoveredCommands) {
 // import-normalized details (a substituted font name, a master's placeholder
 // count), so that earlier live revision is not an identity for the reopened
 // document; the package bytes are.
-async function restoreProductPackageSnapshot(bytes, errorCode) {
+async function restoreProductPackageSnapshot(bytes, errorCode, recovery = {}) {
   try {
-    await writeAndOpen(bytes, filename);
+    await writeAndOpen(bytes, filename, recovery);
+    if (
+      Number.isSafeInteger(recovery.activeSlide) &&
+      recovery.activeSlide >= 0 &&
+      recovery.activeSlide < currentSlideCount
+    )
+      await request("show-slide", { slideIndex: recovery.activeSlide });
     const restored = await observeNativeDocument();
     reconciledModelRevision = restored.revision;
     unreconciledModelRevision = "";
@@ -2939,7 +2950,35 @@ async function handleProductHostMessage(message) {
         value = await commitProductPackageReload(prepared);
       } else {
         markBrowserProbePhase("native-execute");
-        const result = await requestNative(message.request);
+        let result;
+        try {
+          result = await requestNative(message.request);
+        } catch (error) {
+          if (prepared) {
+            try {
+              const failedVersion = failedNativeMutationRecoveryVersion(
+                error,
+                checkpointedDocumentChanges,
+              );
+              if (failedVersion !== null)
+                await restoreProductPackageSnapshot(
+                  prepared.beforeBytes,
+                  "browser_native_failed_mutation_recovery_failed",
+                  {
+                    expectedDocumentChanges: failedVersion,
+                    activeSlide: prepared.beforeObservation?.activeSlide,
+                  },
+                );
+            } catch (recoveryError) {
+              unreconciledModelRevision ||= prepared.beforeRevision;
+              reportHostModified(true);
+              throw new Error(
+                `browser_native_failed_mutation_recovery_failed:${error.message}:${recoveryError.message}`,
+              );
+            }
+          }
+          throw error;
+        }
         markBrowserProbePhase("package-commit");
         const committed = await commitProductPackageMutation(
           prepared,

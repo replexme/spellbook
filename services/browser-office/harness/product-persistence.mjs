@@ -40,6 +40,15 @@ export function assertUnchangedNativeMutation(beforeRevision, observation) {
     throw new Error("browser_native_noop_changed_model");
 }
 
+export function failedNativeMutationRecoveryVersion(error, checkpointedChanges) {
+  const before = error?.nativeChangesBefore;
+  const after = error?.documentChanges;
+  if (![before, after, checkpointedChanges].every(Number.isSafeInteger) ||
+      before !== checkpointedChanges || after < before)
+    throw new Error("browser_native_failed_mutation_version_unverified");
+  return after === before ? null : after;
+}
+
 // A save must describe the model revision that was observed. The browser
 // engine counts modifications and Undo/Redo events; a changed count makes
 // an export stale even when a later semantic comparison looks equivalent.

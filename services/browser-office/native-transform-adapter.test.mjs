@@ -56,6 +56,30 @@ function loadFactory() {
   return context.createSpellbookBrowserNativeAdapter;
 }
 
+test("engine-thread rollback closes only the unchanged failed-request version", () => {
+  let closed = 0;
+  const messages = [];
+  const context = vm.createContext({
+    Module: { zetajs: { then() {} } },
+    WebAssembly,
+    testModel: { close() { closed += 1; }, dispose() { throw new Error("unexpected dispose"); } },
+    testPort: { postMessage(message) { messages.push(message); } },
+  });
+  vm.runInContext(officeThreadSource, context);
+  vm.runInContext("model=testModel; documentChangesWatched=true; documentChanges=11; zetajs={mainPort:testPort};", context);
+  vm.runInContext("reportError(new Error('batch failed'), 'test', 7)", context);
+  assert.equal(messages[0].nativeChangesBefore, 7);
+  assert.equal(messages[0].documentChanges, 11);
+  vm.runInContext("documentChanges=12", context);
+  assert.throws(() => vm.runInContext("closeDocument({expectedDocumentChanges:11})", context), /changed_before_rollback/);
+  assert.equal(closed, 0, "new edits must remain open and intact");
+  vm.runInContext("closeDocument({expectedDocumentChanges:12})", context);
+  assert.equal(closed, 1);
+  vm.runInContext("model=testModel; documentChangesWatched=false", context);
+  assert.throws(() => vm.runInContext("closeDocument({expectedDocumentChanges:12})", context), /changed_before_rollback/);
+  assert.equal(closed, 1);
+});
+
 test("runtime admission follows a verified identity shape without a frozen patch revision", () => {
   const context = {};
   vm.runInNewContext(runtimeAdmissionSource, context, {

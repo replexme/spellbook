@@ -8,6 +8,7 @@ import {
   directMovePreservationTarget,
   directTextGeometryPreservationTarget,
   directTextPreservationTarget,
+  failedNativeMutationRecoveryVersion,
   isRevisionOnlyNativeSnapshot,
   normalizeDirectEditPersistenceState,
   persistedDirectDeletionMatches,
@@ -58,6 +59,18 @@ test("a no-op package cannot adopt a changed or unknown native revision", () => 
     () => assertUnchangedNativeMutation("", { revision: "" }),
     /noop_changed_model/,
   );
+});
+
+test("failed native recovery requires a version-bound mutation from the checkpoint", () => {
+  assert.equal(failedNativeMutationRecoveryVersion({ nativeChangesBefore: 7, documentChanges: 7 }, 7), null);
+  assert.equal(failedNativeMutationRecoveryVersion({ nativeChangesBefore: 7, documentChanges: 11 }, 7), 11);
+  for (const [error, checkpoint] of [
+    [{ nativeChangesBefore: 8, documentChanges: 11 }, 7],
+    [{ nativeChangesBefore: 7, documentChanges: 6 }, 7],
+    [{ nativeChangesBefore: null, documentChanges: 11 }, 7],
+    [{ nativeChangesBefore: 7, documentChanges: null }, 7],
+    [{ nativeChangesBefore: 7, documentChanges: 11 }, null],
+  ]) assert.throws(() => failedNativeMutationRecoveryVersion(error, checkpoint), /version_unverified/);
 });
 
 test("native snapshot must use the observed revision through serialization", () => {
