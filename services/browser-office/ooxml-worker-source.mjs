@@ -2211,9 +2211,14 @@ function reconcileContentTypes(merged, original, edited) {
     }
   for (const part of Object.keys(merged).sort()) {
     if (part === contentTypesPath) continue;
+    // A merge-created clone has neither source path. Its cloning operation
+    // already declared its type: do not infer one from an unrelated source
+    // manifest's broad XML Default.
+    const authoredSource = original[part] ? authoredTypes : null;
+    const engineSource = edited[part] ? engineTypes : null;
     const sources = samePartBytes(merged[part], original[part])
-      ? [authoredTypes, engineTypes]
-      : [engineTypes, authoredTypes];
+      ? [authoredSource, engineSource]
+      : [engineSource, authoredSource];
     const source = sources.find(
       (candidate) => candidate && declaredContentType(candidate, part),
     );

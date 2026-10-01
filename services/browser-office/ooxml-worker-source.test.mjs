@@ -874,6 +874,16 @@ test("master theme edit splits only the selected original layout and retains unr
   );
   assert.ok(clonedMaster);
   assert.ok(clonedTheme);
+  const contentTypes = new DOMParser().parseFromString(
+    strFromU8(merged["[Content_Types].xml"]), "application/xml",
+  );
+  const typeFor = (part) => [...contentTypes.getElementsByTagName("Override")]
+    .find((element) => element.getAttribute("PartName") === `/${part}`)
+    ?.getAttribute("ContentType");
+  assert.equal(typeFor(clonedMaster),
+    "application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml");
+  assert.equal(typeFor(clonedTheme),
+    "application/vnd.openxmlformats-officedocument.theme+xml");
   assert.deepEqual(
     merged["ppt/theme/theme1.xml"],
     original["ppt/theme/theme1.xml"],
