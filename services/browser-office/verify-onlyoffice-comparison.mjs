@@ -245,6 +245,7 @@ async function save(page) {
       metadata: result,
       ms: performance.now() - start,
       base64: btoa(binary),
+      structuralRepairs: window.__comparisonStructuralRepairs ?? [],
     };
   });
 }
@@ -347,6 +348,7 @@ try {
         );
         item.stage = "second-save";
         const currentSave = await save(page);
+        item.structuralRepairs = currentSave.structuralRepairs;
         const currentBytes = Buffer.from(currentSave.base64, "base64");
         await writeFile(
           path.join(outputRoot, "late-save-ack-latest.pptx"),
@@ -540,6 +542,7 @@ try {
         continue;
       }
       const saved = await save(page);
+      item.structuralRepairs = saved.structuralRepairs;
       const bytes = Buffer.from(saved.base64, "base64");
       item.exportMs = saved.ms;
       item.savedBytes = bytes.length;
@@ -577,7 +580,9 @@ try {
         ? "reopen-model-differs"
         : item.undoDifferences?.length || item.redoDifferences?.length
           ? "history-differs"
-          : "raw-export-reopen-verified";
+          : repairStructure
+            ? "repaired-export-reopen-verified"
+            : "raw-export-reopen-verified";
       const cdp = await context.newCDPSession(page);
       await cdp.send("Performance.enable");
       const metrics = await cdp.send("Performance.getMetrics");
@@ -595,7 +600,7 @@ try {
         }))
         .catch(() => null);
     } finally {
-      item.structuralRepairs = await page
+      item.structuralRepairs ??= await page
         .evaluate(() => window.__comparisonStructuralRepairs ?? [])
         .catch(() => []);
       await page
@@ -631,6 +636,7 @@ if (
     (c) =>
       ![
         "raw-export-reopen-verified",
+        "repaired-export-reopen-verified",
         "host-failure-keeps-dirty",
         "late-ack-second-save-history-reopen-verified",
       ].includes(c.status),

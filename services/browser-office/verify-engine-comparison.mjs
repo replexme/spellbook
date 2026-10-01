@@ -24,6 +24,7 @@ const output = path.resolve(flag("--output"));
 const runtime = path.resolve(flag("--native-runtime"));
 const candidate = path.resolve(flag("--candidate-root"));
 const origin = flag("--origin");
+const repairStructure = process.argv.includes("--repair-structure");
 const engines = flag("--engines", "native,onlyoffice").split(",");
 assert(
   engines.every((e) => ["native", "onlyoffice"].includes(e)) &&
@@ -88,7 +89,9 @@ const report = {
   cases: [],
   scope: {
     native: "product-preserved save and model readback",
-    onlyoffice: "raw export and same-engine model readback",
+    onlyoffice: repairStructure
+      ? "browser-repaired export and same-engine model readback; no original-part preservation"
+      : "raw export and same-engine model readback",
     visual:
       "screenshots require human inspection; not an automatic fidelity pass",
     powerpoint: "not run: owner-window restriction",
@@ -232,6 +235,7 @@ try {
             origin,
             "--scenarios",
             input.scenarios.join(","),
+            ...(repairStructure ? ["--repair-structure"] : []),
           ],
           path.join(engineDir, "process.log"),
         );
