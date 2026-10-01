@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
@@ -10,7 +10,7 @@ import {
 } from "./zetajs-overlay.mjs";
 
 const original = readFileSync(
-  new URL("./runtime/zeta.js", import.meta.url),
+  new URL("./fixtures/zeta-proxy-metadata-input.js", import.meta.url),
   "utf8",
 );
 
@@ -192,10 +192,8 @@ test("failed reflection releases all handles and cannot admit a partial definiti
   assert.equal(f.liveHandles.size, 0);
 });
 
-test("proxy overlay composes with admitted typedef and byte overlays and refuses source drift", () => {
-  const patched = applyZetaProxyMetadataOverlay(
-    applyZetaByteSequenceOverlay(applyZetaJsOverlay(original)),
-  );
+test("proxy overlay refuses a changed pinned declaration walker", () => {
+  const patched = applyZetaProxyMetadataOverlay(original);
   assert.doesNotThrow(() => new vm.Script(patched));
   assert.throws(
     () => applyZetaProxyMetadataOverlay(patched),
@@ -213,3 +211,20 @@ test("proxy overlay composes with admitted typedef and byte overlays and refuses
   );
   assert.throws(() => applyZetaProxyMetadataOverlay(null), /must be text/);
 });
+
+test(
+  "proxy metadata composes with the pinned complete bridge and existing overlays",
+  {
+    skip: !existsSync(new URL("./runtime/zeta.js", import.meta.url)),
+  },
+  () => {
+    const source = readFileSync(
+      new URL("./runtime/zeta.js", import.meta.url),
+      "utf8",
+    );
+    const patched = applyZetaProxyMetadataOverlay(
+      applyZetaByteSequenceOverlay(applyZetaJsOverlay(source)),
+    );
+    assert.doesNotThrow(() => new vm.Script(patched));
+  },
+);
