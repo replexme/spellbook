@@ -340,7 +340,14 @@ try {
             mode: 0o600,
           },
         );
-        await page.waitForTimeout(250);
+        const reconciliationStart = performance.now();
+        await page.waitForFunction(
+          () => window.__ONLYOFFICE_SAVE_E2E__.getStatus().dirty === false,
+          null,
+          { timeout: 30000 },
+        );
+        item.latestAckToCleanMs = performance.now() - reconciliationStart;
+        item.saveUntilVerifiedCleanMs = currentSave.ms + item.latestAckToCleanMs;
         item.afterLatestAck = await page.evaluate(() =>
           window.__ONLYOFFICE_SAVE_E2E__.getStatus(),
         );
