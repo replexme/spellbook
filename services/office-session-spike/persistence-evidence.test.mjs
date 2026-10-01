@@ -1541,20 +1541,70 @@ test("persisted changes and canonical observations use the same bounded physical
   const before = { slides: [{ elements: [shape] }], masters: [] };
   const expected = structuredClone(before);
   expected.slides[0].elements[0].text = "After";
+  expected.slides[0].elements[0].x = 110;
   const observed = structuredClone(expected);
-  Object.assign(observed.slides[0].elements[0], { x: 98, width: 904 });
+  Object.assign(observed.slides[0].elements[0], { x: 108, width: 904 });
   assert.deepEqual(
     intendedDocumentMutationDifferences({ before, expected, observed }),
     [],
   );
   assert.deepEqual(formatCanonicalDifferences(expected, observed), []);
-  Object.assign(observed.slides[0].elements[0], { x: 102, width: 902 });
+  Object.assign(observed.slides[0].elements[0], { x: 112, width: 902 });
   for (const differences of [
     intendedDocumentMutationDifferences({ before, expected, observed }),
     formatCanonicalDifferences(expected, observed),
   ]) {
     assert.equal(differences[0].path, "$.slides[0].elements[0].bounds.right");
-    assert.equal(differences[0].expected, 1000);
-    assert.equal(differences[0].observed, 1004);
+    assert.equal(differences[0].expected, 1010);
+    assert.equal(differences[0].observed, 1014);
   }
+});
+
+test("style-only admission leaves unchanged geometry to preservation while release evidence still checks it", () => {
+  const before = {
+    slides: [
+      {
+        elements: [
+          { x: 4747, y: 2540, width: 9556, height: 1055, textShadow: false },
+        ],
+      },
+    ],
+    masters: [],
+  };
+  const expected = structuredClone(before);
+  expected.slides[0].elements[0].textShadow = true;
+  const baseline = structuredClone(before);
+  Object.assign(baseline.slides[0].elements[0], {
+    x: 4744,
+    width: 9560,
+    height: 1053,
+  });
+  const observed = structuredClone(baseline);
+  observed.slides[0].elements[0].textShadow = true;
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({ before, expected, observed }),
+    [],
+  );
+  assert.deepEqual(
+    persistenceDeltaDifferences({ before, expected, baseline, observed }),
+    [],
+  );
+  assert.equal(
+    formatCanonicalDifferences(expected, observed)[0].path,
+    "$.slides[0].elements[0].bounds.left",
+  );
+  observed.slides[0].elements[0].x -= 4;
+  const differences = persistenceDeltaDifferences({
+    before,
+    expected,
+    baseline,
+    observed,
+  });
+  assert.equal(differences[0].invariant, "unchanged-after-normalization");
+  assert.equal(differences[0].path, "$.slides[0].elements[0].bounds.left");
+  observed.slides[0].elements[0].textShadow = false;
+  assert.equal(
+    intendedDocumentMutationDifferences({ before, expected, observed })[0].path,
+    "$.slides[0].elements[0].textShadow",
+  );
 });

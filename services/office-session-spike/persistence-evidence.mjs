@@ -925,13 +925,26 @@ function collectPersistenceDeltaDifferences(
   }
 
   if (expectedKind === "object") {
-    const outline = quantizedOutlineDifference(expected, observed, path);
+    // Treat geometry as one physical outline, but bind its expectation to
+    // whether this edit changed it. A text/style edit does not author the
+    // importer's live geometry; unchanged geometry belongs to the no-op
+    // baseline (or package preservation for product admission).
+    const geometryChanged = ["x", "y", "width", "height"].some((key) =>
+      Boolean(firstPersistenceDifference(before[key], expected[key])),
+    );
+    const outline = quantizedOutlineDifference(
+      geometryChanged ? expected : baseline,
+      observed,
+      path,
+    );
     if (outline) {
       const { actual, ...difference } = outline;
       differences.push({
         ...difference,
         observed: actual,
-        invariant: "intended-change",
+        invariant: geometryChanged
+          ? "intended-change"
+          : "unchanged-after-normalization",
       });
     }
     const keys = [
