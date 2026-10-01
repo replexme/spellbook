@@ -21,6 +21,7 @@ import {
 } from "/harness/ai-observation-view.mjs";
 import {
   assertNativeSnapshotVersion,
+  assertUnchangedNativeMutation,
   directDeletePreservationTarget,
   directMovePreservationTarget,
   directTextGeometryPreservationTarget,
@@ -31,6 +32,7 @@ import {
   persistedDirectSlideTopologyMatches,
   persistedSectionsMatch,
   persistedSlideTopologyMatches,
+  requiresNativeScriptFormatting,
 } from "/harness/product-persistence.mjs";
 import {
   reconcileNativeHistoryRevision,
@@ -654,7 +656,11 @@ async function serializeNativeDocument({
   const outputPath = `/tmp/spellbook/native-${++requestSequence}.pptx`;
   try {
     const stored = await request("store", { path: outputPath });
-    assertNativeSnapshotVersion(expectedDocumentChanges, stored.documentChangesBefore, stored.documentChangesAfter);
+    assertNativeSnapshotVersion(
+      expectedDocumentChanges,
+      stored.documentChangesBefore,
+      stored.documentChangesAfter,
+    );
     const bytes = FS.readFile(outputPath).slice();
     if (Number.isSafeInteger(stored.documentChangesAfter))
       nativeVersionsBySerializedBytes.set(bytes, stored.documentChangesAfter);
@@ -1284,8 +1290,12 @@ async function prepareProductPackageMutation(nativeRequest) {
       sourceOperations: [command.op],
     };
   }
+  const expectedElement = productElementOperations.has(command.op)
+    ? expectedElementForId(expectedSlides, command.elementId)
+    : null;
   const localized =
     nativeCommands.length === 1 &&
+    !requiresNativeScriptFormatting(command, expectedElement) &&
     (productElementOperations.has(command.op) ||
       productSlideOperations.has(command.op));
   if (!localized) {
@@ -1323,9 +1333,6 @@ async function prepareProductPackageMutation(nativeRequest) {
     typeof command.elementId !== "string"
   )
     throw new Error("Browser element command is invalid.");
-  const expectedElement = productElementOperations.has(command.op)
-    ? expectedElementForId(expectedSlides, command.elementId)
-    : null;
   const packageCommand = productPackageCommand(command, expectedElement);
   const beforeBytes = currentBytes.slice();
   const mutation = await applyMutation(beforeBytes, packageCommand);
@@ -1609,9 +1616,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
   const previousState = captureProductEditState();
   if (prepared.persistence === "native_snapshot") {
     if (nativeValue.revision === prepared.beforeRevision) {
-      await refreshReconciledNativeBaseline(nativeValue);
-      reconciledModelRevision = nativeValue.revision;
-      unreconciledModelRevision = "";
+      await commitUnchangedNativeMutation(prepared, nativeValue);
       return;
     }
     let afterBytes;
@@ -1710,9 +1715,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
     throw new Error("Browser native and package edits disagree.");
   }
   if (!prepared.mutation.report.changedParts.length) {
-    await refreshReconciledNativeBaseline(nativeValue);
-    reconciledModelRevision = nativeValue.revision;
-    unreconciledModelRevision = "";
+    await commitUnchangedNativeMutation(prepared, nativeValue);
     return nativeValue;
   }
   const afterBytes = new Uint8Array(prepared.mutation.bytes);
@@ -1798,6 +1801,23 @@ async function commitProductPackageMutation(prepared, nativeValue) {
       liveExportBaseline = null;
     }
   return nativeValue;
+}
+
+async function commitUnchangedNativeMutation(prepared, nativeValue) {
+  const previousState = captureProductEditState();
+  try {
+    assertUnchangedNativeMutation(prepared.beforeRevision, nativeValue);
+    // An unchanged partial model still requires the shared export coverage
+    // check; refreshing the baseline here would swallow an omitted change.
+    await checkpointLiveNativeState(nativeValue, "no_op_ai_mutation");
+  } catch (error) {
+    restoreProductEditState(previousState);
+    await restoreProductPackageSnapshot(
+      prepared.beforeBytes,
+      "browser_native_noop_rollback_failed",
+    );
+    throw error;
+  }
 }
 
 async function replayRecoveredCommands(base, recoveredCommands) {
@@ -2099,8 +2119,15 @@ async function checkpointLiveNativeState(live, reason, retryCount = 0) {
   try {
     return await checkpointLiveNativeStateOnce(live, reason, retryCount);
   } catch (error) {
-    if (retryCount < 2 && error?.message === "browser_native_document_changed_during_snapshot")
-      return checkpointLiveNativeState(await observeNativeDocument(), reason, retryCount + 1);
+    if (
+      retryCount < 2 &&
+      error?.message === "browser_native_document_changed_during_snapshot"
+    )
+      return checkpointLiveNativeState(
+        await observeNativeDocument(),
+        reason,
+        retryCount + 1,
+      );
     throw error;
   }
 }
@@ -2765,9 +2792,16 @@ async function handleProductHostMessage(message) {
         // setModified(false) advances the event counter and resets automatic
         // export author/revision metadata. It is an acknowledged housekeeping
         // event, not permission to ignore a later unobserved user edit.
-        nativeVersionsByObservation.set(afterAcknowledgement, afterStatus.documentChanges);
+        nativeVersionsByObservation.set(
+          afterAcknowledgement,
+          afterStatus.documentChanges,
+        );
         await refreshReconciledNativeBaseline(afterAcknowledgement);
-      } else await checkpointLiveNativeState(afterAcknowledgement, "manual_after_save_acknowledgement");
+      } else
+        await checkpointLiveNativeState(
+          afterAcknowledgement,
+          "manual_after_save_acknowledgement",
+        );
       rememberReconciledObservation(afterAcknowledgement);
       const modified = acknowledgedSaveHasLaterChanges(
         saved,

@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   assertNativeSnapshotVersion,
+  assertUnchangedNativeMutation,
   directDeletePreservationTarget,
   directMovePreservationTarget,
   directTextGeometryPreservationTarget,
@@ -13,7 +14,47 @@ import {
   persistedDirectSlideTopologyMatches,
   persistedSectionsMatch,
   persistedSlideTopologyMatches,
+  requiresNativeScriptFormatting,
 } from "./harness/product-persistence.mjs";
+
+test("localized text formatting requires uniform values across all three scripts", () => {
+  for (const [op, property, value, other] of [
+    ["font_family", "fontFamily", "Liberation Sans", "Noto Sans KR"],
+    ["font_size", "fontSize", 18, 19],
+    ["bold", "fontWeight", 100, 150],
+    ["italic", "fontStyle", "NONE", "ITALIC"],
+  ]) {
+    const formatting = Object.fromEntries(
+      ["", "Asian", "Complex"].map((suffix) => [`${property}${suffix}`, value]),
+    );
+    const element = { wholeTextFormatting: formatting };
+    assert.equal(requiresNativeScriptFormatting({ op }, element), false);
+    for (const suffix of ["Asian", "Complex"]) {
+      formatting[`${property}${suffix}`] = other;
+      assert.equal(requiresNativeScriptFormatting({ op }, element), true);
+      formatting[`${property}${suffix}`] = value;
+    }
+    delete formatting[`${property}Asian`];
+    assert.equal(requiresNativeScriptFormatting({ op }, element), true);
+    assert.equal(requiresNativeScriptFormatting({ op }, null), true);
+  }
+  assert.equal(requiresNativeScriptFormatting({ op: "move" }, null), false);
+});
+
+test("a no-op package cannot adopt a changed or unknown native revision", () => {
+  assert.doesNotThrow(() =>
+    assertUnchangedNativeMutation("v1", { revision: "v1" }),
+  );
+  for (const observation of [null, {}, { revision: "v2" }])
+    assert.throws(
+      () => assertUnchangedNativeMutation("v1", observation),
+      /noop_changed_model/,
+    );
+  assert.throws(
+    () => assertUnchangedNativeMutation("", { revision: "" }),
+    /noop_changed_model/,
+  );
+});
 
 test("native snapshot must use the observed revision through serialization", () => {
   assert.doesNotThrow(() => assertNativeSnapshotVersion(7, 7, 7));

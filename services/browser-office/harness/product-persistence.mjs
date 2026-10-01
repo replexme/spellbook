@@ -5,6 +5,31 @@ import {
 
 /* SPDX-License-Identifier: MPL-2.0 */
 
+// A localized OOXML formatting command uses one uniform expected value.
+// Native setters address Latin, Asian and complex scripts together, so a
+// differing or unknown script value needs the native snapshot/intent path.
+export function requiresNativeScriptFormatting(command, element) {
+  const property = {
+    font_family: "fontFamily",
+    font_size: "fontSize",
+    bold: "fontWeight",
+    italic: "fontStyle",
+  }[command?.op];
+  if (!property) return false;
+  const formatting = element?.wholeTextFormatting;
+  const values = ["", "Asian", "Complex"].map(
+    (suffix) => formatting?.[`${property}${suffix}`],
+  );
+  return values.some(
+    (value) => value === null || value === undefined || value !== values[0],
+  );
+}
+
+export function assertUnchangedNativeMutation(beforeRevision, observation) {
+  if (!beforeRevision || observation?.revision !== beforeRevision)
+    throw new Error("browser_native_noop_changed_model");
+}
+
 // A save must describe the model revision that was observed. The browser
 // engine counts modifications and Undo/Redo events; a changed count makes
 // an export stale even when a later semantic comparison looks equivalent.
@@ -368,7 +393,10 @@ export function directMovePreservationTarget(before, after) {
         name: beforeElement.name,
         shapeIndex: beforeElement.zIndex,
       };
-      translation = { x: afterElement.x - beforeElement.x, y: afterElement.y - beforeElement.y };
+      translation = {
+        x: afterElement.x - beforeElement.x,
+        y: afterElement.y - beforeElement.y,
+      };
       descendants = new Set([beforeElement.elementId]);
       // The observation enumerates a group before its nested children.
       // Accept only descendants translated by the same vector; formatting,
