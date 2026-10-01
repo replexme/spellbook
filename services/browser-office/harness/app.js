@@ -744,7 +744,7 @@ async function preserveAndInspectNativeDocument(
     }
   };
   markBrowserProbePhase("snapshot:serialize");
-  const serialized = await measure("serialize", () =>
+  let serialized = await measure("serialize", () =>
     serializeNativeDocument({ expectedDocumentChanges }),
   );
   markBrowserProbePhase("snapshot:normalize");
@@ -767,6 +767,13 @@ async function preserveAndInspectNativeDocument(
   markBrowserProbePhase("snapshot:inspect");
   const observation = await measure("inspect", () =>
     inspectNativeDocumentBytes(bytes, detailSlideIndex),
+  );
+  // Saved-model inspection can materialize/reset empty-paragraph defaults
+  // in the live exporter without changing the observed content. Bind the
+  // next comparison to an export taken after that inspection, at the same
+  // event version. A concurrent real edit still invalidates this baseline.
+  serialized = await measure("serialize-baseline", () =>
+    serializeNativeDocument({ expectedDocumentChanges }),
   );
   return { bytes, observation, report: preserved.report, serialized };
 }
@@ -1618,6 +1625,7 @@ async function commitProductPackageMutation(prepared, nativeValue) {
         prepared.sourceOperations,
         prepared.sourceTargets ?? null,
         prepared.baselineBytes ?? null,
+        nativeVersionsByObservation.get(nativeValue) ?? null,
       );
       afterBytes = preserved.bytes;
       preservationReport = preserved.report;
