@@ -642,6 +642,8 @@ function start() {
             requested.operation === "observe"
               ? { ...requested, captureSlideIndexes: [] }
               : { ...requested, suppressCapture: true };
+          if (nativeRequest.expiresAt && Date.now() > nativeRequest.expiresAt)
+            throw new Error("expired_operation");
           packageSections = Array.isArray(nativeRequest.packageSections)
             ? nativeRequest.packageSections
             : [];
@@ -650,13 +652,19 @@ function start() {
           nativeChangesBefore = changesBefore;
           let observedBefore = null;
           if (
-            nativeRequest.operation === "edit_batch" &&
+            ["observe", "edit_batch"].includes(nativeRequest.operation) &&
             batchObservation &&
             Number.isSafeInteger(changesBefore) &&
             changesBefore === batchObservation.documentChanges &&
-            nativeRequest.expectedRevision ===
-              batchObservation.value.revision &&
-            JSON.stringify(packageSections) === batchObservation.packageSections
+            (nativeRequest.operation === "observe"
+              ? JSON.stringify(nativeRequest) ===
+                batchObservation.observationRequest
+              : nativeRequest.expectedRevision ===
+                batchObservation.value.revision) &&
+            JSON.stringify(packageSections) ===
+              batchObservation.packageSections &&
+            JSON.stringify(packageAssetHashes) ===
+              batchObservation.packageAssetHashes
           ) {
             try {
               const selection = spellbookDocumentOperation({
@@ -676,24 +684,27 @@ function start() {
               // A missing cheap selection read uses the ordinary full read.
             }
           }
-          if (
-            nativeRequest.operation !== "selection" &&
-            nativeRequest.operation !== "detail_slide"
-          )
-            batchObservation = null;
-          const value = [
-            "insert_image",
-            "replace_image",
-            "insert_media",
-            "replace_media",
-          ].includes(nativeRequest.operation)
-            ? mutateAsset(nativeRequest)
-            : spellbookDocumentOperation({
-                ...nativeRequest,
-                ...(observedBefore ? { observedBefore } : {}),
-                mutationContracts: spellbookMutationContracts,
-                nativeAdapter,
-              });
+          if (nativeRequest.operation !== "selection") batchObservation = null;
+          // A repeated read may reuse only the engine's own observation at
+          // the exact event version, request and selection. No model state
+          // from the page can authorize it. Serialization/hidden inspections
+          // clear this cache because they can materialize exporter defaults.
+          const value =
+            nativeRequest.operation === "observe" && observedBefore
+              ? observedBefore
+              : [
+                    "insert_image",
+                    "replace_image",
+                    "insert_media",
+                    "replace_media",
+                  ].includes(nativeRequest.operation)
+                ? mutateAsset(nativeRequest)
+                : spellbookDocumentOperation({
+                    ...nativeRequest,
+                    ...(observedBefore ? { observedBefore } : {}),
+                    mutationContracts: spellbookMutationContracts,
+                    nativeAdapter,
+                  });
           const changesAfter = documentChangeCount();
           if (
             nativeRequest.operation === "observe" &&
@@ -706,6 +717,8 @@ function start() {
               value,
               documentChanges: changesAfter,
               packageSections: JSON.stringify(packageSections),
+              packageAssetHashes: JSON.stringify(packageAssetHashes),
+              observationRequest: JSON.stringify(nativeRequest),
             };
           post("native-complete", {
             requestId,
@@ -787,9 +800,11 @@ function start() {
           });
           break;
         case "store":
+          batchObservation = null;
           storeDocument(event.data.path, requestId);
           break;
         case "inspect-saved":
+          batchObservation = null;
           post("inspect-saved-complete", {
             requestId,
             value: inspectSavedDocument(
@@ -803,10 +818,12 @@ function start() {
           });
           break;
         case "normalize-saved":
+          batchObservation = null;
           normalizeSavedDocument(event.data.path, event.data.outputPath);
           post("normalize-saved-complete", { requestId });
           break;
         case "mark-saved": {
+          batchObservation = null;
           if (!model) throw new Error("No browser Office document is open.");
           const documentChangesBefore = documentChangeCount();
           model.setModified(false);
