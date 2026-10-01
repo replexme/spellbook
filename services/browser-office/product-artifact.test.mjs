@@ -105,6 +105,32 @@ test("a write inside intent verification also invalidates its evidence", async (
   );
 });
 
+test("an inspector cannot substitute its private byte snapshot or poison the cache", async () => {
+  let replace = true;
+  const gate = authority({
+    inspect: async (captured) => {
+      if (replace) captured[2] = 9;
+      return observed();
+    },
+  });
+  await assert.rejects(admit(gate), /changed_during_verification/);
+  await assert.rejects(gate.require(document(), "v1"), /not_verified/);
+  replace = false;
+  await admit(gate);
+  await gate.require(document(), "v1");
+});
+
+test("intent verification cannot rewrite the persisted-state evidence", async () => {
+  const expected = await admit(authority());
+  const actual = await admit(authority(), document(), "v1", {
+    verify: (observation) => {
+      assertArtifactMatchesObservation(observed(), observation);
+      observation.slides[0].elements[0].text = "rewritten proof";
+    },
+  });
+  assert.deepEqual(actual, expected);
+});
+
 test("recovery re-inspects the file and refuses stale semantic evidence", async () => {
   const receipt = await admit(authority());
   const fresh = authority();

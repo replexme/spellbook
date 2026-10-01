@@ -77,6 +77,8 @@ export function createProductArtifactAuthority({
     let result = inspections.get(key);
     if (!result) {
       result = await inspect(captured, detailSlideIndex);
+      if ((await sha256(captured)) !== digest)
+        throw new Error("browser_artifact_changed_during_verification");
       if (!Array.isArray(result?.slides) || !result.slides.length)
         throw new Error("browser_artifact_inspection_missing");
       // Keep observations, never extra copies of potentially large packages.
@@ -105,7 +107,7 @@ export function createProductArtifactAuthority({
         throw new Error("browser_artifact_intent_evidence_missing");
       const inspected = await inspection(bytes, detailSlideIndex);
       // Only real readback of the exact package can satisfy this callback.
-      await verify(inspected.observation);
+      await verify(structuredClone(inspected.observation));
       if ((await sha256(bytes)) !== inspected.digest)
         throw new Error("browser_artifact_changed_during_verification");
       const persistedStateSha256 = await sha256(
