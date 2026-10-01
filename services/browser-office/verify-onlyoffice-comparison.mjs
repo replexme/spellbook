@@ -44,6 +44,7 @@ const known = [
   "dupslide",
   "delslide",
   "save-failure",
+  "late-save-ack",
 ];
 assert(
   scenarios.every((s) => known.includes(s)) &&
@@ -117,7 +118,7 @@ let editor,dirty=false,writeCount=0,error=null;
 window.__ONLYOFFICE_SAVE_E2E__={getStatus:()=>({ready:editor?.getState().status==='ready',dirty,writeCount,error}),save:async()=>{const file=await editor.save('pptx');return {fileName:file.name,size:file.size};},destroy:async()=>editor?.destroy()};
 try {
  const file=new File([await (await fetch('/compare.pptx',{cache:'no-store'})).arrayBuffer()],'compare.pptx',{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'});
- editor=await createOfficeEditor(document.querySelector('#editor'),{hostUrl:${JSON.stringify(new URL("/office-host.html", origin.origin).href)},file,fileName:file.name,mode:'edit',saveBehavior:'callback',onDirtyChange:value=>dirty=value,onError:e=>error=e.message,onSave:async file=>{if(window.__comparisonRejectSave)throw new Error('comparison_host_write_rejected');window.__comparisonSaved=new Uint8Array(await file.arrayBuffer());writeCount++;return true;}});
+ editor=await createOfficeEditor(document.querySelector('#editor'),{hostUrl:${JSON.stringify(new URL("/office-host.html", origin.origin).href)},file,fileName:file.name,mode:'edit',saveBehavior:'callback',onDirtyChange:value=>dirty=value,onError:e=>error=e.message,onSave:async file=>{if(window.__comparisonRejectSave)throw new Error('comparison_host_write_rejected');window.__comparisonSaved=new Uint8Array(await file.arrayBuffer());if(window.__holdSave){window.__heldSave=true;await new Promise(resolve=>window.__releaseSave=resolve);}writeCount++;return true;}});
 }catch(e){error=e.message;}
 </script>`;
 // Real loopback HTTP gives Chromium a local address space for the host iframe.
@@ -277,6 +278,113 @@ try {
                 names.add(k);
           return [...names].sort();
         });
+      if (scenario === "late-save-ack") {
+        item.stage = "held-save";
+        const duplicate = () =>
+          frame.evaluate(() =>
+            window.Asc.editor.WordControl.m_oLogicDocument.DublicateSlide(),
+          );
+        await duplicate();
+        await page.waitForTimeout(250);
+        const firstSnapshot = await snapshot(frame);
+        assert.equal(firstSnapshot.slides.length, before.slides.length + 1);
+        await page.evaluate(() => {
+          window.__holdSave = true;
+          window.__pendingSave = window.__ONLYOFFICE_SAVE_E2E__.save();
+          window.__pendingSave.catch(() => undefined);
+        });
+        await page.waitForFunction(() => window.__heldSave === true, null, {
+          timeout: 60000,
+        });
+        await duplicate();
+        await page.waitForTimeout(250);
+        const latest = await snapshot(frame);
+        assert.equal(latest.slides.length, firstSnapshot.slides.length + 1);
+        await page.evaluate(() => {
+          window.__releaseSave();
+          window.__holdSave = false;
+          return window.__pendingSave;
+        });
+        item.afterOldAck = [];
+        for (const delay of [100, 1000, 2000]) {
+          await page.waitForTimeout(delay);
+          const status = await page.evaluate(() =>
+            window.__ONLYOFFICE_SAVE_E2E__.getStatus(),
+          );
+          item.afterOldAck.push({ delayMs: delay, ...status });
+          assert.equal(status.dirty, true, "Old ACK must retain later edits");
+          assert.deepEqual(differences(latest, await snapshot(frame)), []);
+        }
+        const oldSaved = await page.evaluate(() => {
+          let binary = "";
+          const bytes = window.__comparisonSaved;
+          for (let i = 0; i < bytes.length; i += 32768)
+            binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+          return btoa(binary);
+        });
+        const oldBytes = Buffer.from(oldSaved, "base64");
+        await writeFile(
+          path.join(outputRoot, "late-save-ack-old.pptx"),
+          oldBytes,
+          {
+            mode: 0o600,
+          },
+        );
+        item.stage = "second-save";
+        const currentSave = await save(page);
+        const currentBytes = Buffer.from(currentSave.base64, "base64");
+        await writeFile(
+          path.join(outputRoot, "late-save-ack-latest.pptx"),
+          currentBytes,
+          {
+            mode: 0o600,
+          },
+        );
+        await page.waitForTimeout(250);
+        item.afterLatestAck = await page.evaluate(() =>
+          window.__ONLYOFFICE_SAVE_E2E__.getStatus(),
+        );
+        assert.equal(
+          item.afterLatestAck.dirty,
+          false,
+          "Latest persisted state should clear dirty",
+        );
+        assert.equal(item.afterLatestAck.writeCount, 2);
+        await frame.evaluate(() => window.Asc.editor.Undo());
+        await page.waitForTimeout(250);
+        item.undoDifferences = differences(
+          firstSnapshot,
+          await snapshot(frame),
+        );
+        assert.deepEqual(item.undoDifferences, []);
+        await frame.evaluate(() => window.Asc.editor.Redo());
+        await page.waitForTimeout(250);
+        item.redoDifferences = differences(latest, await snapshot(frame));
+        assert.deepEqual(item.redoDifferences, []);
+        item.stage = "reopen-old-and-latest";
+        served = oldBytes;
+        ({ frame } = await open(page));
+        item.oldReopenDifferences = differences(
+          firstSnapshot,
+          await snapshot(frame),
+        );
+        assert.deepEqual(item.oldReopenDifferences, []);
+        served = currentBytes;
+        ({ frame } = await open(page));
+        item.latestReopenDifferences = differences(
+          latest,
+          await snapshot(frame),
+        );
+        assert.deepEqual(item.latestReopenDifferences, []);
+        item.oldSlides = firstSnapshot.slides.length;
+        item.latestSlides = latest.slides.length;
+        item.oldSavedSha256 = sha(oldBytes);
+        item.latestSavedSha256 = sha(currentBytes);
+        item.exportMs = currentSave.ms;
+        item.status = "late-ack-second-save-history-reopen-verified";
+        item.stage = "complete";
+        continue;
+      }
       await page.screenshot({
         path: path.join(outputRoot, `${scenario}-before.png`),
       });
@@ -495,9 +603,11 @@ try {
 if (
   report.cases.some(
     (c) =>
-      !["raw-export-reopen-verified", "host-failure-keeps-dirty"].includes(
-        c.status,
-      ),
+      ![
+        "raw-export-reopen-verified",
+        "host-failure-keeps-dirty",
+        "late-ack-second-save-history-reopen-verified",
+      ].includes(c.status),
   )
 )
   process.exitCode = 1;
