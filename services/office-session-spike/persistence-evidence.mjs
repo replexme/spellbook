@@ -1117,7 +1117,7 @@ export function documentPersistenceDeltaDifferences(report, observed, options) {
     throw new Error(
       "Persistence evidence requires before, expected, no-op baseline and reopened slide/master states.",
     );
-  return persistenceDeltaDifferences(
+  const differences = persistenceDeltaDifferences(
     {
       before: normalizeDocumentPersistenceState(before),
       expected: normalizeDocumentPersistenceState(expected),
@@ -1130,6 +1130,69 @@ export function documentPersistenceDeltaDifferences(report, observed, options) {
     },
     options,
   );
+  return [
+    ...differences,
+    ...scriptFormattingIntent(before, expected, observed, options).differences,
+  ].slice(0, options?.limit ?? 20);
+}
+
+// The whole-text summary is normally excluded: mixed runs and inherited
+// defaults need the detailed paragraph model. Native whole-text setters also
+// change Asian/complex-script properties that are absent from that model.
+// Check only the script properties actually changed on an existing named
+// object; a no-op import's resolved defaults are not authored intent.
+function scriptFormattingIntent(
+  before,
+  expected,
+  observed,
+  { limit = 20 } = {},
+) {
+  let changed = false;
+  const differences = [];
+  const properties = [
+    "fontFamily",
+    "fontSize",
+    "fontWeight",
+    "fontStyle",
+  ].flatMap((property) =>
+    ["", "Asian", "Complex"].map((suffix) => `${property}${suffix}`),
+  );
+  for (const [slideIndex, slide] of (expected.slides ?? []).entries()) {
+    const originals = before.slides?.[slideIndex]?.elements ?? [];
+    const saved = observed.slides?.[slideIndex]?.elements ?? [];
+    for (const [elementIndex, element] of (slide.elements ?? []).entries()) {
+      const name = element.objectName ?? element.name;
+      if (typeof name !== "string" || !name) continue;
+      const matches = (elements) =>
+        elements.filter((item) => (item.objectName ?? item.name) === name);
+      const originalMatches = matches(originals);
+      if (originalMatches.length !== 1) continue;
+      const savedMatches = matches(saved);
+      for (const property of properties) {
+        const previous = originalMatches[0].wholeTextFormatting?.[property];
+        const intended = element.wholeTextFormatting?.[property];
+        if (
+          intended === null ||
+          intended === undefined ||
+          Object.is(previous, intended)
+        )
+          continue;
+        changed = true;
+        const actual =
+          savedMatches.length === 1
+            ? savedMatches[0].wholeTextFormatting?.[property]
+            : undefined;
+        if (!Object.is(intended, actual) && differences.length < limit)
+          differences.push({
+            path: `$.slides[${slideIndex}].elements[${elementIndex}].wholeTextFormatting.${property}`,
+            expected: intended,
+            observed: actual,
+            invariant: "intended-change",
+          });
+      }
+    }
+  }
+  return { changed, differences };
 }
 
 /**
@@ -1234,13 +1297,20 @@ export function intendedDocumentMutationDifferences(
   const normalizedObserved = normalizeDocumentPersistenceState(observed, {
     authoredBy: expected,
   });
+  const scriptIntent = scriptFormattingIntent(
+    before,
+    expected,
+    observed,
+    options,
+  );
   const sectionsChanged =
     Array.isArray(before.sections) &&
     Array.isArray(expected.sections) &&
     Boolean(firstPersistenceDifference(before.sections, expected.sections));
   if (
     !firstPersistenceDifference(normalizedBefore, normalizedExpected) &&
-    !sectionsChanged
+    !sectionsChanged &&
+    !scriptIntent.changed
   )
     throw new Error(
       "Persisted mutation evidence has no observable intended change.",
@@ -1270,7 +1340,10 @@ export function intendedDocumentMutationDifferences(
       false,
     );
   }
-  return differences;
+  return [...differences, ...scriptIntent.differences].slice(
+    0,
+    options?.limit ?? 20,
+  );
 }
 
 export function assertDocumentPersistenceDelta(report, observed, message) {

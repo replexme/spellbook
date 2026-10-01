@@ -18,6 +18,93 @@ import {
   withAuthoredUntargetedShapes,
 } from "./persistence-evidence.mjs";
 
+test("script-only formatting intent must survive both product and conformance saves", () => {
+  for (const property of ["fontFamily", "fontSize", "fontWeight", "fontStyle"])
+    for (const suffix of ["Asian", "Complex"]) {
+      const key = `${property}${suffix}`;
+      const before = {
+        slides: [
+          {
+            elements: [
+              { name: "Title", wholeTextFormatting: { [key]: "Before" } },
+            ],
+          },
+        ],
+        masters: [],
+      };
+      const expected = structuredClone(before);
+      expected.slides[0].elements[0].wholeTextFormatting[key] = "After";
+      assert.deepEqual(
+        intendedDocumentMutationDifferences({
+          before,
+          expected,
+          observed: expected,
+        }),
+        [],
+      );
+      const report = {
+        persistenceBefore: before,
+        persistenceExpected: expected,
+        persistenceBaseline: before,
+      };
+      assert.deepEqual(
+        documentPersistenceDeltaDifferences(report, expected),
+        [],
+      );
+      for (const differences of [
+        intendedDocumentMutationDifferences({
+          before,
+          expected,
+          observed: before,
+        }),
+        documentPersistenceDeltaDifferences(report, before),
+      ]) {
+        assert.equal(
+          differences[0].path,
+          `$.slides[0].elements[0].wholeTextFormatting.${key}`,
+        );
+        assert.equal(differences[0].invariant, "intended-change");
+      }
+      const ambiguous = structuredClone(expected);
+      ambiguous.slides[0].elements.push(
+        structuredClone(ambiguous.slides[0].elements[0]),
+      );
+      assert.ok(
+        intendedDocumentMutationDifferences({
+          before,
+          expected,
+          observed: ambiguous,
+        }).length,
+      );
+    }
+});
+
+test("unchanged whole-text defaults remain excluded from persistence intent", () => {
+  const before = {
+    slides: [
+      {
+        elements: [
+          {
+            name: "Title",
+            text: "Before",
+            wholeTextFormatting: { fontFamilyAsian: "Theme" },
+          },
+        ],
+      },
+    ],
+    masters: [],
+  };
+  const expected = structuredClone(before);
+  expected.slides[0].elements[0].text = "After";
+  const observed = structuredClone(expected);
+  observed.slides[0].elements[0].wholeTextFormatting.fontFamilyAsian =
+    "Resolved";
+  assert.deepEqual(
+    intendedDocumentMutationDifferences({ before, expected, observed }),
+    [],
+  );
+});
+
 test("product persistence admission checks changed semantics across save/reopen", () => {
   const before = {
     slides: [{ elements: [{ objectName: "Title", text: "Before", x: 100 }] }],
