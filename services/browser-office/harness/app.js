@@ -2232,10 +2232,21 @@ async function refreshReconciledNativeBaseline(observation) {
   const bytes = await serializeNativeDocument({
     expectedDocumentChanges: changes,
   });
-  liveExportBaseline = { revision: observation.revision, bytes };
   rememberReconciledObservation(observation);
-  checkpointedDocumentChanges =
-    nativeVersionsBySerializedBytes.get(bytes) ?? changes;
+  bindReconciledNativeBaseline(observation, bytes);
+}
+
+// The baseline file and its verified engine event version are one state.
+// Keeping only the bytes makes the next Save/heartbeat re-read the whole
+// model even though this exact version already passed artifact admission.
+// Only the original serialized buffer has an engine-issued version; a copy
+// or an unavailable listener must continue through the ordinary full read.
+function bindReconciledNativeBaseline(observation, bytes) {
+  if (observation?.revision !== reconciledModelRevision)
+    throw new Error("browser_reconciled_baseline_mismatch");
+  liveExportBaseline = { revision: observation.revision, bytes };
+  const changes = nativeVersionsBySerializedBytes.get(bytes);
+  checkpointedDocumentChanges = Number.isSafeInteger(changes) ? changes : null;
 }
 
 async function checkpointLiveNativeState(live, reason, retryCount = 0) {
@@ -2286,8 +2297,7 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
       });
       if (report.report.changedParts.length)
         throw new Error("browser_native_unobserved_change");
-      liveExportBaseline = { revision: live.revision, bytes: candidate };
-      checkpointedDocumentChanges = changes;
+      bindReconciledNativeBaseline(live, candidate);
       unreconciledModelRevision = "";
       return false;
     } catch (error) {
@@ -2320,10 +2330,7 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
       rememberReconciledObservation(live);
       await admitProductHistoryArtifact(currentBytes, live);
       await persistCheckpoint();
-      liveExportBaseline = {
-        revision: live.revision,
-        bytes: serialized,
-      };
+      bindReconciledNativeBaseline(live, serialized);
     } catch (error) {
       restoreProductEditState(previousState);
       unreconciledModelRevision = live.revision;
@@ -2392,10 +2399,7 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
       unreconciledModelRevision = live.revision;
       throw error;
     }
-    liveExportBaseline = {
-      revision: live.revision,
-      bytes: preserved.serialized,
-    };
+    bindReconciledNativeBaseline(live, preserved.serialized);
     return true;
   }
   try {
@@ -2466,7 +2470,7 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
     unreconciledModelRevision = live.revision;
     throw error;
   }
-  liveExportBaseline = { revision: live.revision, bytes: preserved.serialized };
+  bindReconciledNativeBaseline(live, preserved.serialized);
   return true;
 }
 
