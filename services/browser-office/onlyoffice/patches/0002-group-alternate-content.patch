@@ -1,0 +1,256 @@
+From 60b6109055d43da5fe202eb92ae09d25f755f3e3 Mon Sep 17 00:00:00 2001
+From: philo-kim <fineday9@gmail.com>
+Date: Thu, 1 Oct 2026 17:19:54 +0900
+Subject: [PATCH] fix: share alternate-content decoding for slide groups and
+ retain later siblings
+
+---
+ bin/build.sh                                  |   1 +
+ .../patch-onlyoffice-slide-group-reader.d.mts |   1 +
+ .../patch-onlyoffice-slide-group-reader.mjs   |  87 +++++++++++++
+ test/unit/slide-group-reader.test.ts          | 119 ++++++++++++++++++
+ 4 files changed, 208 insertions(+)
+ create mode 100644 scripts/patch-onlyoffice-slide-group-reader.d.mts
+ create mode 100644 scripts/patch-onlyoffice-slide-group-reader.mjs
+ create mode 100644 test/unit/slide-group-reader.test.ts
+
+diff --git a/bin/build.sh b/bin/build.sh
+index 53adc2a..1e28ffd 100755
+--- a/bin/build.sh
++++ b/bin/build.sh
+@@ -7,6 +7,7 @@ echo "Starting build process..."
+ 
+ # Run Vite build through the project-local binary.
+ ./node_modules/.bin/vite build
++node scripts/patch-onlyoffice-slide-group-reader.mjs dist
+ 
+ # Keep the deployable demo/runtime lean by removing low-frequency bundled
+ # assets and emitting canonical path packs for per-document-type CDN sync.
+diff --git a/scripts/patch-onlyoffice-slide-group-reader.d.mts b/scripts/patch-onlyoffice-slide-group-reader.d.mts
+new file mode 100644
+index 0000000..23efeca
+--- /dev/null
++++ b/scripts/patch-onlyoffice-slide-group-reader.d.mts
+@@ -0,0 +1 @@
++export function patchSlideGroupReader(source: string): string;
+diff --git a/scripts/patch-onlyoffice-slide-group-reader.mjs b/scripts/patch-onlyoffice-slide-group-reader.mjs
+new file mode 100644
+index 0000000..52de131
+--- /dev/null
++++ b/scripts/patch-onlyoffice-slide-group-reader.mjs
+@@ -0,0 +1,87 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++// Local candidate patch for ONLYOFFICE sdkjs v9.3.0.140 (common/Shapes/Serialize.js).
++// Keep public upstream assets unchanged; patch only the generated runtime.
++import assert from 'node:assert/strict';
++import { createHash } from 'node:crypto';
++import { readFile, writeFile } from 'node:fs/promises';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { brotliCompressSync, constants } from 'node:zlib';
++
++const marker = 'spellbook-group-alternate-content-v1';
++const sourceHashes = {
++  'sdk-all.js': '56178693da975bf42c990f3906ac63d9f45c43d91c1191c99f0f2b2bb222df8e',
++};
++
++// A child record contains both the primary object and its optional 153
++// alternative. The existing shared reader consumes them as ONE child. The
++// old group-only switch leaves 153 unread and counts its fallback as a child,
++// exhausting the declared child count before later siblings are read.
++const groupReader = `this.ReadGroupShape=function(type){
++/* ${marker} */
++var s=this.stream,previousGroup=this.TempGroupObject;
++var shape=type===9?new AscFormat.CLockedCanvas:new AscFormat.CGroupShape;
++shape.setBDeleted(false);this.TempGroupObject=shape;
++var end=s.cur+s.GetULong()+4;
++while(s.cur<end){
++var tag=s.GetUChar();
++switch(tag){
++case 0:{var pr=this.ReadNvUniProp(shape);shape.setNvSpPr(pr);if(AscFormat.isRealNumber(pr.locks))shape.setLocks(pr.locks);break;}
++case 1:{var spPr=new AscFormat.CSpPr;this.ReadGrSpPr(spPr);shape.setSpPr(spPr);spPr.setParent(shape);break;}
++case 2:{
++s.Skip2(4);var count=s.GetULong();
++for(var i=0;i<count;i++){
++s.Skip2(1);var length=s.GetULong();if(length===0)continue;
++var childStart=s.cur,childEnd=childStart+length,childType=s.GetUChar();s.Seek2(childStart);
++var object=this.ReadSpTreeElement();
++if(object&&(childType===5||(!IsHiddenObj(object)&&object.spPr&&object.spPr.xfrm&&(!object.spTree||object.spTree.length>0)))){
++shape.addToSpTree(shape.spTree.length,object);object.setGroup(shape);
++}
++s.Seek2(childEnd);this.TempGroupObject=shape;
++}
++break;}
++case 255:{shape.ReadRedactIds(s);break;}
++default:{s.SkipRecord();break;}
++}
++}
++this.CheckGroupXfrm(shape);s.Seek2(end);this.TempGroupObject=previousGroup;return shape;
++};`;
++
++export function patchSlideGroupReader(source) {
++  if (source.includes(marker)) return source;
++  const start = source.indexOf('this.ReadGroupShape=function(type)');
++  const end = source.indexOf('this.IsNoSlideSpTree=function', start);
++  assert(start >= 0 && end > start, 'Pinned slide group reader boundary missing');
++  const old = source.slice(start, end);
++  assert(
++    old.includes('case 5:') && !old.includes('this.ReadSpTreeElement()'),
++    'Unexpected group reader implementation',
++  );
++  assert(
++    source.includes('this.ReadSpTreeElement=function') && source.includes('nType===153'),
++    'Shared alternate-content reader missing',
++  );
++  return source.slice(0, start) + groupReader + source.slice(end);
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  const root = path.resolve(process.argv[2] || '');
++  assert(path.basename(root) === 'dist', 'Only generated dist assets may be patched');
++  const results = [];
++  for (const [name, expected] of Object.entries(sourceHashes)) {
++    const target = path.join(root, 'sdkjs/slide', name);
++    const source = await readFile(target, 'utf8');
++    const before = createHash('sha256').update(source).digest('hex');
++    assert(source.includes(marker) || before === expected, `Unexpected SDK asset: ${name}`);
++    const patched = patchSlideGroupReader(source);
++    await writeFile(target, patched);
++    await writeFile(
++      target + '.br',
++      brotliCompressSync(Buffer.from(patched), {
++        params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
++      }),
++    );
++    results.push({ name, before, after: createHash('sha256').update(patched).digest('hex') });
++  }
++  console.log(JSON.stringify({ patch: marker, results }));
++}
+diff --git a/test/unit/slide-group-reader.test.ts b/test/unit/slide-group-reader.test.ts
+new file mode 100644
+index 0000000..f2d526a
+--- /dev/null
++++ b/test/unit/slide-group-reader.test.ts
+@@ -0,0 +1,119 @@
++import { readFileSync } from 'node:fs';
++import vm from 'node:vm';
++import { describe, expect, it } from 'vitest';
++import { patchSlideGroupReader } from '../../scripts/patch-onlyoffice-slide-group-reader.mjs';
++
++const source = readFileSync('public/sdkjs/slide/sdk-all.js', 'utf8');
++const between = (text: string, start: string, end: string) =>
++  text.slice(text.indexOf(start), text.indexOf(end, text.indexOf(start)));
++const original = between(source, 'this.ReadGroupShape=function(type)', 'this.IsNoSlideSpTree=function');
++const shared = between(source, 'this.ReadSpTreeElement=function', 'this.ReadGroupShapeMain=function');
++const patched = between(
++  patchSlideGroupReader(source),
++  'this.ReadGroupShape=function(type)',
++  'this.IsNoSlideSpTree=function',
++);
++
++function decode(definition: string, supported = true): string[] {
++  const uint = (n: number) => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
++  const record = (type: number, content: number[]) => [type, ...uint(content.length), ...content];
++  const primary = (type: number, id: number) => record(type, [id]);
++  const objects = [primary(1, 1), [...primary(5, 2), ...record(153, primary(2, 3))], primary(1, 4), primary(1, 5)];
++  const array = [...uint(objects.length), ...objects.flatMap((value) => record(0, value))];
++  const body = record(2, array);
++  const bytes = new Uint8Array([...uint(body.length), ...body, 0]);
++  const stream = {
++    data: bytes,
++    cur: 0,
++    GetUChar() {
++      return this.data[this.cur++];
++    },
++    GetULong() {
++      const n = new DataView(this.data.buffer).getUint32(this.cur, true);
++      this.cur += 4;
++      return n;
++    },
++    Skip2(n: number) {
++      this.cur += n;
++    },
++    Seek2(n: number) {
++      this.cur = n;
++    },
++    SkipRecord() {
++      const n = this.GetULong();
++      this.cur += n;
++    },
++  };
++  const names = ['unused', 'first', 'chart', 'fallback', 'third', 'caption'];
++  const object = (id: number) => ({
++    name: names[id],
++    spPr: { xfrm: {} },
++    setParent2() {},
++    setGroup() {},
++    isSupported: () => id !== 2 || supported,
++  });
++  class Group {
++    name = 'group';
++    spTree: any[] = [];
++    spPr = { xfrm: {} };
++    setBDeleted() {}
++    setNvSpPr() {}
++    setSpPr() {}
++    setLocks() {}
++    setGroup() {}
++    setParent2() {}
++    addToSpTree(_index: number, value: unknown) {
++      this.spTree.push(value);
++    }
++    isSupported() {
++      return true;
++    }
++  }
++  const loader: any = {
++    stream,
++    TempGroupObject: null,
++    TempMainObject: {},
++    IsNoSlideSpTree: () => false,
++    ReadNvUniProp() {
++      stream.SkipRecord();
++      return { locks: null };
++    },
++    CheckGroupXfrm() {},
++    ReadShape() {
++      const n = stream.GetULong(),
++        end = stream.cur + n,
++        id = stream.GetUChar();
++      stream.Seek2(end);
++      return object(id);
++    },
++    ReadPic() {
++      return this.ReadShape();
++    },
++    ReadGrFrame() {
++      return this.ReadShape();
++    },
++  };
++  const context = vm.createContext({
++    loader,
++    IsHiddenObj: () => false,
++    AscFormat: { CGroupShape: Group, CLockedCanvas: Group, CGraphicFrame: Group, isRealNumber: () => false },
++  });
++  vm.runInContext(`(function(){${shared}${definition}}).call(loader)`, context);
++  return loader.ReadGroupShape().spTree.map((value: any) => value.name);
++}
++
++describe('pinned group alternate-content reader', () => {
++  it('reproduces the original trailing sibling loss on one binary record with a fallback', () => {
++    expect(decode(original)).toEqual(['first', 'chart', 'fallback', 'third']);
++  });
++  it('uses the shared reader to retain siblings and consume the supported primary plus fallback as one child', () => {
++    expect(decode(patched)).toEqual(['first', 'chart', 'third', 'caption']);
++  });
++  it('retains fallback selection for an unsupported primary without losing later siblings', () => {
++    expect(decode(patched, false)).toEqual(['first', 'fallback', 'third', 'caption']);
++  });
++  it('is idempotent and refuses an unknown reader boundary', () => {
++    expect(patchSlideGroupReader(patchSlideGroupReader(source))).toBe(patchSlideGroupReader(source));
++    expect(() => patchSlideGroupReader('unknown SDK')).toThrow('boundary missing');
++  });
++});
+-- 
+2.50.1 (Apple Git-155)
+

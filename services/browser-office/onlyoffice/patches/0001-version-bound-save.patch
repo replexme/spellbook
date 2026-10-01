@@ -1,0 +1,291 @@
+From 1872b4ed43d1fc639f4a548b799901fe1a95a52c Mon Sep 17 00:00:00 2001
+From: philo-kim <fineday9@gmail.com>
+Date: Thu, 1 Oct 2026 17:05:27 +0900
+Subject: [PATCH] fix: bind save acknowledgement and preview remount to the
+ persisted native snapshot
+
+---
+ src/lib/office-editor-runtime.ts        | 42 ++++++++++--
+ src/lib/office-editor.ts                |  3 +-
+ test/unit/office-editor-runtime.test.ts | 87 ++++++++++++++++++++++++-
+ test/unit/office-editor.test.ts         | 34 ++++++++++
+ 4 files changed, 157 insertions(+), 9 deletions(-)
+
+diff --git a/src/lib/office-editor-runtime.ts b/src/lib/office-editor-runtime.ts
+index aefbb5d..1fe040f 100644
+--- a/src/lib/office-editor-runtime.ts
++++ b/src/lib/office-editor-runtime.ts
+@@ -173,6 +173,7 @@ type NativeSaveData =
+       header?: string;
+     }
+   | string;
++type NativeSaveSnapshot = { data: Uint8Array; media: string };
+ type NativePrintPdfData =
+   | Uint8Array
+   | ArrayBuffer
+@@ -1896,6 +1897,7 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+   private sourceObjectUrl: string | null = null;
+   private status: OfficeEditorStatus = 'opening';
+   private dirty = false;
++  private savedNativeSnapshot: NativeSaveSnapshot | null = null;
+   private destroyed = false;
+   private readonly fileName: string;
+   private readonly fileType: string;
+@@ -2973,6 +2975,9 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+         await this.save(getFileExtension(this.fileName).toUpperCase());
+       }
+       if (this.destroyed) return;
++      if (this.dirty) {
++        throw new Error('Document changed while saving; remain in edit mode until the latest changes are saved');
++      }
+       this.status = 'opening';
+       this.editorMode = 'preview';
+       this.readonlyMode.value = true;
+@@ -3226,10 +3231,31 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+     }
+   }
+ 
+-  private async emitSavedFile(file: File): Promise<void> {
++  private nativeMediaIdentity(): string {
++    return JSON.stringify(Object.entries(this.media).sort(([a], [b]) => a.localeCompare(b)));
++  }
++
++  private captureNativeSnapshot(data = this.getNativeSaveData()): NativeSaveSnapshot {
++    return { data: data.slice(), media: this.nativeMediaIdentity() };
++  }
++
++  private matchesNativeSnapshot(snapshot: NativeSaveSnapshot): boolean {
++    try {
++      const current = this.getNativeSaveData();
++      return current.length === snapshot.data.length &&
++        current.every((value, index) => value === snapshot.data[index]) &&
++        snapshot.media === this.nativeMediaIdentity();
++    } catch {
++      // Missing readback cannot prove the current document was persisted.
++      return false;
++    }
++  }
++
++  private async emitSavedFile(file: File, snapshot: NativeSaveSnapshot): Promise<void> {
+     await this.persistSavedFile(file);
+     this.binData = await file.arrayBuffer();
+-    this.setDirty(false);
++    this.savedNativeSnapshot = snapshot;
++    this.setDirty(!this.matchesNativeSnapshot(snapshot));
+     this.resolveSaveRequest(file);
+   }
+ 
+@@ -3272,6 +3298,7 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+     try {
+       const payload = event.data?.data?.data;
+       const nativeData = payload ? toNativeSaveUint8Array(payload) : this.getNativeSaveData();
++      const snapshot = this.captureNativeSnapshot(nativeData);
+       const outputFormat = event.data?.option?.outputformat;
+       const optionFormat =
+         (typeof outputFormat === 'number' ? c_oAscFileType2[outputFormat] : undefined) ||
+@@ -3279,8 +3306,8 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+       const targetFormat = this.fileName.toLowerCase().endsWith('.csv')
+         ? 'CSV'
+         : this.saveRequest?.targetExt || optionFormat;
+-      const file = await this.convertNativeOutputFile(nativeData, targetFormat);
+-      await this.emitSavedFile(file);
++      const file = await this.convertNativeOutputFile(snapshot.data, targetFormat);
++      await this.emitSavedFile(file, snapshot);
+       this.sendOnlyOfficeCommand('asc_onSaveCallback', { err_code: 0 });
+     } catch (error) {
+       const normalized = toError(error);
+@@ -3300,7 +3327,7 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+ 
+   private handleDocumentStateChange(event: DocumentStateChangeEvent): void {
+     const dirty = typeof event === 'boolean' ? event : Boolean(event?.data);
+-    this.setDirty(dirty);
++    this.setDirty(dirty || (this.savedNativeSnapshot !== null && !this.matchesNativeSnapshot(this.savedNativeSnapshot)));
+   }
+ 
+   private async handleDownloadAs(event: DownloadAsEvent): Promise<void> {
+@@ -3443,8 +3470,9 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+ 
+   private async saveNativeBinary(targetFormat: string): Promise<void> {
+     try {
+-      const file = await this.convertNativeOutputFile(this.getNativeSaveData(), targetFormat);
+-      await this.emitSavedFile(file);
++      const snapshot = this.captureNativeSnapshot();
++      const file = await this.convertNativeOutputFile(snapshot.data, targetFormat);
++      await this.emitSavedFile(file, snapshot);
+     } catch (error) {
+       const normalized = toError(error);
+       this.rejectSaveRequest(normalized);
+diff --git a/src/lib/office-editor.ts b/src/lib/office-editor.ts
+index 18d638d..afcb121 100644
+--- a/src/lib/office-editor.ts
++++ b/src/lib/office-editor.ts
+@@ -955,7 +955,8 @@ class BrowserOfficeEditorProxy implements OfficeEditorInstance {
+ 
+     try {
+       await this.persistSavedFile(file);
+-      this.setDirty(false);
++      // Persistence acknowledges this artifact, not the current document.
++      // The runtime owns dirty state and verifies it against the saved snapshot.
+       request?.resolve(file);
+       if (requestId) {
+         this.postSaveAck(requestId, true);
+diff --git a/test/unit/office-editor-runtime.test.ts b/test/unit/office-editor-runtime.test.ts
+index 66150b9..d4c7a01 100644
+--- a/test/unit/office-editor-runtime.test.ts
++++ b/test/unit/office-editor-runtime.test.ts
+@@ -1238,7 +1238,7 @@ describe('office editor runtime', () => {
+ 
+     const savedFile = await instance.save('XLSX');
+ 
+-    expect(docEditorInstances[0].asc_nativeGetFile3).toHaveBeenCalledTimes(1);
++    expect(docEditorInstances[0].asc_nativeGetFile3).toHaveBeenCalledTimes(2);
+     expect(docEditorInstances[0].downloadAs).not.toHaveBeenCalled();
+     expect(mocks.convertBinToDocument).toHaveBeenCalledWith(expect.any(Uint8Array), 'alpha.xlsx', 'XLSX', {});
+     expect(onSave).toHaveBeenCalledTimes(1);
+@@ -2107,6 +2107,7 @@ describe('office editor runtime', () => {
+     docEditorConfigs[0].events.onDocumentStateChange?.({ data: true });
+     expect(instance.getState().dirty).toBe(true);
+ 
++    docEditorInstances[0].asc_nativeGetFile3.mockReturnValue({ data: new Uint8Array([4, 5, 6]) });
+     docEditorConfigs[0].events.onSave?.({
+       data: {
+         data: {
+@@ -2526,6 +2527,90 @@ endobj
+     await instance.destroy();
+   });
+ 
++  it.each(['conversion', 'host-write'])('keeps later native edits dirty during %s, then saves the new state', async (boundary) => {
++    const container = document.createElement('div');
++    document.body.appendChild(container);
++    let release!: () => void;
++    let entered!: () => void;
++    const gate = new Promise<void>((resolve) => { release = resolve; });
++    const started = new Promise<void>((resolve) => { entered = resolve; });
++    const onSave = vi.fn(async () => {
++      if (boundary === 'host-write') { entered(); await gate; }
++      return true;
++    });
++    const instance = await createOfficeEditor(container, {
++      file: new File(['hello'], 'alpha.xlsx'), mode: 'edit', onSave,
++    });
++    await flush();
++    const native = new Uint8Array([9, 8, 7]);
++    docEditorInstances[0].asc_nativeGetFile3.mockImplementation(() => ({ data: native }));
++    docEditorConfigs[0].events.onDocumentStateChange?.({ data: true });
++    if (boundary === 'conversion') {
++      mocks.convertBinToDocument.mockImplementationOnce(async () => {
++        entered(); await gate;
++        return { fileName: 'alpha.xlsx', data: zipFixture() };
++      });
++    }
++    const save = instance.save('XLSX');
++    await started;
++    // Mutate the reused engine buffer without another dirty transition.
++    native[2] = 6;
++    release();
++    await save;
++    expect(instance.getState().dirty).toBe(true);
++    expect(mocks.convertBinToDocument.mock.calls[0][0]).toEqual(new Uint8Array([9, 8, 7]));
++    // An SDK "clean" notification also cannot acknowledge the later edit.
++    docEditorConfigs[0].events.onDocumentStateChange?.({ data: false });
++    expect(instance.getState().dirty).toBe(true);
++    await instance.save('XLSX');
++    expect(instance.getState().dirty).toBe(false);
++    expect(onSave).toHaveBeenCalledTimes(2);
++    await instance.destroy();
++  });
++
++  it('keeps the document dirty when native readback fails after a successful host write', async () => {
++    const container = document.createElement('div');
++    document.body.appendChild(container);
++    const instance = await createOfficeEditor(container, {
++      file: new File(['hello'], 'alpha.xlsx'), mode: 'edit',
++      onSave: async () => {
++        docEditorInstances[0].asc_nativeGetFile3.mockImplementation(() => { throw new Error('readback unavailable'); });
++        return true;
++      },
++    });
++    await flush();
++    docEditorConfigs[0].events.onDocumentStateChange?.({ data: true });
++    await instance.save('XLSX');
++    expect(instance.getState().dirty).toBe(true);
++    await instance.destroy();
++  });
++
++  it('does not remount an older saved artifact when a later edit occurs while returning to preview', async () => {
++    const container = document.createElement('div');
++    document.body.appendChild(container);
++    let release!: () => void;
++    let entered!: () => void;
++    const gate = new Promise<void>((resolve) => { release = resolve; });
++    const started = new Promise<void>((resolve) => { entered = resolve; });
++    const onError = vi.fn();
++    const instance = await createOfficeEditor(container, {
++      file: new File(['hello'], 'alpha.xlsx'), mode: 'edit', canReturnToPreview: true,
++      onSave: async () => { entered(); await gate; return true; }, onError,
++    });
++    await flush();
++    const native = new Uint8Array([9, 8, 7]);
++    docEditorInstances[0].asc_nativeGetFile3.mockImplementation(() => ({ data: native }));
++    docEditorConfigs[0].events.onDocumentStateChange?.({ data: true });
++    instance.setReadonly(true);
++    await started;
++    native[2] = 6;
++    release();
++    await vi.waitFor(() => expect(onError).toHaveBeenCalled());
++    expect(instance.getState()).toMatchObject({ mode: 'edit', readonly: false, dirty: true });
++    expect(docEditorConfigs).toHaveLength(1);
++    await instance.destroy();
++  });
++
+   it('opens initial readonly mode through native edit permissions without a rights-change toast', async () => {
+     const container = document.createElement('div');
+     document.body.appendChild(container);
+diff --git a/test/unit/office-editor.test.ts b/test/unit/office-editor.test.ts
+index e8ce318..4887fea 100644
+--- a/test/unit/office-editor.test.ts
++++ b/test/unit/office-editor.test.ts
+@@ -908,6 +908,40 @@ describe('office-editor parent proxy', () => {
+     );
+   });
+ 
++  it('acknowledges a stored artifact without clearing runtime-owned dirty state', async () => {
++    const container = document.createElement('div');
++    document.body.appendChild(container);
++    let release!: () => void;
++    let entered!: () => void;
++    const gate = new Promise<void>((resolve) => { release = resolve; });
++    const started = new Promise<void>((resolve) => { entered = resolve; });
++    const promise = createOfficeEditor(container, {
++      hostUrl: HOST_URL, file: new File(['a'], 'alpha.docx'), destroyTimeoutMs: 1,
++      onSave: async () => { entered(); await gate; return true; },
++    });
++    const { childPort, iframe, messages } = await connectHost(container, (message, port) => {
++      if (message.type !== 'SAVE') return;
++      port.postMessage({ protocol: OFFICE_HOST_PROTOCOL, type: 'SAVE_RESULT', sessionId: message.sessionId,
++        requestId: message.requestId, buffer: new Uint8Array([9, 8, 7]).buffer, fileName: 'alpha.docx', mimeType: '' });
++    });
++    const instance = await promise;
++    const sessionId = getSessionId(iframe);
++    const state = { ...instance.getState(), dirty: true };
++    childPort.postMessage({ protocol: OFFICE_HOST_PROTOCOL, type: 'STATE', sessionId, state });
++    await waitForMessage();
++    const save = instance.save('DOCX');
++    await started;
++    release();
++    await save;
++    expect(instance.getState().dirty).toBe(true);
++    await waitForMessage();
++    expect(messages).toContainEqual(expect.objectContaining({ type: 'SAVE_ACK', ok: true }));
++    childPort.postMessage({ protocol: OFFICE_HOST_PROTOCOL, type: 'STATE', sessionId, state: { ...state, dirty: false } });
++    await waitForMessage();
++    expect(instance.getState().dirty).toBe(false);
++    await instance.destroy();
++  });
++
+   it('destroys idempotently and force-removes the host iframe without an ack', async () => {
+     const container = document.createElement('div');
+     document.body.appendChild(container);
+-- 
+2.50.1 (Apple Git-155)
+
