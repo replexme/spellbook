@@ -13,6 +13,7 @@ import { createServer } from "node:http";
 import { chromium } from "@playwright/test";
 import { unzipSync, strFromU8 } from "fflate";
 import { readRepositoryIdentity } from "./repository-identity.mjs";
+import { buildHarness } from "./build-harness.mjs";
 
 const flag = (name, fallback) => {
   const i = process.argv.indexOf(name);
@@ -26,6 +27,7 @@ const inputPath = path.resolve(flag("--input"));
 const outputRoot = path.resolve(flag("--output"));
 const candidateRoot = path.resolve(flag("--candidate-root"));
 const origin = new URL(flag("--origin"));
+const repairStructure = process.argv.includes("--repair-structure");
 assert(
   ["127.0.0.1", "localhost"].includes(origin.hostname),
   "Local candidate origin required",
@@ -51,6 +53,7 @@ assert(
     new Set(scenarios).size === scenarios.length,
 );
 await mkdir(outputRoot, { recursive: true, mode: 0o700 });
+if (repairStructure) await buildHarness();
 const source = await readFile(inputPath);
 assertComparisonMarkerAbsent(source);
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
@@ -100,6 +103,9 @@ const report = {
   cases: [],
   engineApiMethods: null,
   externalRequestCount: 0,
+  savePipeline: repairStructure
+    ? "browser structural repair of exported artifact; excludes original-part preservation and complete product admission"
+    : "raw candidate export",
 };
 const browser = await chromium.launch({
   headless: true,
@@ -116,24 +122,33 @@ const diagnosticHost = `<!doctype html><meta charset="utf-8"><style>html,body,#e
 import {createOfficeEditor} from ${JSON.stringify(new URL("/npm/public-api.js", origin.origin).href)};
 let editor,dirty=false,writeCount=0,error=null;
 window.__ONLYOFFICE_SAVE_E2E__={getStatus:()=>({ready:editor?.getState().status==='ready',dirty,writeCount,error}),save:async()=>{const file=await editor.save('pptx');return {fileName:file.name,size:file.size};},destroy:async()=>editor?.destroy()};
+window.__comparisonStructuralRepairs=[];
 try {
  const file=new File([await (await fetch('/compare.pptx',{cache:'no-store'})).arrayBuffer()],'compare.pptx',{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'});
- editor=await createOfficeEditor(document.querySelector('#editor'),{hostUrl:${JSON.stringify(new URL("/office-host.html", origin.origin).href)},file,fileName:file.name,mode:'edit',saveBehavior:'callback',onDirtyChange:value=>dirty=value,onError:e=>error=e.message,onSave:async file=>{if(window.__comparisonRejectSave)throw new Error('comparison_host_write_rejected');window.__comparisonSaved=new Uint8Array(await file.arrayBuffer());if(window.__holdSave){window.__heldSave=true;await new Promise(resolve=>window.__releaseSave=resolve);}writeCount++;return true;}});
+ const original=${repairStructure ? "new Uint8Array(await (await fetch('/original.pptx',{cache:'no-store'})).arrayBuffer())" : "null"};
+ const repair=${repairStructure ? "(await import('/comparison-repair.js')).repairCandidatePptxStructure" : "null"};
+ editor=await createOfficeEditor(document.querySelector('#editor'),{hostUrl:${JSON.stringify(new URL("/office-host.html", origin.origin).href)},file,fileName:file.name,mode:'edit',saveBehavior:'callback',onDirtyChange:value=>dirty=value,onError:e=>error=e.message,onSave:async file=>{if(window.__comparisonRejectSave)throw new Error('comparison_host_write_rejected');let bytes=new Uint8Array(await file.arrayBuffer());if(repair){const started=performance.now(),result=repair(original,bytes);bytes=result.bytes;window.__comparisonStructuralRepairs.push({ms:performance.now()-started,...result.report});}window.__comparisonSaved=bytes;if(window.__holdSave){window.__heldSave=true;await new Promise(resolve=>window.__releaseSave=resolve);}writeCount++;return true;}});
 }catch(e){error=e.message;}
 </script>`;
 // Real loopback HTTP gives Chromium a local address space for the host iframe.
+const repairBundle = repairStructure
+  ? await readFile(path.join(import.meta.dirname, "runtime/ooxml-worker.js"))
+  : null;
 const diagnosticServer = createServer((request, response) => {
   const pathname = new URL(request.url, "http://127.0.0.1").pathname;
   if (pathname === "/compare.html") {
     response.writeHead(200, { "content-type": "text/html" });
     response.end(diagnosticHost);
-  } else if (pathname === "/compare.pptx") {
+  } else if (pathname === "/comparison-repair.js" && repairBundle) {
+    response.writeHead(200, { "content-type": "text/javascript" });
+    response.end(repairBundle);
+  } else if (pathname === "/compare.pptx" || pathname === "/original.pptx") {
     response.writeHead(200, {
       "content-type":
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       "cache-control": "no-store",
     });
-    response.end(served);
+    response.end(pathname === "/original.pptx" ? source : served);
   } else {
     response.writeHead(404);
     response.end();
@@ -580,6 +595,9 @@ try {
         }))
         .catch(() => null);
     } finally {
+      item.structuralRepairs = await page
+        .evaluate(() => window.__comparisonStructuralRepairs ?? [])
+        .catch(() => []);
       await page
         .evaluate(() => window.__ONLYOFFICE_SAVE_E2E__?.destroy())
         .catch(() => undefined);

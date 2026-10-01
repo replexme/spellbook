@@ -39,3 +39,30 @@ Remaining adoption gates include original-part/object binding, independent
 PPTX format errors, the complete product command/rollback contract, full save
 timing, and visible output review. Passing the candidate's component tests or
 same-engine reopening does not satisfy these gates.
+
+## Experimental structural output boundary
+
+`verify-onlyoffice-comparison.mjs --repair-structure` invokes the shared
+`repairCandidatePptxStructure` helper in the diagnostic host browser before
+capturing its persisted artifact. It records each changed part and repair time.
+This does not alter production admission, the component's raw returned File,
+or the native snapshot used for dirty-state reconciliation.
+
+The helper keeps all package parts. It removes an extra presentation theme
+relationship only when original and candidate master ownership give a unique
+answer; ambiguous ownership is rejected. It corrects the known diagram-drawing
+MIME only after checking its XML root, orders known chart children without
+changing values/content, and removes SmartArt frame child coordinates only for
+an identity mapping (zero child offset, equal positive extents). Unknown chart
+children and non-identity frame mappings are rejected. No missing content is
+invented and no original-part preservation is implied.
+
+Decision-driving format references are the [Microsoft PresentationML package
+structure](https://learn.microsoft.com/en-us/office/open-xml/presentation/structure-of-a-presentationml-document),
+[DataLabels schema](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.charts.datalabels?view=openxml-3.0.1),
+[graphic-frame transform](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.presentation.transform?view=openxml-3.0.1),
+and the Open XML SDK chart-style schema. The pinned ONLYOFFICE core
+`v9.3.0.140` writer emits the duplicate theme relationship and incorrect diagram
+MIME; the repair is an adapter experiment while those native defects remain.
+Independent SDK validation, actual repaired-artifact reopen, visual review,
+and complete product-contract checks remain required.

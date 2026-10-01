@@ -3619,6 +3619,337 @@ export function inspectOoxmlDocument(input) {
   return packageObservation(context);
 }
 
+// Experimental candidate-output boundary. Production persistence does not
+// invoke this function. Repair only proven structural defects, never infer
+// missing content or drop unknown chart children. Independent validation and
+// engine readback remain required after these repairs.
+export function repairCandidatePptxStructure(originalInput, candidateInput) {
+  for (const input of [originalInput, candidateInput]) {
+    if (!(input instanceof Uint8Array) || input.byteLength > maximumInputBytes)
+      throw new Error("Invalid PPTX structural repair input.");
+    inspectZipPackage(input);
+  }
+  const original = unzipSync(originalInput);
+  const entries = unzipSync(candidateInput);
+  const repairs = [];
+  const changedParts = new Set();
+  const commit = (part, document, kind) => {
+    entries[part] = serializeXml(document);
+    changedParts.add(part);
+    repairs.push({ part, kind });
+  };
+  const relationships = (parts, part) =>
+    relationshipElements(parseXml(parts, relationshipsPath(part))).filter(
+      (element) => element.getAttribute("TargetMode") !== "External",
+    );
+  const themeTargets = (parts, part) =>
+    relationships(parts, part)
+      .filter(
+        (element) =>
+          element.getAttribute("Type") ===
+          `${relationshipAttributeNamespace}/theme`,
+      )
+      .map((element) => resolvePart(part, element.getAttribute("Target")));
+  const masterThemes = (parts) => {
+    const masters = relationships(parts, presentationPath).filter(
+      (element) =>
+        element.getAttribute("Type") ===
+        `${relationshipAttributeNamespace}/slideMaster`,
+    );
+    if (!masters.length)
+      throw new Error("Presentation theme ownership is unavailable.");
+    return new Set(
+      masters.flatMap((element) => {
+        const part = resolvePart(
+          presentationPath,
+          element.getAttribute("Target"),
+        );
+        const targets = themeTargets(parts, part);
+        if (targets.length !== 1 || !parts[targets[0]])
+          throw new Error("Slide master theme ownership is ambiguous.");
+        return targets;
+      }),
+    );
+  };
+  const presentationRels = parseXml(entries, presentationRelationshipsPath);
+  const themes = relationshipElements(presentationRels).filter(
+    (element) =>
+      element.getAttribute("Type") ===
+      `${relationshipAttributeNamespace}/theme`,
+  );
+  if (themes.length > 1) {
+    const originalThemes = themeTargets(original, presentationPath);
+    const originalMasterThemes = masterThemes(original);
+    const candidateMasterThemes = masterThemes(entries);
+    if (
+      originalThemes.length !== 1 ||
+      originalMasterThemes.size !== 1 ||
+      !originalMasterThemes.has(originalThemes[0]) ||
+      candidateMasterThemes.size !== 1
+    )
+      throw new Error(
+        "Cannot infer presentation default theme from ambiguous ownership.",
+      );
+    const owned = [...candidateMasterThemes][0];
+    const retained = themes.filter(
+      (element) =>
+        element.getAttribute("TargetMode") !== "External" &&
+        resolvePart(presentationPath, element.getAttribute("Target")) === owned,
+    );
+    if (retained.length !== 1)
+      throw new Error("No unique presentation theme matches master ownership.");
+    const presentation = parseXml(entries, presentationPath);
+    for (const theme of themes) {
+      if (theme === retained[0]) continue;
+      const id = theme.getAttribute("Id");
+      if (
+        !id ||
+        [...presentation.getElementsByTagName("*")].some((element) =>
+          [...element.attributes].some(
+            (attribute) =>
+              attribute.namespaceURI === relationshipAttributeNamespace &&
+              attribute.value === id,
+          ),
+        )
+      )
+        throw new Error(
+          "An extra presentation theme has an explicit reference.",
+        );
+      if (
+        theme.getAttribute("TargetMode") === "External" ||
+        !entries[resolvePart(presentationPath, theme.getAttribute("Target"))]
+      )
+        throw new Error(
+          "An extra presentation theme target is not an internal package part.",
+        );
+      theme.parentNode.removeChild(theme);
+    }
+    // Retain all theme files, master/layout relationships and declarations.
+    commit(
+      presentationRelationshipsPath,
+      presentationRels,
+      "presentation-theme-ownership",
+    );
+  }
+  const types = parseXml(entries, contentTypesPath);
+  let typesChanged = false;
+  for (const element of types.getElementsByTagNameNS(
+    contentTypeNamespace,
+    "Override",
+  )) {
+    if (
+      element.getAttribute("ContentType") !==
+      "application/vnd.openxmlformats-officedocument.drawingml.diagramDrawing+xml"
+    )
+      continue;
+    const part = decodeURIComponent(element.getAttribute("PartName")).replace(
+      /^\//u,
+      "",
+    );
+    const root = parseXml(entries, part).documentElement;
+    if (
+      root.namespaceURI !== diagramDrawingNamespace ||
+      root.localName !== "drawing"
+    )
+      throw new Error(
+        "Diagram drawing content type disagrees with its document root.",
+      );
+    element.setAttribute(
+      "ContentType",
+      "application/vnd.ms-office.drawingml.diagramDrawing+xml",
+    );
+    typesChanged = true;
+  }
+  if (typesChanged)
+    commit(contentTypesPath, types, "diagram-drawing-content-type");
+  // Graphic-frame transforms allow off/ext, not group chOff/chExt. Only
+  // remove the redundant identity child-space mapping of SmartArt frames.
+  // A non-identity mapping needs a native exporter fix, never guessed geometry.
+  for (const part of Object.keys(entries).filter((part) =>
+    /^ppt\/slides\/slide\d+\.xml$/u.test(part),
+  )) {
+    const document = parseXml(entries, part);
+    let changed = false;
+    for (const frame of document.getElementsByTagNameNS(
+      presentationNamespace,
+      "graphicFrame",
+    )) {
+      const transform = [...frame.childNodes].find(
+        (node) =>
+          node.nodeType === 1 &&
+          node.namespaceURI === presentationNamespace &&
+          node.localName === "xfrm",
+      );
+      if (!transform) continue;
+      const children = [...transform.childNodes].filter(
+        (node) => node.nodeType === 1,
+      );
+      const groupChildren = children.filter(
+        (node) =>
+          node.namespaceURI === drawingNamespace &&
+          ["chOff", "chExt"].includes(node.localName),
+      );
+      if (!groupChildren.length) continue;
+      const data = frame.getElementsByTagNameNS(
+        drawingNamespace,
+        "graphicData",
+      );
+      const one = (name) =>
+        children.filter(
+          (node) =>
+            node.namespaceURI === drawingNamespace && node.localName === name,
+        );
+      const ext = one("ext"),
+        off = one("off"),
+        chOff = one("chOff"),
+        chExt = one("chExt");
+      const exactAttributes = (node, names) =>
+        [...node.attributes].every(
+          (attribute) =>
+            attribute.namespaceURI === "http://www.w3.org/2000/xmlns/" ||
+            (!attribute.namespaceURI && names.includes(attribute.localName)),
+        ) &&
+        ![...node.childNodes].some(
+          (child) =>
+            child.nodeType === 1 || (child.nodeType === 3 && child.data.trim()),
+        );
+      const integer = (node, name) =>
+        /^-?\d+$/u.test(node.getAttribute(name))
+          ? BigInt(node.getAttribute(name))
+          : null;
+      if (
+        data.length !== 1 ||
+        data[0].getAttribute("uri") !==
+          "http://schemas.openxmlformats.org/drawingml/2006/diagram" ||
+        children.length !== 4 ||
+        ext.length !== 1 ||
+        off.length !== 1 ||
+        chOff.length !== 1 ||
+        chExt.length !== 1 ||
+        !exactAttributes(chOff[0], ["x", "y"]) ||
+        !exactAttributes(chExt[0], ["cx", "cy"]) ||
+        integer(chOff[0], "x") !== 0n ||
+        integer(chOff[0], "y") !== 0n ||
+        ["cx", "cy"].some(
+          (name) =>
+            integer(ext[0], name) === null ||
+            integer(ext[0], name) <= 0n ||
+            integer(ext[0], name) !== integer(chExt[0], name),
+        )
+      )
+        throw new Error(
+          "Cannot repair non-identity or unknown graphic-frame child transform.",
+        );
+      for (const child of groupChildren) transform.removeChild(child);
+      changed = true;
+    }
+    if (changed)
+      commit(part, document, "diagram-frame-identity-child-transform");
+  }
+  // Microsoft Open XML SDK schema particles, DataLabels / ChartStyle.
+  const labels = [
+    "dLbl",
+    "delete",
+    "numFmt",
+    "spPr",
+    "txPr",
+    "dLblPos",
+    "showLegendKey",
+    "showVal",
+    "showCatName",
+    "showSerName",
+    "showPercent",
+    "showBubbleSize",
+    "separator",
+    "showLeaderLines",
+    "leaderLines",
+    "extLst",
+  ];
+  const style = [
+    "axisTitle",
+    "categoryAxis",
+    "chartArea",
+    "dataLabel",
+    "dataLabelCallout",
+    "dataPoint",
+    "dataPoint3D",
+    "dataPointLine",
+    "dataPointMarker",
+    "dataPointMarkerLayout",
+    "dataPointWireframe",
+    "dataTable",
+    "downBar",
+    "dropLine",
+    "errorBar",
+    "floor",
+    "gridlineMajor",
+    "gridlineMinor",
+    "hiLoLine",
+    "leaderLine",
+    "legend",
+    "plotArea",
+    "plotArea3D",
+    "seriesAxis",
+    "seriesLine",
+    "title",
+    "trendline",
+    "trendlineLabel",
+    "upBar",
+    "valueAxis",
+    "wall",
+    "extLst",
+  ];
+  const chartStyleNamespace =
+    "http://schemas.microsoft.com/office/drawing/2012/chartStyle";
+  const reorder = (parent, namespace, order) => {
+    const children = [...parent.childNodes].filter(
+      (node) => node.nodeType === 1,
+    );
+    for (const child of children)
+      if (child.namespaceURI !== namespace || !order.includes(child.localName))
+        throw new Error(
+          `Unknown chart child in structural repair: ${child.nodeName}`,
+        );
+    const sorted = [...children].sort(
+      (left, right) =>
+        order.indexOf(left.localName) - order.indexOf(right.localName),
+    );
+    if (sorted.every((child, index) => child === children[index])) return false;
+    // Replace only element slots; comments, whitespace, attributes and all
+    // child contents survive. Stable sort preserves repeated dLbl order.
+    const slots = children.map((child) => {
+      const slot = parent.ownerDocument.createTextNode("");
+      parent.replaceChild(slot, child);
+      return slot;
+    });
+    slots.forEach((slot, index) => parent.replaceChild(sorted[index], slot));
+    return true;
+  };
+  for (const part of Object.keys(entries).filter((part) =>
+    /^ppt\/charts\/[^/]+\.xml$/u.test(part),
+  )) {
+    const document = parseXml(entries, part);
+    let changed = false;
+    for (const element of document.getElementsByTagNameNS(
+      chartNamespace,
+      "dLbls",
+    ))
+      changed = reorder(element, chartNamespace, labels) || changed;
+    for (const element of document.getElementsByTagNameNS(
+      chartStyleNamespace,
+      "chartStyle",
+    ))
+      changed = reorder(element, chartStyleNamespace, style) || changed;
+    if (changed) commit(part, document, "chart-schema-child-order");
+  }
+  return {
+    bytes: changedParts.size
+      ? zipSync(entries, { level: 6, mtime: deterministicZipModifiedAt })
+      : candidateInput,
+    report: { changedParts: [...changedParts].sort(), repairs },
+  };
+}
+
 function packageObservation(context) {
   return {
     sections: readSections(context),
