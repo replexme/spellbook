@@ -307,11 +307,13 @@ try {
   await page.waitForTimeout(3500);
   if (captureUi) await page.screenshot({ path: `${captureUi}-before.png` });
 
-  // Focus the canvas without selecting anything, then Tab to the first object.
+  // qtcanvas contains the entire Qt UI, including the clickable status bar.
+  // Focus the working area; clicking the bottom opens Position/Size instead
+  // and sends subsequent keys to its fields rather than to the document.
   const canvas = page.locator("#qtcanvas");
   const box = await canvas.boundingBox();
   assert.ok(box, "canvas visible");
-  await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.97);
+  await page.mouse.click(box.x + box.width * 0.9, box.y + box.height * 0.8);
   await page.waitForTimeout(400);
   await page.keyboard.press("Escape");
   const pickTarget = async () => {
