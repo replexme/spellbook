@@ -14,6 +14,7 @@ import {
   applyZetaJsOverlay,
   applyZetaByteSequenceOverlay,
 } from "./zetajs-overlay.mjs";
+import { applyZetaProxyMetadataOverlay } from "./zetajs-proxy-overlay.mjs";
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
@@ -273,7 +274,9 @@ export function buildRoutes(
         const digest = createHash("sha256").update(source).digest("hex");
         if (digest !== bridgeAsset.sha256)
           throw new Error("Pinned ZetaJS asset failed source admission.");
-        return applyZetaByteSequenceOverlay(applyZetaJsOverlay(source));
+        return applyZetaProxyMetadataOverlay(
+          applyZetaByteSequenceOverlay(applyZetaJsOverlay(source)),
+        );
       },
     ),
   );
