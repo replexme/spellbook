@@ -1514,6 +1514,22 @@ test("a colour command adds no opacity and draws a fill or line that was not dra
   );
 });
 
+test("explicit script formatting writes every script even when the Latin value is unchanged", async () => {
+  const source = new Uint8Array(await readFile(fixtureUrl));
+  for (const command of [
+    { op: "font_family", expectedFamily: "Liberation Sans", family: "Liberation Sans" },
+    { op: "font_size", expectedSize: 2400, size: 2400 },
+    { op: "bold", expectedBold: false, bold: false },
+    { op: "italic", expectedItalic: false, italic: false },
+  ]) {
+    const mutation = { ...command, elementId: "0/0", explicitScriptFormatting: true };
+    const result = applyOoxmlCommand(source, mutation);
+    assert.deepEqual(result.report.changedParts, ["ppt/slides/slide1.xml"]);
+    assert.doesNotThrow(() => verifyPersistedElementMutation(source, result.bytes, mutation));
+    assert.throws(() => applyOoxmlCommand(source, { ...mutation, explicitScriptFormatting: "true" }), /must be boolean/);
+  }
+});
+
 test("browser OOXML worker writes local text appearance without touching theme parts", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const original = unzipSync(source);

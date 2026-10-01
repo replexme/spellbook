@@ -4250,6 +4250,9 @@ function updateShapeAppearance(shape, command) {
 }
 
 function updateTextAppearance(shape, command) {
+  if (command.explicitScriptFormatting !== undefined && typeof command.explicitScriptFormatting !== "boolean")
+    throw new TypeError("explicitScriptFormatting must be boolean.");
+  const explicitScripts = command.explicitScriptFormatting === true;
   if (command.op === "paragraph_alignment") {
     const expectedAlignment = paragraphAlignment(
       command.expectedAlignment,
@@ -4280,13 +4283,13 @@ function updateTextAppearance(shape, command) {
     const size = positiveInteger(command.size, "size");
     if (size < 100 || size > 40_000)
       throw new RangeError("size must be between 100 and 40000.");
-    if (expectedSize !== size)
+    if (expectedSize !== size || explicitScripts)
       for (const property of properties)
         property.setAttribute("sz", String(size));
     return {
       previous: expectedSize,
       value: size,
-      changed: expectedSize !== size,
+      changed: expectedSize !== size || explicitScripts,
     };
   }
   if (command.op === "bold" || command.op === "italic") {
@@ -4301,10 +4304,10 @@ function updateTextAppearance(shape, command) {
     const previous =
       command[`expected${field[0].toUpperCase()}${field.slice(1)}`];
     const value = command[field];
-    if (previous !== value)
+    if (previous !== value || explicitScripts)
       for (const property of properties)
         property.setAttribute(attribute, value ? "1" : "0");
-    return { previous, value, changed: previous !== value };
+    return { previous, value, changed: previous !== value || explicitScripts };
   }
   if (command.op === "underline" || command.op === "strikethrough") {
     const field = command.op === "underline" ? "underline" : "strikethrough";
@@ -4336,14 +4339,14 @@ function updateTextAppearance(shape, command) {
   if (command.op === "font_family") {
     const previous = fontFamily(command.expectedFamily, "expectedFamily");
     const value = fontFamily(command.family, "family");
-    if (previous !== value)
+    if (previous !== value || explicitScripts)
       for (const property of properties)
         for (const name of ["latin", "ea", "cs"])
           ensureDirectDrawingElement(property, name).setAttribute(
             "typeface",
             value,
           );
-    return { previous, value, changed: previous !== value };
+    return { previous, value, changed: previous !== value || explicitScripts };
   }
   if (command.op === "font_color") {
     const previous = observedColorInteger(

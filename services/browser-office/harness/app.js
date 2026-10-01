@@ -32,6 +32,7 @@ import {
   persistedDirectSlideTopologyMatches,
   persistedSectionsMatch,
   persistedSlideTopologyMatches,
+  requiresExplicitScriptFormatting,
   requiresNativeScriptFormatting,
 } from "/harness/product-persistence.mjs";
 import {
@@ -1333,7 +1334,14 @@ async function prepareProductPackageMutation(nativeRequest) {
     typeof command.elementId !== "string"
   )
     throw new Error("Browser element command is invalid.");
-  const packageCommand = productPackageCommand(command, expectedElement);
+  const explicitScripts = requiresExplicitScriptFormatting(command, expectedElement);
+  const beforeObservation = explicitScripts
+    ? await observeBeforeNativeMutation()
+    : null;
+  const packageCommand = {
+    ...productPackageCommand(command, expectedElement),
+    ...(explicitScripts ? { explicitScriptFormatting: true } : {}),
+  };
   const beforeBytes = currentBytes.slice();
   const mutation = await applyMutation(beforeBytes, packageCommand);
   verifyPreparedSlideTopology(packageCommand, mutation.report);
@@ -1341,6 +1349,7 @@ async function prepareProductPackageMutation(nativeRequest) {
     beforeBytes,
     beforeRevision: reconciledModelRevision,
     beforeSlides: expectedSlides,
+    ...(beforeObservation ? { beforeObservation } : {}),
     nativeCommand: structuredClone(command),
     nativeRequest: {
       operation: "edit",
@@ -1719,20 +1728,26 @@ async function commitProductPackageMutation(prepared, nativeValue) {
     return nativeValue;
   }
   const afterBytes = new Uint8Array(prepared.mutation.bytes);
-  const packageAuthoritative = productSlideOperations.has(
-    prepared.nativeCommand.op,
-  );
+  const packageAuthoritative =
+    prepared.command.explicitScriptFormatting === true ||
+    productSlideOperations.has(prepared.nativeCommand.op);
   if (packageAuthoritative) {
-    // LibreOffice may assign new object names while duplicating/reordering
-    // slides, while the local OOXML patch preserves the author's names. Use
-    // native editing to apply the command, then reopen the exact PPTX that
-    // Undo, download and recovery will use. A live hash from the pre-reopen
-    // model is not a valid identity for the saved package.
+    // Slide topology can change names, and native export can omit dormant
+    // Asian/complex-script fonts. Reopen the exact authored package used by
+    // Undo/download/recovery, then check the intended script values as well.
     try {
+      const intended = nativeValue;
       await writeAndOpen(afterBytes, filename);
       nativeValue = await observeNativeDocument();
       if (!productMutationMatches(prepared, nativeValue))
         throw new Error("browser_package_slide_edit_not_persisted");
+      if (prepared.command.explicitScriptFormatting)
+        assertPersistedNativeIntent(
+          prepared.beforeObservation,
+          intended,
+          nativeValue,
+          null,
+        );
     } catch (error) {
       restoreProductEditState(previousState);
       await restoreProductPackageSnapshot(

@@ -14,10 +14,11 @@ import {
   persistedDirectSlideTopologyMatches,
   persistedSectionsMatch,
   persistedSlideTopologyMatches,
+  requiresExplicitScriptFormatting,
   requiresNativeScriptFormatting,
 } from "./harness/product-persistence.mjs";
 
-test("localized text formatting requires uniform values across all three scripts", () => {
+test("script formatting chooses explicit package writes or unknown-value native snapshots", () => {
   for (const [op, property, value, other] of [
     ["font_family", "fontFamily", "Liberation Sans", "Noto Sans KR"],
     ["font_size", "fontSize", 18, 19],
@@ -29,13 +30,16 @@ test("localized text formatting requires uniform values across all three scripts
     );
     const element = { wholeTextFormatting: formatting };
     assert.equal(requiresNativeScriptFormatting({ op }, element), false);
+    assert.equal(requiresExplicitScriptFormatting({ op }, element), false);
     for (const suffix of ["Asian", "Complex"]) {
       formatting[`${property}${suffix}`] = other;
-      assert.equal(requiresNativeScriptFormatting({ op }, element), true);
+      assert.equal(requiresNativeScriptFormatting({ op }, element), false);
+      assert.equal(requiresExplicitScriptFormatting({ op }, element), true);
       formatting[`${property}${suffix}`] = value;
     }
     delete formatting[`${property}Asian`];
     assert.equal(requiresNativeScriptFormatting({ op }, element), true);
+    assert.equal(requiresExplicitScriptFormatting({ op }, element), false);
     assert.equal(requiresNativeScriptFormatting({ op }, null), true);
   }
   assert.equal(requiresNativeScriptFormatting({ op: "move" }, null), false);

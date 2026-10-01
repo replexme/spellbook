@@ -5,24 +5,34 @@ import {
 
 /* SPDX-License-Identifier: MPL-2.0 */
 
-// A localized OOXML formatting command uses one uniform expected value.
-// Native setters address Latin, Asian and complex scripts together, so a
-// differing or unknown script value needs the native snapshot/intent path.
-export function requiresNativeScriptFormatting(command, element) {
+// Native setters address all three scripts. Unknown/mixed values require a
+// native snapshot; known differences can be written explicitly into OOXML.
+function scriptFormattingValues(command, element) {
   const property = {
     font_family: "fontFamily",
     font_size: "fontSize",
     bold: "fontWeight",
     italic: "fontStyle",
   }[command?.op];
-  if (!property) return false;
+  if (!property) return null;
   const formatting = element?.wholeTextFormatting;
-  const values = ["", "Asian", "Complex"].map(
+  return ["", "Asian", "Complex"].map(
     (suffix) => formatting?.[`${property}${suffix}`],
   );
-  return values.some(
-    (value) => value === null || value === undefined || value !== values[0],
+}
+
+export function requiresNativeScriptFormatting(command, element) {
+  return (
+    scriptFormattingValues(command, element)?.some(
+      (value) => value === null || value === undefined,
+    ) ?? false
   );
+}
+
+export function requiresExplicitScriptFormatting(command, element) {
+  if (requiresNativeScriptFormatting(command, element)) return false;
+  const values = scriptFormattingValues(command, element);
+  return values?.some((value) => value !== values[0]) ?? false;
 }
 
 export function assertUnchangedNativeMutation(beforeRevision, observation) {
@@ -369,7 +379,8 @@ export function directMovePreservationTarget(before, after) {
           afterElement.elementId !== beforeElement.elementId ||
           afterElement.x - beforeElement.x !== translation.x ||
           afterElement.y - beforeElement.y !== translation.y
-        ) return null;
+        )
+          return null;
         beforeElement.x = afterElement.x;
         beforeElement.y = afterElement.y;
         continue;
@@ -402,7 +413,8 @@ export function directMovePreservationTarget(before, after) {
       // Accept only descendants translated by the same vector; formatting,
       // structure and every unrelated object must still compare exactly.
       for (const element of beforeElements)
-        if (descendants.has(element.parentElementId)) descendants.add(element.elementId);
+        if (descendants.has(element.parentElementId))
+          descendants.add(element.elementId);
       beforeElement.x = afterElement.x;
       beforeElement.y = afterElement.y;
     }
@@ -611,7 +623,11 @@ export function persistedDirectSlideTopologyMatches(
       // has the same name. Ownership and design are proven by the worker;
       // all concrete layout, background and shape properties remain checked.
       const design = report.topologyImportedDesign;
-      if (design?.sourceMaster && design.importedMaster && design.importedLayout)
+      if (
+        design?.sourceMaster &&
+        design.importedMaster &&
+        design.importedLayout
+      )
         delete state.masterName;
       return { slides: [state], masters: [] };
     };
