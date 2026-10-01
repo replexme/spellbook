@@ -26,3 +26,38 @@ export function applyZetaJsOverlay(source) {
     typeDescriptionAnchor + typedefCase,
   );
 }
+
+// BYTE scalars already map to signed JavaScript Numbers. Resolve the constant
+// type/length once, preserving the public Array representation and ownership.
+const byteSequenceAnchor =
+  "          const td = type.getSequenceComponentType();\n" +
+  "          const arr = [];\n" +
+  "          for (let i = 0; i !== val.size(); ++i) {";
+const byteSequenceReplacement =
+  "          const td = type.getSequenceComponentType();\n" +
+  "          if (td.getTypeClass() === Module.uno.com.sun.star.uno.TypeClass.BYTE) {\n" +
+  "            try {\n" +
+  "              const size = val.size();\n" +
+  "              const bytes = new Array(size);\n" +
+  "              for (let i = 0; i !== size; ++i) bytes[i] = val.get(i);\n" +
+  "              return bytes;\n" +
+  "            } finally {\n" +
+  "              if (cleanUpVal) val.delete();\n" +
+  "              td.delete();\n" +
+  "            }\n" +
+  "          }\n" +
+  "          const arr = [];\n" +
+  "          for (let i = 0; i !== val.size(); ++i) {";
+
+export function applyZetaByteSequenceOverlay(source) {
+  if (typeof source !== "string")
+    throw new TypeError("Pinned ZetaJS source must be text.");
+  if (source.includes(byteSequenceReplacement))
+    throw new Error(
+      "Pinned ZetaJS already contains the byte sequence overlay.",
+    );
+  const first = source.indexOf(byteSequenceAnchor);
+  if (first < 0 || source.indexOf(byteSequenceAnchor, first + 1) >= 0)
+    throw new Error("Pinned ZetaJS byte sequence anchor has drifted.");
+  return source.replace(byteSequenceAnchor, () => byteSequenceReplacement);
+}

@@ -181,6 +181,22 @@ heartbeat reads the deck for a recovery checkpoint only after the engine's
 change count moved (Undo and modify events), not every 10 seconds while the
 document is unsaved.
 
+Local byte-bridge improvement, 2026-10-01: full observation of an actual
+50-slide source spent about 4.1 s translating loaded image byte sequences.
+The pinned ZetaJS byte path now resolves the sequence type and length once,
+keeps its signed Number Array representation, and releases owned native
+handles even when conversion fails. Other sequence types keep the existing
+recursive translator. The original asset hash and exact source anchor are
+checked before applying the overlay; unknown/already patched source is refused.
+In local sequential experiments, three warm reads per path had identical
+observation SHA-256 and unchanged native modification count. Median whole-read
+time fell from 7.77 s to 5.06 s. These are observation measurements, not complete
+edit/save latency or a comparison with a fully admitted second engine. The
+remaining byte-by-byte getter would require a native bulk interface to remove;
+[Emscripten memory views](https://emscripten.org/docs/porting/connecting_cpp_and_javascript/embind.html#memory-views)
+also require explicit lifetime handling. No new native interface or Wasm
+rebuild is implied by this JavaScript overlay.
+
 Local save check, 2026-09-28: on a 60-slide PPTX, the first human title edit
 failed because the engine's no-edit export renamed the authored `Title 1`
 placeholder to `PlaceHolder 1` and split its one text run by language. Direct

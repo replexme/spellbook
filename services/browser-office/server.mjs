@@ -10,7 +10,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { probeAssets } from "../office-session-spike/probe-assets.mjs";
 import { applyEmbindOverlay } from "./embind-overlay.mjs";
-import { applyZetaJsOverlay } from "./zetajs-overlay.mjs";
+import {
+  applyZetaJsOverlay,
+  applyZetaByteSequenceOverlay,
+} from "./zetajs-overlay.mjs";
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
@@ -263,7 +266,7 @@ export function buildRoutes(
         const digest = createHash("sha256").update(source).digest("hex");
         if (digest !== bridgeAsset.sha256)
           throw new Error("Pinned ZetaJS asset failed source admission.");
-        return applyZetaJsOverlay(source);
+        return applyZetaByteSequenceOverlay(applyZetaJsOverlay(source));
       },
     ),
   );
