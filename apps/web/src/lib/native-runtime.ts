@@ -911,6 +911,13 @@ export async function completeNativeScan(
     throw new NativeScanValidationError(
       "native_scan_validation_identity_mismatch",
     );
+  if (
+    outputs.graphObject !== `${job.payload.outputPrefix}/element-graph.json` ||
+    outputs.scanObject !== `${job.payload.outputPrefix}/scan.json`
+  )
+    throw new NativeScanValidationError(
+      "native_scan_artifact_identity_mismatch",
+    );
   const [graph, validation] = await Promise.all([
     getJsonObject<ElementGraph>(outputs.graphObject),
     getJsonObject<PackageChangeBudgetReport>(outputs.validationObject),
@@ -919,6 +926,8 @@ export async function completeNativeScan(
     validation.valid !== true ||
     validation.candidateDocumentSha256 !== outputs.documentSha256 ||
     graph.documentSha256 !== outputs.documentSha256 ||
+    !Number.isSafeInteger(outputs.slideCount) ||
+    outputs.slideCount !== graph.slides.length ||
     !graph.slides.length ||
     graph.slides.some((slide) => !slide.previewObject)
   )
@@ -929,6 +938,24 @@ export async function completeNativeScan(
   const documentSha256 = outputs.documentSha256;
   const slideCount = outputs.slideCount;
   await db().begin(async (sql) => {
+    const [staged] = await sql`
+      select v.document_sha256,v.document_object
+      from spellbook_jobs j
+      join spellbook_versions v on v.id=j.version_id and v.document_id=j.document_id
+      where j.id=${job.id} and j.version_id=${job.version_id}
+        and j.job_type='scan_render' and j.status in ('queued','running')
+      for update of j,v
+    `;
+    if (!staged) return;
+    // Agreement between callback/graph/report is insufficient: they could
+    // all describe another package. Bind promotion to the submitted version.
+    if (
+      staged.document_sha256 !== documentSha256 ||
+      staged.document_object !== job.payload.inputObject
+    )
+      throw new NativeScanValidationError(
+        "native_scan_submitted_artifact_mismatch",
+      );
     const [claimed] =
       await sql`update spellbook_jobs set status='succeeded',outputs=${sql.json(callback as never)},updated_at=now()
       where id=${job.id} and status in ('queued','running') returning id`;

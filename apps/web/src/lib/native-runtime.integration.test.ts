@@ -160,8 +160,10 @@ const observation = {
 describe.skipIf(!enabled)("durable native editor orchestration", () => {
   it("isolates the schema on every concurrent pool connection", async () => {
     const rows = await Promise.all(
-      Array.from({ length: 4 }, () =>
-        db()`select current_schema() as schema, pg_backend_pid() as pid, pg_sleep(0.05)`,
+      Array.from(
+        { length: 4 },
+        () =>
+          db()`select current_schema() as schema, pg_backend_pid() as pid, pg_sleep(0.05)`,
       ),
     );
     expect(new Set(rows.map((result) => result[0].pid)).size).toBe(4);
@@ -1966,13 +1968,84 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     expect(after.status).toBe("cancelled");
   });
 
+  it("refuses mutually consistent worker evidence for a different submitted file", async () => {
+    const f = await fixture();
+    const saved = randomUUID(),
+      jobId = randomUUID();
+    const payload = {
+      nativeSessionId: f.nativeSessionId,
+      outputPrefix: "native/bound",
+      inputObject: "native/submitted.pptx",
+    };
+    await db().begin(async (sql) => {
+      await sql`insert into spellbook_versions (id,document_id,parent_version_id,kind,status,document_object,document_sha256)
+        values (${saved},${f.documentId},${f.versionId},'approved','processing',${payload.inputObject},${"c".repeat(64)})`;
+      await sql`insert into spellbook_jobs (id,job_type,document_id,version_id,status,payload)
+        values (${jobId},'scan_render',${f.documentId},${saved},'queued',${sql.json(payload)})`;
+      await sql`update spellbook_native_sessions set working_version_id=${saved},status='validating' where id=${f.nativeSessionId}`;
+    });
+    const job = { id: jobId, version_id: saved, payload };
+    const callback = {
+      jobId,
+      status: "succeeded" as const,
+      outputs: {
+        graphObject: "native/bound/element-graph.json",
+        scanObject: "native/bound/scan.json",
+        validationObject: "native/bound/validation.json",
+        documentSha256: "b".repeat(64),
+        slideCount: 1,
+      },
+    };
+    await expect(completeNativeScan(job, callback)).rejects.toThrow(
+      "native_scan_submitted_artifact_mismatch",
+    );
+    const [version] =
+      await db()`select status,document_sha256 from spellbook_versions where id=${saved}`;
+    const [document] =
+      await db()`select current_version_id from spellbook_documents where id=${f.documentId}`;
+    const [queued] =
+      await db()`select status from spellbook_jobs where id=${jobId}`;
+    expect(version).toMatchObject({
+      status: "processing",
+      document_sha256: "c".repeat(64),
+    });
+    expect(document.current_version_id).toBe(f.versionId);
+    expect(queued.status).toBe("queued");
+    await db()`update spellbook_versions set document_sha256=${"b".repeat(64)} where id=${saved}`;
+    await expect(
+      completeNativeScan(job, {
+        ...callback,
+        outputs: {
+          ...callback.outputs,
+          graphObject: "another/element-graph.json",
+        },
+      }),
+    ).rejects.toThrow("native_scan_artifact_identity_mismatch");
+    await expect(
+      completeNativeScan(job, {
+        ...callback,
+        outputs: { ...callback.outputs, slideCount: 2 },
+      }),
+    ).rejects.toThrow("native_scan_validation_failed");
+    await expect(
+      completeNativeScan(
+        { ...job, payload: { ...payload, inputObject: "another.pptx" } },
+        callback,
+      ),
+    ).rejects.toThrow("native_scan_submitted_artifact_mismatch");
+    await completeNativeScan(job, callback);
+    const [promoted] =
+      await db()`select current_version_id from spellbook_documents where id=${f.documentId}`;
+    expect(promoted.current_version_id).toBe(saved);
+  });
+
   it("promotes only a validated latest native save and fails closed", async () => {
     const f = await fixture();
     const saved = randomUUID();
     const jobId = randomUUID();
     await db().begin(async (sql) => {
-      await sql`insert into spellbook_versions (id,document_id,parent_version_id,kind,status,document_object)
-        values (${saved},${f.documentId},${f.versionId},'approved','processing','native/saved.pptx')`;
+      await sql`insert into spellbook_versions (id,document_id,parent_version_id,kind,status,document_object,document_sha256)
+        values (${saved},${f.documentId},${f.versionId},'approved','processing','native/saved.pptx',${"b".repeat(64)})`;
       await sql`insert into spellbook_jobs (id,job_type,document_id,version_id,status,payload)
         values (${jobId},'scan_render',${f.documentId},${saved},'queued',${sql.json({ nativeSessionId: f.nativeSessionId, outputPrefix: "native/render" })})`;
       await sql`update spellbook_native_sessions set working_version_id=${saved},status='validating' where id=${f.nativeSessionId}`;
@@ -1981,8 +2054,8 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       jobId,
       status: "succeeded" as const,
       outputs: {
-        graphObject: "native/graph.json",
-        scanObject: "native/scan.json",
+        graphObject: "native/render/element-graph.json",
+        scanObject: "native/render/scan.json",
         validationObject: "native/render/validation.json",
         documentSha256: "b".repeat(64),
         slideCount: 1,
@@ -1995,6 +2068,7 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
         payload: {
           nativeSessionId: f.nativeSessionId,
           outputPrefix: "native/render",
+          inputObject: "native/saved.pptx",
         },
       },
       callback,
