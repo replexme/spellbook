@@ -121,16 +121,43 @@ revision is never a substitute for persisted intent. For example, paragraph
 margins must be compared as effective DrawingML semantics, not merely as a UNO
 field that may be remapped into numbering rules on import.
 
-The localized OOXML patch path uses a different persisted proof: the package
-worker reopens the ZIP it just wrote and checks the authored target property
-against the requested text, geometry, color, opacity, line or paragraph/run
-format. This is fast and independent of the live editor. A focused probe showed
-that loading a second hidden LibreOffice document immediately after a native
-edit could block the older stock browser runtime, even after flushing it to
-PPTX; that blocking probe is not on the localized interactive path. Raw OOXML
-readback proves the file contains the authored value, while the release
-conformance runner must still prove that PowerPoint/LibreOffice reimport and
-render that value as intended.
+### One artifact admission boundary
+
+`services/browser-office/product-artifact.mjs` owns admission of product PPTX
+artifacts. AI edits, human checkpoints, package edits, Undo/Redo and recovery
+must inspect the exact candidate package and verify its intended state before
+that digest/model-revision pair can be journaled or exported. Both exports that
+write a checkpoint and read-only exports require admission. A command reply,
+ZIP readback or existing journal alone cannot authorize a save.
+
+The localized OOXML rewrite remains a performance optimization. Its result
+must pass the same engine readback as the native snapshot. If readback disagrees
+with a live native edit, the coordinator preserves that actual native result
+through the existing scoped original/no-edit/edited merge and verifies it again.
+It does not expand the operation's package budget. A failure in either path
+retains the existing rollback behavior. The older stock runtime must pass
+readback too; it cannot silently use the candidate-runtime fallback.
+
+Admission records bind the candidate SHA-256, observed model revision and
+normalized saved-state SHA-256. OPFS stores that record with its byte-checked
+checkpoint, and recovery performs fresh package readback before admitting it.
+Legacy checkpoints retain their existing replay/revision checks and also pass
+fresh admission; migrations retain any existing admission record. Opening
+another document clears the session authority. Save pins its admitted pair
+until acknowledgement so later edits cannot evict an in-flight save's evidence.
+
+The authority retains at most four saved-state inspections and 128 admission
+records, plus the pinned save; it retains no additional document byte buffers.
+Repeated saves of identical admitted bytes check the digest/version binding
+without repeating the hidden-document import. Mutable input buffers and changed
+revisions invalidate evidence. This is integrity evidence, not a replacement
+for changed-slide visual review or an independent PowerPoint compatibility gate.
+
+Server native-save promotion also binds the validation report and element graph
+to the submitted version's digest and input object under a database lock. Output
+objects must belong to that job's output prefix, and the reported slide count
+must equal the graph. Agreement among worker outputs alone is insufficient if
+they describe a different submitted file. Browser and WOPI saves share this gate.
 
 ## Current limitation that matters for expansion
 

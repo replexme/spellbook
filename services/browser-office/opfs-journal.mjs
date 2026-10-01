@@ -58,6 +58,7 @@ export async function openBrowserDocumentJournal({
       baseBytes,
       candidateBytes,
       commands,
+      artifactReceipt = null,
     }) {
       validateBytes(baseBytes, "baseBytes");
       validateBytes(candidateBytes, "candidateBytes");
@@ -67,6 +68,17 @@ export async function openBrowserDocumentJournal({
       const slot = slots[generation % slots.length];
       const baseSha256 = await sha256(baseBytes, cryptoImpl);
       const candidateSha256 = await sha256(candidateBytes, cryptoImpl);
+      if (
+        artifactReceipt &&
+        (artifactReceipt.schemaVersion !== 1 ||
+          artifactReceipt.candidateSha256 !== candidateSha256 ||
+          typeof artifactReceipt.modelRevision !== "string" ||
+          !artifactReceipt.modelRevision ||
+          !/^[0-9a-f]{64}$/u.test(artifactReceipt.persistedStateSha256 ?? ""))
+      )
+        throw new Error(
+          "Browser recovery artifact evidence does not match its bytes.",
+        );
       const metadata = {
         schemaVersion,
         generation,
@@ -78,6 +90,9 @@ export async function openBrowserDocumentJournal({
         baseSha256,
         candidateSha256,
         commands: safeCommands,
+        ...(artifactReceipt
+          ? { artifactReceipt: structuredClone(artifactReceipt) }
+          : {}),
         savedAt: new Date().toISOString(),
       };
       await writeFile(directory, `base-${slot}.pptx`, baseBytes);

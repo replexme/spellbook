@@ -719,6 +719,15 @@ try {
   );
   const savedPayload = await consumeSavedBytes(page, save.requestId);
   const savedBytes = savedPayload.bytes;
+  const artifactBoundary = await evaluateRenderer(
+    page,
+    () => globalThis.spellbookBrowserOffice.verifyProductArtifact(),
+    undefined,
+    "verify common artifact authority",
+  );
+  assert.equal(artifactBoundary.receipt.candidateSha256, sha256(savedBytes));
+  assert.equal(artifactBoundary.replacedBytesRejected, true);
+  assert.equal(artifactBoundary.staleRevisionRejected, true);
   assert.equal(savedBytes[0], 0x50);
   assert.equal(savedBytes[1], 0x4b);
   const savedPackage = unzipSync(Uint8Array.from(savedBytes));
@@ -825,7 +834,8 @@ try {
       JSON.stringify(
         firstDocumentStateDifference(
           normalizeDocumentPersistenceState(laterEdit).slides,
-          normalizeDocumentPersistenceState(redone, { authoredBy: laterEdit }).slides,
+          normalizeDocumentPersistenceState(redone, { authoredBy: laterEdit })
+            .slides,
         ),
       ),
       "null",
@@ -969,6 +979,7 @@ try {
     savedBytes: savedBytes.length,
     fixtureSha256: sha256(fixture),
     savedSha256: sha256(savedBytes),
+    artifactBoundary,
     changedParts,
     endurance,
     slideStructure,

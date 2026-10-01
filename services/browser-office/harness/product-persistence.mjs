@@ -1,7 +1,28 @@
 import {
   intendedDocumentMutationDifferences,
   normalizeDocumentPersistenceState,
+  persistenceStateFromObservation,
 } from "../../office-session-spike/persistence-evidence.mjs";
+import { firstDocumentStateDifference } from "../../office-session-spike/document-state-evidence.mjs";
+
+export function assertArtifactMatchesObservation(expected, reopened) {
+  const authored = persistenceStateFromObservation(expected);
+  const difference = firstDocumentStateDifference(
+    {
+      ...normalizeDocumentPersistenceState(authored),
+      sections: expected?.sections ?? [],
+    },
+    {
+      ...normalizeDocumentPersistenceState(
+        persistenceStateFromObservation(reopened),
+        { authoredBy: authored },
+      ),
+      sections: reopened?.sections ?? [],
+    },
+  );
+  if (difference)
+    throw new Error(`browser_artifact_model_not_persisted:${difference.path}`);
+}
 
 /* SPDX-License-Identifier: MPL-2.0 */
 

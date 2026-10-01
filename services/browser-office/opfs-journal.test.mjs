@@ -2,6 +2,46 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { openBrowserDocumentJournal } from "./opfs-journal.mjs";
+import { createProductArtifactAuthority } from "./product-artifact.mjs";
+
+test("a journal retains byte-bound readback evidence and refuses a receipt for another package", async () => {
+  const root = new MemoryDirectory();
+  const journal = await openBrowserDocumentJournal({
+    identity: "verified-artifact",
+    root,
+  });
+  const candidateBytes = bytes(1, 2, 3);
+  const gate = createProductArtifactAuthority({
+    inspect: async () => ({ slides: [{ elements: [] }] }),
+  });
+  const artifactReceipt = await gate.admit({
+    bytes: candidateBytes,
+    modelRevision: "v1",
+    verify: () => {},
+  });
+  await journal.save({
+    fileName: "deck.pptx",
+    baseBytes: bytes(1),
+    candidateBytes,
+    commands: [],
+    artifactReceipt,
+  });
+  assert.deepEqual(
+    (await journal.load()).metadata.artifactReceipt,
+    artifactReceipt,
+  );
+  await assert.rejects(
+    journal.save({
+      fileName: "deck.pptx",
+      baseBytes: bytes(1),
+      candidateBytes: bytes(7),
+      commands: [],
+      artifactReceipt,
+    }),
+    /evidence does not match/,
+  );
+  assert.equal((await journal.load()).metadata.generation, 1);
+});
 
 test("OPFS journal restores the newest complete browser checkpoint", async () => {
   const root = new MemoryDirectory();

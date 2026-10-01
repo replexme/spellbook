@@ -20,6 +20,7 @@ import {
   reusableAiObservationForSlide,
 } from "/harness/ai-observation-view.mjs";
 import {
+  assertArtifactMatchesObservation,
   assertNativeSnapshotVersion,
   assertUnchangedNativeMutation,
   directDeletePreservationTarget,
@@ -56,6 +57,7 @@ import {
   journalRecoveryDisposition,
 } from "/harness/save-transaction.mjs";
 import { installTextInputBridge } from "/harness/text-input-bridge.mjs";
+import { createProductArtifactAuthority } from "/harness/product-artifact.mjs";
 import "/harness/runtime-admission.js";
 
 const body = document.body;
@@ -90,6 +92,9 @@ const pending = new Map();
 const mutationPending = new Map();
 const observed = { marks: {}, events: [], runs: [] };
 const savedArtifacts = new Map();
+const productArtifacts = createProductArtifactAuthority({
+  inspect: inspectNativeDocumentBytes,
+});
 const upstreamUiSettleMs = 1_000;
 const history = [];
 const verifiedTopologyOperations = "add,duplicate,move,delete";
@@ -778,7 +783,7 @@ async function preserveAndInspectNativeDocument(
   const bytes = new Uint8Array(preserved.bytes);
   markBrowserProbePhase("snapshot:inspect");
   const observation = await measure("inspect", () =>
-    inspectNativeDocumentBytes(bytes, detailSlideIndex),
+    productArtifacts.inspect(bytes, detailSlideIndex),
   );
   // Saved-model inspection can materialize/reset empty-paragraph defaults
   // in the live exporter without changing the observed content. Bind the
@@ -850,6 +855,24 @@ function assertPersistedNativeIntent(
           : ""
       }`,
     );
+}
+
+async function admitProductArtifact(
+  bytes,
+  live,
+  verify,
+  recoveredReceipt = null,
+) {
+  return productArtifacts.admit({
+    bytes,
+    modelRevision: live.revision,
+    detailSlideIndex:
+      recoveredReceipt?.detailSlideIndex ?? live.textDetails?.slideIndex,
+    verify:
+      verify ??
+      ((reopened) => assertArtifactMatchesObservation(live, reopened)),
+    recoveredReceipt,
+  });
 }
 
 async function mutate(command) {
@@ -1291,6 +1314,7 @@ async function prepareProductPackageMutation(nativeRequest) {
       beforeBytes,
       beforeRevision: reconciledModelRevision,
       beforeSlides: expectedSlides,
+      beforeObservation: reconciledObservation,
       command: packageCommand,
       mutation,
       sourceOperations: [command.op],
@@ -1339,10 +1363,13 @@ async function prepareProductPackageMutation(nativeRequest) {
     typeof command.elementId !== "string"
   )
     throw new Error("Browser element command is invalid.");
-  const explicitScripts = requiresExplicitScriptFormatting(command, expectedElement);
+  const explicitScripts = requiresExplicitScriptFormatting(
+    command,
+    expectedElement,
+  );
   const beforeObservation = explicitScripts
     ? await observeBeforeNativeMutation()
-    : null;
+    : reconciledObservation;
   const packageCommand = {
     ...productPackageCommand(command, expectedElement),
     ...(explicitScripts ? { explicitScriptFormatting: true } : {}),
@@ -1355,6 +1382,9 @@ async function prepareProductPackageMutation(nativeRequest) {
     beforeRevision: reconciledModelRevision,
     beforeSlides: expectedSlides,
     ...(beforeObservation ? { beforeObservation } : {}),
+    baselineBytes: liveExportBaselineAt(beforeObservation?.revision),
+    sourceOperations: nativeCommands.map(({ op }) => op),
+    sourceTargets: nativeSnapshotTargets(beforeObservation, nativeCommands),
     nativeCommand: structuredClone(command),
     nativeRequest: {
       operation: "edit",
@@ -1574,6 +1604,13 @@ async function commitProductPackageReload(prepared) {
     );
     if (!productMutationMatches(prepared, after))
       throw new Error("browser_package_edit_not_persisted");
+    await admitProductArtifact(afterBytes, after, (reopened) => {
+      if (!productMutationMatches(prepared, reopened))
+        throw new Error(
+          `browser_package_edit_not_persisted:${prepared.command.op}:${browserProbeMode || query.get("verifySerialization") === "1" ? JSON.stringify({ command: prepared.command, target: reopened.slides?.flatMap((slide) => slide.elements ?? []).find((element) => element.elementId === prepared.command.elementId) }) : ""}`,
+        );
+      assertArtifactMatchesObservation(after, reopened);
+    });
     const journalCommand = {
       ...prepared.command,
       persistence: "package_reload",
@@ -1651,11 +1688,13 @@ async function commitProductPackageMutation(prepared, nativeValue) {
       liveSave = preserved.serialized;
       if ((await sha256(afterBytes)) === (await sha256(prepared.beforeBytes)))
         throw new Error("Browser native edit did not change the PPTX package.");
-      assertPersistedNativeIntent(
-        prepared.beforeObservation,
-        nativeValue,
-        preserved.observation,
-        preservationReport,
+      await admitProductArtifact(afterBytes, nativeValue, (reopened) =>
+        assertPersistedNativeIntent(
+          prepared.beforeObservation,
+          nativeValue,
+          reopened,
+          preservationReport,
+        ),
       );
     } catch (error) {
       try {
@@ -1772,6 +1811,37 @@ async function commitProductPackageMutation(prepared, nativeValue) {
       permission: prepared.permission,
     },
   };
+  try {
+    await admitProductArtifact(afterBytes, nativeValue, (reopened) => {
+      if (!productMutationMatches(prepared, reopened))
+        throw new Error(
+          `browser_package_edit_not_persisted:${prepared.command.op}:${browserProbeMode || query.get("verifySerialization") === "1" ? JSON.stringify({ command: prepared.command, target: reopened.slides?.flatMap((slide) => slide.elements ?? []).find((element) => element.elementId === prepared.command.elementId) }) : ""}`,
+        );
+      assertArtifactMatchesObservation(nativeValue, reopened);
+    });
+  } catch (error) {
+    if (
+      !packageAuthoritative &&
+      patchedBrowserRuntimeAdmitted() &&
+      /^(?:browser_package_edit_not_persisted|browser_native_snapshot_not_persisted|browser_artifact_model_not_persisted):/u.test(
+        error?.message ?? "",
+      )
+    ) {
+      // The localized rewrite is an optimization, never a second truth for
+      // an edit. If exact-package readback disagrees, preserve the real native
+      // result through the same scoped three-way path used by every other edit.
+      return commitProductPackageMutation(
+        { ...prepared, persistence: "native_snapshot" },
+        nativeValue,
+      );
+    }
+    restoreProductEditState(previousState);
+    await restoreProductPackageSnapshot(
+      prepared.beforeBytes,
+      "browser_artifact_admission_rollback_failed",
+    );
+    throw error;
+  }
   currentBytes = afterBytes;
   productUndoHistory.push({
     beforeBytes: prepared.beforeBytes,
@@ -1894,6 +1964,7 @@ async function restoreProductPackageSnapshot(bytes, errorCode, recovery = {}) {
     )
       await request("show-slide", { slideIndex: recovery.activeSlide });
     const restored = await observeNativeDocument();
+    await admitProductArtifact(currentBytes, restored);
     reconciledModelRevision = restored.revision;
     unreconciledModelRevision = "";
     bindOpenExportBaseline(restored.revision);
@@ -1971,6 +2042,7 @@ async function undoProductMutation() {
   reconciledModelRevision = reached.revision;
   unreconciledModelRevision = "";
   try {
+    await admitProductArtifact(currentBytes, reached);
     await refreshReconciledNativeBaseline(reached);
     rebaseCommandsToSavedBase("undo");
     await persistCheckpoint();
@@ -2065,6 +2137,7 @@ async function redoProductMutation() {
   reconciledModelRevision = reached.revision;
   unreconciledModelRevision = "";
   try {
+    await admitProductArtifact(currentBytes, reached);
     await refreshReconciledNativeBaseline(reached);
     rebaseCommandsToSavedBase("redo");
     await persistCheckpoint();
@@ -2102,6 +2175,7 @@ async function openJournal(initialBytes, name, documentId = null) {
         baseBytes: checkpoint.baseBytes,
         candidateBytes: checkpoint.candidateBytes,
         commands: checkpoint.metadata.commands,
+        artifactReceipt: checkpoint.metadata.artifactReceipt ?? null,
       });
       const migrated = await journal.load();
       if (
@@ -2118,12 +2192,17 @@ async function openJournal(initialBytes, name, documentId = null) {
 
 async function persistCheckpoint() {
   if (!journal || !baseBytes || !currentBytes) return;
+  const artifactReceipt = await productArtifacts.require(
+    currentBytes,
+    reconciledModelRevision,
+  );
   await journal.save({
     fileName: filename,
     baseVersionId: await sha256(baseBytes),
     baseBytes,
     candidateBytes: currentBytes,
     commands,
+    artifactReceipt,
   });
   trimSessionProductHistory(productUndoHistory, productRedoHistory);
 }
@@ -2221,6 +2300,7 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
       unreconciledModelRevision = "";
       currentSlideCount = live.slides.length;
       rememberReconciledObservation(live);
+      await admitProductArtifact(currentBytes, live);
       await persistCheckpoint();
       liveExportBaseline = {
         revision: live.revision,
@@ -2287,6 +2367,7 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
     unreconciledModelRevision = "";
     try {
       rememberReconciledObservation(live);
+      await admitProductArtifact(currentBytes, live);
       await persistCheckpoint();
     } catch (error) {
       restoreProductEditState(previousState);
@@ -2300,31 +2381,33 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
     return true;
   }
   try {
-    const reopenedState = normalizeDocumentPersistenceState(
-      persistenceStateFromObservation(preserved.observation),
-    );
-    const deletionVerified = persistedDirectDeletionMatches(
-      priorState,
-      liveState,
-      reopenedState,
-      directTarget,
-      preserved.report,
-    );
-    const topologyVerified = persistedDirectSlideTopologyMatches(
-      persistenceStateFromObservation(reconciledObservation),
-      persistenceStateFromObservation(live),
-      persistenceStateFromObservation(preserved.observation),
-      preserved.report,
-    );
-    if (preserved.report.topologyAligned && !topologyVerified)
-      throw new Error("browser_native_topology_retained_model_changed");
-    if (!deletionVerified && !topologyVerified)
-      assertPersistedNativeIntent(
-        reconciledObservation,
-        live,
-        preserved.observation,
+    await admitProductArtifact(afterBytes, live, (reopened) => {
+      const reopenedState = normalizeDocumentPersistenceState(
+        persistenceStateFromObservation(reopened),
+      );
+      const deletionVerified = persistedDirectDeletionMatches(
+        priorState,
+        liveState,
+        reopenedState,
+        directTarget,
         preserved.report,
       );
+      const topologyVerified = persistedDirectSlideTopologyMatches(
+        persistenceStateFromObservation(reconciledObservation),
+        persistenceStateFromObservation(live),
+        persistenceStateFromObservation(reopened),
+        preserved.report,
+      );
+      if (preserved.report.topologyAligned && !topologyVerified)
+        throw new Error("browser_native_topology_retained_model_changed");
+      if (!deletionVerified && !topologyVerified)
+        assertPersistedNativeIntent(
+          reconciledObservation,
+          live,
+          reopened,
+          preserved.report,
+        );
+    });
   } catch (error) {
     if (
       retryCount < 2 &&
@@ -2471,6 +2554,7 @@ async function exportProductDocumentNow({ checkpoint = true } = {}) {
   const bytes = currentBytes.slice();
   if (!bytes.byteLength || bytes.byteLength > hostMaximumBytes)
     throw new Error("Browser Office export exceeded the document limit.");
+  await productArtifacts.require(bytes, reconciledModelRevision);
   if (checkpoint) {
     const checkpointStartedAt = performance.now();
     try {
@@ -2521,6 +2605,7 @@ async function openProductDocument(message) {
   if (initial[0] !== 0x50 || initial[1] !== 0x4b)
     throw new Error("Browser Office received an invalid PPTX package.");
   hostRevision = message.revision;
+  productArtifacts.clear();
   productTaskReplies.clear();
   hostMaximumBytes = message.maxBytes;
   history.length = 0;
@@ -2622,6 +2707,12 @@ async function openProductDocument(message) {
   }
   await writeAndOpen(candidate, message.fileName);
   const live = await observeNativeDocument();
+  await admitProductArtifact(
+    currentBytes,
+    live,
+    undefined,
+    recovered?.metadata.artifactReceipt ?? null,
+  );
   const recoveredRevision = commands.at(-1)?.reconciliation?.afterRevision;
   if (recoveredRevision && live.revision !== recoveredRevision)
     throw new Error("Browser recovery model differs from the package journal.");
@@ -2646,6 +2737,7 @@ async function openProductDocument(message) {
 
 let hostSaveRequestId = null;
 let hostSaveSnapshot = null;
+let releaseSaveArtifact = null;
 async function saveProductDocument() {
   if (hostSaveRequestId) return;
   const requestId = `browser-save-${++requestSequence}`;
@@ -2658,6 +2750,10 @@ async function saveProductDocument() {
       end: performance.now(),
     });
     hostSaveSnapshot = createSaveSnapshot(bytes, reconciledModelRevision);
+    releaseSaveArtifact = await productArtifacts.retainSave(
+      bytes,
+      reconciledModelRevision,
+    );
     const transferable = bytes.slice();
     postHost(
       {
@@ -2671,6 +2767,8 @@ async function saveProductDocument() {
   } catch (error) {
     hostSaveRequestId = null;
     hostSaveSnapshot = null;
+    releaseSaveArtifact?.();
+    releaseSaveArtifact = null;
     throw error;
   }
 }
@@ -2769,6 +2867,8 @@ async function handleProductHostMessage(message) {
     if (message.ok !== true) {
       hostSaveRequestId = null;
       hostSaveSnapshot = null;
+      releaseSaveArtifact?.();
+      releaseSaveArtifact = null;
       reportHostModified(true);
       postHost({
         type: "save-response",
@@ -2782,6 +2882,7 @@ async function handleProductHostMessage(message) {
       if (typeof message.revision !== "string" || !message.revision)
         throw new Error("Browser Office save revision is invalid.");
       const saved = hostSaveSnapshot;
+      await productArtifacts.require(saved.bytes, saved.modelRevision);
       // The server has already accepted this version. Even if local
       // reconciliation fails, the next save must not use the previous ETag.
       hostRevision = message.revision;
@@ -2837,6 +2938,8 @@ async function handleProductHostMessage(message) {
       unreconciledModelRevision = "";
       hostSaveRequestId = null;
       hostSaveSnapshot = null;
+      releaseSaveArtifact?.();
+      releaseSaveArtifact = null;
       lastReportedModified = !modified;
       reportHostModified(modified);
       postHost({
@@ -2848,6 +2951,8 @@ async function handleProductHostMessage(message) {
     } catch (error) {
       hostSaveRequestId = null;
       hostSaveSnapshot = null;
+      releaseSaveArtifact?.();
+      releaseSaveArtifact = null;
       lastReportedModified = false;
       reportHostModified(true);
       postHost({
@@ -4014,5 +4119,32 @@ globalThis.spellbookBrowserOffice = {
     if (!productMode || query.get("verifySerialization") !== "1")
       throw new Error("Browser product export probe is not active.");
     return Array.from(await exportProductDocument({ checkpoint: false }));
+  },
+  async verifyProductArtifact() {
+    if (!productMode || query.get("verifySerialization") !== "1")
+      throw new Error("Browser artifact probe is not active.");
+    const receipt = await productArtifacts.require(
+      currentBytes,
+      reconciledModelRevision,
+    );
+    const replaced = currentBytes.slice();
+    replaced[replaced.length - 1] ^= 1;
+    const rejected = async (bytes, revision) => {
+      try {
+        await productArtifacts.require(bytes, revision);
+        return false;
+      } catch (error) {
+        if (error.message !== "browser_artifact_not_verified") throw error;
+        return true;
+      }
+    };
+    return {
+      receipt,
+      replacedBytesRejected: await rejected(replaced, reconciledModelRevision),
+      staleRevisionRejected: await rejected(
+        currentBytes,
+        `${reconciledModelRevision}:stale`,
+      ),
+    };
   },
 };
