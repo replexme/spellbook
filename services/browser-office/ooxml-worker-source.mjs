@@ -2181,9 +2181,10 @@ function declaredContentType({ overrides, defaults }, part) {
 // Every package part needs a declared content type. The merge can keep an
 // author's part that the engine dropped (printer settings, a transition
 // sound) while taking the engine's [Content_Types].xml, or keep the author's
-// manifest while adding an engine-created part. Declare each undeclared part
-// the way the package it came from declared it, and drop overrides for parts
-// the merge left out. Returns null when the manifest is already complete.
+// manifest while adding an engine-created part. Bind the effective type to
+// the package supplying each part: a generic XML Default cannot replace an
+// author's specific Override. Drop overrides for parts the merge left out.
+// Returns null when the manifest already declares the correct types.
 function reconcileContentTypes(merged, original, edited) {
   if (!merged[contentTypesPath]) return null;
   const document = parseXml(merged, contentTypesPath);
@@ -2209,8 +2210,7 @@ function reconcileContentTypes(merged, original, edited) {
       changed = true;
     }
   for (const part of Object.keys(merged).sort()) {
-    if (part === contentTypesPath || declaredContentType(declared, part))
-      continue;
+    if (part === contentTypesPath) continue;
     const sources = samePartBytes(merged[part], original[part])
       ? [authoredTypes, engineTypes]
       : [engineTypes, authoredTypes];
@@ -2219,6 +2219,13 @@ function reconcileContentTypes(merged, original, edited) {
     );
     if (!source) continue;
     const contentType = declaredContentType(source, part);
+    if (declaredContentType(declared, part) === contentType) continue;
+    const previousOverride = declared.overrides.get(part.toLowerCase());
+    if (previousOverride) {
+      previousOverride.setAttribute("ContentType", contentType);
+      changed = true;
+      continue;
+    }
     const sourceOverride = source.overrides.get(part.toLowerCase());
     const extension = partExtension(part);
     if (!sourceOverride && extension && !declared.defaults.has(extension)) {

@@ -2289,6 +2289,52 @@ test("native snapshot declares content types for author parts the engine dropped
   assert.ok(result.report.semanticPatchedParts.includes("[Content_Types].xml"));
 });
 
+test("native snapshot restores retained author part types over a generic XML default", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const path = "ppt/viewProps.xml";
+  const type = "application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml";
+  assert.ok(original[path]);
+  const noEdit = { ...original };
+  // Export drops view properties and their Override, while leaving a broad
+  // XML Default. Adding an image makes the engine manifest enter the merge.
+  delete noEdit[path];
+  noEdit["[Content_Types].xml"] = strToU8(
+    strFromU8(original["[Content_Types].xml"]).replace(
+      /<Override PartName="\/ppt\/viewProps.xml"[^>]*\/>/u, "",
+    ),
+  );
+  const edited = {
+    ...noEdit,
+    "ppt/media/new.png": strToU8("PNG"),
+    "[Content_Types].xml": strToU8(
+      strFromU8(noEdit["[Content_Types].xml"]).replace(
+        "</Types>", '<Default Extension="png" ContentType="image/png"/></Types>',
+      ),
+    ),
+  };
+  for (const wrongOverride of [false, true]) {
+    const candidate = { ...edited };
+    if (wrongOverride)
+      candidate["[Content_Types].xml"] = strToU8(
+        strFromU8(candidate["[Content_Types].xml"]).replace(
+          "</Types>", '<Override PartName="/ppt/viewProps.xml" ContentType="application/xml"/></Types>',
+        ),
+      );
+    const result = preserveOriginalPptxParts(
+      zipSync(original), zipSync(noEdit), zipSync(candidate), ["insert_image"],
+    );
+    const merged = unzipSync(result.bytes);
+    assert.deepEqual(merged[path], original[path]);
+    const manifest = new DOMParser().parseFromString(strFromU8(merged["[Content_Types].xml"]), "application/xml");
+    const overrides = [...manifest.getElementsByTagName("Override")].filter(
+      (element) => element.getAttribute("PartName") === "/ppt/viewProps.xml",
+    );
+    assert.equal(overrides.length, 1);
+    assert.equal(overrides[0].getAttribute("ContentType"), type);
+    assert.ok(merged["ppt/media/new.png"]);
+  }
+});
+
 test("native snapshot keeps the author's manifest when the engine declares .rels explicitly", async () => {
   const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
   assert.match(
