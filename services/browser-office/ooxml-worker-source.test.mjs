@@ -4187,3 +4187,63 @@ test("regenerated slide names cannot shift existing picture opacity during dupli
     /no unambiguous retained-content correspondence/u,
   );
 });
+
+test("restoring an authored transition preserves ancestor-only Requires prefix bindings against a conflicting destination", async () => {
+  const fixture = new Uint8Array(await readFile(fixtureUrl));
+  const { entries, slidePath } = withAuthoredTransitionSound(fixture);
+  entries[slidePath] = strToU8(
+    strFromU8(entries[slidePath])
+      .replace(
+        "<p:sld ",
+        '<p:sld xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" ',
+      )
+      .replace(
+        '<mc:Choice xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main"',
+        "<mc:Choice",
+      ),
+  );
+  const source = zipSync(entries);
+  const noEdit = withEngineTransition(
+    entries,
+    slidePath,
+    '<p:transition spd="slow" advTm="5000"/>',
+  );
+  noEdit[slidePath] = strToU8(
+    strFromU8(noEdit[slidePath]).replace(
+      'xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main"',
+      'xmlns:p14="urn:conflicting-engine-prefix"',
+    ),
+  );
+  const edited = {
+    ...noEdit,
+    [slidePath]: strToU8(
+      strFromU8(noEdit[slidePath]).replace(
+        "Spellbook 검증 العربية",
+        "Transition untouched",
+      ),
+    ),
+  };
+  const result = preserveOriginalPptxParts(
+    source,
+    zipSync(noEdit),
+    zipSync(edited),
+    ["replace_text"],
+  );
+  const document = new DOMParser().parseFromString(
+    strFromU8(unzipSync(result.bytes)[slidePath]),
+    "application/xml",
+  );
+  const choice = document.getElementsByTagNameNS(
+    "http://schemas.openxmlformats.org/markup-compatibility/2006",
+    "Choice",
+  )[0];
+  assert.equal(choice.getAttribute("Requires"), "p14");
+  assert.equal(
+    choice.lookupNamespaceURI("p14"),
+    "http://schemas.microsoft.com/office/powerpoint/2010/main",
+  );
+  assert.match(
+    strFromU8(unzipSync(result.bytes)[slidePath]),
+    /Transition untouched/u,
+  );
+});

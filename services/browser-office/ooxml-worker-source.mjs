@@ -290,7 +290,7 @@ function countByName(nodes) {
 // the engine's element whole.
 function mergeElementThreeWay(document, source, baseline, edited) {
   if (comparableXml(baseline) === comparableXml(edited))
-    return document.importNode(source, true);
+    return importOoxmlSubtree(document, source, true);
   if (
     xmlElementKey(source) !== xmlElementKey(baseline) ||
     xmlElementKey(baseline) !== xmlElementKey(edited) ||
@@ -317,7 +317,7 @@ function mergeElementThreeWay(document, source, baseline, edited) {
     if (authored && !before && after && authored !== after) return null;
   }
 
-  const merged = document.importNode(source, false);
+  const merged = importOoxmlSubtree(document, source, false);
   const attributes = new Map();
   for (const element of [baseline, edited])
     for (let index = 0; index < element.attributes.length; index += 1) {
@@ -378,16 +378,16 @@ function mergeElementThreeWay(document, source, baseline, edited) {
     const after = editedByKey.get(key);
     // The engine never writes this child (for example an empty a:lstStyle).
     if (!before && !after)
-      output.push({ key, node: document.importNode(authored, true) });
+      output.push({ key, node: importOoxmlSubtree(document, authored, true) });
     else if (!after) continue;
     else if (!before)
-      output.push({ key, node: document.importNode(after, true) });
+      output.push({ key, node: importOoxmlSubtree(document, after, true) });
     else
       output.push({
         key,
         node:
           mergeElementThreeWay(document, authored, before, after) ??
-          document.importNode(after, true),
+          importOoxmlSubtree(document, after, true),
       });
   }
   for (const [index, key] of editedKeys.entries()) {
@@ -414,7 +414,7 @@ function mergeElementThreeWay(document, source, baseline, edited) {
     }
     output.splice(position < 0 ? output.length : position, 0, {
       key,
-      node: document.importNode(after, true),
+      node: importOoxmlSubtree(document, after, true),
     });
   }
   for (const { node } of output) merged.appendChild(node);
@@ -448,7 +448,7 @@ function applyAuthoredGeometryDelta(
       const properties = optionalDirectXmlChild(merged, presentationNamespace,
         merged.localName === "grpSp" ? "grpSpPr" : "spPr");
       if (!properties) return false;
-      transforms[0] = merged.ownerDocument.importNode(transforms[2], true);
+      transforms[0] = importOoxmlSubtree(merged.ownerDocument, transforms[2], true);
       properties.insertBefore(transforms[0], properties.firstChild);
     }
     transforms[1] = transforms[2];
@@ -514,7 +514,7 @@ function mergeExtendedProperties(originalBytes, noEditBytes, editedBytes) {
       continue;
     const source = authored.get(key);
     if (after) {
-      const replacement = original.importNode(after, true);
+      const replacement = importOoxmlSubtree(original, after, true);
       if (source) original.documentElement.replaceChild(replacement, source);
       else original.documentElement.appendChild(replacement);
     } else if (source) original.documentElement.removeChild(source);
@@ -722,7 +722,7 @@ function preserveUnaffectedSlideShapes(
       // Geometry can be applied to the original frame/group wrapper without
       // importing the engine's children or relationship IDs. Keep diagram
       // parts, picture contents and style exactly as authored.
-      const moved = documents[2].importNode(source, true);
+      const moved = importOoxmlSubtree(documents[2], source, true);
       if (!applyAuthoredGeometryDelta(moved, source, baseline, editedShape, sourceOperations)) return null;
       // The geometry changed, but every shape ID still comes from source.
       replacements.push({ pair, editedShape, restored: true, node: moved });
@@ -739,7 +739,7 @@ function preserveUnaffectedSlideShapes(
         pair,
         editedShape,
         restored: true,
-        node: documents[2].importNode(source, true),
+        node: importOoxmlSubtree(documents[2], source, true),
       });
       continue;
     }
@@ -763,7 +763,7 @@ function preserveUnaffectedSlideShapes(
             const authoredText = source.cloneNode(true);
             replaceShapeText(authoredText, changedText);
             if (readShapeText(authoredText) === changedText)
-              merged = documents[2].importNode(authoredText, true);
+              merged = importOoxmlSubtree(documents[2], authoredText, true);
           }
         }
       } catch {
@@ -861,7 +861,7 @@ function preserveUnaffectedSlideShapes(
   for (const { editedShape, node } of replacements)
     editedShape.parentNode.replaceChild(node, editedShape);
   if (restoreTiming) {
-    const timing = documents[2].importNode(authoredTiming, true);
+    const timing = importOoxmlSubtree(documents[2], authoredTiming, true);
     if (editedTiming)
       editedTiming.parentNode.replaceChild(timing, editedTiming);
     else insertSlideTiming(documents[2], timing);
@@ -1145,7 +1145,7 @@ function relationshipAdopter(part, original, merged) {
           const identity = relationshipIdentity(part, relationship);
           let id = merge.get(identity);
           if (!id) {
-            const copy = document.importNode(relationship, true);
+            const copy = importOoxmlSubtree(document, relationship, true);
             id = nextRelationshipId(document);
             copy.setAttribute("Id", id);
             document.documentElement.appendChild(copy);
@@ -1197,7 +1197,7 @@ function mergeSlideTransition(part, original, noEdit, merged) {
   const adopter = relationshipAdopter(part, original, merged);
   if (serialized(baseline) === serialized(edited)) {
     if (serialized(edited) === serialized(authored)) return null;
-    const restored = selected.importNode(authored, true);
+    const restored = importOoxmlSubtree(selected, authored, true);
     if (!adopter.adopt(restored)) return null;
     if (edited) selected.documentElement.replaceChild(restored, edited);
     else insertSlideTransition(selected, restored);
@@ -1228,7 +1228,7 @@ function mergeSlideTransition(part, original, noEdit, merged) {
         child.namespaceURI === presentationNamespace &&
         child.localName === "extLst",
     );
-    const copy = selected.importNode(sound, true);
+    const copy = importOoxmlSubtree(selected, sound, true);
     if (!adopter.adopt(copy)) return null;
     if (extension) transition.insertBefore(copy, extension);
     else transition.appendChild(copy);
@@ -2516,7 +2516,7 @@ function mergeThemeValues(originalBytes, noEditBytes, editedBytes, part) {
     // this command is allowed to change. A collateral theme rewrite fails.
     if (key.startsWith("color:") || key.startsWith("font:")) {
       editedNode.parentNode.replaceChild(
-        noEdit.importNode(baselineNode, true),
+        importOoxmlSubtree(noEdit, baselineNode, true),
         editedNode,
       );
     } else editedNode.setAttribute(editedAttribute, before);
@@ -4976,7 +4976,7 @@ function ownShapeTransform(context, slidePath, shape) {
   const transform = effectiveShapeTransform(context, slidePath, shape);
   if (transform.ownerDocument === shape.ownerDocument) return transform;
   const properties = requiredShapeProperties(shape);
-  const copy = shape.ownerDocument.importNode(transform, true);
+  const copy = importOoxmlSubtree(shape.ownerDocument, transform, true);
   properties.insertBefore(copy, properties.firstChild);
   return copy;
 }
@@ -5821,6 +5821,59 @@ function parseXml(entries, path) {
   if (issues.length || document.getElementsByTagName("parsererror").length)
     throw new Error(`Invalid XML in ${path}: ${issues.join("; ")}`);
   return document;
+}
+
+// importNode preserves XML names, but QName-valued attributes can refer
+// to ancestor-only declarations. Carry exactly those bindings, keeping
+// unrelated authored/engine XML serialization unchanged.
+function importOoxmlSubtree(document, source, deep) {
+  const copy = document.importNode(source, deep);
+  if (copy.nodeType !== 1) return copy;
+  const sources = [source, ...(deep ? source.getElementsByTagName("*") : [])];
+  const copies = [copy, ...(deep ? copy.getElementsByTagName("*") : [])];
+  sources.forEach((element, index) => {
+    for (const attribute of element.attributes) {
+      const prefixList =
+        (element.namespaceURI === markupCompatibilityNamespace &&
+          element.localName === "Choice" &&
+          !attribute.namespaceURI &&
+          attribute.localName === "Requires") ||
+        (attribute.namespaceURI === markupCompatibilityNamespace &&
+          ["Ignorable", "MustUnderstand"].includes(attribute.localName));
+      const qnameList =
+        (attribute.namespaceURI === markupCompatibilityNamespace &&
+          ["ProcessContent", "PreserveElements", "PreserveAttributes"].includes(
+            attribute.localName,
+          )) ||
+        (attribute.namespaceURI ===
+          "http://www.w3.org/2001/XMLSchema-instance" &&
+          attribute.localName === "type");
+      if (!prefixList && !qnameList) continue;
+      for (const value of attribute.value
+        .trim()
+        .split(/\s+/u)
+        .filter(Boolean)) {
+        const prefix = prefixList
+          ? value
+          : value.includes(":")
+            ? value.split(":")[0]
+            : "";
+        const uri = element.lookupNamespaceURI(prefix || null);
+        if (!uri && prefix)
+          throw new Error(
+            `Cannot import unbound XML namespace prefix ${prefix}.`,
+          );
+        const target = copies[index];
+        if (target.lookupNamespaceURI(prefix || null) !== uri)
+          target.setAttributeNS(
+            "http://www.w3.org/2000/xmlns/",
+            prefix ? `xmlns:${prefix}` : "xmlns",
+            uri ?? "",
+          );
+      }
+    }
+  });
+  return copy;
 }
 
 function serializeXml(document) {
