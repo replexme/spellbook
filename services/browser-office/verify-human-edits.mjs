@@ -85,11 +85,14 @@ if (scenario === "unobserved-picture-mode") {
       .find(s=>String(s.getShapeType()).endsWith("GraphicObjectShape"));
     if (!shape) throw new Error("No picture for observation-coverage probe");
     const before = shape.getPropertyValue("GraphicColorMode");
-    const color = uno.idl.com.sun.star.drawing.ColorMode;
-    shape.setPropertyValue("GraphicColorMode", new uno.Any(uno.type.enum(color), color.GREYS));
-    model.setModified(true);
+    if (request.__coverageProbe === "write") {
+      const color = uno.idl.com.sun.star.drawing.ColorMode;
+      shape.setPropertyValue("GraphicColorMode", new uno.Any(uno.type.enum(color), color.GREYS));
+      model.setModified(true);
+    }
     const after = shape.getPropertyValue("GraphicColorMode");
-    return { before:Number(before?.value ?? before), after:Number(after?.value ?? after) };
+    const position=shape.getPosition();
+    return { before:Number(before?.value ?? before), after:Number(after?.value ?? after),x:position.X,y:position.Y };
   }
 `,
       ),
@@ -349,7 +352,7 @@ try {
     }
     result.controlledProperty = await nativeCall({
       operation: "selection",
-      __coverageProbe: true,
+      __coverageProbe: "write",
     });
     result.engineApplied =
       result.controlledProperty.before !== result.controlledProperty.after;
@@ -378,6 +381,8 @@ try {
         };
         try { await nativeCall(request); result.outcome="incorrectly-accepted"; }
         catch(error) { result.outcome="refused";result.error=error.message; }
+        if (coverageBoundary === "before-ai")
+          result.afterRejectedAi = await nativeCall({operation:"selection",__coverageProbe:"read"});
       }
       throw Object.assign(new Error("Coverage boundary checked"),{skip:true});
     }
@@ -605,11 +610,15 @@ try {
   if (receiptPath)
     await writeFile(receiptPath, JSON.stringify(result, null, 2) + "\n");
   if (scenario === "unobserved-picture-mode") {
+    const staleAiRejectedWithoutMutation = coverageBoundary === "before-ai" &&
+      result.error === "browser_package_revision_changed" &&
+      result.afterRejectedAi?.x === result.controlledProperty?.x &&
+      result.afterRejectedAi?.y === result.controlledProperty?.y;
     result.coverageGuardPassed =
       result.engineApplied === true &&
       result.outcome === "refused" &&
-      result.error === "browser_native_unobserved_change" &&
-      Boolean(result.metrics?.unreconciledModelRevision);
+      (staleAiRejectedWithoutMutation ||
+        (result.error === "browser_native_unobserved_change" && Boolean(result.metrics?.unreconciledModelRevision)));
     // Record the assertion too, not only the engine's refusal message.
     if (receiptPath)
       await writeFile(receiptPath, JSON.stringify(result, null, 2) + "\n");
