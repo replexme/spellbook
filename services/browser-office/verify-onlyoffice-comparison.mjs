@@ -1,3 +1,4 @@
+import { observeOnlyOfficeCandidate } from "./onlyoffice-observation.mjs";
 /* SPDX-License-Identifier: MPL-2.0 */
 import { createOnlyOfficeComparisonHost } from "./onlyoffice/comparison-host.mjs";
 import {
@@ -190,36 +191,15 @@ await new Promise((resolve) =>
 );
 const diagnosticOrigin = `http://127.0.0.1:${diagnosticServer.address().port}`;
 async function snapshot(frame) {
-  return frame.evaluate(() => {
-    const m = window.Asc.editor.WordControl.m_oLogicDocument;
-    const shape = (x) => ({
-      // Selection-text getters return null for some authored line breaks.
-      // Read the whole document content without changing ApplyToAll/selection.
-      text:
-        x.getDocContent?.()?.GetText?.({ Numbering: false }) ??
-        x.getContentText?.() ??
-        null,
-      x: x.x,
-      y: x.y,
-      w: x.extX,
-      h: x.extY,
-      type: x.isTable?.()
-        ? "table"
-        : x.isChart?.()
-          ? "chart"
-          : x.isImage?.()
-            ? "image"
-            : x.spTree
-              ? "group"
-              : "shape",
-      children: x.spTree?.map(shape) ?? [],
-      hidden: x.getCNvProps?.()?.isHidden ?? null,
-    });
-    return {
-      slides: m.Slides.map((s) => ({ shapes: s.cSld.spTree.map(shape) })),
-    };
-  });
+  const observed = await observeOnlyOfficeCandidate(frame);
+  return {
+    ...observed.common,
+    features: observed.extended,
+    native: observed.narrow,
+    unavailable: observed.unavailable,
+  };
 }
+
 function differences(expected, actual, at = "document", results = []) {
   if (typeof expected === "number" && typeof actual === "number") {
     if (Math.abs(expected - actual) > 0.02) results.push(at);
@@ -234,7 +214,7 @@ function differences(expected, actual, at = "document", results = []) {
     actual &&
     typeof actual === "object"
   ) {
-    for (const k of Object.keys(expected))
+    for (const k of new Set([...Object.keys(expected), ...Object.keys(actual)]))
       differences(expected[k], actual[k], `${at}.${k}`, results);
   } else if (expected !== actual) results.push(at);
   return results;

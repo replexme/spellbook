@@ -51,7 +51,11 @@ duplicate, unexpected, failed, unverified or wrong-pipeline results make the
 requested matrix incomplete and the process exits unsuccessfully. Completion
 is explicitly limited to the manifest's human-editing scenarios; it does not
 mean all product operations or engine admission passed. Geometry/text snapshots
-do not prove all chart, table, style, media, animation or relationship semantics.
+are supplemented by the same read-only candidate observer used by typed trials:
+table text/fill, chart caches/type, SmartArt nodes, crop, existing notes/timing,
+transitions, hyperlinks, layout, fill and WordArt on every slide. Missing getter
+fields remain explicit and unverified; this observer still does not prove every
+media, master, theme, embedded object or relationship semantic.
 Screenshots require direct review. Provider authentication and PowerPoint reopen
 remain separate evidence boundaries.
 
