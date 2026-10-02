@@ -3187,7 +3187,6 @@ async function handleProductHostMessage(message) {
             "same_revision_ai_observe",
           );
         rememberReconciledObservation(value);
-        if (nativeResult) noteCheckpointedDocumentChanges(nativeResult);
       }
       if (
         (message.request.operation === "observe" ||
@@ -3447,13 +3446,6 @@ async function cachedAiObservation(requested) {
     return null;
   }
 }
-function noteCheckpointedDocumentChanges(result) {
-  checkpointedDocumentChanges =
-    result?.value?.revision === reconciledModelRevision &&
-    Number.isSafeInteger(result.documentChanges)
-      ? result.documentChanges
-      : null;
-}
 function startProductHeartbeat() {
   if (!productMode || !runtimeReady || !hostPort || productHeartbeat) return;
   const poll = () => {
@@ -3490,7 +3482,6 @@ function startProductHeartbeat() {
         const live = observedLive.value;
         await checkpointLiveNativeState(live, "manual_autosave");
         await persistCheckpoint();
-        noteCheckpointedDocumentChanges(observedLive);
         lastCheckpointAt = Date.now();
       }
     }).then(

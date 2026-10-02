@@ -136,3 +136,65 @@ test("failed persistence cannot publish a newly checkpointed event version", asy
   );
   assert.equal(context.checkpointedDocumentChanges, 1);
 });
+
+test("heartbeat retains the admitted retry version when typing advances after its first read", async () => {
+  let poll, pending;
+  const originalRead = {
+    value: { revision: "typing-in-progress" },
+    documentChanges: 10,
+  };
+  const context = vm.createContext({
+    productMode: true,
+    runtimeReady: true,
+    hostPort: {},
+    productHeartbeat: null,
+    currentBytes: new Uint8Array([1]),
+    checkpointInFlight: false,
+    commands: [],
+    unreconciledModelRevision: "",
+    selectionTick: 0,
+    checkpointedDocumentChanges: 1,
+    lastCheckpointAt: 0,
+    reconciledModelRevision: "before-typing",
+    Date: { now: () => 20_000 },
+    request: async () => ({ modified: true, documentChanges: 10 }),
+    reportHostModified() {},
+    observeNativeDocumentChanges: async () => originalRead,
+    checkpointLiveNativeState: async () => {
+      // The first snapshot races with input. The real checkpointer retries,
+      // validates and admits a later version instead of this original read.
+      context.reconciledModelRevision = "typing-complete";
+      context.checkpointedDocumentChanges = 14;
+    },
+    persistCheckpoint: async () => {},
+    enqueueProductOperation: (operation) => {
+      pending = operation();
+      return pending;
+    },
+    setInterval: (callback) => {
+      poll = callback;
+      return 1;
+    },
+  });
+  const heartbeat = source.slice(
+    source.indexOf("function startProductHeartbeat()"),
+    source.indexOf("async function runConformance()"),
+  );
+  // Include the former writer when testing an earlier source: its stale
+  // post-retry assignment makes this regression fail rather than throw.
+  const oldWriterStart = source.indexOf(
+    "function noteCheckpointedDocumentChanges(",
+  );
+  const oldWriter =
+    oldWriterStart < 0
+      ? ""
+      : source.slice(
+          oldWriterStart,
+          source.indexOf("function startProductHeartbeat()"),
+        );
+  vm.runInContext(oldWriter + heartbeat + "startProductHeartbeat();", context);
+  poll();
+  await pending;
+  assert.equal(context.checkpointedDocumentChanges, 14);
+  assert.equal(context.reconciledModelRevision, "typing-complete");
+});
