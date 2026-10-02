@@ -7,7 +7,7 @@ original PPTX preservation, useful responsiveness, and verified output quality.
 
 Apply in filename order to `agentbridges-ai/onlyoffice-browser` at
 `d15d12b6945be4d8b0f3aa1806120e740d2950ee` (0.3.34, SDK 9.3). Patched local
-candidate commits are `1872b4e`, `60b6109`, and `1317f56`. The upstream component and SDK
+candidate commits are `1872b4e`, `60b6109`, `1317f56`, `ded5281`, and `e6165f7`. The upstream component and SDK
 are AGPL-3.0; these patch artifacts retain the upstream licensing context.
 
 - `0001-version-bound-save.patch`: persistence acknowledges an exported native
@@ -29,6 +29,24 @@ are AGPL-3.0; these patch artifacts retain the upstream licensing context.
   Unknown versions, attributes and malformed records cannot clear dirty. This
   fixes the follow-up real test in which even the latest successful save stayed
   dirty. It does not prove properties that this engine never serializes.
+- `0004-smartart-new-node-connection-map.patch`: the native SmartArt layout
+  algorithm previously dereferenced a missing source group when a newly added
+  semantic node had no presentation relation yet. It now creates that relation
+  through the existing native history setters. The generated SDK input must
+  match the exact group-patched digest; public upstream files stay unchanged.
+  Both an unpatched-input exception and native relation retention are regression
+  tested. This fix alone does not construct or validate a complete diagram graph.
+
+- `0005-smartart-generated-connector-path-and-style.patch`: generated open
+  connector paths no longer inherit polygon fill. Native path setters retain
+  Undo/Redo. New parent/sibling transition presentation points defer their
+  unspecified style to the existing routing algorithm, instead of choosing a
+  generic node style which makes new organization-chart connectors white.
+  Explicitly authored styles and content-node fallbacks remain unchanged.
+  Both defects were observed in actual added-node screenshots and saved XML;
+  corrected output was reopened and visually reviewed. These are separate from
+  the missing relation-map guard in `0004`. The exact pinned input digest is
+  checked separately at each generated-asset step.
 
 Local evidence is recorded in the private product delivery report and under
 `/private/tmp/present-engine-comparison-20261001/improved-comparison`. User files,
@@ -74,3 +92,38 @@ writes. `--readback-slide <index>` selects the page for its screenshot. Kinds,
 text and geometry are covered; full style/source bindings are not implied.
 Regular edit trials also select the original edited page before the reopened
 screenshot, so newly added slides are visually compared on the same page.
+
+## Typed native comparisons
+
+`verify-onlyoffice-typed-comparison.mjs --input <fixture.pptx> --output <private-directory>
+--candidate-root <patched-component> --origin <loopback-preview> --typed-case <case>`
+runs representative text/table/chart/layout/image/SmartArt/WordArt mutations,
+one native Undo and Redo, the actual source-preservation save callback, and a new
+editor session reading the saved artifact. It shares the diagnostic component
+host and save pipeline with `verify-onlyoffice-comparison.mjs`; the two runners
+do not keep parallel callback implementations. Screenshot and package outputs
+stay outside Git. These representative cases are not the complete 94-command
+product contract, permission/preflight/failure rollback, or server acknowledgement.
+
+Readback includes authored names, image crop and semantic SmartArt text/parent
+connections alongside displayed drawing text. `GetName` creates a transient
+display name when no name was authored, so `getOwnName` is used for persistent
+name comparison. Explicitly requested WordArt names are applied after slide
+registration and verified, rather than ignored. Image crop uses the pinned
+native `setSrcRect` history path. SmartArt text edits follow the unique native
+drawing-to-content-node binding; graph changes include the parent/sibling
+transition points and rebuild the derived layout cache. A successful setter,
+data-only edit, or public API list cannot substitute for the displayed and
+saved state checks.
+
+SmartArt add/delete cases additionally assert the requested parent, normal node
+kind, precise node count and retention of every unrelated semantic node. Local
+candidate trial requests to external HTTP(S) hosts are blocked and counted.
+The runner records the actual generated SDK digest as well as both repository
+identities; dirty trial results are never substituted for clean-commit evidence.
+
+The native connector changes were checked against the pinned [SmartArtTree
+source](https://github.com/ONLYOFFICE/sdkjs/blob/v9.3.0.140/common/SmartArts/SmartArtTree.js).
+The reviewed master source still had the same filled path and generic new-node
+fallback on 2026-10-02. This source inspection is not a trial of a newer released
+SDK; the runtime comparison remains pinned to 9.3.0.140.

@@ -1,0 +1,286 @@
+diff --git a/bin/build.sh b/bin/build.sh
+index 17fc424..eb90ce3 100755
+--- a/bin/build.sh
++++ b/bin/build.sh
+@@ -9,6 +9,8 @@ echo "Starting build process..."
+ ./node_modules/.bin/vite build
+ node scripts/patch-onlyoffice-slide-group-reader.mjs dist
+ node scripts/patch-onlyoffice-smartart-connection-map.mjs dist
++node scripts/patch-onlyoffice-smartart-line-path.mjs dist
++node scripts/patch-onlyoffice-smartart-transition-style.mjs dist
+ 
+ # Keep the deployable demo/runtime lean by removing low-frequency bundled
+ # assets and emitting canonical path packs for per-document-type CDN sync.
+diff --git a/scripts/patch-onlyoffice-smartart-line-path.d.mts b/scripts/patch-onlyoffice-smartart-line-path.d.mts
+new file mode 100644
+index 0000000..ce59fd7
+--- /dev/null
++++ b/scripts/patch-onlyoffice-smartart-line-path.d.mts
+@@ -0,0 +1 @@
++export function patchSmartArtLinePathFill(source: string): string;
+diff --git a/scripts/patch-onlyoffice-smartart-line-path.mjs b/scripts/patch-onlyoffice-smartart-line-path.mjs
+new file mode 100644
+index 0000000..6b58da1
+--- /dev/null
++++ b/scripts/patch-onlyoffice-smartart-line-path.mjs
+@@ -0,0 +1,46 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++// Local candidate for ONLYOFFICE sdkjs v9.3.0.140, after the group and SmartArt relation patches.
++import assert from 'node:assert/strict';
++import { createHash } from 'node:crypto';
++import { readFile, writeFile } from 'node:fs/promises';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { brotliCompressSync, constants } from 'node:zlib';
++
++const marker = 'spellbook-smartart-line-path-no-fill-v1';
++const inputHash = '2c302a894f67b77361424b908358b23de38cd340d2bf5d84f3baa7dc15f4cf5e';
++const oldGuard = 'geometry.AddPathCommand.apply(geometry,custCommand)}this.applyPostEditorSettings(shape);return shape';
++const newGuard = `geometry.AddPathCommand.apply(geometry,custCommand)}/* ${marker} */for(var p=0;p<geometry.pathLst.length;p++)geometry.pathLst[p].setFill("none");this.applyPostEditorSettings(shape);return shape`;
++
++export function patchSmartArtLinePathFill(source) {
++  const start = source.indexOf('ShadowShape.prototype.getEditorLine=function(');
++  const end = source.indexOf('ShadowShape.prototype.getEditorShape=', start);
++  assert(start >= 0 && end > start, 'Pinned SmartArt connector boundary missing');
++  const body = source.slice(start, end);
++  if (body.includes(newGuard)) {
++    assert(!body.includes(oldGuard), 'Mixed SmartArt connector implementation');
++    return source;
++  }
++  assert(body.split(oldGuard).length === 2, 'Pinned SmartArt connector path changed');
++  return source.slice(0, start) + body.replace(oldGuard, newGuard) + source.slice(end);
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  const root = path.resolve(process.argv[2] || '');
++  assert(path.basename(root) === 'dist', 'Only generated dist assets may be patched');
++  const target = path.join(root, 'sdkjs/slide/sdk-all.js');
++  const source = await readFile(target, 'utf8');
++  const before = createHash('sha256').update(source).digest('hex');
++  // Even an already patched input must reconstruct the exact pinned input.
++  const unpatched = source.replace(newGuard, oldGuard);
++  assert(createHash('sha256').update(unpatched).digest('hex') === inputHash, 'Unexpected SDK asset');
++  const patched = patchSmartArtLinePathFill(source);
++  await writeFile(target, patched);
++  await writeFile(
++    target + '.br',
++    brotliCompressSync(Buffer.from(patched), {
++      params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
++    }),
++  );
++  console.log(JSON.stringify({ patch: marker, before, after: createHash('sha256').update(patched).digest('hex') }));
++}
+diff --git a/scripts/patch-onlyoffice-smartart-transition-style.d.mts b/scripts/patch-onlyoffice-smartart-transition-style.d.mts
+new file mode 100644
+index 0000000..2965484
+--- /dev/null
++++ b/scripts/patch-onlyoffice-smartart-transition-style.d.mts
+@@ -0,0 +1 @@
++export function patchSmartArtTransitionStyle(source: string): string;
+diff --git a/scripts/patch-onlyoffice-smartart-transition-style.mjs b/scripts/patch-onlyoffice-smartart-transition-style.mjs
+new file mode 100644
+index 0000000..0fdc697
+--- /dev/null
++++ b/scripts/patch-onlyoffice-smartart-transition-style.mjs
+@@ -0,0 +1,46 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++// Local candidate for ONLYOFFICE sdkjs v9.3.0.140, after the group, relation and connector path patches.
++import assert from 'node:assert/strict';
++import { createHash } from 'node:crypto';
++import { readFile, writeFile } from 'node:fs/promises';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { brotliCompressSync, constants } from 'node:zlib';
++
++const marker = 'spellbook-smartart-transition-default-style-v1';
++const inputHash = '9f0ffa814c45d92b450bd32737602cd9fadf48f8686c053d1f1ba75ca15ddd28';
++const oldGuard = 'prSet.setPresStyleLbl(styleLbl||"node1");';
++const newGuard = `/* ${marker} */prSet.setPresStyleLbl(styleLbl||(contentNode&&(contentNode.isParNode()||contentNode.isSibNode())?"":"node1"));`;
++
++export function patchSmartArtTransitionStyle(source) {
++  const start = source.indexOf('SmartArtAlgorithm.prototype.createPresNode=function(');
++  const end = source.indexOf('SmartArtAlgorithm.prototype.forEachContentNode=', start);
++  assert(start >= 0 && end > start, 'Pinned SmartArt presentation node boundary missing');
++  const body = source.slice(start, end);
++  if (body.includes(newGuard)) {
++    assert(!body.includes(oldGuard), 'Mixed SmartArt style implementation');
++    return source;
++  }
++  assert(body.split(oldGuard).length === 2, 'Pinned SmartArt default style changed');
++  return source.slice(0, start) + body.replace(oldGuard, newGuard) + source.slice(end);
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  const root = path.resolve(process.argv[2] || '');
++  assert(path.basename(root) === 'dist', 'Only generated dist assets may be patched');
++  const target = path.join(root, 'sdkjs/slide/sdk-all.js');
++  const source = await readFile(target, 'utf8');
++  const before = createHash('sha256').update(source).digest('hex');
++  // Even an already patched input must reconstruct the exact pinned input.
++  const unpatched = source.replace(newGuard, oldGuard);
++  assert(createHash('sha256').update(unpatched).digest('hex') === inputHash, 'Unexpected SDK asset');
++  const patched = patchSmartArtTransitionStyle(source);
++  await writeFile(target, patched);
++  await writeFile(
++    target + '.br',
++    brotliCompressSync(Buffer.from(patched), {
++      params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
++    }),
++  );
++  console.log(JSON.stringify({ patch: marker, before, after: createHash('sha256').update(patched).digest('hex') }));
++}
+diff --git a/test/unit/smartart-line-path.test.ts b/test/unit/smartart-line-path.test.ts
+new file mode 100644
+index 0000000..627ba25
+--- /dev/null
++++ b/test/unit/smartart-line-path.test.ts
+@@ -0,0 +1,84 @@
++import { readFileSync } from 'node:fs';
++import vm from 'node:vm';
++import { describe, expect, it } from 'vitest';
++import { patchSmartArtLinePathFill } from '../../scripts/patch-onlyoffice-smartart-line-path.mjs';
++
++const source = readFileSync('public/sdkjs/slide/sdk-all.js', 'utf8');
++function generatedLine(text: string) {
++  class ShadowShape {}
++  const history: string[] = [];
++  const paths: { fill: string; commands: unknown[][]; setFill: (value: string) => void }[] = [];
++  const geometry = {
++    pathLst: paths,
++    AddPathCommand(...command: unknown[]) {
++      if (command[0] === 0) {
++        const path = {
++          fill: 'norm',
++          commands: [] as unknown[][],
++          setFill(value: string) {
++            this.fill = value;
++            history.push(value);
++          },
++        };
++        paths.push(path);
++      } else paths.at(-1)!.commands.push(command);
++    },
++  };
++  const noop = () => {};
++  const shape = {
++    spPr: { geometry, setFill: noop, setLn: noop, xfrm: { setExtX: noop, setExtY: noop } },
++    setBDeleted: noop,
++    setParent: noop,
++    setWorksheet: noop,
++  };
++  class NewShapeTrack {
++    track() {}
++    getShape() {
++      return shape;
++    }
++  }
++  const context = vm.createContext({ ShadowShape, AscFormat: { NewShapeTrack } });
++  const start = text.indexOf('ShadowShape.prototype.getEditorLine=function(');
++  vm.runInContext(text.slice(start, text.indexOf('ShadowShape.prototype.getEditorShape=', start)), context);
++  const shadow = new ShadowShape() as any;
++  Object.assign(shadow, {
++    x: 0,
++    y: 0,
++    width: 30,
++    height: 50,
++    // An open orthogonal connector encloses an unintended triangle when filled.
++    customGeom: [[0], [1, 0, 0], [2, 0, 900000], [2, 1080000, 900000]],
++    applyPostEditorSettings: () => {},
++  });
++  shadow.getEditorLine({});
++  return { paths, history };
++}
++
++describe('SmartArt generated connector path fill', () => {
++  it('reproduces the filled open path in the pinned SDK', () => {
++    expect(generatedLine(source).paths[0].fill).toBe('norm');
++  });
++  it('uses native path history to preserve the open stroke without a filled polygon', () => {
++    const { paths, history } = generatedLine(patchSmartArtLinePathFill(source));
++    expect(paths[0].fill).toBe('none');
++    expect(history).toEqual(['none']);
++    expect(paths[0].commands).toEqual([
++      [1, '0', '0'],
++      [2, '0', '900000'],
++      [2, '1080000', '900000'],
++    ]);
++  });
++  it('leaves all non-line shape generation unchanged', () => {
++    const boundary = source.indexOf('ShadowShape.prototype.getEditorShape=');
++    const patched = patchSmartArtLinePathFill(source);
++    expect(patched.slice(patched.indexOf('ShadowShape.prototype.getEditorShape='))).toBe(source.slice(boundary));
++  });
++  it('is idempotent and refuses unknown native boundaries', () => {
++    const patched = patchSmartArtLinePathFill(source);
++    expect(patchSmartArtLinePathFill(patched)).toBe(patched);
++    expect(() => patchSmartArtLinePathFill('unknown SDK')).toThrow();
++    expect(() =>
++      patchSmartArtLinePathFill(source.replace('geometry.AddPathCommand.apply(geometry,custCommand)', 'unknown()')),
++    ).toThrow();
++  });
++});
+diff --git a/test/unit/smartart-transition-style.test.ts b/test/unit/smartart-transition-style.test.ts
+new file mode 100644
+index 0000000..8dbf8a5
+--- /dev/null
++++ b/test/unit/smartart-transition-style.test.ts
+@@ -0,0 +1,59 @@
++import { readFileSync } from 'node:fs';
++import vm from 'node:vm';
++import { describe, expect, it } from 'vitest';
++import { patchSmartArtTransitionStyle } from '../../scripts/patch-onlyoffice-smartart-transition-style.mjs';
++const source = readFileSync('public/sdkjs/slide/sdk-all.js', 'utf8');
++function style(text: string, kind: string, authored?: string) {
++  class SmartArtAlgorithm {
++    getNewGUID() {
++      return 'native-point';
++    }
++  }
++  class PrSet {
++    presStyleLbl = '';
++    setPresName() {}
++    setPresStyleLbl(value: string) {
++      this.presStyleLbl = value;
++    }
++  }
++  class Point {
++    prSet?: PrSet;
++    setType() {}
++    setPrSet(value: PrSet) {
++      this.prSet = value;
++    }
++    setModelId() {}
++  }
++  class PresNode {
++    constructor(public point: Point) {}
++  }
++  const context = vm.createContext({ SmartArtAlgorithm, Point, PresNode, AscFormat: { PrSet, Point_type_pres: 4 } });
++  const start = text.indexOf('SmartArtAlgorithm.prototype.createPresNode=function(');
++  vm.runInContext(text.slice(start, text.indexOf('SmartArtAlgorithm.prototype.forEachContentNode=', start)), context);
++  const algorithm = new SmartArtAlgorithm() as any;
++  return algorithm.createPresNode('layout-node', authored, {
++    isParNode: () => kind === 'parent-transition',
++    isSibNode: () => kind === 'sibling-transition',
++  }).point.prSet.presStyleLbl;
++}
++describe('SmartArt new transition presentation styles', () => {
++  it('reproduces the generic node style which prevents native line style selection', () => {
++    expect(style(source, 'parent-transition')).toBe('node1');
++  });
++  it.each(['parent-transition', 'sibling-transition'])('defers %s style to its native routing algorithm', (kind) => {
++    expect(style(patchSmartArtTransitionStyle(source), kind)).toBe('');
++  });
++  it.each(['parent-transition', 'sibling-transition', 'content'])(
++    'retains explicitly authored styles for %s',
++    (kind) => {
++      expect(style(patchSmartArtTransitionStyle(source), kind, 'authored-custom-style')).toBe('authored-custom-style');
++    },
++  );
++  it('retains the content node fallback and refuses changed boundaries', () => {
++    const patched = patchSmartArtTransitionStyle(source);
++    expect(style(patched, 'content')).toBe('node1');
++    expect(patchSmartArtTransitionStyle(patched)).toBe(patched);
++    expect(() => patchSmartArtTransitionStyle('unknown')).toThrow();
++    expect(() => patchSmartArtTransitionStyle(source.replace('styleLbl||"node1"', 'unknown'))).toThrow();
++  });
++});

@@ -1,0 +1,158 @@
+diff --git a/bin/build.sh b/bin/build.sh
+index 1e28ffd..17fc424 100755
+--- a/bin/build.sh
++++ b/bin/build.sh
+@@ -8,6 +8,7 @@ echo "Starting build process..."
+ # Run Vite build through the project-local binary.
+ ./node_modules/.bin/vite build
+ node scripts/patch-onlyoffice-slide-group-reader.mjs dist
++node scripts/patch-onlyoffice-smartart-connection-map.mjs dist
+ 
+ # Keep the deployable demo/runtime lean by removing low-frequency bundled
+ # assets and emitting canonical path packs for per-document-type CDN sync.
+diff --git a/scripts/patch-onlyoffice-smartart-connection-map.d.mts b/scripts/patch-onlyoffice-smartart-connection-map.d.mts
+new file mode 100644
+index 0000000..084dec8
+--- /dev/null
++++ b/scripts/patch-onlyoffice-smartart-connection-map.d.mts
+@@ -0,0 +1 @@
++export function patchSmartArtConnectionMap(source: string): string;
+diff --git a/scripts/patch-onlyoffice-smartart-connection-map.mjs b/scripts/patch-onlyoffice-smartart-connection-map.mjs
+new file mode 100644
+index 0000000..71b6f19
+--- /dev/null
++++ b/scripts/patch-onlyoffice-smartart-connection-map.mjs
+@@ -0,0 +1,47 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++// Local candidate for ONLYOFFICE sdkjs v9.3.0.140, after the group reader patch.
++import assert from 'node:assert/strict';
++import { createHash } from 'node:crypto';
++import { readFile, writeFile } from 'node:fs/promises';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { brotliCompressSync, constants } from 'node:zlib';
++
++const marker = 'spellbook-smartart-new-node-connection-v1';
++const inputHash = 'b61156c91fcb7083452034ae8815e22c25b25fe85cc22a975915db3c34c2e608';
++const oldGuard = 'if(cxnMap[contentNodeId][modelId])delete cxnMap[contentNodeId][modelId];';
++const newGuard = `/* ${marker} */if(cxnMap[contentNodeId]&&cxnMap[contentNodeId][modelId])delete cxnMap[contentNodeId][modelId];`;
++
++export function patchSmartArtConnectionMap(source) {
++  const start = source.indexOf('SmartArtAlgorithm.prototype.checkPresOfCxn=function(');
++  const end = source.indexOf('SmartArtAlgorithm.prototype.checkPresOfData=', start);
++  assert(start >= 0 && end > start, 'Pinned SmartArt connection boundary missing');
++  const body = source.slice(start, end);
++  assert(body.includes('new AscFormat.Cxn') && body.includes('Cxn_type_presOf'), 'Native relation creation missing');
++  if (body.includes(newGuard)) {
++    assert(!body.includes(oldGuard), 'Mixed SmartArt connection implementation');
++    return source;
++  }
++  assert(body.split(oldGuard).length === 2, 'Pinned SmartArt connection guard changed');
++  return source.slice(0, start) + body.replace(oldGuard, newGuard) + source.slice(end);
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  const root = path.resolve(process.argv[2] || '');
++  assert(path.basename(root) === 'dist', 'Only generated dist assets may be patched');
++  const target = path.join(root, 'sdkjs/slide/sdk-all.js');
++  const source = await readFile(target, 'utf8');
++  const before = createHash('sha256').update(source).digest('hex');
++  // Even an already patched input must reconstruct the exact pinned input.
++  const unpatched = source.replace(newGuard, oldGuard);
++  assert(createHash('sha256').update(unpatched).digest('hex') === inputHash, 'Unexpected SDK asset');
++  const patched = patchSmartArtConnectionMap(source);
++  await writeFile(target, patched);
++  await writeFile(
++    target + '.br',
++    brotliCompressSync(Buffer.from(patched), {
++      params: { [constants.BROTLI_PARAM_QUALITY]: 5 },
++    }),
++  );
++  console.log(JSON.stringify({ patch: marker, before, after: createHash('sha256').update(patched).digest('hex') }));
++}
+diff --git a/test/unit/smartart-connection-map.test.ts b/test/unit/smartart-connection-map.test.ts
+new file mode 100644
+index 0000000..dcaf830
+--- /dev/null
++++ b/test/unit/smartart-connection-map.test.ts
+@@ -0,0 +1,80 @@
++import { readFileSync } from 'node:fs';
++import vm from 'node:vm';
++import { describe, expect, it } from 'vitest';
++import { patchSmartArtConnectionMap } from '../../scripts/patch-onlyoffice-smartart-connection-map.mjs';
++
++const source = readFileSync('public/sdkjs/slide/sdk-all.js', 'utf8');
++const extract = (text: string) => {
++  const start = text.indexOf('SmartArtAlgorithm.prototype.checkPresOfCxn=function(');
++  return text.slice(start, text.indexOf('SmartArtAlgorithm.prototype.checkPresOfData=', start));
++};
++function connect(text: string, map: Record<string, Record<string, unknown>>) {
++  class SmartArtAlgorithm {}
++  class Cxn {
++    values: Record<string, unknown> = {};
++    setModelId(value: string) {
++      this.values.id = value;
++    }
++    setSrcId(value: string) {
++      this.values.source = value;
++    }
++    setDestId(value: string) {
++      this.values.destination = value;
++    }
++    setDestOrd(value: number) {
++      this.values.destinationOrder = value;
++    }
++    setSrcOrd(value: number) {
++      this.values.sourceOrder = value;
++    }
++    setType(value: number) {
++      this.values.type = value;
++    }
++  }
++  const context = vm.createContext({ SmartArtAlgorithm, AscFormat: { Cxn, Cxn_type_presOf: 1 } });
++  vm.runInContext(extract(text), context);
++  const added: Cxn[] = [];
++  const algorithm = new SmartArtAlgorithm() as any;
++  algorithm.getNewGUID = () => 'new-native-connection';
++  algorithm.checkPresOfCxn({ presPoint: { getModelId: () => 'presentation-node' } }, 'new-node', map, {
++    list: added,
++    addToLst: (_position: number, value: Cxn) => added.push(value),
++  });
++  return added.map((value) => value.values);
++}
++
++describe('SmartArt semantic node connection creation', () => {
++  it('reproduces the pinned engine exception for a valid new node with no presentation relation yet', () => {
++    expect(() => connect(source, {})).toThrow();
++  });
++  it('creates the native relation for a new node without dropping unrelated map entries', () => {
++    const map = { other: { retained: true } };
++    expect(connect(patchSmartArtConnectionMap(source), map)).toEqual([
++      {
++        id: 'new-native-connection',
++        source: 'new-node',
++        destination: 'presentation-node',
++        sourceOrder: 0,
++        destinationOrder: 0,
++        type: 1,
++      },
++    ]);
++    expect(map).toEqual({ other: { retained: true } });
++  });
++  it('keeps existing native relations instead of duplicating them', () => {
++    const map = { 'new-node': { 'presentation-node': {}, unrelated: true } };
++    expect(connect(patchSmartArtConnectionMap(source), map)).toEqual([]);
++    expect(map).toEqual({ 'new-node': { unrelated: true } });
++  });
++  it('adds a missing destination to an existing source group', () => {
++    expect(connect(patchSmartArtConnectionMap(source), { 'new-node': {} })).toHaveLength(1);
++  });
++  it('is idempotent and refuses an altered or missing pinned implementation', () => {
++    const patched = patchSmartArtConnectionMap(source);
++    expect(patchSmartArtConnectionMap(patched)).toBe(patched);
++    expect(() => patchSmartArtConnectionMap('other engine')).toThrow();
++    expect(() =>
++      patchSmartArtConnectionMap(source.replace('cxnMap[contentNodeId][modelId]', 'unknown[modelId]')),
++    ).toThrow();
++  });
++});
