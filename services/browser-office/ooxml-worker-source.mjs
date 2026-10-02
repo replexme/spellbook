@@ -767,8 +767,19 @@ function preserveUnaffectedSlideShapes(
       // Geometry can be applied to the original frame/group wrapper without
       // importing the engine's children or relationship IDs. Keep diagram
       // parts, picture contents and style exactly as authored.
-      const moved = importOoxmlSubtree(documents[2], source, true);
+      let moved = importOoxmlSubtree(documents[2], source, true);
       if (!applyAuthoredGeometryDelta(moved, source, baseline, editedShape, sourceOperations, geometrySources)) return null;
+      if (hasRelationshipReference(moved)) {
+        if (!geometrySources) return null;
+        const related = relationshipsPath(part);
+        // This subtree came from the author, while its destination document
+        // uses engine relationship IDs. Translate by type and resolved target
+        // before the final package translates all engine IDs back together.
+        const rebound = remapPartRelationshipIds(part, serializeXml(moved),
+          geometrySources.entries[1][related], geometrySources.entries[0][related]);
+        if (!rebound) return null;
+        moved = importOoxmlSubtree(documents[2], parseXml({ [part]: rebound }, part).documentElement, true);
+      }
       // The geometry changed, but every shape ID still comes from source.
       replacements.push({ pair, editedShape, restored: true, node: moved });
       continue;
@@ -3293,7 +3304,10 @@ export function preserveOriginalPptxParts(
       authoredChange &&
       !part.endsWith(".rels") &&
       !semanticSlideSizePatch &&
-      !presentationPatch
+      !presentationPatch &&
+      // Direct deletion builds the entire XML from the original and keeps
+      // its original .rels. It contains no engine-origin relationship IDs.
+      !(directDeletionPart === part && semanticShapePatch)
     ) {
       if (
         samePartBytes(noEdit[related], edited[related]) &&

@@ -4478,3 +4478,52 @@ test("a newly inserted slide can introduce the first notes master without replac
   assert.ok(masterEntry);
   assert.ok(saved[masterEntry.replace("/notesMasters/", "/notesMasters/_rels/") + ".rels"]);
 });
+
+
+test("direct deletion keeps authored relationship IDs even when engine IDs reuse another target", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml";
+  const related = "ppt/slides/_rels/slide1.xml.rels";
+  original[part] = strToU8(strFromU8(original[part]).replace("</p:spTree>",
+    '<p:pic><p:nvPicPr><p:cNvPr id="9" name="Retained picture"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rIdPicture"/></p:blipFill><p:spPr><a:xfrm><a:off x="1000" y="2000"/><a:ext cx="3000" cy="4000"/></a:xfrm></p:spPr></p:pic></p:spTree>'));
+  original[related] = strToU8(strFromU8(original[related]).replace("</Relationships>",
+    '<Relationship Id="rIdPicture" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/retained.png"/></Relationships>'));
+  original["ppt/media/retained.png"] = new Uint8Array([1,2,3]);
+  const baseline = { ...original,
+    [part]: strToU8(strFromU8(original[part]).replace('r:embed="rIdPicture"', 'r:embed="rIdEnginePicture"')),
+    [related]: strToU8(strFromU8(original[related]).replace('Id="rIdPicture"','Id="rIdEnginePicture"')) };
+  const document = new DOMParser().parseFromString(strFromU8(baseline[part]), "application/xml");
+  const removed = document.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "sp")[0];
+  removed.parentNode.removeChild(removed);
+  const edited = { ...baseline, [part]: strToU8(new XMLSerializer().serializeToString(document)) };
+  const result = preserveOriginalPptxParts(zipSync(original), zipSync(baseline), zipSync(edited), ["delete_element"],
+    [{ op: "delete_element", slideIndex: 0, shapeIndex: 0, name: "TextBox 1" }]);
+  assert.deepEqual(result.report.changedParts, [part]);
+  const saved = unzipSync(result.bytes);
+  assert.match(strFromU8(saved[part]), /r:embed="rIdPicture"/u);
+  assert.doesNotMatch(strFromU8(saved[part]), /Spellbook 검증/u);
+  for (const [key,value] of Object.entries(original))
+    if (key !== part) assert.deepEqual(saved[key], value, key);
+});
+
+test("restored SmartArt frames translate their authored relationship IDs into the engine document before final merge", async () => {
+  const bytes = new Uint8Array(await readFile(new URL("../../eval/public/downloads/lo-smartart-org.pptx", import.meta.url)));
+  const original = unzipSync(bytes);
+  const part = "ppt/slides/slide1.xml";
+  const related = "ppt/slides/_rels/slide1.xml.rels";
+  const remappedRelationships = strFromU8(original[related]).replace(/Id="rId(\d+)"/gu, 'Id="native$1"');
+  const baseline = { ...original, [related]: strToU8(remappedRelationships),
+    [part]: strToU8(strFromU8(original[part]).replace(/r:([\w]+)="rId(\d+)"/gu, 'r:$1="native$2"')) };
+  const edited = { ...baseline, [part]: strToU8(strFromU8(baseline[part]).replace('x="1524000"', 'x="1740000"')) };
+  const result = preserveOriginalPptxParts(bytes, zipSync(baseline), zipSync(edited), ["move"],
+    [{ op: "move", slideIndex: 0, shapeIndex: 0, name: "Diagram 3" }]);
+  assert.deepEqual(result.report.changedParts, [part]);
+  const saved = unzipSync(result.bytes);
+  assert.match(strFromU8(saved[part]), /x="1740000"/u);
+  assert.doesNotMatch(strFromU8(saved[part]), /="native\d+"/u);
+  for (const [key,value] of Object.entries(original))
+    if (key !== part) assert.deepEqual(saved[key], value, key);
+  baseline[related] = strToU8(remappedRelationships.replace('Target="../diagrams/data1.xml"', 'Target="../diagrams/other.xml"'));
+  assert.throws(() => preserveOriginalPptxParts(bytes, zipSync(baseline), zipSync(edited), ["move"],
+    [{ op: "move", slideIndex: 0, shapeIndex: 0, name: "Diagram 3" }]), /cannot isolate direct move/u);
+});
