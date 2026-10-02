@@ -483,6 +483,29 @@ const item = {
     "Actual typed candidate native history and authored-source preservation plus final structure repair in real save callback; excludes full 94-command product admission.",
 };
 report.cases.push(item);
+async function visibleSlide(frame) {
+  return frame.evaluate(async () => {
+    const canvas = document.getElementById("id_viewer");
+    if (!(canvas instanceof HTMLCanvasElement) || !canvas.width || !canvas.height)
+      throw Error("visible_slide_canvas_missing");
+    const pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+    const digest = await crypto.subtle.digest("SHA-256", pixels);
+    return { width: canvas.width, height: canvas.height, sha256: Array.from(new Uint8Array(digest), n => n.toString(16).padStart(2,"0")).join("") };
+  });
+}
+async function visibleSlides(page, frame, label, count) {
+  const views = [];
+  for (let index = 0; index < count; index++) {
+    await frame.evaluate(index => window.Asc.editor.WordControl.GoToPage(index), index);
+    await page.waitForTimeout(250);
+    views.push(await visibleSlide(frame));
+    await page.screenshot({path: path.join(outputRoot, `slide-${label}-${index + 1}.png`)});
+  }
+  await frame.evaluate(() => window.Asc.editor.WordControl.GoToPage(0));
+  await page.waitForTimeout(250);
+  return views;
+}
+
 try {
   let { frame, ms } = await open(page);
   item.openMs = ms;
@@ -493,6 +516,8 @@ try {
     window.__comparisonIntent = { sourceOperations: null, sourceTargets: null };
   });
   const before = await typedProjection(frame);
+  item.slideRendering = { before: await visibleSlides(page, frame, "before", before.common.slides.length) };
+  if (typedCase === "chart-data") item.visibleRendering = { before: await visibleSlide(frame) };
   await page.screenshot({ path: path.join(outputRoot, "before.png") });
   item.stage = "apply";
   let chartAuthority = null;
@@ -978,6 +1003,13 @@ try {
   {
     await page.waitForTimeout(200);
     const edited = await typedProjection(frame);
+    item.slideRendering.edited = await visibleSlides(page, frame, "edited", edited.common.slides.length);
+    for (let index=1;index<before.common.slides.length;index++)
+      assert.deepEqual(item.slideRendering.edited[index], item.slideRendering.before[index], `Untargeted slide ${index+1} must retain visible pixels`);
+    if (chartAuthority) {
+      item.visibleRendering.edited = await visibleSlide(frame);
+      assert.notEqual(item.visibleRendering.edited.sha256, item.visibleRendering.before.sha256, "Chart edit must redraw the visible slide");
+    }
     if (setup.semanticMutation) {
       const diagrams = (value) =>
         value.common.slides[0].shapes
@@ -1086,6 +1118,11 @@ try {
     await frame.evaluate(() => window.Asc.editor.Undo());
     await page.waitForTimeout(150);
     item.undoDifferences = differences(before, await typedProjection(frame));
+    if (chartAuthority) {
+      item.visibleRendering.undo = await visibleSlide(frame);
+      await page.screenshot({path: path.join(outputRoot, "undo.png")});
+      assert.equal(item.visibleRendering.undo.sha256, item.visibleRendering.before.sha256, "Undo must restore visible chart pixels");
+    }
     if (chartAuthority)
       assert.deepEqual(
         await nativeWorkbook(),
@@ -1095,6 +1132,11 @@ try {
     await frame.evaluate(() => window.Asc.editor.Redo());
     await page.waitForTimeout(150);
     item.redoDifferences = differences(edited, await typedProjection(frame));
+    if (chartAuthority) {
+      item.visibleRendering.redo = await visibleSlide(frame);
+      await page.screenshot({path: path.join(outputRoot, "redo.png")});
+      assert.equal(item.visibleRendering.redo.sha256, item.visibleRendering.edited.sha256, "Redo must restore visible chart pixels");
+    }
     if (chartAuthority)
       assert.deepEqual(
         await nativeWorkbook(),
@@ -1106,6 +1148,13 @@ try {
     ({ frame, ms } = await open(page));
     item.reopenMs = ms;
     const reopened = await typedProjection(frame);
+    item.slideRendering.reopened = await visibleSlides(page, frame, "reopened", reopened.common.slides.length);
+    for (let index=1;index<before.common.slides.length;index++)
+      assert.deepEqual(item.slideRendering.reopened[index], item.slideRendering.before[index], `Saved untargeted slide ${index+1} must retain visible pixels`);
+    if (chartAuthority) {
+      item.visibleRendering.reopened = await visibleSlide(frame);
+      assert.equal(item.visibleRendering.reopened.sha256, item.visibleRendering.edited.sha256, "Saved reopened chart must match the live rendering");
+    }
     item.reopenDifferences = differences(edited, reopened);
     await page.screenshot({ path: path.join(outputRoot, "reopened.png") });
     await writeFile(

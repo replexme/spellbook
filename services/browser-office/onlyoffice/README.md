@@ -163,3 +163,20 @@ source index disambiguates identical slides only after complete native slide
 content matches; it cannot authorize a mismatching source. The comparison host
 requires its explicit programmatic save boundary and is not production admission
 or an implementation of every native toolbar save route.
+
+Chart-data verification also hashes the actual visible slide canvas. Edited
+pixels must differ from the original; Undo must restore the original pixels,
+and Redo and reopened pixels must match the edited pixels exactly. The local
+numeric-point history patch supplies the missing native `Refresh_RecalcData`
+hook through the owning chart's existing data invalidation lifecycle. This
+fixes apply and history replay without changing workbook contents or adding a
+manual redraw to the test. Its generated SDK bytes are digest-bound like the
+other candidate patches. The pinned [chart format source](https://github.com/ONLYOFFICE/sdkjs/blob/v9.3.0.140/common/Drawings/Format/ChartFormat.js)
+provides `CNumericPoint.setVal` and the parent numeric-cache history lifecycle.
+
+Every typed trial captures all slides before editing, after editing and after
+reopening, and requires pixel identity for untargeted slides. This selects and
+renders each page rather than treating a lazy thumbnail as evidence of lost
+content. First-slide non-chart visual review remains a separate requirement;
+these screenshots do not turn representative setters into complete operation
+contracts.
