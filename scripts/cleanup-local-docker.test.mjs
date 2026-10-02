@@ -61,6 +61,15 @@ test("can remove all unused labeled images without touching active ones", () => 
   );
 });
 
+test("defaults to removing every unused managed image immediately", () => {
+  const plan = planSpellbookImageCleanup([
+    image("newest-unused", "web", "2026-10-03T01:00:00Z"),
+    image("active", "web", "2026-10-02T01:00:00Z"),
+  ], ["active"]);
+  assert.deepEqual(plan.remove.map(({ id }) => id), ["newest-unused"]);
+  assert.deepEqual(plan.keep.map(({ id }) => id), ["active"]);
+});
+
 test("adopts only exact legacy Spellbook Compose image names", () => {
   assert.equal(
     componentFromImage({

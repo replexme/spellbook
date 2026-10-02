@@ -21,7 +21,7 @@ export function componentFromImage(image) {
 export function planSpellbookImageCleanup(
   images,
   referencedImageIds,
-  { keepUnusedPerComponent = 1 } = {},
+  { keepUnusedPerComponent = 0 } = {},
 ) {
   if (!Number.isInteger(keepUnusedPerComponent) || keepUnusedPerComponent < 0)
     throw new Error("keepUnusedPerComponent must be a non-negative integer.");
@@ -100,7 +100,7 @@ function dockerState() {
 }
 
 function parseArguments(argv) {
-  const options = { execute: false, keepUnusedPerComponent: 1 };
+  const options = { execute: false, keepUnusedPerComponent: 0 };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--") continue;
@@ -122,6 +122,10 @@ function run(argv) {
       ["image", "rm", "--", ...plan.remove.map((image) => image.id)],
       { stdio: "inherit" },
     );
+  if (options.execute)
+    execFileSync("docker", ["builder", "prune", "--all", "--force"], {
+      stdio: "inherit",
+    });
   process.stdout.write(
     `${JSON.stringify(
       {

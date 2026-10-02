@@ -72,21 +72,20 @@ function execute([command, args]) {
     );
 }
 
-function run() {
-  const plan = selfhostUpPlan();
-  execute(plan.beforeBuild);
-  execute(plan.stopInactive);
-  execute(plan.build);
+export function runSelfhostUp(plan = selfhostUpPlan(), executeStep = execute) {
+  executeStep(plan.beforeBuild);
   try {
-    execute(plan.start);
+    executeStep(plan.stopInactive);
+    executeStep(plan.build);
+    executeStep(plan.start);
   } finally {
-    execute(plan.afterStart);
+    executeStep(plan.afterStart);
   }
 }
 
 if (path.resolve(process.argv[1] ?? "") === fileURLToPath(import.meta.url)) {
   try {
-    run();
+    runSelfhostUp();
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
