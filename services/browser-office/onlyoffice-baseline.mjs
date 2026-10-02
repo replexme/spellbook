@@ -4,10 +4,15 @@ import { nativeExportDifferences } from "./ooxml-worker-source.mjs";
 // A cold native serializer may materialize derived layout state. Capture a
 // bounded stable same-engine baseline before any edit; never treat it as saved
 // authored content. The actual component callback owns each captured export.
-export async function captureStableOnlyOfficeBaseline(page, save) {
-  await page.evaluate(() => {
+export async function captureStableOnlyOfficeBaseline(
+  page,
+  save,
+  { retainPreservationBaseline = false } = {},
+) {
+  await page.evaluate((retain) => {
     window.__comparisonCaptureBaseline = true;
-  });
+    window.__comparisonRetainPreservationBaseline = retain;
+  }, retainPreservationBaseline);
   let ms = 0,
     prior = null;
   const transitions = [];
@@ -28,6 +33,7 @@ export async function captureStableOnlyOfficeBaseline(page, save) {
   } finally {
     await page.evaluate(() => {
       window.__comparisonCaptureBaseline = false;
+      window.__comparisonRetainPreservationBaseline = false;
     });
   }
 }

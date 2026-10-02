@@ -160,3 +160,24 @@ test("comparison hosts require loopback and source-preserved artifacts require f
     /structure repair/,
   );
 });
+
+test("native checkpoint acknowledgement retains the workbook preservation reference without a write", async () => {
+  const h = await host();
+  h.window.__comparisonCaptureBaseline = true;
+  h.window.__comparisonRetainPreservationBaseline = true;
+  h.setValue(2);
+  await h.window.__ONLYOFFICE_SAVE_E2E__.save();
+  h.window.__comparisonCaptureBaseline = false;
+  h.window.__comparisonRetainPreservationBaseline = false;
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 0);
+  h.window.__comparisonIntent = { sourceOperations: null, sourceTargets: null };
+  h.setValue(3);
+  const saved = h.window.__ONLYOFFICE_SAVE_E2E__.save();
+  await h.settle();
+  assert.deepEqual([...h.requests[0].bytes], [1]);
+  assert.deepEqual([...h.requests[0].noEditBytes], [1]);
+  assert.deepEqual([...h.requests[0].editedBytes], [3]);
+  h.worker.reply(13);
+  await saved;
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 1);
+});

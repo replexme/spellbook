@@ -27,8 +27,8 @@ function trial(values) {
   const window = {},
     calls = [];
   const page = {
-    evaluate: (fn) =>
-      Promise.resolve(vm.runInNewContext(`(${fn})()`, { window })),
+    evaluate: (fn, value) =>
+      Promise.resolve(vm.runInNewContext(`(${fn})(value)`, { window, value })),
   };
   const save = async () => {
     assert.equal(window.__comparisonCaptureBaseline, true);
@@ -70,4 +70,17 @@ test("unstable serialization and export failures release the baseline capture bo
     assert.equal(t.window.__comparisonCaptureBaseline, false);
     assert.ok(t.calls.length <= 4);
   }
+});
+
+test("a native saved-state checkpoint can retain the independently prepared preservation reference", async () => {
+  const t = trial([version(1), version(1)]);
+  await captureStableOnlyOfficeBaseline(
+    t.page,
+    async (page) => {
+      assert.equal(t.window.__comparisonRetainPreservationBaseline, true);
+      return t.save(page);
+    },
+    { retainPreservationBaseline: true },
+  );
+  assert.equal(t.window.__comparisonRetainPreservationBaseline, false);
 });

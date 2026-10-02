@@ -1,3 +1,4 @@
+import { readCandidateNativeEvidence } from "./onlyoffice/native-evidence.mjs";
 import { readOnlyOfficeCodeIdentity } from "./onlyoffice/code-identity.mjs";
 import { beginCandidateTransaction, finishCandidateTransaction } from "./onlyoffice/candidate-transaction.mjs";
 import { captureStableOnlyOfficeBaseline } from "./onlyoffice-baseline.mjs";
@@ -91,7 +92,7 @@ const report = {
 };
 const typedCase = flag("--typed-case");
 const failAfterApply = process.argv.includes("--fail-after-apply");
-let transaction = null, transactionBefore = null;
+let transaction = null, transactionBefore = null, transactionNativeBefore = null, transactionHostBefore = null;
 const knownTypedCases = [
   "table-row-add",
   "table-cell-style",
@@ -268,8 +269,6 @@ async function visibleSlides(page, frame, label, count) {
 try {
   let { frame, ms } = await open(page);
   item.openMs = ms;
-  const sourceBaseline = await captureStableOnlyOfficeBaseline(page, save);
-  item.sourceBaselineStabilization = { ms: sourceBaseline.ms, attempts: sourceBaseline.attempts, transitions: sourceBaseline.transitions };
   await page.evaluate(() => {
     window.__comparisonIntent = { sourceOperations: null, sourceTargets: null };
   });
@@ -277,6 +276,8 @@ try {
   item.slideRendering = { before: await visibleSlides(page, frame, "before", before.common.slides.length) };
   if (typedCase === "chart-data") item.visibleRendering = { before: await visibleSlide(frame) };
   await page.screenshot({ path: path.join(outputRoot, "before.png") });
+  const sourceBaseline = await captureStableOnlyOfficeBaseline(page, save);
+  item.sourceBaselineStabilization = { ms: sourceBaseline.ms, attempts: sourceBaseline.attempts, transitions: sourceBaseline.transitions };
   item.stage = "apply";
   let chartAuthority = null;
   if (typedCase === "chart-data") {
@@ -454,7 +455,17 @@ try {
       { mode: 0o600 },
     );
   }
+  // Visiting slides can resolve imported dynamic-field caches without a history
+  // point. Capture the no-edit baseline after observation/rendering and chart
+  // workbook preparation, before any transaction can mutate authored content.
+  const transactionBaseline = chartAuthority ? await captureStableOnlyOfficeBaseline(page, save, {retainPreservationBaseline:true}) : sourceBaseline;
+  item.transactionBaselineStabilization = {ms:transactionBaseline.ms, attempts:transactionBaseline.attempts, transitions:transactionBaseline.transitions};
   transactionBefore = await typedProjection(frame);
+  assert.deepEqual(differences(before,transactionBefore),[],"No-edit preparation cannot alter observed content");
+  transactionHostBefore = await page.evaluate(() => window.__ONLYOFFICE_SAVE_E2E__.getStatus());
+  transactionNativeBefore = await readCandidateNativeEvidence(frame,candidateRoot);
+  item.hostBeforeMutation = transactionHostBefore;
+  item.nativeBeforeMutation = transactionNativeBefore;
   transaction = { frame, checkpoint: await beginCandidateTransaction(frame) };
   const setup = await frame.evaluate(({ kind, chartAuthority }) => {
     const api = window.AscBuilder.Slide.Api,
@@ -942,9 +953,11 @@ try {
       assert.deepEqual(item.rollbackDifferences, [], "Native cancellation must restore all observed slides");
       item.rollbackRendering = await visibleSlides(page, transaction.frame, "rollback", transactionBefore.common.slides.length);
       assert.deepEqual(item.rollbackRendering, item.slideRendering.before, "Native cancellation must restore every visible slide");
-      item.rollbackVerified = true;
+      item.nativeAfterFailure = await readCandidateNativeEvidence(transaction.frame,candidateRoot);
+      assert.deepEqual(item.nativeAfterFailure,transactionNativeBefore,"Cancellation must restore native content and saved-state flags");
       item.hostAfterFailure = await page.evaluate(() => window.__ONLYOFFICE_SAVE_E2E__.getStatus());
-      assert.equal(item.hostAfterFailure.writeCount, 0, "A failed mutation cannot persist a file");
+      assert.deepEqual(item.hostAfterFailure,transactionHostBefore,"Cancellation must restore host saved state without persisting a file");
+      item.rollbackVerified = true;
     } catch (rollbackError) {
       item.rollbackVerified = false;
       item.rollbackError = rollbackError.message;
