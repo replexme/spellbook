@@ -28,6 +28,11 @@ plus unused build cache. The cleanup recognizes exact legacy Compose image
 names during migration. It preserves other projects' images, containers and
 data volumes. Run `pnpm docker:cleanup` to inspect the plan without changing state.
 
+Standalone Office image builders also remove unused build cache on success,
+failure and interruption. Their output image remains available for its pending
+runtime verification; remove it with the shared local Docker cleanup when that
+consumer finishes. A cache-cleanup failure fails the build command.
+
 `SPELLBOOK_EDITOR_MODE` selects exactly one live editor engine. The default
 `wopi` profile starts the server-side Collabora editor while the browser engine
 is still being promoted. Set it to `browser` to start the client-side Office

@@ -69,20 +69,27 @@ fi
 
 build_completed=false
 cleanup() {
+  local build_status=$?
   if [[ "$build_root" == "/workspace/.spellbook-collabora-build" ]]; then
     # Cloud Build workers are disposable and this exact path is recreated on
     # every run, so leaving a partial tree there cannot provide an incremental
     # recovery path.
-    rm -rf -- "$build_root"
+    rm -rf -- "$build_root" || build_status=1
   elif [[ "$build_root" == /tmp/spellbook-collabora-build.* ]]; then
     if [[ "$build_completed" == true ]]; then
-      rm -rf -- "$build_root"
+      rm -rf -- "$build_root" || build_status=1
     else
       echo "Integrated build failed; preserving $build_root for diagnosis and incremental target rebuilds." >&2
     fi
   fi
+  if ! node "$spellbook_repo_root/scripts/cleanup-local-docker.mjs" --execute --build-cache-only; then
+    if [[ "$build_status" -eq 0 ]]; then build_status=1; fi
+  fi
+  exit "$build_status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 source_root="$build_root/source"
 patched_repository="$build_root/patched.git"

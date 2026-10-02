@@ -100,11 +100,16 @@ function dockerState() {
 }
 
 function parseArguments(argv) {
-  const options = { execute: false, keepUnusedPerComponent: 0 };
+  const options = {
+    execute: false,
+    keepUnusedPerComponent: 0,
+    buildCacheOnly: false,
+  };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--") continue;
     if (value === "--execute") options.execute = true;
+    else if (value === "--build-cache-only") options.buildCacheOnly = true;
     else if (value === "--keep-unused-per-component")
       options.keepUnusedPerComponent = Number(argv[++index]);
     else throw new Error(`Unknown argument: ${value}`);
@@ -112,20 +117,39 @@ function parseArguments(argv) {
   return options;
 }
 
+function pruneUnusedBuildCache() {
+  execFileSync("docker", ["builder", "prune", "--all", "--force"], {
+    stdio: "inherit",
+  });
+}
+
 function run(argv) {
   const options = parseArguments(argv);
-  const { images, referencedImageIds } = dockerState();
-  const plan = planSpellbookImageCleanup(images, referencedImageIds, options);
-  if (options.execute && plan.remove.length)
-    execFileSync(
-      "docker",
-      ["image", "rm", "--", ...plan.remove.map((image) => image.id)],
-      { stdio: "inherit" },
-    );
-  if (options.execute)
-    execFileSync("docker", ["builder", "prune", "--all", "--force"], {
-      stdio: "inherit",
-    });
+  if (options.buildCacheOnly) {
+    if (!options.execute)
+      throw new Error("--build-cache-only requires --execute.");
+    pruneUnusedBuildCache();
+    return;
+  }
+  let plan;
+  try {
+    const { images, referencedImageIds } = dockerState();
+    plan = planSpellbookImageCleanup(images, referencedImageIds, options);
+    if (options.execute) {
+      for (const image of plan.remove) {
+        // Remove each alias: Docker rejects removal by ID when multiple tags exist.
+        // No --force, so a newly attached container still protects its image.
+        for (const reference of image.references.length
+          ? image.references
+          : [image.id])
+          execFileSync("docker", ["image", "rm", "--", reference], {
+            stdio: "inherit",
+          });
+      }
+    }
+  } finally {
+    if (options.execute) pruneUnusedBuildCache();
+  }
   process.stdout.write(
     `${JSON.stringify(
       {

@@ -34,9 +34,16 @@ fi
 
 candidate_env="$(mktemp "${TMPDIR:-/tmp}/spellbook-candidate-runtime.XXXXXX")"
 cleanup() {
-  rm -f -- "$candidate_env"
+  local build_status=$?
+  rm -f -- "$candidate_env" || build_status=1
+  if ! node "$spellbook_repo_root/scripts/cleanup-local-docker.mjs" --execute --build-cache-only; then
+    if [[ "$build_status" -eq 0 ]]; then build_status=1; fi
+  fi
+  exit "$build_status"
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 node "$spellbook_repo_root/services/office-editor/libreoffice/write-candidate-build-env.mjs" \
   "$candidate_env" "$candidate_engine_image"
