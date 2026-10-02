@@ -14,6 +14,8 @@ import {
   verifyPersistedElementMutation,
   remapPartRelationshipIds,
   nativeExportDifferences,
+  prepareChartSeriesWorkbookMutation,
+  mergeNumericWorkbookDelta,
 } from "./ooxml-worker-source.mjs";
 import { persistedSlideTopologyMatches } from "./harness/product-persistence.mjs";
 
@@ -4661,4 +4663,415 @@ test("an unnamed picture move keeps authored references when the engine renames 
     ),
   );
   assert.throws(preserve, /cannot isolate direct move/u);
+});
+
+test("human layout selection survives source preservation while unrelated AI layout rewrites remain suppressed", async () => {
+  const source = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/downloads/lo-master-layouts.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
+  const baseline = unzipSync(source),
+    edited = { ...baseline };
+  const rels = "ppt/slides/_rels/slide1.xml.rels";
+  edited[rels] = strToU8(
+    strFromU8(edited[rels]).replace(
+      "../slideLayouts/slideLayout1.xml",
+      "../slideLayouts/slideLayout2.xml",
+    ),
+  );
+  const direct = unzipSync(
+    preserveOriginalPptxParts(source, zipSync(baseline), zipSync(edited), null)
+      .bytes,
+  );
+  assert.match(
+    strFromU8(direct[rels]),
+    /Target="\.\.\/slideLayouts\/slideLayout2\.xml"/u,
+  );
+  const indirect = unzipSync(
+    preserveOriginalPptxParts(source, zipSync(baseline), zipSync(edited), [
+      "set_object_interaction",
+    ]).bytes,
+  );
+  assert.match(
+    strFromU8(indirect[rels]),
+    /Target="\.\.\/slideLayouts\/slideLayout1\.xml"/u,
+  );
+});
+
+async function renamedChartWorkbookFixture() {
+  const source = new Uint8Array(
+    await readFile(
+      new URL("../../eval/public/downloads/ox-chart-2d.pptx", import.meta.url),
+    ),
+  );
+  const original = unzipSync(source),
+    baseline = { ...original };
+  const authored = "ppt/embeddings/Microsoft_Office_Excel_Worksheet1.xlsx";
+  const native = "ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx";
+  baseline[native] = baseline[authored];
+  delete baseline[authored];
+  const rels = "ppt/charts/_rels/chart1.xml.rels";
+  baseline[rels] = strToU8(
+    strFromU8(baseline[rels]).replace(
+      "Microsoft_Office_Excel_Worksheet1.xlsx",
+      "Microsoft_Excel_Worksheet1.xlsx",
+    ),
+  );
+  const edited = { ...baseline };
+  edited["ppt/charts/chart1.xml"] = strToU8(
+    strFromU8(edited["ppt/charts/chart1.xml"]).replace(
+      "</c:chartSpace>",
+      "<!-- actual owner edit --></c:chartSpace>",
+    ),
+  );
+  return { source, original, baseline, edited, authored, native, rels };
+}
+
+test("renamed chart workbook binds to its unique authored frame and preserves unchanged workbook bytes", async () => {
+  const f = await renamedChartWorkbookFixture();
+  const result = preserveOriginalPptxParts(
+    f.source,
+    zipSync(f.baseline),
+    zipSync(f.edited),
+    null,
+  );
+  const merged = unzipSync(result.bytes);
+  assert.deepEqual(merged[f.authored], f.original[f.authored]);
+  assert.equal(merged[f.native], undefined);
+  assert.deepEqual(merged[f.rels], f.original[f.rels]);
+  assert.match(
+    strFromU8(merged["ppt/charts/chart1.xml"]),
+    /actual owner edit/u,
+  );
+});
+
+test("a changed renamed chart workbook remains attached to the authored chart rather than an orphan native filename", async () => {
+  const f = await renamedChartWorkbookFixture();
+  const workbook = unzipSync(f.baseline[f.native]);
+  const sheet = "xl/worksheets/sheet1.xml";
+  workbook[sheet] = strToU8(
+    strFromU8(workbook[sheet]).replace(/(<c r="B2"[^>]*><v>)[^<]+/u, "$111.3"),
+  );
+  f.edited[f.native] = zipSync(workbook);
+  const merged = unzipSync(
+    preserveOriginalPptxParts(
+      f.source,
+      zipSync(f.baseline),
+      zipSync(f.edited),
+      ["set_chart_data"],
+    ).bytes,
+  );
+  assert.deepEqual(
+    Object.keys(unzipSync(merged[f.authored])).sort(),
+    Object.keys(workbook).sort(),
+  );
+  assert.equal(merged[f.native], undefined);
+  assert.deepEqual(merged[f.rels], f.original[f.rels]);
+  assert.match(
+    strFromU8(unzipSync(merged[f.authored])[sheet]),
+    /<c r="B2"[^>]*><v>11\.3<\/v>/u,
+  );
+  for (const [part, bytes] of Object.entries(unzipSync(f.original[f.authored])))
+    if (part !== sheet)
+      assert.deepEqual(unzipSync(merged[f.authored])[part], bytes, part);
+});
+
+for (const identity of ["unnamed", "different-name", "duplicate-name"]) {
+  test(`chart workbook alignment refuses ${identity} frame identity`, async () => {
+    const f = await renamedChartWorkbookFixture();
+    const slide = "ppt/slides/slide1.xml";
+    let xml = strFromU8(f.baseline[slide]);
+    if (identity === "duplicate-name") {
+      const frame = xml.match(
+        /<p:graphicFrame\b[\s\S]*?<\/p:graphicFrame>/u,
+      )[0];
+      xml = xml.replace("</p:spTree>", frame + "</p:spTree>");
+    } else
+      xml = xml.replace(
+        'name="Chart 5"',
+        `name="${identity === "unnamed" ? "" : "different"}"`,
+      );
+    f.baseline[slide] = strToU8(xml);
+    f.edited[slide] = f.baseline[slide];
+    assert.throws(
+      () =>
+        preserveOriginalPptxParts(
+          f.source,
+          zipSync(f.baseline),
+          zipSync(f.edited),
+          null,
+        ),
+      /relationship remapping/u,
+    );
+  });
+}
+
+test("chart workbook alignment rejects collision with another existing native package part", async () => {
+  const f = await renamedChartWorkbookFixture();
+  f.baseline[f.authored] = f.original[f.authored];
+  f.edited[f.authored] = f.original[f.authored];
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(
+        f.source,
+        zipSync(f.baseline),
+        zipSync(f.edited),
+        null,
+      ),
+    /ambiguous chart workbook ownership/u,
+  );
+});
+
+test("an unrelated transition edit binds a renamed identical image by actual bytes without changing the authored media", async () => {
+  const source = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/downloads/lo-transition-media.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
+  const original = unzipSync(source),
+    baseline = { ...original },
+    slide = "ppt/slides/slide1.xml",
+    rels = "ppt/slides/_rels/slide1.xml.rels";
+  baseline["ppt/media/image1.jpg"] = baseline["ppt/media/image1.jpeg"];
+  delete baseline["ppt/media/image1.jpeg"];
+  baseline[rels] = strToU8(
+    strFromU8(baseline[rels]).replace("image1.jpeg", "image1.jpg"),
+  );
+  baseline["[Content_Types].xml"] = strToU8(
+    strFromU8(baseline["[Content_Types].xml"]).replace(
+      "</Types>",
+      '<Default Extension="jpg" ContentType="image/jpeg"/></Types>',
+    ),
+  );
+  const edited = {
+    ...baseline,
+    [slide]: strToU8(
+      strFromU8(baseline[slide]).replace(
+        "</p:sld>",
+        "<!-- transition edit --></p:sld>",
+      ),
+    ),
+  };
+  const merged = unzipSync(
+    preserveOriginalPptxParts(source, zipSync(baseline), zipSync(edited), null)
+      .bytes,
+  );
+  assert.deepEqual(
+    merged["ppt/media/image1.jpeg"],
+    original["ppt/media/image1.jpeg"],
+  );
+  assert.deepEqual(merged[rels], original[rels]);
+  edited["ppt/media/image1.jpg"] = new Uint8Array(
+    edited["ppt/media/image1.jpg"],
+  );
+  edited["ppt/media/image1.jpg"][100] ^= 1;
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(
+        source,
+        zipSync(baseline),
+        zipSync(edited),
+        null,
+      ),
+    /relationship remapping/u,
+  );
+});
+
+test("exact image bytes do not make duplicate original image ownership unambiguous", async () => {
+  const source = unzipSync(
+    new Uint8Array(
+      await readFile(
+        new URL(
+          "../../eval/public/downloads/lo-transition-media.pptx",
+          import.meta.url,
+        ),
+      ),
+    ),
+  );
+  const slide = "ppt/slides/slide1.xml",
+    rels = "ppt/slides/_rels/slide1.xml.rels";
+  const original = {
+    ...source,
+    "ppt/media/copy.jpeg": source["ppt/media/image1.jpeg"],
+  };
+  original[rels] = strToU8(
+    strFromU8(original[rels]).replace(
+      "</Relationships>",
+      '<Relationship Id="rId99" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/copy.jpeg"/></Relationships>',
+    ),
+  );
+  const engine = {
+    ...source,
+    "ppt/media/image1.jpg": source["ppt/media/image1.jpeg"],
+  };
+  delete engine["ppt/media/image1.jpeg"];
+  engine["[Content_Types].xml"] = strToU8(
+    strFromU8(engine["[Content_Types].xml"]).replace(
+      "</Types>",
+      '<Default Extension="jpg" ContentType="image/jpeg"/></Types>',
+    ),
+  );
+  engine[rels] = strToU8(
+    strFromU8(engine[rels]).replace("image1.jpeg", "image1.jpg"),
+  );
+  assert.equal(
+    remapPartRelationshipIds(
+      slide,
+      engine[slide],
+      original[rels],
+      engine[rels],
+      [original, engine],
+    ),
+    null,
+  );
+});
+
+test("chart series workbook preparation keeps every unedited nested part and authored cell style", async () => {
+  const f = await renamedChartWorkbookFixture();
+  const chart = new DOMParser().parseFromString(
+    strFromU8(f.original["ppt/charts/chart1.xml"]),
+    "application/xml",
+  );
+  const namespace = "http://schemas.openxmlformats.org/drawingml/2006/chart";
+  const series = chart.getElementsByTagNameNS(namespace, "ser")[0];
+  const cache = series
+    .getElementsByTagNameNS(namespace, "val")[0]
+    .getElementsByTagNameNS(namespace, "numCache")[0];
+  const requested = [...cache.getElementsByTagNameNS(namespace, "pt")].map(
+    (point, index) =>
+      Number(point.getElementsByTagNameNS(namespace, "v")[0].textContent) +
+      (index === 0 ? 7 : 0),
+  );
+  const result = prepareChartSeriesWorkbookMutation(f.source, {
+    slideIndex: 0,
+    shapeName: "Chart 5",
+    seriesIndex: 0,
+    values: requested,
+  });
+  assert.deepEqual(
+    result.changedCells,
+    [{ address: "B2", previous: 4.3, value: 11.3 }].map((cell) => ({
+      ...cell,
+      previous: 4.2999999999999998,
+    })),
+  );
+  const before = unzipSync(f.original[f.authored]),
+    after = unzipSync(result.bytes);
+  assert.deepEqual(Object.keys(after).sort(), Object.keys(before).sort());
+  for (const [part, bytes] of Object.entries(before))
+    if (part !== result.worksheetPart)
+      assert.deepEqual(after[part], bytes, part);
+  assert.match(
+    strFromU8(after[result.worksheetPart]),
+    /<c r="B2" s="1"><v>11\.3<\/v>/u,
+  );
+  for (const request of [
+    { shapeName: "missing" },
+    { values: [] },
+    { values: [NaN] },
+    { values: new Array(requested.length) },
+    { values: requested.slice(1) },
+    { seriesIndex: 999 },
+  ])
+    assert.throws(() =>
+      prepareChartSeriesWorkbookMutation(f.source, {
+        slideIndex: 0,
+        shapeName: "Chart 5",
+        seriesIndex: 0,
+        values: requested,
+        ...request,
+      }),
+    );
+});
+
+test("numeric workbook merge keeps author-only content and refuses any nonnumeric native delta", async () => {
+  const f = await renamedChartWorkbookFixture();
+  const source = unzipSync(f.original[f.authored]);
+  const sheet = "xl/worksheets/sheet1.xml";
+  const before = {
+    ...source,
+    "engine-only.dat": strToU8("same native normalization"),
+  };
+  before[sheet] = strToU8(
+    strFromU8(source[sheet]).replace(
+      'defaultRowHeight="15"',
+      'defaultRowHeight="14.25"',
+    ),
+  );
+  const after = {
+    ...before,
+    [sheet]: strToU8(
+      strFromU8(before[sheet]).replace(/(<c r="B2"[^>]*><v>)[^<]+/u, "$111.3"),
+    ),
+  };
+  const author = { ...source, "author-only.dat": strToU8("must survive") };
+  const merge = (a = author, b = before, c = after) =>
+    mergeNumericWorkbookDelta(zipSync(a), zipSync(b), zipSync(c));
+  const merged = unzipSync(merge());
+  assert.deepEqual(Object.keys(merged).sort(), Object.keys(author).sort());
+  for (const [part, bytes] of Object.entries(author))
+    if (part !== sheet) assert.deepEqual(merged[part], bytes, part);
+  assert.match(strFromU8(merged[sheet]), /defaultRowHeight="15"/u);
+  assert.match(strFromU8(merged[sheet]), /<c r="B2" s="1"><v>11\.3<\/v>/u);
+  const changes = [
+    {
+      ...after,
+      [sheet]: strToU8(
+        strFromU8(after[sheet]).replace('r="B2" s="1"', 'r="B2" s="2"'),
+      ),
+    },
+    {
+      ...after,
+      [sheet]: strToU8(
+        strFromU8(after[sheet]).replace(
+          'r="B2" s="1"><v>',
+          'r="B2" s="1"><f>SUM(A1)</f><v>',
+        ),
+      ),
+    },
+    {
+      ...after,
+      [sheet]: strToU8(strFromU8(after[sheet]).replace('r="B2"', 'r="B3"')),
+    },
+    {
+      ...after,
+      [sheet]: strToU8(
+        strFromU8(after[sheet]).replace(
+          'defaultRowHeight="14.25"',
+          'defaultRowHeight="16"',
+        ),
+      ),
+    },
+    { ...after, "engine-only.dat": strToU8("actually changed") },
+    { ...after, "new-part.dat": strToU8("new") },
+  ];
+  for (const candidate of changes)
+    assert.equal(merge(author, before, candidate), null);
+  assert.equal(
+    merge({
+      ...author,
+      [sheet]: strToU8(
+        strFromU8(author[sheet]).replace(/(<c r="B2"[^>]*><v>)[^<]+/u, "$199"),
+      ),
+    }),
+    null,
+  );
+  const renamed = {
+    ...author,
+    "xl/workbook.xml": strToU8(
+      strFromU8(author["xl/workbook.xml"]).replace(
+        'name="Sheet1"',
+        'name="DifferentOwner"',
+      ),
+    ),
+  };
+  assert.equal(merge(renamed), null);
+  assert.equal(merge(author, before, before), null);
 });

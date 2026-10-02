@@ -1504,6 +1504,241 @@ export function remapPartRelationshipIds(
   return changed ? serializeXml(document) : bytes;
 }
 
+// A presentation chart's cache and its embedded workbook are two views of the
+// same authored data. Prepare one owned workbook snapshot for the adapter to
+// install through native history together with the cache mutation.
+export function prepareChartSeriesWorkbookMutation(
+  input,
+  { slideIndex, shapeName, seriesIndex, values },
+) {
+  if (
+    !(input instanceof Uint8Array) ||
+    input.byteLength > maximumInputBytes ||
+    !Number.isInteger(slideIndex) ||
+    slideIndex < 0 ||
+    typeof shapeName !== "string" ||
+    !shapeName ||
+    !Number.isInteger(seriesIndex) ||
+    seriesIndex < 0 ||
+    !Array.isArray(values) ||
+    !values.length ||
+    values.length > maximumEntries ||
+    Array.from(values).some((value) => !Number.isFinite(value))
+  )
+    throw new Error("Invalid bounded chart data mutation.");
+  inspectZipPackage(input);
+  const entries = unzipSync(input),
+    slide = orderedSlidePaths(entries)[slideIndex];
+  if (!slide) throw new Error("Chart source slide is missing.");
+  const frames = [
+    ...parseXml(entries, slide).getElementsByTagNameNS(
+      presentationNamespace,
+      "graphicFrame",
+    ),
+  ].filter((frame) =>
+    [...frame.getElementsByTagNameNS(presentationNamespace, "cNvPr")].some(
+      (node) => node.getAttribute("name") === shapeName,
+    ),
+  );
+  if (frames.length !== 1) throw new Error("Chart source frame is not unique.");
+  const charts = [...frames[0].getElementsByTagNameNS(chartNamespace, "chart")];
+  if (charts.length !== 1)
+    throw new Error("Chart source frame has no unique chart.");
+  const resolveReference = (owner, id, type) => {
+    const rels = relationshipsPath(owner);
+    if (!entries[rels]) throw new Error("Chart data relationship is missing.");
+    const matches = relationshipElements(parseXml(entries, rels)).filter(
+      (node) =>
+        node.getAttribute("Id") === id &&
+        node.getAttribute("Type") ===
+          `${relationshipAttributeNamespace}/${type}` &&
+        node.getAttribute("TargetMode") !== "External",
+    );
+    if (matches.length !== 1)
+      throw new Error("Chart data relationship is not uniquely internal.");
+    const part = resolvePart(owner, matches[0].getAttribute("Target"));
+    if (!entries[part])
+      throw new Error("Chart data relationship target is missing.");
+    return part;
+  };
+  const chartPart = resolveReference(
+    slide,
+    charts[0].getAttributeNS(relationshipAttributeNamespace, "id"),
+    "chart",
+  );
+  const chart = parseXml(entries, chartPart);
+  const series = [
+    ...chart.getElementsByTagNameNS(chartNamespace, "ser"),
+  ].filter(
+    (node) =>
+      optionalDirectXmlChild(node, chartNamespace, "idx")?.getAttribute(
+        "val",
+      ) === String(seriesIndex),
+  );
+  if (series.length !== 1) throw new Error("Chart series is not unique.");
+  const reference = directXmlChild(
+    directXmlChild(series[0], chartNamespace, "val"),
+    chartNamespace,
+    "numRef",
+  );
+  const formula = directXmlChild(reference, chartNamespace, "f").textContent;
+  const range =
+    /^(?:'((?:[^']|'')+)'|([^!'\[\]]+))!\$?([A-Z]+)\$?([1-9]\d*):\$?([A-Z]+)\$?([1-9]\d*)$/u.exec(
+      formula,
+    );
+  if (!range)
+    throw new Error("Chart data needs one bounded internal cell range.");
+  const sheetName = range[1]?.replaceAll("''", "'") ?? range[2];
+  const column = (text) =>
+    [...text].reduce(
+      (value, letter) => value * 26 + letter.charCodeAt(0) - 64,
+      0,
+    );
+  const [c1, r1, c2, r2] = [
+    column(range[3]),
+    Number(range[4]),
+    column(range[5]),
+    Number(range[6]),
+  ];
+  if (
+    c1 > 16384 ||
+    c2 > 16384 ||
+    r1 > 1048576 ||
+    r2 > 1048576 ||
+    c2 < c1 ||
+    r2 < r1 ||
+    (c1 !== c2 && r1 !== r2) ||
+    (c2 - c1 + 1) * (r2 - r1 + 1) !== values.length
+  )
+    throw new Error("Chart data range and values differ.");
+  const cache = directXmlChild(reference, chartNamespace, "numCache");
+  const points = [...cache.getElementsByTagNameNS(chartNamespace, "pt")];
+  if (
+    points.length !== values.length ||
+    new Set(points.map((point) => point.getAttribute("idx"))).size !==
+      values.length
+  )
+    throw new Error(
+      "Chart data cache must cover the complete requested range.",
+    );
+  const previousValues = values.map((_, index) => {
+    const point = points.find(
+      (point) => point.getAttribute("idx") === String(index),
+    );
+    const text =
+      point && directXmlChild(point, chartNamespace, "v").textContent;
+    if (!text?.trim() || !Number.isFinite(Number(text)))
+      throw new Error("Chart data cache value is not numeric.");
+    return Number(text);
+  });
+  const external = [
+    ...chart.getElementsByTagNameNS(chartNamespace, "externalData"),
+  ];
+  if (external.length !== 1)
+    throw new Error("Chart data has no unique embedded workbook.");
+  const workbookPart = resolveReference(
+    chartPart,
+    external[0].getAttributeNS(relationshipAttributeNamespace, "id"),
+    "package",
+  );
+  if (!/^ppt\/embeddings\/[^/]+\.xlsx$/u.test(workbookPart))
+    throw new Error("Chart data workbook is not an internal XLSX.");
+  const workbookBytes = entries[workbookPart];
+  if (inspectZipPackage(workbookBytes).expandedBytes > maximumInputBytes)
+    throw new Error("Chart workbook exceeds the adapter limit.");
+  const workbook = unzipSync(workbookBytes),
+    workbookDocument = parseXml(workbook, "xl/workbook.xml");
+  const spreadsheetNamespace = workbookDocument.documentElement.namespaceURI;
+  if (
+    ![
+      "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+      "http://schemas.openxmlformats.org/spreadsheetml/2006/7/main",
+      "http://purl.oclc.org/ooxml/spreadsheetml/main",
+    ].includes(spreadsheetNamespace)
+  )
+    throw new Error("Chart workbook namespace is not supported.");
+  const sheets = [
+    ...workbookDocument.getElementsByTagNameNS(spreadsheetNamespace, "sheet"),
+  ].filter((node) => node.getAttribute("name") === sheetName);
+  if (sheets.length !== 1)
+    throw new Error("Chart worksheet name is not unique.");
+  const sheetId =
+    sheets[0].getAttributeNS(relationshipAttributeNamespace, "id") ||
+    sheets[0].getAttributeNS(
+      "http://purl.oclc.org/ooxml/officeDocument/relationships",
+      "id",
+    );
+  const sheetRelations = relationshipElements(
+    parseXml(workbook, "xl/_rels/workbook.xml.rels"),
+  ).filter(
+    (node) =>
+      node.getAttribute("Id") === sheetId &&
+      [
+        `${relationshipAttributeNamespace}/worksheet`,
+        "http://purl.oclc.org/ooxml/officeDocument/relationships/worksheet",
+      ].includes(node.getAttribute("Type")) &&
+      node.getAttribute("TargetMode") !== "External",
+  );
+  if (sheetRelations.length !== 1)
+    throw new Error("Chart worksheet relationship is not unique.");
+  const worksheetPart = resolvePart(
+    "xl/workbook.xml",
+    sheetRelations[0].getAttribute("Target"),
+  );
+  const worksheet = parseXml(workbook, worksheetPart),
+    cells = [...worksheet.getElementsByTagNameNS(spreadsheetNamespace, "c")];
+  const columnName = (value) => {
+    let text = "";
+    for (; value; value = Math.floor((value - 1) / 26))
+      text = String.fromCharCode(65 + ((value - 1) % 26)) + text;
+    return text;
+  };
+  const changedCells = [];
+  for (const [index, value] of values.entries()) {
+    const address = `${columnName(c1 + (r1 === r2 ? index : 0))}${r1 + (c1 === c2 ? index : 0)}`;
+    const matches = cells.filter((cell) => cell.getAttribute("r") === address);
+    if (
+      matches.length !== 1 ||
+      ![null, "", "n"].includes(matches[0].getAttribute("t")) ||
+      optionalDirectXmlChild(matches[0], spreadsheetNamespace, "f")
+    )
+      throw new Error(
+        "Chart target cell must be one authored numeric constant.",
+      );
+    const node = directXmlChild(matches[0], spreadsheetNamespace, "v"),
+      previous = Number(node.textContent);
+    if (
+      !node.textContent.trim() ||
+      !Number.isFinite(previous) ||
+      Math.abs(previous - previousValues[index]) >
+        1e-12 * Math.max(1, Math.abs(previous), Math.abs(previousValues[index]))
+    )
+      throw new Error(
+        "Chart cache and authored workbook disagree before mutation.",
+      );
+    if (value !== previousValues[index]) {
+      node.textContent = String(value);
+      changedCells.push({ address, previous, value });
+    }
+  }
+  if (!changedCells.length)
+    throw new Error("Chart data mutation changed no cell.");
+  workbook[worksheetPart] = serializeXml(worksheet);
+  const bytes = zipSync(workbook, {
+    level: 6,
+    mtime: deterministicZipModifiedAt,
+  });
+  return {
+    bytes,
+    chartPart,
+    workbookPart,
+    worksheetPart,
+    previousValues,
+    values,
+    changedCells,
+  };
+}
+
 // A SmartArt drawing part is PowerPoint's cached rendering of the diagram
 // data, which PowerPoint shows instead of laying the diagram out again. When an
 // edit replaced a slide's diagram data and the engine's own export carries no
@@ -1662,6 +1897,125 @@ function alignEngineSlideParts(original, engine, targetPaths = null) {
     taken.add(destination);
     renames.set(engineNotes, destination);
   }
+  return renameEnginePackageParts(engine, renames);
+}
+
+// Source-bound identity belongs to the chart's authored frame and externalData
+// role, not to the filename chosen by an exporter. Only unique named frames
+// which retain the same chart part can bind a renamed existing XLSX resource.
+function chartWorkbookRenames(original, baseline) {
+  const workbookNames = (entries) =>
+    Object.keys(entries).filter((part) =>
+      /^ppt\/embeddings\/[^/]+\.xlsx$/u.test(part),
+    );
+  if (!workbookNames(original).length || !workbookNames(baseline).length)
+    return new Map();
+  const bindings = (entries) => {
+    const result = new Map();
+    for (const slide of orderedSlidePaths(entries)) {
+      const document = parseXml(entries, slide);
+      for (const frame of document.getElementsByTagNameNS(
+        presentationNamespace,
+        "graphicFrame",
+      )) {
+        const names = [
+          ...frame.getElementsByTagNameNS(presentationNamespace, "cNvPr"),
+        ];
+        const charts = [
+          ...frame.getElementsByTagNameNS(chartNamespace, "chart"),
+        ];
+        if (
+          names.length !== 1 ||
+          charts.length !== 1 ||
+          !names[0].getAttribute("name")
+        )
+          continue;
+        const id = charts[0].getAttributeNS(
+          relationshipAttributeNamespace,
+          "id",
+        );
+        const relations = entries[relationshipsPath(slide)]
+          ? relationshipElements(
+              parseXml(entries, relationshipsPath(slide)),
+            ).filter(
+              (relationship) =>
+                relationship.getAttribute("Id") === id &&
+                relationship.getAttribute("Type") ===
+                  `${relationshipAttributeNamespace}/chart` &&
+                relationship.getAttribute("TargetMode") !== "External",
+            )
+          : [];
+        if (relations.length !== 1) continue;
+        const chart = resolvePart(slide, relations[0].getAttribute("Target"));
+        if (!entries[chart] || !/^ppt\/charts\/[^/]+\.xml$/u.test(chart))
+          continue;
+        const data = [
+          ...parseXml(entries, chart).getElementsByTagNameNS(
+            chartNamespace,
+            "externalData",
+          ),
+        ];
+        if (data.length !== 1 || !entries[relationshipsPath(chart)]) continue;
+        const resourceId = data[0].getAttributeNS(
+          relationshipAttributeNamespace,
+          "id",
+        );
+        const resources = relationshipElements(
+          parseXml(entries, relationshipsPath(chart)),
+        ).filter(
+          (relationship) =>
+            relationship.getAttribute("Id") === resourceId &&
+            relationship.getAttribute("Type") ===
+              `${relationshipAttributeNamespace}/package` &&
+            relationship.getAttribute("TargetMode") !== "External",
+        );
+        if (resources.length !== 1) continue;
+        const workbook = resolvePart(
+          chart,
+          resources[0].getAttribute("Target"),
+        );
+        if (
+          !/^ppt\/embeddings\/[^/]+\.xlsx$/u.test(workbook) ||
+          !entries[workbook]
+        )
+          continue;
+        const key = `${slide}\0${names[0].getAttribute("name")}`;
+        result.set(key, result.has(key) ? null : { chart, workbook });
+      }
+    }
+    return result;
+  };
+  const authored = bindings(original),
+    exported = bindings(baseline),
+    renames = new Map(),
+    destinations = new Map();
+  for (const [key, binding] of exported) {
+    const source = authored.get(key);
+    if (
+      !binding ||
+      !source ||
+      source.chart !== binding.chart ||
+      source.workbook === binding.workbook
+    )
+      continue;
+    if (
+      (renames.has(binding.workbook) &&
+        renames.get(binding.workbook) !== source.workbook) ||
+      (destinations.has(source.workbook) &&
+        destinations.get(source.workbook) !== binding.workbook) ||
+      original[binding.workbook] ||
+      baseline[source.workbook]
+    )
+      throw new Error(
+        "Native snapshot has ambiguous chart workbook ownership.",
+      );
+    renames.set(binding.workbook, source.workbook);
+    destinations.set(source.workbook, binding.workbook);
+  }
+  return renames;
+}
+
+function renameEnginePackageParts(engine, renames) {
   if (!renames.size) return engine;
 
   const renamedPart = (part) => {
@@ -2533,6 +2887,7 @@ function remapAuthoredRelationships(
   original,
   noEdit,
   sourceOperations,
+  humanEdit = false,
 ) {
   const sourcePart = part.replace(/\/_rels\/([^/]+)\.rels$/u, "/$1");
   const document = parseXml({ [part]: bytes }, part);
@@ -2559,11 +2914,10 @@ function remapAuthoredRelationships(
     const normalizedRelationship = normalizedById.get(
       relationship.getAttribute("Id"),
     );
-    const layoutWasNotEdited =
-      !sourceOperations.includes("set_slide_layout") ||
-      (normalizedRelationship?.getAttribute("Type") ===
-        relationship.getAttribute("Type") &&
-        normalizedRelationship.getAttribute("Target") === target);
+    const sameNativeTarget = normalizedRelationship?.getAttribute("Type") ===
+      relationship.getAttribute("Type") && normalizedRelationship.getAttribute("Target") === target;
+    const layoutWasNotEdited = sameNativeTarget ||
+      (!humanEdit && !sourceOperations.includes("set_slide_layout"));
     const originalLayout =
       layoutWasNotEdited && original[part]
         ? relationshipsOfType(original, sourcePart, "slideLayout")
@@ -3157,6 +3511,195 @@ function mergeSlideSizeIntoOriginal(original, noEdit, edited) {
   return bytes;
 }
 
+// A numeric chart edit must keep workbook content the engine did not edit.
+// Only accept a complete, same-engine delta consisting of constant cell values;
+// new sheets, formulas, styles and ambiguous cell identities use the ordinary
+// package path instead. The author's cell must agree with the native baseline.
+export function mergeNumericWorkbookDelta(
+  originalBytes,
+  baselineBytes,
+  editedBytes,
+) {
+  if (
+    ![originalBytes, baselineBytes, editedBytes].every(
+      (bytes) => bytes instanceof Uint8Array,
+    )
+  )
+    return null;
+  let sizes;
+  try {
+    sizes = [originalBytes, baselineBytes, editedBytes].map(
+      (bytes) => inspectZipPackage(bytes).expandedBytes,
+    );
+  } catch {
+    // Embedded package relationships can also contain opaque legacy payloads.
+    // No guessed XML interpretation or numeric reconciliation is permitted.
+    return null;
+  }
+  if (sizes.reduce((sum, size) => sum + size, 0) > maximumInputBytes)
+    return null;
+  const [original, baseline, edited] = [
+    originalBytes,
+    baselineBytes,
+    editedBytes,
+  ].map((bytes) => unzipSync(bytes));
+  const names = Object.keys(baseline);
+  if (
+    names.length !== Object.keys(edited).length ||
+    names.some((name) => !edited[name])
+  )
+    return null;
+  const result = { ...original };
+  let changes = 0;
+  const sheetOwners = (entries) => {
+    if (!entries["xl/workbook.xml"] || !entries["xl/_rels/workbook.xml.rels"])
+      return null;
+    const document = parseXml(entries, "xl/workbook.xml");
+    const relationships = relationshipElements(
+      parseXml(entries, "xl/_rels/workbook.xml.rels"),
+    );
+    const owners = new Map(),
+      sheetNames = new Set();
+    for (const sheet of document.getElementsByTagNameNS(
+      document.documentElement.namespaceURI,
+      "sheet",
+    )) {
+      const name = sheet.getAttribute("name");
+      const id =
+        sheet.getAttributeNS(relationshipAttributeNamespace, "id") ||
+        sheet.getAttributeNS(
+          "http://purl.oclc.org/ooxml/officeDocument/relationships",
+          "id",
+        );
+      const matches = relationships.filter(
+        (relationship) =>
+          relationship.getAttribute("Id") === id &&
+          [
+            `${relationshipAttributeNamespace}/worksheet`,
+            "http://purl.oclc.org/ooxml/officeDocument/relationships/worksheet",
+          ].includes(relationship.getAttribute("Type")) &&
+          relationship.getAttribute("TargetMode") !== "External",
+      );
+      if (!name || sheetNames.has(name) || matches.length !== 1) return null;
+      const target = resolvePart(
+        "xl/workbook.xml",
+        matches[0].getAttribute("Target"),
+      );
+      if (!entries[target] || owners.has(target)) return null;
+      owners.set(target, name);
+      sheetNames.add(name);
+    }
+    return owners;
+  };
+  const owners = [original, baseline, edited].map(sheetOwners);
+  if (owners.some((owner) => !owner)) return null;
+  const numericEqual = (left, right) =>
+    Math.abs(left - right) <=
+    1e-12 * Math.max(1, Math.abs(left), Math.abs(right));
+  for (const part of names) {
+    if (samePartBytes(baseline[part], edited[part])) continue;
+    // These properties describe the save, not chart data. All other metadata
+    // and every unknown package payload must match the two native exports.
+    if (part === "docProps/core.xml") {
+      const documents = [baseline, edited].map((entries) =>
+        parseXml(entries, part),
+      );
+      for (const document of documents)
+        for (const element of [...document.getElementsByTagName("*")])
+          if (
+            (element.namespaceURI === "http://purl.org/dc/terms/" &&
+              element.localName === "modified") ||
+            (element.namespaceURI ===
+              "http://schemas.openxmlformats.org/package/2006/metadata/core-properties" &&
+              ["lastModifiedBy", "revision"].includes(element.localName))
+          )
+            element.textContent = "__native_save_property__";
+      if (
+        !samePartBytes(serializeXml(documents[0]), serializeXml(documents[1]))
+      )
+        return null;
+      continue;
+    }
+    if (!/^xl\/worksheets\/[^/]+\.xml$/u.test(part) || !original[part]) {
+      if (!sameEngineExportPart(part, baseline[part], edited[part]))
+        return null;
+      continue;
+    }
+    const [source, before, after] = [original, baseline, edited].map(
+      (entries) => parseXml(entries, part),
+    );
+    const owner = owners[0].get(part);
+    if (
+      !owner ||
+      owners[1].get(part) !== owner ||
+      owners[2].get(part) !== owner
+    )
+      return null;
+    const cells = (document) => {
+      const nodes = [
+        ...document.getElementsByTagNameNS(
+          document.documentElement.namespaceURI,
+          "c",
+        ),
+      ];
+      const map = new Map(nodes.map((cell) => [cell.getAttribute("r"), cell]));
+      return map.size === nodes.length &&
+        [...map.keys()].every((address) =>
+          /^[A-Z]{1,3}[1-9]\d*$/u.test(address),
+        )
+        ? map
+        : null;
+    };
+    const maps = [source, before, after].map(cells);
+    if (maps.some((map) => !map) || maps[1].size !== maps[2].size) return null;
+    let worksheetChanges = 0;
+    for (const [address, priorCell] of maps[1]) {
+      const nextCell = maps[2].get(address);
+      if (!nextCell) return null;
+      if (samePartBytes(serializeXml(priorCell), serializeXml(nextCell)))
+        continue;
+      const authoredCell = maps[0].get(address);
+      const numeric = (cell) => {
+        if (
+          !cell ||
+          ![null, "", "n"].includes(cell.getAttribute("t")) ||
+          optionalDirectXmlChild(cell, cell.namespaceURI, "f")
+        )
+          return null;
+        const value = optionalDirectXmlChild(cell, cell.namespaceURI, "v");
+        return value?.textContent.trim() &&
+          Number.isFinite(Number(value.textContent))
+          ? value
+          : null;
+      };
+      const values = [authoredCell, priorCell, nextCell].map(numeric);
+      if (
+        values.some((value) => !value) ||
+        !numericEqual(
+          Number(values[0].textContent),
+          Number(values[1].textContent),
+        )
+      )
+        return null;
+      const nextValue = Number(values[2].textContent);
+      values[2].textContent = values[1].textContent;
+      if (!samePartBytes(serializeXml(priorCell), serializeXml(nextCell)))
+        return null;
+      if (!numericEqual(Number(values[1].textContent), nextValue)) {
+        values[0].textContent = String(nextValue);
+        worksheetChanges++;
+      }
+    }
+    if (!samePartBytes(serializeXml(before), serializeXml(after))) return null;
+    if (worksheetChanges) {
+      result[part] = serializeXml(source);
+      changes += worksheetChanges;
+    }
+  }
+  return changes
+    ? zipSync(result, { level: 6, mtime: deterministicZipModifiedAt })
+    : null;
+}
 // Office can rewrite unrelated package parts even when no edit was made.
 // Compare two exports from that same engine, then apply only their actual
 // difference to the user's original package. Reopening the result and proving
@@ -3180,7 +3723,9 @@ export function preserveOriginalPptxParts(
     inspectZipPackage(bytes);
   }
   const original = unzipSync(originalBytes);
-  const noEdit = alignEngineSlideParts(original, unzipSync(noEditBytes));
+  const rawNoEdit = alignEngineSlideParts(original, unzipSync(noEditBytes));
+  const workbookRenames = chartWorkbookRenames(original, rawNoEdit);
+  const noEdit = renameEnginePackageParts(rawNoEdit, workbookRenames);
   const rawEdited = unzipSync(editedBytes);
   const topology = humanEdit
     ? directSlideTopologyPaths(original, noEdit, rawEdited, sourceTargets)
@@ -3195,7 +3740,9 @@ export function preserveOriginalPptxParts(
       "Native slide topology has no unambiguous retained-content correspondence.",
     );
   const topologyPaths = topology?.paths ?? null;
-  const edited = alignEngineSlideParts(original, rawEdited, topologyPaths);
+  const edited = renameEnginePackageParts(
+    alignEngineSlideParts(original, rawEdited, topologyPaths), workbookRenames,
+  );
   const expandedBytes = [original, noEdit, edited].reduce(
     (total, entries) =>
       total +
@@ -3377,6 +3924,9 @@ export function preserveOriginalPptxParts(
       edited[part]
         ? mergeExtendedProperties(original[part], noEdit[part], edited[part])
         : null;
+    const semanticWorkbookPatch = authoredChange && /^ppt\/embeddings\/[^/]+\.xlsx$/u.test(part)
+      ? mergeNumericWorkbookDelta(original[part], noEdit[part], edited[part])
+      : null;
     let relationshipRemap = null;
     const presentationPatch =
       presentationPartsPatch && Object.hasOwn(presentationPartsPatch, part);
@@ -3405,9 +3955,7 @@ export function preserveOriginalPptxParts(
           semanticShapePatch ?? semanticTableInsetPatch ?? edited[part],
           original[related],
           noEdit[related],
-          targetIndexesBySlide?.has(part) && semanticShapePatch &&
-            sourceOperations.every(operation => ["move", "resize"].includes(operation))
-              ? [original, noEdit] : null,
+          [original, edited],
         );
         if (!relationshipRemap)
           throw new Error(
@@ -3431,12 +3979,14 @@ export function preserveOriginalPptxParts(
                       original,
                       noEdit,
                       sourceOperations,
+                      humanEdit,
                     )
                   : undefined
                 : (relationshipRemap ??
                   semanticShapePatch ??
                   semanticTableInsetPatch ??
                   semanticExtendedPropertiesPatch ??
+                  semanticWorkbookPatch ??
                   edited[part])
             : (reboundReferences ?? original[part]);
     if (semanticSlideSizePatch) semanticPatchedParts.push(part);
