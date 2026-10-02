@@ -1,0 +1,107 @@
+diff --git a/bin/build.sh b/bin/build.sh
+index eb90ce3..b609b2c 100755
+--- a/bin/build.sh
++++ b/bin/build.sh
+@@ -11,6 +11,7 @@ node scripts/patch-onlyoffice-slide-group-reader.mjs dist
+ node scripts/patch-onlyoffice-smartart-connection-map.mjs dist
+ node scripts/patch-onlyoffice-smartart-line-path.mjs dist
+ node scripts/patch-onlyoffice-smartart-transition-style.mjs dist
++node scripts/patch-onlyoffice-chart-point-recalc.mjs dist
+ 
+ # Keep the deployable demo/runtime lean by removing low-frequency bundled
+ # assets and emitting canonical path packs for per-document-type CDN sync.
+diff --git a/scripts/patch-onlyoffice-chart-point-recalc.d.mts b/scripts/patch-onlyoffice-chart-point-recalc.d.mts
+new file mode 100644
+index 0000000..f9ae38b
+--- /dev/null
++++ b/scripts/patch-onlyoffice-chart-point-recalc.d.mts
+@@ -0,0 +1 @@
++export function patchChartPointRecalc(source: string): string;
+diff --git a/scripts/patch-onlyoffice-chart-point-recalc.mjs b/scripts/patch-onlyoffice-chart-point-recalc.mjs
+new file mode 100644
+index 0000000..8abe3ab
+--- /dev/null
++++ b/scripts/patch-onlyoffice-chart-point-recalc.mjs
+@@ -0,0 +1,38 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++// Local candidate for ONLYOFFICE sdkjs v9.3.0.140 after the SmartArt patches.
++import assert from 'node:assert/strict';
++import { createHash } from 'node:crypto';
++import { readFile, writeFile } from 'node:fs/promises';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { brotliCompressSync, constants } from 'node:zlib';
++
++const inputHash = '7a5ea043eca4e9d594554037fadf72eb7061c3be0ccc4aa21b565ca5b1294cb1';
++const anchor = 'InitClass(CNumericPoint,CBaseChartObject,AscDFH.historyitem_type_NumericPoint);';
++const addition = '/* spellbook-chart-point-history-recalc-v1 */CNumericPoint.prototype.Refresh_RecalcData=function(data){if(data.Type===AscDFH.historyitem_NumericPoint_SetVal){var chart=this.getChartSpace();if(chart)chart.onDataUpdateRecalc()}};';
++
++export function patchChartPointRecalc(source) {
++  assert(source.split(anchor).length === 2, 'Pinned numeric chart point boundary changed');
++  if (source.includes(addition)) {
++    assert(source.includes(anchor + addition), 'Misplaced chart history recalculation');
++    return source;
++  }
++  const start = source.indexOf(anchor);
++  const end = source.indexOf('InitClass(CNumFmt,', start);
++  assert(end > start, 'Pinned numeric chart point implementation missing');
++  assert(!source.slice(start, end).includes('CNumericPoint.prototype.Refresh_RecalcData'), 'Upstream chart point recalculation changed');
++  return source.replace(anchor, anchor + addition);
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  const root = path.resolve(process.argv[2] || '');
++  assert(path.basename(root) === 'dist', 'Only generated dist assets may be patched');
++  const target = path.join(root, 'sdkjs/slide/sdk-all.js');
++  const source = await readFile(target, 'utf8');
++  const hash = (text) => createHash('sha256').update(text).digest('hex');
++  assert(hash(source.replace(addition, '')) === inputHash, 'Unexpected SDK asset');
++  const patched = patchChartPointRecalc(source);
++  await writeFile(target, patched);
++  await writeFile(target + '.br', brotliCompressSync(Buffer.from(patched), { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }));
++  console.log(JSON.stringify({ patch: 'spellbook-chart-point-history-recalc-v1', before: hash(source), after: hash(patched) }));
++}
+diff --git a/test/unit/chart-point-recalc.test.ts b/test/unit/chart-point-recalc.test.ts
+new file mode 100644
+index 0000000..4a2dcf1
+--- /dev/null
++++ b/test/unit/chart-point-recalc.test.ts
+@@ -0,0 +1,38 @@
++import { readFileSync } from 'node:fs';
++import vm from 'node:vm';
++import { describe, expect, it } from 'vitest';
++import { patchChartPointRecalc } from '../../scripts/patch-onlyoffice-chart-point-recalc.mjs';
++
++const source = readFileSync('public/sdkjs/slide/sdk-all.js', 'utf8');
++function point(text: string, chart: unknown) {
++  class NumericPoint {
++    getChartSpace() { return chart; }
++  }
++  const context = vm.createContext({ CNumericPoint: NumericPoint, AscDFH: { historyitem_NumericPoint_SetVal: 123 } });
++  const start = text.indexOf('CNumericPoint.prototype.Refresh_RecalcData=');
++  if (start >= 0) vm.runInContext(text.slice(start, text.indexOf('CNumericPoint.prototype.fillObject=', start)), context);
++  return new NumericPoint() as NumericPoint & { Refresh_RecalcData?: (data: { Type: number }) => void };
++}
++
++describe('numeric chart point history invalidation', () => {
++  it('reproduces the missing native history hook', () => {
++    expect(point(source, null).Refresh_RecalcData).toBeUndefined();
++  });
++  it('invalidates the owning chart through its existing native data lifecycle', () => {
++    let updates = 0;
++    const value = point(patchChartPointRecalc(source), { onDataUpdateRecalc() { updates++; } });
++    // The native history calls this hook on apply, Undo and Redo.
++    for (let i = 0; i < 3; i++) value.Refresh_RecalcData!({ Type: 123 });
++    expect(updates).toBe(3);
++    value.Refresh_RecalcData!({ Type: 456 });
++    expect(updates).toBe(3);
++  });
++  it('allows detached points and refuses changed or duplicate boundaries', () => {
++    const patched = patchChartPointRecalc(source);
++    expect(() => point(patched, null).Refresh_RecalcData!({ Type: 123 })).not.toThrow();
++    expect(patchChartPointRecalc(patched)).toBe(patched);
++    expect(() => patchChartPointRecalc('unknown')).toThrow();
++    expect(() => patchChartPointRecalc(source + source)).toThrow();
++    expect(() => patchChartPointRecalc(source.replace('CNumericPoint.prototype.fillObject=', 'CNumericPoint.prototype.Refresh_RecalcData='))).toThrow();
++  });
++});

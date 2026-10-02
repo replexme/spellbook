@@ -7,7 +7,7 @@ original PPTX preservation, useful responsiveness, and verified output quality.
 
 Apply in filename order to `agentbridges-ai/onlyoffice-browser` at
 `d15d12b6945be4d8b0f3aa1806120e740d2950ee` (0.3.34, SDK 9.3). Patched local
-candidate commits are `1872b4e`, `60b6109`, `1317f56`, `ded5281`, and `e6165f7`. The upstream component and SDK
+candidate commits are `1872b4e`, `60b6109`, `1317f56`, `ded5281`, `e6165f7`, and `3b6e983`. The upstream component and SDK
 are AGPL-3.0; these patch artifacts retain the upstream licensing context.
 
 - `0001-version-bound-save.patch`: persistence acknowledges an exported native
@@ -47,6 +47,16 @@ are AGPL-3.0; these patch artifacts retain the upstream licensing context.
   corrected output was reopened and visually reviewed. These are separate from
   the missing relation-map guard in `0004`. The exact pinned input digest is
   checked separately at each generated-asset step.
+
+- `0006-chart-numeric-point-native-recalc.patch`: a numeric cache point changed
+  native history but had no recalculation hook. History rebuilding clears the
+  earlier drawing map, so the live canvas stayed stale while export/reopen used
+  the new data. The point now invokes its owning chart's existing data update
+  invalidation when its value changes, including Undo/Redo. Other history types
+  and detached points are unaffected. The generated SDK input is digest-bound;
+  unit tests, a full runtime/library build and actual visible-canvas history
+  replay were verified. This does not make cache-only chart editing complete:
+  the embedded workbook must still change in the same native history point.
 
 Local evidence is recorded in the private product delivery report and under
 `/private/tmp/present-engine-comparison-20261001/improved-comparison`. User files,
@@ -173,6 +183,8 @@ fixes apply and history replay without changing workbook contents or adding a
 manual redraw to the test. Its generated SDK bytes are digest-bound like the
 other candidate patches. The pinned [chart format source](https://github.com/ONLYOFFICE/sdkjs/blob/v9.3.0.140/common/Drawings/Format/ChartFormat.js)
 provides `CNumericPoint.setVal` and the parent numeric-cache history lifecycle.
+The pinned [native history source](https://github.com/ONLYOFFICE/sdkjs/blob/v9.3.0.140/word/Editor/History.js)
+rebuilds drawing recalculation data through the recorded object's hook.
 
 Every typed trial captures all slides before editing, after editing and after
 reopening, and requires pixel identity for untargeted slides. This selects and
