@@ -304,9 +304,11 @@ function spellbookDocumentOperation(request) {
     );
     return type === "none" ? null : { type, width, length };
   };
-  const safeTextProperty = (shape, name) => {
+  const safeTextProperty = (shape, name, textCursor) => {
     try {
-      const cursor = shape.createTextCursor();
+      const cursor = textCursor
+        ? textCursor(shape, false)
+        : shape.createTextCursor();
       if (!propertyIsSupported(cursor, name)) return safeProperty(shape, name);
       return safeProperty(cursor, name);
     } catch (_) {
@@ -319,7 +321,7 @@ function spellbookDocumentOperation(request) {
     );
     const propertyNames = [
       ...new Set(supported.map(([, property]) => property)),
-    ];
+    ].sort();
     if (!propertyNames.length) return {};
     try {
       const states = Array.from(value.getPropertyStates(propertyNames));
@@ -344,7 +346,7 @@ function spellbookDocumentOperation(request) {
         .filter(([, state]) => state !== null),
     );
   };
-  const shapePropertyStates = (shape, text) => {
+  const shapePropertyStates = (shape, text, textCursor) => {
     const states = collectPropertyStates(shape, [
       ["fillStyle", "FillStyle"],
       ["fill", "FillColor"],
@@ -392,7 +394,12 @@ function spellbookDocumentOperation(request) {
     ]);
     if (text === null) return states;
     try {
-      const cursor = text === "" ? shape : shape.createTextCursor();
+      const cursor =
+        text === ""
+          ? shape
+          : textCursor
+            ? textCursor(shape, true)
+            : shape.createTextCursor();
       if (cursor !== shape) cursor.gotoEnd(true);
       const textMappings = [
         ["fontFamily", "CharFontName"],
@@ -562,42 +569,74 @@ function spellbookDocumentOperation(request) {
       }
     }
   };
-  const wholeTextFormatting = (shape, text) => {
+  const wholeTextFormatting = (shape, text, textCursor) => {
     if (text === null) return null;
     try {
       // An empty text body has no range whose character properties can be
       // authoritative. Its UNO cursor may report a physical fallback font
       // after Undo even while the shape default and saved PPTX retain the
       // declared family. Read the shape defaults until text exists.
-      const cursor = text === "" ? shape : shape.createTextCursor();
+      const cursor =
+        text === ""
+          ? shape
+          : textCursor
+            ? textCursor(shape, true)
+            : shape.createTextCursor();
       if (cursor !== shape) cursor.gotoEnd(true);
+      // UNO supports a single ordered read of these character properties.
+      // Keep mixed/void values intact, and retain the same individual fallback
+      // for engines or objects that do not implement XMultiPropertySet.
+      const names = [
+        "CharCaseMap",
+        "CharColor",
+        "CharFontName",
+        "CharFontNameAsian",
+        "CharFontNameComplex",
+        "CharHeight",
+        "CharHeightAsian",
+        "CharHeightComplex",
+        "CharLocale",
+        "CharLocaleAsian",
+        "CharLocaleComplex",
+        "CharPosture",
+        "CharPostureAsian",
+        "CharPostureComplex",
+        "CharStrikeout",
+        "CharUnderline",
+        "CharWeight",
+        "CharWeightAsian",
+        "CharWeightComplex",
+        "ParaAdjust",
+      ];
+      let values;
+      try {
+        const result = Array.from(cursor.getPropertyValues(names));
+        if (result.length === names.length)
+          values = new Map(names.map((name, index) => [name, result[index]]));
+      } catch (_) {}
+      const property = (name) =>
+        values ? values.get(name) : cursor.getPropertyValue(name);
       return {
-        fontFamily: cursor.getPropertyValue("CharFontName"),
-        fontFamilyAsian: cursor.getPropertyValue("CharFontNameAsian"),
-        fontFamilyComplex: cursor.getPropertyValue("CharFontNameComplex"),
-        fontSize: cursor.getPropertyValue("CharHeight"),
-        fontSizeAsian: cursor.getPropertyValue("CharHeightAsian"),
-        fontSizeComplex: cursor.getPropertyValue("CharHeightComplex"),
-        fontWeight: cursor.getPropertyValue("CharWeight"),
-        fontWeightAsian: cursor.getPropertyValue("CharWeightAsian"),
-        fontWeightComplex: cursor.getPropertyValue("CharWeightComplex"),
-        fontStyle: fontSlantName(cursor.getPropertyValue("CharPosture")),
-        fontStyleAsian: fontSlantName(
-          cursor.getPropertyValue("CharPostureAsian"),
-        ),
-        fontStyleComplex: fontSlantName(
-          cursor.getPropertyValue("CharPostureComplex"),
-        ),
-        underline: cursor.getPropertyValue("CharUnderline"),
-        strikethrough: cursor.getPropertyValue("CharStrikeout"),
-        color: cursor.getPropertyValue("CharColor"),
-        paragraphAlignment: cursor.getPropertyValue("ParaAdjust"),
-        caseMap: cursor.getPropertyValue("CharCaseMap"),
-        locale: localeDetails(cursor.getPropertyValue("CharLocale")),
-        localeAsian: localeDetails(cursor.getPropertyValue("CharLocaleAsian")),
-        localeComplex: localeDetails(
-          cursor.getPropertyValue("CharLocaleComplex"),
-        ),
+        fontFamily: property("CharFontName"),
+        fontFamilyAsian: property("CharFontNameAsian"),
+        fontFamilyComplex: property("CharFontNameComplex"),
+        fontSize: property("CharHeight"),
+        fontSizeAsian: property("CharHeightAsian"),
+        fontSizeComplex: property("CharHeightComplex"),
+        fontWeight: property("CharWeight"),
+        fontWeightAsian: property("CharWeightAsian"),
+        fontWeightComplex: property("CharWeightComplex"),
+        fontStyle: fontSlantName(property("CharPosture")),
+        fontStyleAsian: fontSlantName(property("CharPostureAsian")),
+        fontStyleComplex: fontSlantName(property("CharPostureComplex")),
+        underline: property("CharUnderline"),
+        strikethrough: property("CharStrikeout"),
+        color: property("CharColor"),
+        paragraphAlignment: property("ParaAdjust"),
+        caseMap: property("CharCaseMap"),
+        locale: localeDetails(property("CharLocale")),
+        localeAsian: localeDetails(property("CharLocaleAsian")),
+        localeComplex: localeDetails(property("CharLocaleComplex")),
       };
     } catch (_) {
       return null;
@@ -2155,6 +2194,20 @@ function spellbookDocumentOperation(request) {
   let documentReadMs = 0;
   function read(detailSlideIndex, reusableObservation, changedSlideIndex) {
     const readStartedAt = Date.now();
+    // Cursors anchor ranges in a mutable document. Share them only within
+    // this synchronous read; a later read after a mutation starts fresh.
+    // Collapsed and whole-text ranges must stay separate.
+    const textCursors = new WeakMap();
+    const textCursor = (shape, whole) => {
+      let ranges = textCursors.get(shape);
+      if (!ranges) {
+        ranges = {};
+        textCursors.set(shape, ranges);
+      }
+      const key = whole ? "whole" : "collapsed";
+      if (!ranges[key]) ranges[key] = shape.createTextCursor();
+      return ranges[key];
+    };
     documentReadCount++;
     // Only a transaction's intermediate, shape-local result may reuse slides.
     // Its final command still takes a complete read to verify the edit scope.
@@ -2252,10 +2305,10 @@ function spellbookDocumentOperation(request) {
               "IsEmptyPresentationObject",
             ),
             geometryType: shapeGeometryType(shape, shapeKind),
-            propertyStates: shapePropertyStates(shape, text),
+            propertyStates: shapePropertyStates(shape, text, textCursor),
             text,
             paragraphFormats,
-            wholeTextFormatting: wholeTextFormatting(shape, text),
+            wholeTextFormatting: wholeTextFormatting(shape, text, textCursor),
             runFormatting: runFormatting(shape, text),
             x: position.X,
             y: position.Y,
@@ -2273,8 +2326,8 @@ function spellbookDocumentOperation(request) {
             fontWeight: safeProperty(shape, "CharWeight"),
             fontStyle: fontSlantName(safeProperty(shape, "CharPosture")),
             underline: safeProperty(shape, "CharUnderline"),
-            strikethrough: safeTextProperty(shape, "CharStrikeout"),
-            textShadow: safeTextProperty(shape, "CharShadowed"),
+            strikethrough: safeTextProperty(shape, "CharStrikeout", textCursor),
+            textShadow: safeTextProperty(shape, "CharShadowed", textCursor),
             color: safeProperty(shape, "CharColor"),
             // PPTX stores the alignment on each paragraph, and the shape's
             // own property keeps the default until a save and reopen apply
@@ -2299,11 +2352,15 @@ function spellbookDocumentOperation(request) {
               bottom: safeProperty(shape, "TextLowerDistance"),
             },
             characterSpacing: kerningMm100ToPoints(
-              safeTextProperty(shape, "CharKerning"),
+              safeTextProperty(shape, "CharKerning", textCursor),
             ),
             scriptPosition: {
-              escapement: safeTextProperty(shape, "CharEscapement"),
-              relativeHeight: safeTextProperty(shape, "CharEscapementHeight"),
+              escapement: safeTextProperty(shape, "CharEscapement", textCursor),
+              relativeHeight: safeTextProperty(
+                shape,
+                "CharEscapementHeight",
+                textCursor,
+              ),
             },
             title: safeProperty(shape, "Title"),
             description: safeProperty(shape, "Description"),
