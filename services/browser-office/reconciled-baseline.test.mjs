@@ -206,7 +206,7 @@ test("a coverage refusal records the actual parts and retains file pairs only in
   for (const rawProbe of [false, true]) {
     const context = session("noop");
     context.browserProbeMode = rawProbe;
-    context.query = { get: () => "1" };
+    context.query = { get: () => (rawProbe ? "1" : null) };
     context.savedArtifacts = new Map();
     context.ooxmlWorker = {
       postMessage({ requestId }) {

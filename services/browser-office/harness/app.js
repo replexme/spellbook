@@ -2283,9 +2283,7 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
         expectedDocumentChanges: changes,
       });
       const diagnosticBaseline =
-        browserProbeMode && query.get("nativeRaw") === "1"
-          ? baseline.slice()
-          : null;
+        query.get("nativeRaw") === "1" ? baseline.slice() : null;
       const requestId = `native-noop-${++requestSequence}`;
       const report = await new Promise((resolve, reject) => {
         mutationPending.set(requestId, { resolve, reject });

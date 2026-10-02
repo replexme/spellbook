@@ -276,7 +276,7 @@ const partsDiff = (before, after) => {
 try {
   const runtimeStarted = Date.now();
   await page.goto(
-    `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}${diagnosticRaw ? "&browserProbe=1&nativeRaw=1" : ""}`,
+    `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}${diagnosticRaw ? "&nativeRaw=1" : ""}`,
     { waitUntil: "domcontentloaded", timeout: 30_000 },
   );
   await page.waitForFunction(
