@@ -681,7 +681,11 @@ try {
     } else if (kind === "table-cell-text") {
       const d = find("table");
       if (!d) throw Error("table target missing");
-      d.GetRow(0).GetCell(0).SetText("SBX_TYPED_9F3");
+      const content = d.GetRow(0).GetCell(0).GetContent();
+      content.RemoveAllElements();
+      content.GetElement(0).AddText("SBX_TYPED_9F3");
+      if (!content.GetText().includes("SBX_TYPED_9F3"))
+        throw Error("table_cell_text_postcondition_failed");
       result = true;
     } else if (kind === "chart-data") {
       const d = find("chart");
