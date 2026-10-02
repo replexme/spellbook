@@ -1,0 +1,228 @@
+diff --git a/bin/build.sh b/bin/build.sh
+index b609b2c..474203d 100755
+--- a/bin/build.sh
++++ b/bin/build.sh
+@@ -12,6 +12,7 @@ node scripts/patch-onlyoffice-smartart-connection-map.mjs dist
+ node scripts/patch-onlyoffice-smartart-line-path.mjs dist
+ node scripts/patch-onlyoffice-smartart-transition-style.mjs dist
+ node scripts/patch-onlyoffice-chart-point-recalc.mjs dist
++node scripts/patch-onlyoffice-field-cache-history.mjs dist
+ 
+ # Keep the deployable demo/runtime lean by removing low-frequency bundled
+ # assets and emitting canonical path packs for per-document-type CDN sync.
+diff --git a/scripts/patch-onlyoffice-field-cache-history.mjs b/scripts/patch-onlyoffice-field-cache-history.mjs
+new file mode 100644
+index 0000000..286c7f4
+--- /dev/null
++++ b/scripts/patch-onlyoffice-field-cache-history.mjs
+@@ -0,0 +1,50 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++// Pinned sdkjs 9.3: generated presentation fields must participate in an open
++// native action group, so cancellation and Undo cannot leave warmed layout
++// caches behind. Ordinary rendering retains the upstream no-history behavior.
++import assert from 'node:assert/strict';
++import { createHash } from 'node:crypto';
++import { readFile, writeFile } from 'node:fs/promises';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { brotliCompressSync, constants } from 'node:zlib';
++const inputHash = '15ff9dd1544b118854b92208957de7b524de4e167ed597b9aa68c59eeed8d016';
++const anchor = 'CPresentationField.prototype.private_CalculateContent=function(){';
++const addition = '/* spellbook-field-cache-history-v1 */if(Asc.editor&&Asc.editor.isGroupActions&&Asc.editor.isGroupActions()&&!AscCommon.History.UndoRedoInProgress){var value=this.private_GetString();if(typeof value!=="string"||this.GetText()===value)return;var selected=this.IsSelectionUse(),selection=this.State.Selection,direction=selection.EndPos-selection.StartPos,allow=this.CanAddToContent,history=AscCommon.History,depth=history.TurnOffHistory;for(var i=0;i<depth;i++)history.TurnOn();try{if(!history.CanAddChanges())throw new Error("field_cache_history_unavailable");this.CanAddToContent=true;ParaRun.prototype.Remove_FromContent.call(this,0,this.Content.length,true);this.AddText(value,-1);if(selected)this.SelectAll(direction)}finally{this.CanAddToContent=allow;for(var i=0;i<depth;i++)history.TurnOff()}return;}';
++const contextAnchor = 'MasterSlide.prototype.drawNoPlaceholders=function(graphics,slide){';
++const contextHelper = '/* spellbook-field-context-history-v1 */AscFormat.spellbookRestoreFieldContext=function(target,next){target.lastRecalcSlideIndex=next};AscFormat.spellbookSetFieldContext=function(object,value){var h=AscCommon.History;if(Asc.editor&&Asc.editor.isGroupActions&&Asc.editor.isGroupActions()&&!h.UndoRedoInProgress&&object.lastRecalcSlideIndex!==value){var type=object.getObjectType()|65500;if(!AscDFH.changesFactory[type]&&!AscDFH.drawingsChangesMap[type]){AscDFH.changesFactory[type]=AscDFH.CChangesDrawingsDouble2;AscDFH.drawingsChangesMap[type]=AscFormat.spellbookRestoreFieldContext}else if(AscDFH.changesFactory[type]!==AscDFH.CChangesDrawingsDouble2||AscDFH.drawingsChangesMap[type]!==AscFormat.spellbookRestoreFieldContext)throw new Error("field_context_history_collision");var depth=h.TurnOffHistory;for(var i=0;i<depth;i++)h.TurnOn();try{if(!h.CanAddChanges())throw new Error("field_context_history_unavailable");h.Add(new AscDFH.CChangesDrawingsDouble2(object,type,object.lastRecalcSlideIndex,value))}finally{for(var i=0;i<depth;i++)h.TurnOff()}}object.lastRecalcSlideIndex=value;};';
++const contextReplacements = [
++ ['this.lastRecalcSlideIndex=slide.num;this.cSld.refreshAllContentsFields(true)', 'AscFormat.spellbookSetFieldContext(this,slide.num);this.cSld.refreshAllContentsFields(true)'],
++ ['this.lastRecalcSlideIndex=-1;this.cSld.refreshAllContentsFields(true)', 'AscFormat.spellbookSetFieldContext(this,-1);this.cSld.refreshAllContentsFields(true)'],
++];
++export function unpatchFieldCacheHistory(source) {
++ source=source.replace(addition,'').replace(contextHelper,'');
++ for(const [before,after] of contextReplacements)source=source.split(after).join(before);
++ return source;
++}
++export function patchFieldCacheHistory(source) {
++  assert(source.split(anchor).length === 2, 'Pinned presentation field boundary changed');
++  if(source.includes(addition)) {
++    assert(source.includes(anchor+addition),'Misplaced native field cache history');
++    assert(source.includes(contextHelper),'Missing field context history');
++    return source;
++  }
++  const start=source.indexOf(anchor),end=source.indexOf('CPresentationField.prototype.GetFieldType=',start);
++  assert(end>start && source.slice(start,end).includes('this.Content.length=0;this.AddText(sStr,-1);'),'Pinned generated-field calculation changed');
++  assert(source.split(contextAnchor).length===2,'Pinned master drawing boundary changed');
++  for(const [before,after] of contextReplacements){assert(source.split(before).length===7,'Pinned six master/layout drawing contexts changed');source=source.split(before).join(after)}
++  return source.replace(contextAnchor,contextHelper+contextAnchor).replace(anchor,anchor+addition);
++}
++
++if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
++  const root = path.resolve(process.argv[2] || '');
++  assert(path.basename(root) === 'dist', 'Only generated dist assets may be patched');
++  const target = path.join(root, 'sdkjs/slide/sdk-all.js');
++  const source = await readFile(target, 'utf8');
++  const hash = (text) => createHash('sha256').update(text).digest('hex');
++  assert(hash(unpatchFieldCacheHistory(source)) === inputHash, 'Unexpected SDK asset');
++  const patched = patchFieldCacheHistory(source);
++  await writeFile(target, patched);
++  await writeFile(target + '.br', brotliCompressSync(Buffer.from(patched), { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }));
++  console.log(JSON.stringify({ patch: 'spellbook-field-cache-history-v1', before: hash(source), after: hash(patched) }));
++}
+diff --git a/scripts/patch-onlyoffice-field-cache-history.test.mjs b/scripts/patch-onlyoffice-field-cache-history.test.mjs
+new file mode 100644
+index 0000000..c487945
+--- /dev/null
++++ b/scripts/patch-onlyoffice-field-cache-history.test.mjs
+@@ -0,0 +1,66 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import vm from 'node:vm';
++import { patchFieldCacheHistory, unpatchFieldCacheHistory } from './patch-onlyoffice-field-cache-history.mjs';
++
++const draw = 'if(slide){this.lastRecalcSlideIndex=slide.num;this.cSld.refreshAllContentsFields(true)}else{this.lastRecalcSlideIndex=-1;this.cSld.refreshAllContentsFields(true)}';
++const source = 'MasterSlide.prototype.drawNoPlaceholders=function(graphics,slide){' + draw + '};' +
++  Array.from({length:5},(_,i)=>`MasterSlide.prototype.draw${i}=function(graphics,slide){${draw}};`).join('') +
++  'CPresentationField.prototype.private_CalculateContent=function(){AscFormat.ExecuteNoHistory(function(){var sStr=this.private_GetString();this.Content.length=0;this.AddText(sStr,-1);},this,[])};CPresentationField.prototype.GetFieldType=function(){};';
++
++function fixture({group=true, depth=1, reject=false}={}) {
++  const changes=[];
++  const history={TurnOffHistory:depth,UndoRedoInProgress:false,TurnOn(){this.TurnOffHistory--},TurnOff(){this.TurnOffHistory++},CanAddChanges(){return this.TurnOffHistory===0},Add(change){if(reject)throw new Error('native history rejected');changes.push(change)}};
++  const dfh={changesFactory:{},drawingsChangesMap:{},CChangesDrawingsDouble2:class{constructor(object,type,old,next){Object.assign(this,{object,type,old,next})}}};
++  class MasterSlide {}
++  class CPresentationField {}
++  const context={Asc:{editor:{isGroupActions:()=>group}},AscCommon:{History:history},AscFormat:{},AscDFH:dfh,MasterSlide,CPresentationField};
++  vm.runInNewContext(patchFieldCacheHistory(source),context);
++  return {context,history,changes,dfh};
++}
++
++test('patch is reversible and idempotent and refuses changed native boundaries',()=>{
++  const patched=patchFieldCacheHistory(source);
++  assert.equal(unpatchFieldCacheHistory(patched),source);
++  assert.equal(patchFieldCacheHistory(patched),patched);
++  assert.throws(()=>patchFieldCacheHistory(source.replace('this.Content.length=0;','this.Content.splice(0);')),/calculation changed/);
++  assert.throws(()=>patchFieldCacheHistory(source.replace('draw4=function','drawNoPlaceholders=function')),/drawing boundary changed/);
++});
++
++test('native context history retains negative indices and restores no-history depth',()=>{
++  const {context,history,changes,dfh}=fixture();
++  const object={lastRecalcSlideIndex:-1,getObjectType:()=>1118<<16};
++  context.AscFormat.spellbookSetFieldContext(object,0);
++  assert.equal(object.lastRecalcSlideIndex,0);
++  assert.equal(history.TurnOffHistory,1);
++  assert.equal(changes.length,1);
++  const change=changes[0];
++  assert.equal(change.old,-1);
++  dfh.drawingsChangesMap[change.type](object,change.old);
++  assert.equal(object.lastRecalcSlideIndex,-1);
++});
++
++test('ordinary paint and unchanged context do not add history; failures restore depth',()=>{
++  const normal=fixture({group:false});
++  normal.context.AscFormat.spellbookSetFieldContext({lastRecalcSlideIndex:-1},0);
++  assert.equal(normal.changes.length,0);
++  const same=fixture();
++  same.context.AscFormat.spellbookSetFieldContext({lastRecalcSlideIndex:0},0);
++  assert.equal(same.changes.length,0);
++  const failed=fixture({depth:2,reject:true});
++  const object={lastRecalcSlideIndex:-1,getObjectType:()=>1119<<16};
++  assert.throws(()=>failed.context.AscFormat.spellbookSetFieldContext(object,0),/native history rejected/);
++  assert.equal(failed.history.TurnOffHistory,2);
++  assert.equal(object.lastRecalcSlideIndex,-1);
++});
++
++test('existing history type collisions fail before modifying the render context',()=>{
++  const {context,dfh}=fixture();
++  const type=(1118<<16)|65500;
++  dfh.changesFactory[type]=dfh.CChangesDrawingsDouble2;
++  dfh.drawingsChangesMap[type]=()=>{};
++  const object={lastRecalcSlideIndex:-1,getObjectType:()=>1118<<16};
++  assert.throws(()=>context.AscFormat.spellbookSetFieldContext(object,0),/history_collision/);
++  assert.equal(object.lastRecalcSlideIndex,-1);
++});
+diff --git a/src/lib/office-editor-runtime.ts b/src/lib/office-editor-runtime.ts
+index 02aac45..01c8848 100644
+--- a/src/lib/office-editor-runtime.ts
++++ b/src/lib/office-editor-runtime.ts
+@@ -1899,6 +1899,7 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+   private status: OfficeEditorStatus = 'opening';
+   private dirty = false;
+   private savedNativeSnapshot: NativeSaveSnapshot | null = null;
++  private savedStateRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+   private destroyed = false;
+   private readonly fileName: string;
+   private readonly fileType: string;
+@@ -3329,8 +3330,23 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+   }
+ 
+   private handleDocumentStateChange(event: DocumentStateChangeEvent): void {
++    if (this.savedStateRefreshTimer !== null) {
++      clearTimeout(this.savedStateRefreshTimer);
++      this.savedStateRefreshTimer = null;
++    }
+     const dirty = typeof event === 'boolean' ? event : Boolean(event?.data);
+     this.setDirty(dirty || (this.savedNativeSnapshot !== null && !this.matchesNativeSnapshot(this.savedNativeSnapshot)));
++    // Native Undo/cancellation can notify before its paint restores generated
++    // field caches. Recheck the acknowledged bytes once after that paint; a
++    // later native event or save invalidates this pending check.
++    if (!dirty && this.dirty && this.savedNativeSnapshot !== null) {
++      const snapshot = this.savedNativeSnapshot;
++      this.savedStateRefreshTimer = setTimeout(() => {
++        this.savedStateRefreshTimer = null;
++        if (!this.destroyed && this.savedNativeSnapshot === snapshot)
++          this.setDirty(!this.matchesNativeSnapshot(snapshot));
++      }, 50);
++    }
+   }
+ 
+   private async handleDownloadAs(event: DownloadAsEvent): Promise<void> {
+@@ -3546,6 +3562,10 @@ class BrowserOfficeEditor implements OfficeEditorInstance {
+   destroy(): Promise<void> {
+     if (this.destroyPromise) return this.destroyPromise;
+     this.destroyed = true;
++    if (this.savedStateRefreshTimer !== null) {
++      clearTimeout(this.savedStateRefreshTimer);
++      this.savedStateRefreshTimer = null;
++    }
+     this.status = 'destroyed';
+     this.clearNativeDownloadAsInterceptorRetry();
+     this.clearNativeEditModeBridgeRetry();
+diff --git a/test/unit/office-editor-runtime.test.ts b/test/unit/office-editor-runtime.test.ts
+index d4c7a01..4f8c43e 100644
+--- a/test/unit/office-editor-runtime.test.ts
++++ b/test/unit/office-editor-runtime.test.ts
+@@ -2527,6 +2527,36 @@ endobj
+     await instance.destroy();
+   });
+ 
++  it.each(['settled', 'later-edit', 'readback-failure', 'destroyed'])('rechecks a pre-paint clean event without erasing %s state', async (kind) => {
++    const container = document.createElement('div');
++    document.body.appendChild(container);
++    const onDirtyChange = vi.fn();
++    const instance = await createOfficeEditor(container, {
++      file: new File(['hello'], 'alpha.xlsx'), mode: 'edit',
++      onDirtyChange, onSave: async () => true,
++    });
++    await flush();
++    const native = new Uint8Array([9, 8, 7]);
++    const reader = docEditorInstances[0].asc_nativeGetFile3;
++    reader.mockImplementation(() => ({ data: native }));
++    await instance.save('XLSX');
++    native[2] = 6;
++    docEditorConfigs[0].events.onDocumentStateChange?.({ data: false });
++    expect(instance.getState().dirty).toBe(true);
++    native[2] = 7;
++    if (kind === 'later-edit')
++      docEditorConfigs[0].events.onDocumentStateChange?.({ data: true });
++    if (kind === 'readback-failure')
++      reader.mockImplementation(() => { throw new Error('readback unavailable'); });
++    if (kind === 'destroyed') await instance.destroy();
++    const notifications = onDirtyChange.mock.calls.length;
++    await new Promise(resolve => setTimeout(resolve, 80));
++    if (kind === 'settled') expect(instance.getState().dirty).toBe(false);
++    else expect(instance.getState().dirty).toBe(true);
++    if (kind === 'destroyed') expect(onDirtyChange).toHaveBeenCalledTimes(notifications);
++    await instance.destroy();
++  });
++
+   it.each(['conversion', 'host-write'])('keeps later native edits dirty during %s, then saves the new state', async (boundary) => {
+     const container = document.createElement('div');
+     document.body.appendChild(container);

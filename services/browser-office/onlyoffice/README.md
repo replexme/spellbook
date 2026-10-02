@@ -7,7 +7,8 @@ original PPTX preservation, useful responsiveness, and verified output quality.
 
 Apply in filename order to `agentbridges-ai/onlyoffice-browser` at
 `d15d12b6945be4d8b0f3aa1806120e740d2950ee` (0.3.34, SDK 9.3). Patched local
-candidate commits are `1872b4e`, `60b6109`, `1317f56`, `ded5281`, `e6165f7`, and `3b6e983`. The upstream component and SDK
+candidate commits are `1872b4e`, `60b6109`, `1317f56`, `ded5281`, `e6165f7`,
+`3b6e983`, `d288ebb`, and `98bece7`. The upstream component and SDK
 are AGPL-3.0; these patch artifacts retain the upstream licensing context.
 
 - `0001-version-bound-save.patch`: persistence acknowledges an exported native
@@ -57,6 +58,21 @@ are AGPL-3.0; these patch artifacts retain the upstream licensing context.
   unit tests, a full runtime/library build and actual visible-canvas history
   replay were verified. This does not make cache-only chart editing complete:
   the embedded workbook must still change in the same native history point.
+
+- `0007-native-field-cache-transaction-and-settled-save-state.patch`: grouped
+  edits now record both generated field text and the master/layout rendering
+  slide index through native history changes. Undoing text alone left the index
+  changed, so cancellation's recalc wrote the wrong cached slide number again.
+  Ordinary paint retains upstream no-history behavior. Exact generated input
+  and six drawing boundaries are checked; history-type collisions fail closed.
+  A clean notification arriving before paint receives one delayed comparison
+  against the acknowledged native bytes and media identity. Later changes,
+  another acknowledged save, and teardown invalidate that check. Readback
+  failures retain dirty state. These changes restore the actual layout-switch
+  cancellation's complete native identity and host saved state, without
+  rewriting history arrays or excluding generated fields from byte comparison.
+  Whole-product permission, existing Redo preservation, and admission remain
+  separate gates.
 
 Local evidence is recorded in the private product delivery report and under
 `/private/tmp/present-engine-comparison-20261001/improved-comparison`. User files,
@@ -197,8 +213,9 @@ contracts.
 The typed diagnostic adapter uses the pinned SDK's native group-action boundary
 for commit/cancellation. `--fail-after-apply` injects an exception after the real
 mutation and its postconditions, before any save. Success requires restoration
-of the complete observed document, every slide's visible pixels, native history
-and released locks, with zero persistence callbacks. Each typed case inherits
+of the complete observed document, every slide's visible pixels, canonical
+native bytes and saved-state flags, host ready/dirty/error, native history and
+released locks, with zero persistence callbacks. Each typed case inherits
 this boundary rather than implementing its own rollback. A rollback error is a
 failure and cannot become an expected-failure pass.
 
