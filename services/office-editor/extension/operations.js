@@ -190,7 +190,11 @@ function spellbookDocumentOperation(request) {
   // UNO objects expose different property sets. Ask the object's declared
   // capability before reading so optional properties do not repeatedly enter
   // the exception path during whole-document observations.
-  const propertyCapabilityCache = new WeakMap();
+  let propertyCapabilityCache = new WeakMap();
+  // Several objects return the same immutable property-set declaration.
+  // Match its UNO identity, never its class/name or a property-value proxy.
+  // The sharing pool exists only during a synchronous observation.
+  let propertyInfoCapabilities = null;
   const propertyIsSupported = (value, name) => {
     if (!value || typeof value !== "object") return true;
     let entry = propertyCapabilityCache.get(value);
@@ -199,7 +203,11 @@ function spellbookDocumentOperation(request) {
       try {
         info = value.getPropertySetInfo();
       } catch (_) {}
-      entry = { info, names: new Map() };
+      entry = propertyInfoCapabilities?.find(candidate => {
+        try { return info && uno.sameUnoObject(info, candidate.info); } catch (_) { return false; }
+      }) ?? { info, names: new Map() };
+      if (info && propertyInfoCapabilities && !propertyInfoCapabilities.includes(entry))
+        propertyInfoCapabilities.push(entry);
       propertyCapabilityCache.set(value, entry);
     }
     if (!entry.info) return true;
@@ -2194,6 +2202,8 @@ function spellbookDocumentOperation(request) {
   let documentReadMs = 0;
   function read(detailSlideIndex, reusableObservation, changedSlideIndex) {
     const readStartedAt = Date.now();
+    propertyCapabilityCache = new WeakMap();
+    propertyInfoCapabilities = [];
     // Cursors anchor ranges in a mutable document. Share them only within
     // this synchronous read; a later read after a mutation starts fresh.
     // Collapsed and whole-text ranges must stay separate.
@@ -2747,6 +2757,7 @@ function spellbookDocumentOperation(request) {
       sections,
     });
     documentReadMs += Date.now() - readStartedAt;
+    propertyInfoCapabilities = null;
     return {
       unit: "1/100mm",
       readMetrics: {

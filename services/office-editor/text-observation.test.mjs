@@ -131,3 +131,27 @@ test("one observation shares separate collapsed and whole ranges, then discards 
   assert.notEqual(next(shape, true), whole);
   assert.equal(state.created, 4);
 });
+
+const capabilitySource = source.slice(source.indexOf("  let propertyCapabilityCache ="), source.indexOf("  const safeProperty =", source.indexOf("  let propertyCapabilityCache =")));
+function capabilityRead() {
+  return runInNewContext(capabilitySource + "\npropertyInfoCapabilities = [];\npropertyIsSupported;", {
+    uno: { sameUnoObject: (left, right) => left.identity === right.identity },
+  });
+}
+
+test("property capabilities share only exact UNO info identity within one read", () => {
+  let calls = 0;
+  const info = (identity, names) => ({ identity, hasPropertyByName(name) { calls++; return names.includes(name); } });
+  const read = capabilityRead();
+  const a = { getPropertySetInfo: () => info(1, ["CharHeight"]) };
+  const b = { getPropertySetInfo: () => info(1, ["CharHeight"]) };
+  const other = { getPropertySetInfo: () => info(2, ["CharFontName"]) };
+  assert.equal(read(a, "CharHeight"), true);
+  assert.equal(read(b, "CharHeight"), true);
+  assert.equal(calls, 1);
+  assert.equal(read(other, "CharHeight"), false);
+  assert.equal(calls, 2);
+  const nextRead = capabilityRead();
+  assert.equal(nextRead(a, "CharHeight"), true);
+  assert.equal(calls, 3);
+});
