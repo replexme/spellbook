@@ -685,6 +685,27 @@ try {
       item.sourcePreservations = saved.preservations;
       const bytes = Buffer.from(saved.base64, "base64");
       item.exportMs = saved.ms;
+      const cleanStart = performance.now();
+      await page.waitForFunction(
+        () => window.__ONLYOFFICE_SAVE_E2E__.getStatus().dirty === false,
+        null,
+        { timeout: 30000 },
+      );
+      item.ackToCleanMs = performance.now() - cleanStart;
+      item.saveUntilVerifiedCleanMs = saved.ms + item.ackToCleanMs;
+      item.afterSave = await page.evaluate(() =>
+        window.__ONLYOFFICE_SAVE_E2E__.getStatus(),
+      );
+      assert.equal(
+        item.afterSave.writeCount,
+        1,
+        "One edited artifact must reach the host callback",
+      );
+      assert.deepEqual(
+        differences(edited, await snapshot(frame)),
+        [],
+        "Saving must not mutate the live document",
+      );
       item.savedBytes = bytes.length;
       item.savedSha256 = sha(bytes);
       Object.assign(item, packageDelta(bytes));
