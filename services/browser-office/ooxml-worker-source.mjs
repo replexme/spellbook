@@ -4163,10 +4163,9 @@ export async function inspectOoxmlDocumentWithAssets(input) {
   if (!(input instanceof Uint8Array) || input.byteLength > maximumInputBytes)
     throw new Error("Invalid PPTX inspection input.");
   const context = openPackage(input, { requireSimpleTopology: false });
-  const assetHashes = Object.fromEntries(
+  const partHashes = Object.fromEntries(
     await Promise.all(
       Object.entries(context.entries)
-        .filter(([name]) => name.startsWith("ppt/media/"))
         .map(async ([name, bytes]) => {
           const digest = new Uint8Array(
             await crypto.subtle.digest("SHA-256", bytes),
@@ -4180,7 +4179,15 @@ export async function inspectOoxmlDocumentWithAssets(input) {
         }),
     ),
   );
-  return { ...packageObservation(context), assetHashes };
+  const assetHashes = Object.fromEntries(
+    Object.entries(partHashes).filter(([name]) => name.startsWith("ppt/media/")),
+  );
+  return {
+    ...packageObservation(context),
+    assetHashes,
+    partHashes,
+    slidePaths: orderedSlidePaths(context.entries),
+  };
 }
 
 function openPackage(input, { requireSimpleTopology }) {

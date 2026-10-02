@@ -732,11 +732,16 @@ async function inspectNativeDocumentBytes(bytes, detailSlideIndex) {
   const path = `/tmp/spellbook/native-${++requestSequence}.pptx`;
   try {
     FS.writeFile(path, bytes);
+    const metadata = await packageMetadataOf(bytes);
     const observed = await request("inspect-saved", {
       path,
       detailSlideIndex,
-      packageSections: await packageSectionsOf(bytes),
-      packageAssetHashes: (await packageMetadataOf(bytes)).assetHashes,
+      packageSections: metadata.sections,
+      packageAssetHashes: metadata.assetHashes,
+      packageInspection: {
+        slidePaths: metadata.slidePaths,
+        partHashes: metadata.partHashes,
+      },
     });
     return observed.value;
   } finally {

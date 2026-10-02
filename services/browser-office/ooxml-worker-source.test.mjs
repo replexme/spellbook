@@ -194,6 +194,13 @@ test("package inspection fingerprints asset bytes, including same-size replaceme
   );
   assert.deepEqual(before.slideIds, after.slideIds);
   assert.deepEqual(before.sections, after.sections);
+  assert.deepEqual(Object.keys(before.partHashes).sort(), Object.keys(entries).sort());
+  for (const [name, bytes] of Object.entries(entries)) {
+    if (name === "ppt/media/proof.wav") continue;
+    assert.equal(before.partHashes[name], createHash("sha256").update(bytes).digest("hex"));
+  }
+  assert(before.slidePaths.every(name => Object.hasOwn(before.partHashes, name)));
+  assert.equal(before.partHashes["ppt/media/proof.wav"], before.assetHashes["ppt/media/proof.wav"]);
 });
 
 test("browser OOXML commands produce deterministic package bytes", async () => {

@@ -2219,8 +2219,9 @@ function spellbookDocumentOperation(request) {
       return ranges[key];
     };
     documentReadCount++;
-    // Only a transaction's intermediate, shape-local result may reuse slides.
-    // Its final command still takes a complete read to verify the edit scope.
+    // A transaction's intermediate shape-local result or a saved readback
+    // with package-proven unchanged slides may reuse those slides. Final live
+    // command observations still read the full mutable document.
     const reuseUnchangedSlides =
       engineIdentity.engineImage === "browser-wasm" &&
       Array.isArray(reusableObservation?.slides) &&
@@ -3187,6 +3188,8 @@ function spellbookDocumentOperation(request) {
         request.operation === "observe"
           ? request.detailSlideIndex
           : detailSlideForCommand(request.command),
+        inspectionModel ? request.savedInspectionReuse?.observation : undefined,
+        inspectionModel ? request.savedInspectionReuse?.changedSlideIndex : undefined,
       );
     const diagnosticObservedAt = request.diagnosticTimings ? Date.now() : 0;
     const result = (state, slideIndex) => ({

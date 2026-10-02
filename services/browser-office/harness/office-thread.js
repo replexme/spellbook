@@ -20,6 +20,46 @@ function installSpellbookUnoAdapter() {
 
 let nativeAdapter;
 let batchObservation = null;
+let savedInspection = null;
+
+function validInspectionMetadata(metadata) {
+  if (!metadata || !Array.isArray(metadata.slidePaths) ||
+      !metadata.slidePaths.length || metadata.slidePaths.length > 500 ||
+      new Set(metadata.slidePaths).size !== metadata.slidePaths.length ||
+      !metadata.partHashes || typeof metadata.partHashes !== "object") return false;
+  const hashes = metadata.partHashes;
+  return Object.keys(hashes).length <= 10_000 &&
+    Object.values(hashes).every(hash => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash)) &&
+    ["[Content_Types].xml", "ppt/presentation.xml", "ppt/_rels/presentation.xml.rels",
+      ...metadata.slidePaths].every(name => Object.hasOwn(hashes, name)) &&
+    metadata.slidePaths.every(name => /^ppt\/slides\/[^/]+\.xml$/u.test(name));
+}
+
+// This cache contains only actual readback of a saved package. A live model,
+// edit intent or caller-supplied observation cannot populate it. Every other
+// package part, including relationships, masters, notes and binary assets,
+// must match before unchanged slide readback can be reused.
+function reusableSavedInspection(metadata) {
+  const previous = savedInspection?.metadata;
+  if (!previous || !validInspectionMetadata(metadata) ||
+      JSON.stringify(previous.slidePaths) !== JSON.stringify(metadata.slidePaths) ||
+      savedInspection.observation.slides.length !== metadata.slidePaths.length)
+    return null;
+  const before = previous.partHashes;
+  const after = metadata.partHashes;
+  if (!before || !after || typeof after !== "object") return null;
+  const names = Object.keys(before);
+  if (names.length !== Object.keys(after).length ||
+      names.some(name => !Object.hasOwn(after, name) ||
+        !/^[a-f0-9]{64}$/.test(after[name]))) return null;
+  const changed = names.filter(name => before[name] !== after[name]);
+  if (changed.length !== 1) return null;
+  const slideIndex = metadata.slidePaths.indexOf(changed[0]);
+  return slideIndex < 0 ? null : {
+    observation: savedInspection.observation,
+    changedSlideIndex: slideIndex,
+  };
+}
 
 function post(command, details = {}) {
   zetajs.mainPort.postMessage({ command, ...details });
@@ -123,8 +163,10 @@ function inspectSavedDocument(
   detailSlideIndex,
   savedSections,
   savedAssets,
+  metadata,
 ) {
-  return withSavedDocumentModel(path, (created) =>
+  const reuse = reusableSavedInspection(metadata);
+  const observation = withSavedDocumentModel(path, (created) =>
     spellbookDocumentOperation({
       operation: "observe",
       packageSections: savedSections,
@@ -135,8 +177,16 @@ function inspectSavedDocument(
       nativeAdapter,
       documentModel: created,
       inspectPersistedSnapshot: true,
+      savedInspectionReuse: reuse,
     }),
   );
+  // Failed reads leave the earlier verified cache intact. Copy the result
+  // because the page may attach fields or mutate its returned observation.
+  savedInspection = validInspectionMetadata(metadata) &&
+    observation.slides.length === metadata.slidePaths.length
+    ? { metadata: structuredClone(metadata), observation: structuredClone(observation) }
+    : null;
+  return observation;
 }
 
 function normalizeSavedDocument(path, outputPath) {
@@ -587,6 +637,7 @@ function start() {
     try {
       switch (command) {
         case "open":
+          savedInspection = null;
           openDocument(event.data.path, requestId);
           break;
         case "dispatch":
@@ -636,7 +687,11 @@ function start() {
           // the shared program does not capture them itself.
           // Only this thread may supply an earlier observation. Never trust
           // one sent through the page's native request boundary.
-          const { observedBefore: _untrustedObservation, ...requested } =
+          const {
+            observedBefore: _untrustedObservation,
+            savedInspectionReuse: _untrustedSavedInspection,
+            ...requested
+          } =
             event.data.nativeRequest ?? {};
           const nativeRequest =
             requested.operation === "observe"
@@ -814,6 +869,7 @@ function start() {
                 ? event.data.packageSections
                 : [],
               event.data.packageAssetHashes ?? {},
+              event.data.packageInspection,
             ),
           });
           break;
@@ -835,6 +891,7 @@ function start() {
           break;
         }
         case "close":
+          savedInspection = null;
           closeDocument({
             expectedDocumentChanges: event.data.expectedDocumentChanges,
           });

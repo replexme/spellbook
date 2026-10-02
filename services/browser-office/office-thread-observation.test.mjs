@@ -134,6 +134,60 @@ test("serialization and hidden inspection invalidate even when the operation fai
   }
 });
 
+function savedMetadata() {
+  return {
+    slidePaths: ["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],
+    partHashes: Object.fromEntries([
+      "[Content_Types].xml", "ppt/presentation.xml", "ppt/_rels/presentation.xml.rels",
+      "ppt/slides/slide1.xml", "ppt/slides/slide2.xml",
+      "ppt/slides/_rels/slide1.xml.rels", "ppt/theme/theme1.xml",
+      "ppt/media/image1.png", "ppt/embeddings/chart.xlsx", "ppt/notesSlides/notesSlide1.xml",
+    ].map(name => [name, "a".repeat(64)])),
+  };
+}
+
+function savedReuse(before, after) {
+  const context = vm.createContext({ Module: { zetajs: { then() {} } }, before, after });
+  vm.runInContext(source, context);
+  return vm.runInContext(`savedInspection = {metadata: before, observation: {slides: [{}, {}]}};
+    reusableSavedInspection(after)`, context);
+}
+
+test("saved readback reuse is scoped by every package payload rather than live intent", () => {
+  const before = savedMetadata(), after = structuredClone(before);
+  after.partHashes[after.slidePaths[1]] = "b".repeat(64);
+  assert.equal(savedReuse(before, after).changedSlideIndex, 1);
+  for (const part of ["ppt/media/image1.png", "ppt/theme/theme1.xml",
+    "ppt/slides/_rels/slide1.xml.rels", "ppt/embeddings/chart.xlsx", "ppt/notesSlides/notesSlide1.xml"]){
+    const changed = structuredClone(after);
+    changed.partHashes[part] = "c".repeat(64);
+    assert.equal(savedReuse(before, changed), null, part);
+  }
+});
+
+test("slide creation, deletion, reordering or incomplete package proof force full saved readback", () => {
+  const before = savedMetadata(), after = structuredClone(before);
+  after.partHashes[after.slidePaths[1]] = "b".repeat(64);
+  for (const change of [
+    value => { value.slidePaths.reverse(); },
+    value => { delete value.partHashes["ppt/media/image1.png"]; },
+    value => { value.partHashes["ppt/custom.xml"] = "c".repeat(64); },
+    value => { value.partHashes[value.slidePaths[0]] = "d".repeat(64); },
+    value => { value.partHashes[value.slidePaths[1]] = "invalid"; },
+    value => { value.slidePaths.push(value.slidePaths[0]); },
+  ]) {
+    const changed = structuredClone(after); change(changed);
+    assert.equal(savedReuse(before, changed), null);
+  }
+  assert.equal(savedReuse(before, null), null);
+});
+
+test("a page cannot inject a saved observation into a live native request", () => {
+  const t = thread();
+  t.observe({ savedInspectionReuse: { observation: { revision: "forged" }, changedSlideIndex: 0 } });
+  assert.equal(t.calls[0].savedInspectionReuse, undefined);
+});
+
 test("expired requests cannot receive a cached observation", () => {
   const t = thread();
   t.observe({ expiresAt: 200 });
