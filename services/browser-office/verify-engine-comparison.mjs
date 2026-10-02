@@ -1,3 +1,4 @@
+import { readOnlyOfficeCodeIdentity } from "./onlyoffice/code-identity.mjs";
 /* SPDX-License-Identifier: MPL-2.0 */
 // One matrix controls both engines. Run with `nice -n 15 node ...`; children
 // are sequential and every browser adapter is headless. No native Office app,
@@ -92,7 +93,9 @@ assert.equal(
   false,
   "Commit comparison code before recording final evidence",
 );
+const candidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidate);
 const report = {
+  candidateCodeIdentity,
   schemaVersion: 1,
   startedAt: new Date().toISOString(),
   integration: identity,
@@ -412,7 +415,9 @@ try {
       ),
     )
   ).every(Boolean);
+  report.finalCandidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidate);
   report.sourceStable =
+    candidateCodeIdentity.sha256 === report.finalCandidateCodeIdentity.sha256 &&
     JSON.stringify(report.finalIntegration) === JSON.stringify(identity) &&
     JSON.stringify(report.finalCandidate) ===
       JSON.stringify(candidateIdentity) &&

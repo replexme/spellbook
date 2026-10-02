@@ -1,3 +1,4 @@
+import { readOnlyOfficeCodeIdentity } from "./onlyoffice/code-identity.mjs";
 import { beginCandidateTransaction, finishCandidateTransaction } from "./onlyoffice/candidate-transaction.mjs";
 import { captureStableOnlyOfficeBaseline } from "./onlyoffice-baseline.mjs";
 import { observeOnlyOfficeCandidate as typedProjection } from "./onlyoffice-observation.mjs";
@@ -67,7 +68,9 @@ const packageDelta = (bytes) => {
     ),
   };
 };
+const candidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidateRoot);
 const report = {
+  candidateCodeIdentity,
   schemaVersion: 1,
   startedAt: new Date().toISOString(),
   inputName: path.basename(inputPath),
@@ -966,6 +969,12 @@ try {
   await context.close();
   await browser.close();
   await new Promise((r) => diagnosticServer.close(r));
+  report.finalCandidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidateRoot);
+  report.candidateCodeStable = candidateCodeIdentity.sha256 === report.finalCandidateCodeIdentity.sha256;
+  if (!report.candidateCodeStable) {
+    process.exitCode = 1;
+    report.error = "candidate_generated_code_changed_during_trial";
+  }
   report.finishedAt = new Date().toISOString();
   await writeFile(
     path.join(outputRoot, "report.json"),

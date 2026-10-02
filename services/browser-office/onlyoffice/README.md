@@ -214,3 +214,12 @@ and [history cancellation](https://github.com/ONLYOFFICE/sdkjs/blob/v9.3.0.140/w
 are the actual native providers. Presentation has no end-group recalc override,
 so cancellation's own change list is passed through the same native recalc path
 as `Document_Undo`; history arrays are not rewritten by the adapter.
+
+
+All comparison runners additionally hash the actual generated JavaScript/WASM
+code tree before and after the trial, including both SDK halves, the embedded
+spreadsheet SDK, converter and diagnostic host component. Git ignores these
+outputs, so a clean repository and `sdk-all.js` alone do not establish their
+identity. A missing SDK half, a changed file set or a changed code payload
+invalidates the trial. Fonts and non-code assets remain explicitly outside
+this code identity; it is not an engine-admission or visual-fidelity receipt.
