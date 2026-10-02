@@ -1,3 +1,4 @@
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 import { createRequire } from "node:module";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { writeFile } from "node:fs/promises";
@@ -240,5 +241,5 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
-  await browser.close();
+  await closeNativeProbe(browser, "uno-chart-type-operation");
 }

@@ -2282,6 +2282,10 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
       const candidate = await serializeNativeDocument({
         expectedDocumentChanges: changes,
       });
+      const diagnosticBaseline =
+        browserProbeMode && query.get("nativeRaw") === "1"
+          ? baseline.slice()
+          : null;
       const requestId = `native-noop-${++requestSequence}`;
       const report = await new Promise((resolve, reject) => {
         mutationPending.set(requestId, { resolve, reject });
@@ -2295,8 +2299,22 @@ async function checkpointLiveNativeStateOnce(live, reason, retryCount) {
           [baseline.buffer],
         );
       });
-      if (report.report.changedParts.length)
+      if (report.report.changedParts.length) {
+        observed.nativeCoverageFailure = {
+          reason,
+          modelRevision: live.revision,
+          documentChanges:
+            nativeVersionsBySerializedBytes.get(candidate) ?? null,
+          checkpointedDocumentChanges,
+          changedPartCount: report.report.changedParts.length,
+          changedParts: report.report.changedParts.slice(0, 50),
+        };
+        if (diagnosticBaseline) {
+          savedArtifacts.set("native-coverage-baseline", diagnosticBaseline);
+          savedArtifacts.set("native-coverage-candidate", candidate.slice());
+        }
         throw new Error("browser_native_unobserved_change");
+      }
       bindReconciledNativeBaseline(live, candidate);
       unreconciledModelRevision = "";
       return false;
@@ -2612,6 +2630,9 @@ async function openProductDocument(message) {
     throw new Error(
       "Browser Office requires a verified runtime before opening product documents.",
     );
+  delete observed.nativeCoverageFailure;
+  savedArtifacts.delete("native-coverage-baseline");
+  savedArtifacts.delete("native-coverage-candidate");
   if (
     typeof message.requestId !== "string" ||
     typeof message.fileName !== "string" ||
@@ -4108,6 +4129,9 @@ globalThis.spellbookBrowserOffice = {
       unreconciledModelRevision,
       hostSaveRequestId,
       checkpointInFlight,
+      nativeCoverageFailure: structuredClone(
+        observed.nativeCoverageFailure ?? null,
+      ),
       ...(browserProbeMode ? { browserProbePhaseTrace } : {}),
     };
   },

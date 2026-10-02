@@ -15,7 +15,7 @@ import {
   PROBE_REPLACEMENT_MEDIA_ASSET_ID as REPLACEMENT_MEDIA_ASSET_ID,
   PROBE_SAME_SIZE_IMAGE_ASSET_ID as SAME_SIZE_IMAGE_ASSET_ID,
 } from "./probe-assets.mjs";
-import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
   new URL("../../apps/web/package.json", import.meta.url),
@@ -364,6 +364,5 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
-  await captureNativeSnapshots(page, scenario);
-  await browser.close();
+  await closeNativeProbe(browser, scenario);
 }

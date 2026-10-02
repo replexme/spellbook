@@ -22,6 +22,9 @@ function session(mode, version = 7) {
   const serializedVersions = new WeakMap();
   if (version !== null) serializedVersions.set(bytes, version);
   const context = vm.createContext({
+    browserProbeMode: false,
+    query: { get: () => null },
+    observed: {},
     reconciledModelRevision: "old",
     reconciledObservation: { revision: "old", slides: [] },
     checkpointedDocumentChanges: 1,
@@ -197,4 +200,52 @@ test("heartbeat retains the admitted retry version when typing advances after it
   await pending;
   assert.equal(context.checkpointedDocumentChanges, 14);
   assert.equal(context.reconciledModelRevision, "typing-complete");
+});
+
+test("a coverage refusal records the actual parts and retains file pairs only in explicit probes", async () => {
+  for (const rawProbe of [false, true]) {
+    const context = session("noop");
+    context.browserProbeMode = rawProbe;
+    context.query = { get: () => "1" };
+    context.savedArtifacts = new Map();
+    context.ooxmlWorker = {
+      postMessage({ requestId }) {
+        context.mutationPending
+          .get(requestId)
+          .resolve({ report: { changedParts: ["ppt/charts/chart1.xml"] } });
+      },
+    };
+    await assert.rejects(
+      vm.runInContext(
+        'checkpointLiveNativeStateOnce(observation, "manual_save", 0)',
+        context,
+      ),
+      /browser_native_unobserved_change/,
+    );
+    assert.deepEqual(
+      Array.from(context.observed.nativeCoverageFailure.changedParts),
+      ["ppt/charts/chart1.xml"],
+    );
+    assert.equal(context.observed.nativeCoverageFailure.documentChanges, 7);
+    assert.equal(
+      context.observed.nativeCoverageFailure.checkpointedDocumentChanges,
+      1,
+    );
+    assert.equal(context.checkpointedDocumentChanges, 1);
+    assert.equal(context.savedArtifacts.size, rawProbe ? 2 : 0);
+    if (rawProbe) {
+      assert.deepEqual(
+        Array.from(context.savedArtifacts.get("native-coverage-baseline")),
+        [0],
+      );
+      assert.deepEqual(
+        Array.from(context.savedArtifacts.get("native-coverage-candidate")),
+        [1],
+      );
+      assert.notEqual(
+        context.savedArtifacts.get("native-coverage-candidate"),
+        context.bytes,
+      );
+    }
+  }
 });

@@ -307,7 +307,7 @@ async function runBrowserProbe({
   logPath,
 }) {
   await buildHarness();
-const server = createHarnessServer({
+  const server = createHarnessServer({
     runtimeRoot: candidateRuntime.runtimeDirectory,
     runtimeIdentity: candidateRuntime.runtimeIdentity,
     upstream: candidateRuntime.upstream,
@@ -320,16 +320,21 @@ const server = createHarnessServer({
   });
   const address = server.address();
   const origin = `http://127.0.0.1:${address.port}`;
-  const diagnosticRaw = process.env.SPELLBOOK_DIAGNOSTIC_RAW_DIR
-    ? "&nativeRaw=1"
-    : "";
+  const diagnosticDirectory =
+    process.env.SPELLBOOK_DIAGNOSTIC_RAW_DIR ??
+    path.join(
+      path.dirname(logPath),
+      "diagnostics",
+      path.basename(logPath, ".log"),
+    );
+  const diagnosticRaw = "&nativeRaw=1";
   const url = `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}&browserProbe=1${diagnosticRaw}`;
   try {
     const result = await runProcess(
       process.execPath,
       [path.resolve(repositoryRoot, script), url, ...args],
       logPath,
-      env,
+      { ...env, SPELLBOOK_DIAGNOSTIC_RAW_DIR: diagnosticDirectory },
     );
     if (output) await fs.access(output);
     return result;

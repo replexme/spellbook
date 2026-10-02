@@ -1,3 +1,4 @@
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 import { createRequire } from "node:module";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -123,5 +124,5 @@ try {
     )}\n`,
   );
 } finally {
-  await browser.close();
+  await closeNativeProbe(browser, "uno-chart-reopen");
 }

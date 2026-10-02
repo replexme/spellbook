@@ -1,3 +1,4 @@
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 import { createRequire } from "node:module";
 import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { readFile, writeFile } from "node:fs/promises";
@@ -126,5 +127,5 @@ try {
     )}\n`,
   );
 } finally {
-  await browser.close();
+  await closeNativeProbe(browser, "uno-picture-crop-reopen");
 }

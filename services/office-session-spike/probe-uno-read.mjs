@@ -1,3 +1,4 @@
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 import { createRequire } from "node:module";
 
 const require = createRequire(
@@ -186,5 +187,5 @@ try {
     )}\n`,
   );
 } finally {
-  await browser.close();
+  await closeNativeProbe(browser, "uno-read");
 }

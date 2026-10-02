@@ -1,3 +1,4 @@
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 import { createRequire } from "node:module";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import { revisionDocumentState } from "./document-state-evidence.mjs";
@@ -226,5 +227,5 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
-  await browser.close();
+  await closeNativeProbe(browser, "uno-picture-crop-operation");
 }

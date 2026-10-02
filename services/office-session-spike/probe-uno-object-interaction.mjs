@@ -8,7 +8,7 @@ import {
   historyStateDifference,
   historyStateEquivalent,
 } from "./persistence-evidence.mjs";
-import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
   new URL("../../apps/web/package.json", import.meta.url),
@@ -180,6 +180,5 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
-  await captureNativeSnapshots(page, "object-interaction");
-  await browser.close();
+  await closeNativeProbe(browser, "object-interaction");
 }

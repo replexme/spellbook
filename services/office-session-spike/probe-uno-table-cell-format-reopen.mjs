@@ -1,3 +1,4 @@
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 import { readFile, writeFile } from "node:fs/promises";
 import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { formatCanonicalDifferences } from "./persistence-evidence.mjs";
@@ -91,5 +92,5 @@ try {
     `${JSON.stringify({ reopened: true, enginePatchLevel: observed.engine.patchLevel, operation: "set_table_cell_format", objectName: expected.objectName }, null, 2)}\n`,
   );
 } finally {
-  await browser.close();
+  await closeNativeProbe(browser, "uno-table-cell-format-reopen");
 }

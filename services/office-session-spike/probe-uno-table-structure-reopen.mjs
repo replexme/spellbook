@@ -1,3 +1,4 @@
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 import { readFile, writeFile } from "node:fs/promises";
 import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { createRequire } from "node:module";
@@ -102,5 +103,5 @@ try {
     `${JSON.stringify({ reopened: true, enginePatchLevel: observed.engine.patchLevel, operationCount: 8, objectName: table.objectName, geometry: { x: table.x, y: table.y, width: table.width, height: table.height } }, null, 2)}\n`,
   );
 } finally {
-  await browser.close();
+  await closeNativeProbe(browser, "uno-table-structure-reopen");
 }

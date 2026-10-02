@@ -1,3 +1,4 @@
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 import { createRequire } from "node:module";
 import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { requestNativeProbeSave } from "./probe-save.mjs";
@@ -551,5 +552,5 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
-  await browser.close();
+  await closeNativeProbe(browser, "uno-table-structure");
 }

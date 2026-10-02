@@ -14,7 +14,7 @@ import {
   persistenceStateFromObservation,
 } from "./persistence-evidence.mjs";
 import { activeTextFontEvidence } from "./text-format-evidence.mjs";
-import { captureNativeSnapshots } from "./probe-raw-snapshots.mjs";
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 
 const require = createRequire(
   new URL("../../apps/web/package.json", import.meta.url),
@@ -1629,6 +1629,5 @@ try {
     });
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
-  await captureNativeSnapshots(page, "general-native-surface");
-  await browser.close();
+  await closeNativeProbe(browser, "general-native-surface");
 }

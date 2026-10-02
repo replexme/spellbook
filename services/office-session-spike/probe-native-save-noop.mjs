@@ -1,3 +1,4 @@
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 import { createRequire } from "node:module";
 import { requestNativeProbeSave } from "./probe-save.mjs";
 import {
@@ -51,5 +52,5 @@ try {
   await page.waitForTimeout(1_000);
   process.stdout.write("No-op save requested.\n");
 } finally {
-  await browser.close();
+  await closeNativeProbe(browser, "native-save-noop");
 }

@@ -1,3 +1,4 @@
+import { closeNativeProbe } from "./probe-raw-snapshots.mjs";
 import { readFile } from "node:fs/promises";
 import { probeEnginePatchVersion } from "./probe-engine-patch.mjs";
 import { createRequire } from "node:module";
@@ -64,5 +65,5 @@ try {
     `${JSON.stringify({ reopened: true, enginePatchLevel: observed.engine.patchLevel, operation: "set_animation_timing" }, null, 2)}\n`,
   );
 } finally {
-  await browser.close();
+  await closeNativeProbe(browser, "uno-animation-timing-reopen");
 }
