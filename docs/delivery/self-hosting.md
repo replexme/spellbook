@@ -20,13 +20,13 @@ pnpm selfhost:doctor
 
 The setup command creates `.env` with mode `0600`, generates independent secrets, creates a persistent 4096-bit Collabora WOPI proof key under the ignored `.spellbook/secrets/` directory and prints the initial password once. Re-running setup preserves both `.env` and the proof key. Open `http://localhost:3000`, log in, then connect Codex from the AI panel if AI editing is needed.
 
-The start command removes older Spellbook service images before building,
+The start command removes unused Spellbook service images before building,
 starts the new services in detached mode, waits for all declared health checks
-and runs the same bounded cleanup again. It always preserves images referenced
-by any container and one unused rollback per component. The cleanup recognizes
-the exact legacy Compose image names during migration, but it neither performs
-a global Docker prune nor removes another project's images, containers or
-volumes. Run `pnpm docker:cleanup` to inspect the plan without changing state.
+and runs cleanup again, including when building or starting fails. It preserves
+every image referenced by a container and removes every unused Spellbook image
+plus unused build cache. The cleanup recognizes exact legacy Compose image
+names during migration. It preserves other projects' images, containers and
+data volumes. Run `pnpm docker:cleanup` to inspect the plan without changing state.
 
 `SPELLBOOK_EDITOR_MODE` selects exactly one live editor engine. The default
 `wopi` profile starts the server-side Collabora editor while the browser engine

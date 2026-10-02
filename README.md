@@ -28,12 +28,11 @@ The Compose profile uses its private connector by default. The optional user-dev
 The first build downloads pinned LibreOffice and Collabora images and can take several minutes. Subsequent starts reuse the images and persistent volumes. Run `pnpm selfhost:doctor` to validate configuration and service health.
 
 `pnpm selfhost:up` builds the services, waits for their health checks and then
-retires old Spellbook service images automatically. Runtime images carry a
-Spellbook component label so this lifecycle never prunes another project's
-Docker data. `pnpm docker:cleanup` shows the exact plan; its explicit
-`--execute` mode keeps every image used by a container plus one unused rollback
-per component and removes only older Spellbook images. Persistent document and
-database volumes are never part of this cleanup.
+removes unused Spellbook service images automatically, including after failed
+builds or starts. `pnpm docker:cleanup` shows the exact plan; its explicit
+`--execute` mode keeps every image used by a container and removes all unused
+Spellbook images plus unused build cache. Persistent document and database
+volumes are never part of this cleanup.
 
 ## Product contract
 
