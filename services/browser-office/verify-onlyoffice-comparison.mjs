@@ -1,3 +1,4 @@
+import { captureStableOnlyOfficeBaseline } from "./onlyoffice-baseline.mjs";
 import { observeOnlyOfficeCandidate } from "./onlyoffice-observation.mjs";
 /* SPDX-License-Identifier: MPL-2.0 */
 import { createOnlyOfficeComparisonHost } from "./onlyoffice/comparison-host.mjs";
@@ -341,10 +342,8 @@ try {
         // Raw baseline is an engine observation, never an admitted artifact.
         // Restore authored ownership before repairing the artifact to save.
         item.stage = "source-baseline";
-        await page.evaluate(() => {
-          window.__comparisonCaptureBaseline = true;
-        });
-        const baseline = await save(page);
+        const baseline = await captureStableOnlyOfficeBaseline(page, save);
+        item.sourceBaselineStabilization = { attempts: baseline.attempts, transitions: baseline.transitions };
         item.sourceBaselineExportMs = baseline.ms;
         item.sourceBaselineSha256 = sha(Buffer.from(baseline.base64, "base64"));
         assert.deepEqual(
@@ -352,9 +351,6 @@ try {
           [],
           "Baseline export must not mutate the document",
         );
-        await page.evaluate(() => {
-          window.__comparisonCaptureBaseline = false;
-        });
       }
       if (scenario === "late-save-ack") {
         item.stage = "held-save";

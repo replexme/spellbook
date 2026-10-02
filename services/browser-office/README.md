@@ -46,8 +46,14 @@ an explicit raw export diagnostic; `--repair-structure` alone repairs its format
 without implying authored-source preservation.
 
 The report records independent saved OpenXML validation, package rewrite scope,
-history, complete save timing and approximate task resource use. Missing,
-duplicate, unexpected, failed, unverified or wrong-pipeline results make the
+history, complete save timing and approximate task resource use. Fully valid
+files and files retaining the exact original format errors are counted separately.
+The latter require proven authored preservation, matching reader adjustments and
+no reader/process failure; a new error cannot pass. No-edit output must retain
+every authored ZIP payload, direct edits must stay on their authored first slide,
+and slide topology edits must retain unrelated existing content and design.
+These checks resolve the first slide through the presentation relationships.
+Missing, duplicate, unexpected, failed, unverified or wrong-pipeline results make the
 requested matrix incomplete and the process exits unsuccessfully. Completion
 is explicitly limited to the manifest's human-editing scenarios; it does not
 mean all product operations or engine admission passed. Geometry/text snapshots
@@ -58,6 +64,13 @@ fields remain explicit and unverified; this observer still does not prove every
 media, master, theme, embedded object or relationship semantic.
 Screenshots require direct review. Provider authentication and PowerPoint reopen
 remain separate evidence boundaries.
+
+The candidate native serializer can materialize derived layout state during its
+first export. Before any edit, both comparison runners require two consecutive
+equivalent exports, bounded to four attempts, and record the preparation cost and
+changed parts. This same-engine baseline is never persisted as authored content.
+An unstable baseline refuses the trial; it cannot silently rewrite an untouched
+master or layout during the measured save.
 
 The candidate's `save-failure` diagnostic rejects the real host save callback
 and checks that its write count stays zero and dirty state survives. It does

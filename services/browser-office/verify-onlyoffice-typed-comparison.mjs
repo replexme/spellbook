@@ -1,3 +1,4 @@
+import { captureStableOnlyOfficeBaseline } from "./onlyoffice-baseline.mjs";
 import { observeOnlyOfficeCandidate as typedProjection } from "./onlyoffice-observation.mjs";
 /* SPDX-License-Identifier: MPL-2.0 */
 import { createOnlyOfficeComparisonHost } from "./onlyoffice/comparison-host.mjs";
@@ -261,10 +262,9 @@ async function visibleSlides(page, frame, label, count) {
 try {
   let { frame, ms } = await open(page);
   item.openMs = ms;
-  await page.evaluate(() => (window.__comparisonCaptureBaseline = true));
-  await save(page);
+  const sourceBaseline = await captureStableOnlyOfficeBaseline(page, save);
+  item.sourceBaselineStabilization = { ms: sourceBaseline.ms, attempts: sourceBaseline.attempts, transitions: sourceBaseline.transitions };
   await page.evaluate(() => {
-    window.__comparisonCaptureBaseline = false;
     window.__comparisonIntent = { sourceOperations: null, sourceTargets: null };
   });
   const before = await typedProjection(frame);
@@ -405,8 +405,8 @@ try {
         [],
       );
     }, baselineBinary);
-    await page.evaluate(() => (window.__comparisonCaptureBaseline = true));
-    await save(page);
+    const chartBaseline = await captureStableOnlyOfficeBaseline(page, save);
+    item.chartBaselineStabilization = { ms: chartBaseline.ms, attempts: chartBaseline.attempts, transitions: chartBaseline.transitions };
     await frame.evaluate((bytes) => {
       const d = window.AscBuilder.Slide.Api.GetPresentation()
         .GetSlideByIndex(0)
