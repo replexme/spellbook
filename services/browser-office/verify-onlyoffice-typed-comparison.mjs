@@ -1,3 +1,4 @@
+import { beginCandidateTransaction, finishCandidateTransaction } from "./onlyoffice/candidate-transaction.mjs";
 import { captureStableOnlyOfficeBaseline } from "./onlyoffice-baseline.mjs";
 import { observeOnlyOfficeCandidate as typedProjection } from "./onlyoffice-observation.mjs";
 /* SPDX-License-Identifier: MPL-2.0 */
@@ -86,6 +87,8 @@ const report = {
   externalRequestCount: 0,
 };
 const typedCase = flag("--typed-case");
+const failAfterApply = process.argv.includes("--fail-after-apply");
+let transaction = null, transactionBefore = null;
 const knownTypedCases = [
   "table-row-add",
   "table-cell-style",
@@ -448,6 +451,8 @@ try {
       { mode: 0o600 },
     );
   }
+  transactionBefore = await typedProjection(frame);
+  transaction = { frame, checkpoint: await beginCandidateTransaction(frame) };
   const setup = await frame.evaluate(({ kind, chartAuthority }) => {
     const api = window.AscBuilder.Slide.Api,
       a = window.Asc.editor,
@@ -818,6 +823,9 @@ try {
       "Typed request changed no inspected field",
     );
     assert(setup.result !== false, "API rejected mutation");
+    if (failAfterApply) throw new Error("injected_failure_after_native_mutation");
+    item.nativeTransaction = await finishCandidateTransaction(frame, transaction.checkpoint, true);
+    transaction = null;
     await page.screenshot({ path: path.join(outputRoot, "edited.png") });
     item.stage = "save";
     const saved = await save(page),
@@ -924,6 +932,26 @@ try {
 } catch (e) {
   item.status = "failed";
   item.error = e.message;
+  if (transaction) {
+    try {
+      item.nativeRollback = await finishCandidateTransaction(transaction.frame, transaction.checkpoint, false);
+      item.rollbackDifferences = differences(transactionBefore, await typedProjection(transaction.frame));
+      assert.deepEqual(item.rollbackDifferences, [], "Native cancellation must restore all observed slides");
+      item.rollbackRendering = await visibleSlides(page, transaction.frame, "rollback", transactionBefore.common.slides.length);
+      assert.deepEqual(item.rollbackRendering, item.slideRendering.before, "Native cancellation must restore every visible slide");
+      item.rollbackVerified = true;
+      item.hostAfterFailure = await page.evaluate(() => window.__ONLYOFFICE_SAVE_E2E__.getStatus());
+      assert.equal(item.hostAfterFailure.writeCount, 0, "A failed mutation cannot persist a file");
+    } catch (rollbackError) {
+      item.rollbackVerified = false;
+      item.rollbackError = rollbackError.message;
+    }
+    transaction = null;
+  }
+  if (failAfterApply && item.error === "injected_failure_after_native_mutation" && item.rollbackVerified) {
+    item.status = "typed-failed-mutation-rollback-verified";
+    item.expectedFailure = true;
+  }
   await page
     .screenshot({ path: path.join(outputRoot, "failure.png") })
     .catch(() => {});
@@ -956,5 +984,5 @@ console.log(
     reopenDifferences: item.reopenDifferences,
   }),
 );
-if (item.status !== "typed-apply-save-history-reopen-verified")
+if (item.status !== (failAfterApply ? "typed-failed-mutation-rollback-verified" : "typed-apply-save-history-reopen-verified"))
   process.exitCode = 1;

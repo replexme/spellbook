@@ -192,3 +192,25 @@ renders each page rather than treating a lazy thumbnail as evidence of lost
 content. First-slide non-chart visual review remains a separate requirement;
 these screenshots do not turn representative setters into complete operation
 contracts.
+
+
+The typed diagnostic adapter uses the pinned SDK's native group-action boundary
+for commit/cancellation. `--fail-after-apply` injects an exception after the real
+mutation and its postconditions, before any save. Success requires restoration
+of the complete observed document, every slide's visible pixels, native history
+and released locks, with zero persistence callbacks. Each typed case inherits
+this boundary rather than implementing its own rollback. A rollback error is a
+failure and cannot become an expected-failure pass.
+
+This remains diagnostic, not product admission. A pre-existing Redo branch is
+rejected before mutation: native `startGroupPoints` discards it, and the pinned
+API has no proven public mechanism to restore it after cancellation. This
+limitation must be resolved before the full product contract can use the
+adapter. Unknown/nested group state cannot cancel someone else's history.
+The official [CreateNewHistoryPoint API](https://api.onlyoffice.com/docs/office-api/usage-api/presentation-api/ApiPresentation/Methods/CreateNewHistoryPoint/)
+provides a checkpoint, not automatic exception rollback. The pinned
+[base group-action implementation](https://github.com/ONLYOFFICE/sdkjs/blob/v9.3.0.140/common/apiBase.js)
+and [history cancellation](https://github.com/ONLYOFFICE/sdkjs/blob/v9.3.0.140/word/Editor/History.js)
+are the actual native providers. Presentation has no end-group recalc override,
+so cancellation's own change list is passed through the same native recalc path
+as `Document_Undo`; history arrays are not rewritten by the adapter.
