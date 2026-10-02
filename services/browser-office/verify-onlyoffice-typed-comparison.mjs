@@ -10,6 +10,7 @@ import path from "node:path";
 import { createServer } from "node:http";
 import { chromium } from "@playwright/test";
 import { unzipSync, strFromU8 } from "fflate";
+import { prepareChartSeriesWorkbookMutation } from "./ooxml-worker-source.mjs";
 import { readRepositoryIdentity } from "./repository-identity.mjs";
 
 const flag = (name, fallback) => {
@@ -494,7 +495,183 @@ try {
   const before = await typedProjection(frame);
   await page.screenshot({ path: path.join(outputRoot, "before.png") });
   item.stage = "apply";
-  const setup = await frame.evaluate((kind) => {
+  let chartAuthority = null;
+  if (typedCase === "chart-data") {
+    const preparationStarted = performance.now();
+    const request = await frame.evaluate(() => {
+      const d = window.AscBuilder.Slide.Api.GetPresentation()
+        .GetSlideByIndex(0)
+        .GetAllDrawings()
+        .find((d) => d.GetClassType() === "chart");
+      if (!d) throw Error("chart target missing");
+      const series = d.Chart.getAllSeries()[0],
+        points = series.val?.numRef?.numCache?.pts;
+      if (!points?.length) throw Error("numeric chart cache missing");
+      return {
+        initialWorkbookBytes: Array.from(d.Chart.XLSX),
+        initialWorkbook: {
+          bytes: d.Chart.XLSX.length,
+          prefix: Array.from(d.Chart.XLSX.slice(0, 32)),
+        },
+        slideIndex: 0,
+        shapeName: d.Drawing.getOwnName(),
+        seriesIndex: series.idx,
+        values: points.map(
+          (point, index) => Number(point.val) + (index === 0 ? 7 : 0),
+        ),
+      };
+    });
+    const prepared = prepareChartSeriesWorkbookMutation(source, request);
+    await page.evaluate(() => window.__ONLYOFFICE_SAVE_E2E__.destroy());
+    const workbookBinaries = [];
+    for (const workbookBytes of [
+      unzipSync(source)[prepared.workbookPart],
+      prepared.bytes,
+    ]) {
+      await page.evaluate(
+        async ({ bytes, candidateOrigin }) => {
+          const { createOfficeEditor } = await import(
+            candidateOrigin + "/npm/public-api.js"
+          );
+          const container = document.createElement("div");
+          container.style.cssText =
+            "position:absolute;left:-20000px;top:0;width:1200px;height:900px";
+          document.body.append(container);
+          window.__comparisonWorkbookContainer = container;
+          window.__comparisonWorkbookEditor = await createOfficeEditor(
+            container,
+            {
+              hostUrl: candidateOrigin + "/office-host.html",
+              file: new File(
+                [
+                  Uint8Array.from(atob(bytes), (character) =>
+                    character.charCodeAt(0),
+                  ),
+                ],
+                "chart-data.xlsx",
+                {
+                  type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                },
+              ),
+              fileName: "chart-data.xlsx",
+              mode: "edit",
+              saveBehavior: "callback",
+              onSave: async () => {
+                throw new Error(
+                  "temporary_workbook_has_no_persistence_authority",
+                );
+              },
+            },
+          );
+        },
+        {
+          bytes: Buffer.from(workbookBytes).toString("base64"),
+          candidateOrigin: origin.origin,
+        },
+      );
+      await page.waitForFunction(
+        () => window.__comparisonWorkbookEditor?.getState().status === "ready",
+        null,
+        { timeout: 60000 },
+      );
+      const sheetFrame = page
+        .frames()
+        .find(
+          (candidate) =>
+            candidate.url().includes("/spreadsheeteditor/") &&
+            candidate.url().includes("/index.html"),
+        );
+      assert(
+        sheetFrame,
+        "Owned embedded workbook must have an isolated native spreadsheet frame",
+      );
+      const embeddedBinary = await sheetFrame.evaluate(() => {
+        const editor = window.Asc.editor;
+        return window.AscFormat.ExecuteNoHistory(
+          () => {
+            const workbook = editor.wbModel;
+            if (!workbook) throw new Error("native_spreadsheet_model_missing");
+            const writer = new window.AscCommonExcel.BinaryFileWriter(workbook);
+            const bytes = writer.Write(true, false, true);
+            let text = "";
+            for (let i = 0; i < bytes.length; i += 32768)
+              text += String.fromCharCode(...bytes.subarray(i, i + 32768));
+            return btoa(text);
+          },
+          null,
+          [],
+        );
+      });
+      await page.evaluate(async () => {
+        await window.__comparisonWorkbookEditor.destroy();
+        window.__comparisonWorkbookEditor = null;
+        window.__comparisonWorkbookContainer.remove();
+      });
+      workbookBinaries.push(embeddedBinary);
+    }
+    const [baselineBinary, embeddedBinary] = workbookBinaries;
+    ({ frame, ms } = await open(page));
+    assert.deepEqual(
+      differences(before, await typedProjection(frame)),
+      [],
+      "Workbook preparation must not edit the presentation",
+    );
+    await frame.evaluate((bytes) => {
+      const d = window.AscBuilder.Slide.Api.GetPresentation()
+        .GetSlideByIndex(0)
+        .GetAllDrawings()
+        .find((d) => d.GetClassType() === "chart");
+      window.AscFormat.ExecuteNoHistory(
+        () =>
+          d.Chart.setXLSX(Uint8Array.from(atob(bytes), (c) => c.charCodeAt(0))),
+        null,
+        [],
+      );
+    }, baselineBinary);
+    await page.evaluate(() => (window.__comparisonCaptureBaseline = true));
+    await save(page);
+    await frame.evaluate((bytes) => {
+      const d = window.AscBuilder.Slide.Api.GetPresentation()
+        .GetSlideByIndex(0)
+        .GetAllDrawings()
+        .find((d) => d.GetClassType() === "chart");
+      window.AscFormat.ExecuteNoHistory(
+        () => d.Chart.setXLSX(Uint8Array.from(bytes)),
+        null,
+        [],
+      );
+    }, request.initialWorkbookBytes);
+    await page.evaluate(() => {
+      window.__comparisonCaptureBaseline = false;
+      window.__comparisonIntent = {
+        sourceOperations: null,
+        sourceTargets: null,
+      };
+    });
+    chartAuthority = {
+      ...request,
+      previousValues: prepared.previousValues,
+      bytes: embeddedBinary,
+      expectedWorkbook: Buffer.from(prepared.bytes).toString("base64"),
+    };
+    item.chartDataAuthority = {
+      preparationMs: performance.now() - preparationStarted,
+      initialWorkbook: request.initialWorkbook,
+      convertedPrefix: Array.from(
+        Buffer.from(embeddedBinary, "base64").subarray(0, 48),
+      ),
+      chartPart: prepared.chartPart,
+      workbookPart: prepared.workbookPart,
+      worksheetPart: prepared.worksheetPart,
+      changedCells: prepared.changedCells,
+    };
+    await writeFile(
+      path.join(outputRoot, "expected-workbook.xlsx"),
+      prepared.bytes,
+      { mode: 0o600 },
+    );
+  }
+  const setup = await frame.evaluate(({ kind, chartAuthority }) => {
     const api = window.AscBuilder.Slide.Api,
       a = window.Asc.editor,
       m = a.WordControl.m_oLogicDocument;
@@ -693,10 +870,20 @@ try {
       const s = d.Chart.getAllSeries()[0];
       const pts = s.val?.numRef?.numCache?.pts ?? s.val?.numLit?.pts ?? [];
       if (!pts.length) throw Error("numeric chart cache missing");
-      result = d.SetSeriaValues(
-        pts.map((p, i) => (i === 0 ? Number(p.val) + 7 : Number(p.val))),
-        s.idx,
+      if (
+        !chartAuthority ||
+        d.Drawing.getOwnName() !== chartAuthority.shapeName ||
+        s.idx !== chartAuthority.seriesIndex ||
+        JSON.stringify(pts.map((point) => Number(point.val))) !==
+          JSON.stringify(chartAuthority.previousValues)
+      )
+        throw Error("chart_authority_preflight_failed");
+      result = d.SetSeriaValues(chartAuthority.values, s.idx);
+      const bytes = Uint8Array.from(atob(chartAuthority.bytes), (character) =>
+        character.charCodeAt(0),
       );
+      d.Chart.setXLSX(bytes);
+      window.__chartAuthorityApplied = bytes;
     } else if (kind === "chart-type") {
       const d = find("chart");
       if (!d) throw Error("chart target missing");
@@ -786,7 +973,7 @@ try {
       chartDiagnostic: window.__typedChartDiagnostic ?? null,
       availableMethods: methods(api),
     };
-  }, typedCase);
+  }, { kind: typedCase, chartAuthority });
   item.setup = setup;
   {
     await page.waitForTimeout(200);
@@ -856,17 +1043,64 @@ try {
       preservations: window.__comparisonPreservations,
       repairs: window.__comparisonStructuralRepairs,
     }));
+    if (chartAuthority) {
+      const workbook = unzipSync(bytes)[item.chartDataAuthority.workbookPart];
+      assert(workbook, "Saved chart workbook must retain the authored binding");
+      await writeFile(
+        path.join(outputRoot, "native-saved-workbook.xlsx"),
+        workbook,
+        { mode: 0o600 },
+      );
+      const expected = unzipSync(
+          Buffer.from(chartAuthority.expectedWorkbook, "base64"),
+        ),
+        actual = unzipSync(workbook);
+      assert.deepEqual(
+        Object.keys(actual).sort(),
+        Object.keys(expected).sort(),
+        "Saved chart workbook part set changed",
+      );
+      for (const [part, payload] of Object.entries(expected))
+        assert.deepEqual(
+          actual[part],
+          payload,
+          "Saved chart workbook payload differs: " + part,
+        );
+      item.chartDataAuthority.persistedPayloadVerified = true;
+    }
     item.savedSha256 = sha(bytes);
     Object.assign(item, packageDelta(bytes));
     await writeFile(path.join(outputRoot, "saved.pptx"), bytes, {
       mode: 0o600,
     });
+    const nativeWorkbook = async () =>
+      frame.evaluate(() =>
+        Array.from(
+          window.AscBuilder.Slide.Api.GetPresentation()
+            .GetSlideByIndex(0)
+            .GetAllDrawings()
+            .find((d) => d.GetClassType() === "chart").Chart.XLSX,
+        ),
+      );
+    const appliedWorkbook = chartAuthority ? await nativeWorkbook() : null;
     await frame.evaluate(() => window.Asc.editor.Undo());
     await page.waitForTimeout(150);
     item.undoDifferences = differences(before, await typedProjection(frame));
+    if (chartAuthority)
+      assert.deepEqual(
+        await nativeWorkbook(),
+        chartAuthority.initialWorkbookBytes,
+        "Undo must restore the exact prior native workbook",
+      );
     await frame.evaluate(() => window.Asc.editor.Redo());
     await page.waitForTimeout(150);
     item.redoDifferences = differences(edited, await typedProjection(frame));
+    if (chartAuthority)
+      assert.deepEqual(
+        await nativeWorkbook(),
+        appliedWorkbook,
+        "Redo must restore the exact native workbook snapshot",
+      );
     item.stage = "reopen";
     served = bytes;
     ({ frame, ms } = await open(page));
@@ -893,6 +1127,10 @@ try {
     .screenshot({ path: path.join(outputRoot, "failure.png") })
     .catch(() => {});
 } finally {
+  await page.evaluate(async () => {
+    await window.__comparisonWorkbookEditor?.destroy();
+    window.__comparisonWorkbookContainer?.remove();
+  }).catch(() => {});
   await page
     .evaluate(() => window.__ONLYOFFICE_SAVE_E2E__?.destroy())
     .catch(() => {});

@@ -127,3 +127,23 @@ source](https://github.com/ONLYOFFICE/sdkjs/blob/v9.3.0.140/common/SmartArts/Sma
 The reviewed master source still had the same filled path and generic new-node
 fallback on 2026-10-02. This source inspection is not a trial of a newer released
 SDK; the runtime comparison remains pinned to 9.3.0.140.
+
+The chart-data case checks both the displayed series cache and the actual
+embedded XLSX. In this SDK `SetSeriaValues` updates the cache alone. The
+diagnostic adapter prepares an owned numeric-cell snapshot, serializes it with
+the native spreadsheet writer, and installs it with `setXLSX` in the same
+native history point as the series edit. Temporary spreadsheet sessions run
+sequentially in the same headless browser and have no persistence callback.
+They respect the component's single-editor origin isolation. Preparation time
+is recorded separately; this diagnostic path is not production admission or
+a chart-edit performance claim.
+
+The shared package boundary binds a renamed workbook to a unique authored
+chart frame and its internal `externalData` relationship. For a same-engine
+delta consisting only of numeric constant cells, it applies those values to
+the author's workbook and retains every other nested part byte for byte.
+Worksheet ownership, cell addresses and baseline values must agree. Formula,
+style, ambiguous-owner and unknown-content changes cannot take this narrow
+merge path. The runner checks the complete saved workbook payload and exact
+native workbook restoration on Undo and Redo, in addition to saved-artifact
+reopening. A cache-only readback does not satisfy this case.
