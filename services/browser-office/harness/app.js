@@ -4021,7 +4021,9 @@ globalThis.Module = {
 // LibreOffice's Qt layer draws text with cairo unless SAL_VCL_QT_USE_QFONT is
 // set, and only the Qt font path registers the Korean fonts with Qt (patches
 // 0047 and 0049). Qt draws the menu bar, context menus and tooltips itself,
-// so without it their Korean labels were empty boxes; slides render the same.
+// so without it their Korean labels were empty boxes. The document renderer
+// also changes: current QFont and Cairo paths have distinct fidelity defects.
+// Decoupling UI font initialization requires a newly built, verified engine.
 function useQtFonts() {
   ENV.SAL_VCL_QT_USE_QFONT = "1";
 }

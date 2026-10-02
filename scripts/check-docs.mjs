@@ -76,8 +76,7 @@ const formatSupport = fs.readFileSync(
 for (const requiredStatement of [
   `classifies ${operationCount} operations`,
   `of which ${exposedOperationCount} bounded operations are exposed`,
-  `${availabilityCount("runtime_verified")} have passed the live runtime path`,
-  `${candidateOperationCount} are implemented against the cumulative \`${editorUpstream.patchLevel}\` engine candidate and require final runtime validation`,
+  `Registry status: ${availabilityCount("runtime_verified")} runtime-verified; ${candidateOperationCount} engine candidates (\`${editorUpstream.patchLevel}\`).`,
 ]) {
   if (!formatSupport.includes(requiredStatement))
     failures.push(
