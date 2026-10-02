@@ -155,3 +155,21 @@ test("the shapes a command may change are named per slide", () => {
   );
   assert.equal(slideShapeTargets(["text_shadow"], []), null);
 });
+
+
+test("unnamed direct objects require an explicit observed index and a bounded direct operation", () => {
+  const target = { op: "move", slideIndex: 0, shapeIndex: 0, name: "" };
+  assert.deepEqual(
+    slideShapeTargets(["move"], [target]),
+    new Map([[0, new Set([""])]]),
+  );
+  for (const shapeIndex of [undefined, -1, 0.5])
+    assert.equal(
+      slideShapeTargets(["move"], [{ ...target, shapeIndex }]),
+      null,
+    );
+  assert.equal(
+    slideShapeTargets(["align"], [{ ...target, op: "align" }]),
+    null,
+  );
+});

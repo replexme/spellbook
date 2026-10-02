@@ -7,6 +7,7 @@ import {
   nativePreservationBudget,
   humanEditPreservationBudget,
   slideShapeTargets,
+  directShapeIndexOperations,
 } from "./native-preservation-policy.mjs";
 
 const presentationNamespace =
@@ -776,7 +777,8 @@ function preserveUnaffectedSlideShapes(
         // uses engine relationship IDs. Translate by type and resolved target
         // before the final package translates all engine IDs back together.
         const rebound = remapPartRelationshipIds(part, serializeXml(moved),
-          geometrySources.entries[1][related], geometrySources.entries[0][related]);
+          geometrySources.entries[1][related], geometrySources.entries[0][related],
+          [geometrySources.entries[1], geometrySources.entries[0]]);
         if (!rebound) return null;
         moved = importOoxmlSubtree(documents[2], parseXml({ [part]: rebound }, part).documentElement, true);
       }
@@ -1385,6 +1387,7 @@ export function remapPartRelationshipIds(
   bytes,
   originalRels,
   engineRels,
+  imageSources = null,
 ) {
   if (!bytes || !originalRels || !engineRels || !part.endsWith(".xml"))
     return null;
@@ -1395,11 +1398,66 @@ export function remapPartRelationshipIds(
     ).map((relationship) => ({
       id: relationship.getAttribute("Id"),
       key: relationshipIdentity(part, relationship),
+      relationship,
     }));
-  const engineById = new Map(keyed(engineRels).map(({ id, key }) => [id, key]));
+  const engineRelationships = keyed(engineRels);
+  const originals = keyed(originalRels);
+  const engineById = new Map(
+    engineRelationships.map((item) => [item.id, item]),
+  );
   const originalByKey = new Map();
-  for (const { id, key } of keyed(originalRels))
+  for (const { id, key } of originals)
     originalByKey.set(key, originalByKey.has(key) ? null : id);
+  let imageTypes = null;
+  const imageResource = (relationship, entries, types) => {
+    if (
+      relationship.getAttribute("Type") !==
+        `${relationshipAttributeNamespace}/image` ||
+      relationship.getAttribute("TargetMode") === "External"
+    )
+      return null;
+    const target = resolvePart(part, relationship.getAttribute("Target"));
+    const contentType = declaredContentType(types, target);
+    if (
+      !["image/png", "image/jpeg"].includes(contentType) ||
+      !entries[target]?.length
+    )
+      return null;
+    return { bytes: entries[target], contentType };
+  };
+  const equivalentImageId = (item) => {
+    if (
+      !imageSources ||
+      !item ||
+      item.relationship.getAttribute("Type") !==
+        `${relationshipAttributeNamespace}/image` ||
+      item.relationship.getAttribute("TargetMode") === "External"
+    )
+      return null;
+    imageTypes ??= imageSources.map((entries) =>
+      contentTypeDeclarations(parseXml(entries, contentTypesPath)),
+    );
+    const source = imageResource(
+      item.relationship,
+      imageSources[1],
+      imageTypes[1],
+    );
+    if (!source) return null;
+    // A filename is not content identity. Only a unique internal PNG/JPEG
+    // with the same declared type and exact bytes can bridge a renamed part.
+    const matches = originals.filter((candidate) => {
+      const destination = imageResource(
+        candidate.relationship,
+        imageSources[0],
+        imageTypes[0],
+      );
+      return (
+        destination?.contentType === source.contentType &&
+        samePartBytes(destination.bytes, source.bytes)
+      );
+    });
+    return matches.length === 1 ? matches[0].id : null;
+  };
   const document = parseXml({ [part]: bytes }, part);
   let changed = false;
   for (const element of [
@@ -1413,8 +1471,11 @@ export function remapPartRelationshipIds(
         !attribute.value
       )
         continue;
-      const key = engineById.get(attribute.value);
-      const originalId = key ? originalByKey.get(key) : undefined;
+      const item = engineById.get(attribute.value);
+      const originalId =
+        item && originalByKey.has(item.key)
+          ? originalByKey.get(item.key)
+          : equivalentImageId(item);
       if (!originalId) return null;
       if (originalId !== attribute.value) {
         attribute.value = originalId;
@@ -2185,7 +2246,7 @@ function directShapeTargetIndexesBySlide(original, operations, targets) {
     operations.length < 1 ||
     operations.length > 3 ||
     !operations.every((operation) =>
-      ["replace_text", "move", "resize", "delete_element"].includes(operation),
+      directShapeIndexOperations.includes(operation),
     ) ||
     !Array.isArray(targets) ||
     targets.length !== operations.length ||
@@ -3324,6 +3385,9 @@ export function preserveOriginalPptxParts(
           semanticShapePatch ?? semanticTableInsetPatch ?? edited[part],
           original[related],
           noEdit[related],
+          targetIndexesBySlide?.has(part) && semanticShapePatch &&
+            sourceOperations.every(operation => ["move", "resize"].includes(operation))
+              ? [original, noEdit] : null,
         );
         if (!relationshipRemap)
           throw new Error(

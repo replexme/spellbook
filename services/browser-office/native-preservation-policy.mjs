@@ -119,6 +119,13 @@ export function operationSlideScope(operation) {
  * slide and every target was identified; every other shape then keeps the
  * XML the author saved, whatever the engine's own save wrote for it.
  */
+export const directShapeIndexOperations = Object.freeze([
+  "replace_text",
+  "move",
+  "resize",
+  "delete_element",
+]);
+
 export function slideShapeTargets(operations, targets) {
   if (
     !Array.isArray(operations) ||
@@ -144,7 +151,18 @@ export function slideShapeTargets(operations, targets) {
     if (!scopes.has(target.slideIndex))
       scopes.set(target.slideIndex, new Set());
     if (scope === "no_shape") continue;
-    if (typeof target.name !== "string" || !target.name) return null;
+    // Direct edits can bind an unnamed authored object by its observed
+    // top-level index. Other operations still need their named shape scope.
+    if (
+      typeof target.name !== "string" ||
+      (!target.name &&
+        !(
+          directShapeIndexOperations.includes(target.op) &&
+          Number.isSafeInteger(target.shapeIndex) &&
+          target.shapeIndex >= 0
+        ))
+    )
+      return null;
     scopes.get(target.slideIndex)?.add(target.name);
   }
   return scopes;

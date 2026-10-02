@@ -4527,3 +4527,101 @@ test("restored SmartArt frames translate their authored relationship IDs into th
   assert.throws(() => preserveOriginalPptxParts(bytes, zipSync(baseline), zipSync(edited), ["move"],
     [{ op: "move", slideIndex: 0, shapeIndex: 0, name: "Diagram 3" }]), /cannot isolate direct move/u);
 });
+
+
+test("an unnamed picture move keeps authored references when the engine renames identical image bytes", async () => {
+  const source = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/downloads/lo-transition-media.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
+  const original = unzipSync(source);
+  const part = "ppt/slides/slide1.xml",
+    related = "ppt/slides/_rels/slide1.xml.rels";
+  const a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+  const p = "http://schemas.openxmlformats.org/presentationml/2006/main";
+  const parse = (bytes) =>
+    new DOMParser().parseFromString(strFromU8(bytes), "application/xml");
+  const serialize = (node) =>
+    strToU8(new XMLSerializer().serializeToString(node));
+  const document = parse(original[part]);
+  const picture = document.getElementsByTagNameNS(p, "pic")[0];
+  assert.equal(
+    picture.getElementsByTagNameNS(p, "cNvPr")[0].getAttribute("name"),
+    "",
+  );
+  const offset = picture.getElementsByTagNameNS(a, "off")[0];
+  const originalX = Number(offset.getAttribute("x"));
+  picture.getElementsByTagNameNS(p, "cNvPr")[0].setAttribute("id", "99");
+  picture
+    .getElementsByTagNameNS(a, "blip")[0]
+    .setAttribute("r:embed", "nativeImage");
+  const baseline = {
+    ...original,
+    [part]: serialize(document),
+    [related]: strToU8(
+      strFromU8(original[related])
+        .replace('Id="rId1"', 'Id="nativeImage"')
+        .replace(
+          'Target="../media/image1.jpeg"',
+          'Target="../media/image1.jpg"',
+        ),
+    ),
+    "ppt/media/image1.jpg": original["ppt/media/image1.jpeg"],
+    "[Content_Types].xml": strToU8(
+      strFromU8(original["[Content_Types].xml"]).replace(
+        "</Types>",
+        '<Default Extension="jpg" ContentType="image/jpeg"/></Types>',
+      ),
+    ),
+  };
+  offset.setAttribute("x", String(originalX + 3600));
+  const edited = { ...baseline, [part]: serialize(document) };
+  const preserve = () =>
+    preserveOriginalPptxParts(
+      source,
+      zipSync(baseline),
+      zipSync(edited),
+      ["move"],
+      [{ op: "move", slideIndex: 0, shapeIndex: 0, name: "" }],
+    );
+  const result = preserve();
+  assert.deepEqual(result.report.changedParts, [part]);
+  const saved = unzipSync(result.bytes),
+    output = parse(saved[part]);
+  assert.equal(
+    output
+      .getElementsByTagNameNS(p, "pic")[0]
+      .getElementsByTagNameNS(a, "off")[0]
+      .getAttribute("x"),
+    String(originalX + 3600),
+  );
+  assert.equal(
+    output.getElementsByTagNameNS(a, "blip")[0].getAttribute("r:embed"),
+    "rId1",
+  );
+  for (const [key, value] of Object.entries(original))
+    if (key !== part) assert.deepEqual(saved[key], value, key);
+  assert.equal(saved["ppt/media/image1.jpg"], undefined);
+  baseline["ppt/media/image1.jpg"] = original["ppt/media/image2.jpeg"];
+  assert.throws(preserve, /cannot isolate direct move/u);
+  baseline["ppt/media/image1.jpg"] = original["ppt/media/image1.jpeg"];
+  baseline["[Content_Types].xml"] = strToU8(
+    strFromU8(baseline["[Content_Types].xml"]).replace(
+      'Extension="jpg" ContentType="image/jpeg"',
+      'Extension="jpg" ContentType="image/png"',
+    ),
+  );
+  assert.throws(preserve, /cannot isolate direct move/u);
+  baseline["[Content_Types].xml"] = edited["[Content_Types].xml"];
+  baseline[related] = strToU8(
+    strFromU8(baseline[related]).replace(
+      "</Relationships>",
+      '<Relationship Id="duplicateImage" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image1.jpg"/></Relationships>',
+    ),
+  );
+  assert.throws(preserve, /cannot isolate direct move/u);
+});
