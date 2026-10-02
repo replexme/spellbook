@@ -22,7 +22,7 @@ const version = (value) =>
         `<!--${value}--></p:sld>`,
       ),
     ),
-  });
+  }, { mtime: new Date("2020-01-01T00:00:00Z") });
 function trial(values) {
   const window = {},
     calls = [];
