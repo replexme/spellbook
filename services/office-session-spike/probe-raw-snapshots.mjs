@@ -10,8 +10,11 @@ const labels = [
   "native-coverage-candidate",
 ];
 
-export async function captureNativeSnapshots(page, scope) {
-  const directory = process.env.SPELLBOOK_DIAGNOSTIC_RAW_DIR;
+export async function captureNativeSnapshots(
+  page,
+  scope,
+  directory = process.env.SPELLBOOK_DIAGNOSTIC_RAW_DIR,
+) {
   if (!directory || !page) return;
   if (!/^[a-z0-9-]+$/u.test(scope))
     throw new Error("Native snapshot diagnostic scope is invalid.");

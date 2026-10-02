@@ -11,6 +11,7 @@ import { strFromU8, unzipSync } from "fflate";
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
 import { buildHarness } from "./build-harness.mjs";
 import { createHarnessServer } from "./server.mjs";
+import { captureNativeSnapshots } from "../office-session-spike/probe-raw-snapshots.mjs";
 
 const arg = (name) => {
   const i = process.argv.indexOf(name);
@@ -236,6 +237,7 @@ const engineState = async () => {
 async function capturePrivateSnapshots() {
   if (diagnosticRaw) {
     await mkdir(diagnosticRaw, { recursive: true, mode: 0o700 });
+    await captureNativeSnapshots(page, "human-edit", diagnosticRaw);
     for (const kind of ["original", "noEdit", "edited"]) {
       const encoded = await page.evaluate((key) => {
         const bytes = globalThis.__humanSnapshot?.[key];
@@ -274,7 +276,7 @@ const partsDiff = (before, after) => {
 try {
   const runtimeStarted = Date.now();
   await page.goto(
-    `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}`,
+    `${origin}/workspace?hostOrigin=${encodeURIComponent(origin)}${diagnosticRaw ? "&browserProbe=1&nativeRaw=1" : ""}`,
     { waitUntil: "domcontentloaded", timeout: 30_000 },
   );
   await page.waitForFunction(
