@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
+import { createAutosaveIdleGate } from "./save-transaction.mjs";
 
 const source = await readFile(
   new URL("./harness/app.js", import.meta.url),
@@ -142,6 +143,10 @@ test("failed persistence cannot publish a newly checkpointed event version", asy
 
 test("heartbeat retains the admitted retry version when typing advances after its first read", async () => {
   let poll, pending;
+  let time = 17_000;
+  const autosaveIdleGate = createAutosaveIdleGate(() => time);
+  autosaveIdleGate.ready(10);
+  time = 20_000;
   const originalRead = {
     value: { revision: "typing-in-progress" },
     documentChanges: 10,
@@ -159,7 +164,9 @@ test("heartbeat retains the admitted retry version when typing advances after it
     checkpointedDocumentChanges: 1,
     lastCheckpointAt: 0,
     reconciledModelRevision: "before-typing",
-    Date: { now: () => 20_000 },
+    Date: { now: () => time },
+    autosaveIdleGate,
+    requestNative: async () => ({ value: null }),
     request: async () => ({ modified: true, documentChanges: 10 }),
     reportHostModified() {},
     observeNativeDocumentChanges: async () => originalRead,
@@ -196,6 +203,13 @@ test("heartbeat retains the admitted retry version when typing advances after it
           source.indexOf("function startProductHeartbeat()"),
         );
   vm.runInContext(oldWriter + heartbeat + "startProductHeartbeat();", context);
+  autosaveIdleGate.input("compositionstart");
+  poll();
+  await pending;
+  assert.equal(context.checkpointedDocumentChanges, 1);
+  assert.equal(context.reconciledModelRevision, "before-typing");
+  autosaveIdleGate.input("compositionend");
+  time += 1500;
   poll();
   await pending;
   assert.equal(context.checkpointedDocumentChanges, 14);
