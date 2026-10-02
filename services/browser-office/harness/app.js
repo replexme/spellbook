@@ -53,6 +53,7 @@ import {
   acknowledgedSaveHasLaterChanges,
   canReuseSaveAcknowledgementObservation,
   createSaveSnapshot,
+  createAutosaveIdleGate,
   journalSnapshotFromSavedBase,
   journalRecoveryDisposition,
 } from "/harness/save-transaction.mjs";
@@ -2841,6 +2842,7 @@ async function handleProductHostMessage(message) {
     aiObservationCache = null;
   }
   if (message.type === "open") {
+    autosaveIdleGate.reset();
     await openProductDocument(message);
     return;
   }
@@ -3465,6 +3467,12 @@ async function cachedAiObservation(requested) {
     return null;
   }
 }
+const autosaveIdleGate = createAutosaveIdleGate();
+for (const type of ["keydown", "input", "pointerdown", "pointerup", "compositionstart", "compositionend"])
+  document.addEventListener(type, () => autosaveIdleGate.input(type), { capture: true, passive: true });
+document.addEventListener("pointermove", event => {
+  if (event.buttons) autosaveIdleGate.input("pointermove");
+}, { capture: true, passive: true });
 function startProductHeartbeat() {
   if (!productMode || !runtimeReady || !hostPort || productHeartbeat) return;
   const poll = () => {
@@ -3472,6 +3480,7 @@ function startProductHeartbeat() {
     checkpointInFlight = true;
     void enqueueProductOperation(async () => {
       const current = await request("status");
+      const inputSettled = autosaveIdleGate.ready(current.documentChanges);
       const modified =
         Boolean(current.modified) ||
         commands.length > 0 ||
@@ -3490,6 +3499,7 @@ function startProductHeartbeat() {
       }
       if (
         modified &&
+        inputSettled &&
         Date.now() - lastCheckpointAt >= 10_000 &&
         (!Number.isSafeInteger(current.documentChanges) ||
           current.documentChanges !== checkpointedDocumentChanges)

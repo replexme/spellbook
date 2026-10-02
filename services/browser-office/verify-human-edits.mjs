@@ -26,6 +26,7 @@ if (
     "roundtrip",
     "type",
     "type-move",
+    "type-continuous",
     "move",
     "delete",
     "newslide",
@@ -348,13 +349,13 @@ try {
       if (item && selection.activeSlide === 0) {
         result.selectionKeys ??= Object.keys(item).join(",");
         if (
-          !["type", "type-move"].includes(scenario) ||
+          !["type", "type-move", "type-continuous"].includes(scenario) ||
           item.hasText === true ||
           item.text
         )
           return item;
         if (
-          ["type", "type-move"].includes(scenario) &&
+          ["type", "type-move", "type-continuous"].includes(scenario) &&
           item.kind &&
           /text|title|shape|placeholder/iu.test(String(item.kind))
         )
@@ -434,13 +435,24 @@ try {
       kind: target.kind,
       name: String(target.name ?? "").replace(/[^\x20-\x7e]/gu, "?"),
     };
-    if (["type", "type-move"].includes(scenario)) {
+    if (["type", "type-move", "type-continuous"].includes(scenario)) {
       if (scenario === "type-move")
         for (let i = 0; i < 6; i += 1) await page.keyboard.press("ArrowRight");
       await page.keyboard.press("F2");
       await page.waitForTimeout(800);
       await page.keyboard.press("End");
-      await page.keyboard.type(` ${editMarker}`, { delay: 60 });
+      if (scenario === "type-continuous") {
+        await page.evaluate(() => performance.mark("human-continuous-start"));
+        await page.keyboard.type(` ${editMarker} ${"input ".repeat(32)}`, { delay: 70 });
+        result.continuousInput = await page.evaluate(() => {
+          const start = performance.getEntriesByName("human-continuous-start").at(-1).startTime;
+          const end = performance.now();
+          return { durationMs: end - start, wholeReadsDuringInput: performance.getEntriesByType("measure")
+            .filter(entry => entry.name === "spellbook-native-read:internal-observe" && entry.startTime >= start && entry.startTime <= end).length };
+        });
+        assert(result.continuousInput.durationMs > 10_000);
+        assert.equal(result.continuousInput.wholeReadsDuringInput, 0, "Autosave read held the engine during continuous input");
+      } else await page.keyboard.type(` ${editMarker}`, { delay: 60 });
       await page.waitForTimeout(800);
       await page.keyboard.press("Escape");
     } else if (scenario === "move") {
@@ -472,7 +484,7 @@ try {
     scenario,
   )
     ? result.engineApplied
-    : ["type", "type-move"].includes(scenario)
+    : ["type", "type-move", "type-continuous"].includes(scenario)
       ? Boolean(
           after?.text?.includes(editMarker) &&
             after.text !== before?.text &&
@@ -485,6 +497,10 @@ try {
           : scenario === "newslide" || scenario === "dupslide"
             ? afterState.slideCount > beforeState.slideCount
             : afterState.slideCount < beforeState.slideCount;
+  if (scenario === "type-continuous") {
+    result.continuousInput.textRetained = after?.text?.includes(`${editMarker} ${"input ".repeat(32)}`) === true;
+    assert.equal(result.continuousInput.textRetained, true, "Continuous input was truncated or lost");
+  }
   result.engineDelta = {
     slides: [beforeState.slideCount, afterState.slideCount],
     firstSlideElements: [
@@ -566,7 +582,7 @@ try {
     const slide1After = after["ppt/slides/slide1.xml"]
       ? strFromU8(after["ppt/slides/slide1.xml"])
       : "";
-    if (["type", "type-move"].includes(scenario))
+    if (["type", "type-move", "type-continuous"].includes(scenario))
       result.textPresent = slide1After.includes(editMarker);
     if (["newslide", "dupslide", "delslide"].includes(scenario))
       result.slidesAfter = Object.keys(after).filter((n) =>

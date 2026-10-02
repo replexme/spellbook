@@ -105,3 +105,39 @@ export function journalSnapshotFromSavedBase({
     },
   };
 }
+
+// Whole-document reads hold the engine while it processes text/drag input.
+// Automatic saves wait for a quiet interval in both input and native changes.
+// Explicit Save and AI requests still use their normal fresh checks.
+export function createAutosaveIdleGate(now = Date.now) {
+  const idleMs = 1500;
+  let lastInputAt = -Infinity;
+  let composing = false;
+  let lastChanges;
+  let stableSince = -Infinity;
+  return {
+    input(type) {
+      lastInputAt = now();
+      if (type === "compositionstart") composing = true;
+      if (type === "compositionend") composing = false;
+    },
+    ready(documentChanges) {
+      const time = now();
+      if (documentChanges !== lastChanges) {
+        lastChanges = documentChanges;
+        stableSince = time;
+      }
+      return (
+        !composing &&
+        time - lastInputAt >= idleMs &&
+        time - stableSince >= idleMs
+      );
+    },
+    reset() {
+      composing = false;
+      lastInputAt = -Infinity;
+      lastChanges = undefined;
+      stableSince = now();
+    },
+  };
+}

@@ -151,3 +151,30 @@ test("save acknowledgement compares the sent snapshot, not the current buffer re
     true,
   );
 });
+
+test("automatic saves wait for settled input and stable native changes", async () => {
+  const { createAutosaveIdleGate } = await import("./save-transaction.mjs");
+  let time = 0;
+  const gate = createAutosaveIdleGate(() => time);
+  assert.equal(gate.ready(1), false);
+  time = 1500;
+  assert.equal(gate.ready(1), true);
+  gate.input("keydown");
+  assert.equal(gate.ready(1), false);
+  time += 500;
+  assert.equal(gate.ready(2), false);
+  time += 1500;
+  assert.equal(gate.ready(2), true);
+  gate.input("compositionstart");
+  time += 5000;
+  assert.equal(gate.ready(2), false);
+  gate.input("compositionend");
+  time += 1500;
+  assert.equal(gate.ready(2), true);
+  gate.input("pointermove");
+  assert.equal(gate.ready(2), false);
+  gate.reset();
+  assert.equal(gate.ready(2), false);
+  time += 1500;
+  assert.equal(gate.ready(2), true);
+});
