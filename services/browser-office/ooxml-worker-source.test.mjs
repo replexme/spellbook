@@ -4118,6 +4118,90 @@ test("new placeholders keep live alignment and autofit without touching old desi
   );
 });
 
+test("native duplication uses the captured source among identical baseline slides", async () => {
+  const one = new Uint8Array(await readFile(fixtureUrl));
+  const entries = unzipSync(applyOoxmlCommand(one, {
+    op: "duplicate_slide", slideIndex: 0, insertIndex: 1,
+  }).bytes);
+  const paths = slidePaths(entries);
+  assert.equal(paths.length, 2);
+  const baseline = { ...entries };
+  paths.forEach((part, index) => {
+    entries[part] = strToU8(strFromU8(entries[part]).replace('<p:cSld', `<p:cSld privateOwner="owner-${index}"`));
+  });
+  const edited = engineTopologyFixture(unzipSync(applyOoxmlCommand(zipSync(baseline), {
+    op: "duplicate_slide", slideIndex: 1, insertIndex: 2,
+  }).bytes));
+  const document = new DOMParser().parseFromString(strFromU8(edited[slidePaths(edited)[2]]), "application/xml");
+  const tree = document.getElementsByTagNameNS("http://schemas.openxmlformats.org/presentationml/2006/main", "spTree")[0];
+  const elements = [...tree.childNodes].filter(node => node.nodeType === 1 &&
+    ["sp", "pic", "graphicFrame", "cxnSp", "grpSp"].includes(node.localName)).map(shape => ({
+      text: [...shape.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "p")].map(paragraph =>
+        [...paragraph.getElementsByTagNameNS("http://schemas.openxmlformats.org/drawingml/2006/main", "t")].map(text => text.textContent).join("")).join("\n"),
+    }));
+  const intent = { op: "native_slide_topology", slideIndex: 2, elements };
+  for (const index of [0, 1]) {
+    const result = preserveOriginalPptxParts(zipSync(entries), zipSync(baseline), zipSync(edited), null,
+      [{ ...intent, cloneSourceSlideIndex: index }]);
+    const saved = unzipSync(result.bytes);
+    assert.ok(strFromU8(saved[slidePaths(saved)[2]]).includes(`privateOwner="owner-${index}"`));
+    for (const part of paths) assert.deepEqual(saved[part], entries[part]);
+  }
+  for (const index of [-1, 2, "1", 1.5]) {
+    assert.throws(() => preserveOriginalPptxParts(zipSync(entries), zipSync(baseline), zipSync(edited), null,
+      [{ ...intent, cloneSourceSlideIndex: index }]), /duplicate source does not match/);
+  }
+  const different = strToU8(strFromU8(baseline[paths[0]]).replace("Spellbook 검증 العربية", "Different retained source"));
+  const distinctBaseline = { ...baseline, [paths[0]]: different };
+  const distinctEdited = { ...edited, [slidePaths(edited)[0]]: different };
+  assert.throws(() => preserveOriginalPptxParts(zipSync(entries), zipSync(distinctBaseline), zipSync(distinctEdited), null,
+    [{ ...intent, cloneSourceSlideIndex: 0 }]), /duplicate source does not match/);
+});
+
+test("scoped text keeps unrelated authored external pictures when the native writer loses their targets", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml", related = "ppt/slides/_rels/slide1.xml.rels";
+  const picture = '<p:pic><p:nvPicPr><p:cNvPr id="501" name="Unresolved external picture"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:link="authorExternal"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="36000" cy="36000"/></a:xfrm></p:spPr></p:pic>';
+  original[part] = strToU8(strFromU8(original[part]).replace('</p:spTree>', picture + '</p:spTree>'));
+  original[related] = strToU8(strFromU8(original[related]).replace('</Relationships>', '<Relationship Id="authorExternal" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="NULL" TargetMode="External"/></Relationships>'));
+  const baseline = { ...original,
+    [part]: strToU8(strFromU8(original[part]).replace('r:link="authorExternal"', 'r:embed="nativeMissing"')),
+    [related]: strToU8(strFromU8(original[related]).replace('Id="authorExternal"', 'Id="nativeMissing"').replace('Target="NULL" TargetMode="External"', 'Target="../media/missing.png"')),
+  };
+  const edited = { ...baseline, [part]: strToU8(strFromU8(baseline[part]).replace('Spellbook 검증 العربية', 'Spellbook 검증 العربية MANUAL')) };
+  const result = preserveOriginalPptxParts(zipSync(original), zipSync(baseline), zipSync(edited), ['replace_text'],
+    [{ op: 'replace_text', slideIndex: 0, shapeIndex: 0, name: 'TextBox 1' }]);
+  const saved = unzipSync(result.bytes);
+  assert.match(strFromU8(saved[part]), /Spellbook 검증 العربية MANUAL/);
+  assert.ok(strFromU8(saved[part]).includes(picture));
+  assert.doesNotMatch(strFromU8(saved[part]), /nativeMissing/);
+  assert.deepEqual(result.report.changedParts, [part]);
+  for (const [name, bytes] of Object.entries(original)) if (name !== part) assert.deepEqual(saved[name], bytes, name);
+});
+
+test("direct picture deletion retains authored dependency bytes and refuses incoming drawing references", async () => {
+  const bytes = new Uint8Array(await readFile(new URL('../../eval/public/downloads/lo-custom-xml.pptx', import.meta.url)));
+  const original = unzipSync(bytes), part = 'ppt/slides/slide1.xml';
+  const ns = 'http://schemas.openxmlformats.org/presentationml/2006/main';
+  const document = new DOMParser().parseFromString(strFromU8(original[part]), 'application/xml');
+  const tree = document.getElementsByTagNameNS(ns, 'spTree')[0];
+  const shapes = [...tree.childNodes].filter(node => node.nodeType === 1 && ['sp','pic','graphicFrame','cxnSp','grpSp'].includes(node.localName));
+  const picture = shapes.find(shape => shape.localName === 'pic');
+  const props = picture.getElementsByTagNameNS(ns, 'cNvPr')[0];
+  const index = shapes.indexOf(picture), name = props.getAttribute('name'), id = props.getAttribute('id');
+  picture.parentNode.removeChild(picture);
+  const edited = {...original, [part]: strToU8(new XMLSerializer().serializeToString(document))};
+  const preserve = source => preserveOriginalPptxParts(zipSync(source), zipSync(original), zipSync(edited), ['delete_element'],
+    [{op: 'delete_element', slideIndex: 0, shapeIndex: index, name}]);
+  const result = preserve(original), saved = unzipSync(result.bytes);
+  assert.deepEqual(result.report.changedParts, [part]);
+  assert.equal(new DOMParser().parseFromString(strFromU8(saved[part]), 'application/xml').getElementsByTagNameNS(ns, 'pic').length,
+    document.getElementsByTagNameNS(ns, 'pic').length);
+  for (const [name, value] of Object.entries(original)) if (name !== part) assert.deepEqual(saved[name], value, name);
+  const referenced = {...original, [part]: strToU8(strFromU8(original[part]).replace('</p:spTree>', connectorXml(501, id, 4) + '</p:spTree>'))};
+  assert.throws(() => preserve(referenced), /cannot isolate direct deletion/);
+});
+
 test("native duplication clones an unambiguous authored slide without adding text bodies to decoration", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const original = unzipSync(source);

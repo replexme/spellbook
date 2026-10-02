@@ -765,6 +765,40 @@ function preserveUnaffectedSlideShapes(
     )
   )
     return null;
+  if (targetIndexes !== null && sourceOperations.length > 0 &&
+      sourceOperations.every(operation => directShapeIndexOperations.includes(operation) && operation !== "delete_element")) {
+    // These commands cannot retarget package relationships. Build their small
+    // semantic delta on the authored slide, keeping even unresolved external
+    // pictures and unknown relationship-bearing subtrees in one ID space.
+    for (const pair of pairs.filter(pair => targetIndexes.has(pair.index))) {
+      const { source, baseline, editedShape } = pair;
+      const prior = source.cloneNode(true);
+      if (hasRelationshipReference(source)) {
+        if (!geometrySources) return null;
+        const related = relationshipsPath(part);
+        if (!remapPartRelationshipIds(part, serializeXml(source),
+            geometrySources.entries[1][related], geometrySources.entries[0][related],
+            [geometrySources.entries[1], geometrySources.entries[0]])) return null;
+      }
+      if (sourceOperations.includes("replace_text")) {
+        try {
+          const text = readShapeText(editedShape);
+          replaceShapeText(source, text);
+          if (readShapeText(source) !== text) return null;
+        } catch { return null; }
+        const properties = [source, baseline, editedShape].map(shape =>
+          optionalDirectXmlChild(shape, presentationNamespace, "spPr"));
+        if (!properties.every(Boolean)) return null;
+        const merged = mergeElementThreeWay(documents[0], ...properties);
+        if (!merged) return null;
+        source.replaceChild(merged, properties[0]);
+      }
+      if (sourceOperations.some(operation => ["move", "resize"].includes(operation)) &&
+          !applyAuthoredGeometryDelta(source, prior, baseline, editedShape,
+            sourceOperations, geometrySources)) return null;
+    }
+    return serializeXml(documents[0]);
+  }
   // An engine element as the author would name it: its references to other
   // shapes in the author's ids, and without its own engine-numbered id.
   const asAuthored = (node, ids) => {
@@ -783,28 +817,6 @@ function preserveUnaffectedSlideShapes(
   );
   for (const pair of pairs) {
     const { source, baseline, editedShape, index } = pair;
-    if (targetIndexes?.has(index) && sourceOperations.every(operation => ["move", "resize"].includes(operation))) {
-      // Geometry can be applied to the original frame/group wrapper without
-      // importing the engine's children or relationship IDs. Keep diagram
-      // parts, picture contents and style exactly as authored.
-      let moved = importOoxmlSubtree(documents[2], source, true);
-      if (!applyAuthoredGeometryDelta(moved, source, baseline, editedShape, sourceOperations, geometrySources)) return null;
-      if (hasRelationshipReference(moved)) {
-        if (!geometrySources) return null;
-        const related = relationshipsPath(part);
-        // This subtree came from the author, while its destination document
-        // uses engine relationship IDs. Translate by type and resolved target
-        // before the final package translates all engine IDs back together.
-        const rebound = remapPartRelationshipIds(part, serializeXml(moved),
-          geometrySources.entries[1][related], geometrySources.entries[0][related],
-          [geometrySources.entries[1], geometrySources.entries[0]]);
-        if (!rebound) return null;
-        moved = importOoxmlSubtree(documents[2], parseXml({ [part]: rebound }, part).documentElement, true);
-      }
-      // The geometry changed, but every shape ID still comes from source.
-      replacements.push({ pair, editedShape, restored: true, node: moved });
-      continue;
-    }
     if (hasRelationshipReference(source)) continue;
     if (
       additiveOnly ||
@@ -820,65 +832,8 @@ function preserveUnaffectedSlideShapes(
       });
       continue;
     }
-    // A shape the command named keeps the author's XML wherever the engine's
-    // saves before and after the command agree.
-    let merged = null;
-    if (
-      targetIndexes?.has(index) &&
-      sourceOperations.every((operation) => operation === "replace_text")
-    ) {
-      // An imported placeholder can have one authored run but several
-      // language-specific runs in both engine exports. The XML three-way
-      // merge can import engine formatting or fail to align those trees.
-      // Keep the authored runs while carrying both the live text delta and
-      // its shape-property delta. Auto-fit can resize a text box during an
-      // edit even though the command did not explicitly request a resize.
-      try {
-        const priorText = readShapeText(source);
-        if (priorText === readShapeText(baseline)) {
-          const changedText = readShapeText(editedShape);
-          if (changedText !== priorText) {
-            const authoredText = source.cloneNode(true);
-            replaceShapeText(authoredText, changedText);
-            const properties = [source, baseline, editedShape].map((shape) =>
-              optionalDirectXmlChild(shape, presentationNamespace, "spPr"),
-            );
-            const changedProperties = properties.every(Boolean)
-              ? mergeElementThreeWay(documents[2], ...properties)
-              : null;
-            if (readShapeText(authoredText) === changedText && changedProperties) {
-              merged = importOoxmlSubtree(documents[2], authoredText, true);
-              merged.replaceChild(changedProperties,
-                optionalDirectXmlChild(merged, presentationNamespace, "spPr"));
-            }
-          }
-        }
-      } catch {
-        // Other text structures use the regular three-way merge.
-      }
-    }
-    merged ??= mergeElementThreeWay(
-      documents[2],
-      source,
-      baseline,
-      editedShape,
-    );
-    if (
-      merged &&
-      targetIndexes?.has(index) &&
-      sourceOperations.some(
-        (operation) => operation === "move" || operation === "resize",
-      ) &&
-      !applyAuthoredGeometryDelta(
-        merged,
-        source,
-        baseline,
-        editedShape,
-        sourceOperations,
-        geometrySources,
-      )
-    )
-      return null;
+    // Preserve authored properties wherever the two native exports agree.
+    const merged = mergeElementThreeWay(documents[2], source, baseline, editedShape);
     if (merged)
       replacements.push({ pair, editedShape, restored: false, node: merged });
   }
@@ -1036,12 +991,6 @@ function removeDirectShapeFromOriginal(
     !removedId ||
     identity(removed)?.name !== name ||
     removed.localName !== baseline[index].localName ||
-    [removed, ...removed.getElementsByTagName("*")].some((node) =>
-      Array.from(node.attributes).some(
-        (attribute) =>
-          attribute.namespaceURI === relationshipAttributeNamespace,
-      ),
-    ) ||
     shapeReferences(documents[0]).some(
       ({ element, attribute }) => element.getAttribute(attribute) === removedId,
     )
@@ -1076,6 +1025,8 @@ function removeDirectShapeFromOriginal(
     )
   )
     return null;
+  // Deleting a drawing does not grant authority to delete its assets. Keep
+  // authored relationships and dependencies, including any shared consumers.
   removed.parentNode.removeChild(removed);
   return serializeXml(documents[0]);
 }
@@ -2391,13 +2342,21 @@ function mergeDirectSlideTopology(
         ),
       )
     : [];
-  if (cloneSources.length === 1) {
+  let cloneSource = cloneSources.length === 1 ? cloneSources[0] : null;
+  if (intent && Object.hasOwn(intent, "cloneSourceSlideIndex")) {
+    const index = intent.cloneSourceSlideIndex;
+    if (!Number.isInteger(index) || index < 0 || index >= baselinePaths.length ||
+        !cloneSources.includes(baselinePaths[index]))
+      throw new Error("Native duplicate source does not match the captured baseline.");
+    cloneSource = baselinePaths[index];
+  }
+  if (cloneSource) {
     const changed = new Set();
     clonePart(
       context,
-      orderedSlidePaths(original)[baselinePaths.indexOf(cloneSources[0])],
+      orderedSlidePaths(original)[baselinePaths.indexOf(cloneSource)],
       newSlide,
-      new Map([[cloneSources[0], newSlide]]),
+      new Map([[cloneSource, newSlide]]),
       changed,
     );
     preserveInsertedShapeProperties(context.entries, newSlide, intent);
@@ -3840,7 +3799,7 @@ export function preserveOriginalPptxParts(
       withinBudget &&
       !untargetedSlide &&
       !existingSlideContentDuringTopology &&
-      !(directDeletionPart && part === relationshipsPath(directDeletionPart));
+      !(part.endsWith(".rels") && targetIndexesBySlide?.has(part.replace(/_rels\/([^/]+)\.rels$/u, "$1")));
     // The author's copy of an unchanged part is kept, but its .rels may be the
     // engine's renumbered copy by now (.rels sort before their part). Rebind
     // the kept part's r:* references to the same relationships; when one no
@@ -3927,6 +3886,8 @@ export function preserveOriginalPptxParts(
     const semanticWorkbookPatch = authoredChange && /^ppt\/embeddings\/[^/]+\.xlsx$/u.test(part)
       ? mergeNumericWorkbookDelta(original[part], noEdit[part], edited[part])
       : null;
+    const authoredDirectShape = semanticShapePatch && targetIndexesBySlide?.has(part) &&
+      sourceOperations.every(operation => directShapeIndexOperations.includes(operation));
     let relationshipRemap = null;
     const presentationPatch =
       presentationPartsPatch && Object.hasOwn(presentationPartsPatch, part);
@@ -3936,9 +3897,9 @@ export function preserveOriginalPptxParts(
       !part.endsWith(".rels") &&
       !semanticSlideSizePatch &&
       !presentationPatch &&
-      // Direct deletion builds the entire XML from the original and keeps
-      // its original .rels. It contains no engine-origin relationship IDs.
-      !(directDeletionPart === part && semanticShapePatch)
+      // Scoped text/geometry/deletion builds XML in the authored ID space
+      // and keeps its original .rels; no engine relationship IDs remain.
+      !authoredDirectShape
     ) {
       if (
         samePartBytes(noEdit[related], edited[related]) &&
