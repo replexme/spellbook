@@ -129,7 +129,7 @@ const report = {
   candidate,
   integration,
   timingScope: preserveSource
-    ? "candidate export including browser repair, shared original-part preservation worker and host callback; excludes independent SDK validation and product admission"
+    ? "candidate export including shared original-part preservation worker, final structural repair and host callback; excludes independent SDK validation and product admission"
     : repairStructure
       ? "candidate readiness / export including browser repair and host callback; excludes original-part preservation and runtime clean reconciliation"
       : "candidate readiness / raw export including host callback; excludes product preservation and runtime clean reconciliation",
@@ -143,7 +143,7 @@ const report = {
   engineApiMethods: null,
   externalRequestCount: 0,
   savePipeline: preserveSource
-    ? "shared original-part preservation in the actual save callback; excludes complete typed-feature and product admission"
+    ? "authored-source preservation precedes final structural repair in the actual save callback; excludes complete typed-feature and product admission"
     : repairStructure
       ? "browser structural repair of exported artifact; excludes original-part preservation and complete product admission"
       : "raw candidate export",
@@ -173,7 +173,7 @@ try {
  const file=new File([await (await fetch('/compare.pptx',{cache:'no-store'})).arrayBuffer()],'compare.pptx',{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'});
  const original=${repairStructure ? "new Uint8Array(await (await fetch('/original.pptx',{cache:'no-store'})).arrayBuffer())" : "null"};
  const repair=${repairStructure ? "(await import('/comparison-repair.js')).repairCandidatePptxStructure" : "null"};
- editor=await createOfficeEditor(document.querySelector('#editor'),{hostUrl:${JSON.stringify(new URL("/office-host.html", origin.origin).href)},file,fileName:file.name,mode:'edit',saveBehavior:'callback',onDirtyChange:value=>dirty=value,onError:e=>error=e.message,onSave:async file=>{if(window.__comparisonRejectSave)throw new Error('comparison_host_write_rejected');let bytes=new Uint8Array(await file.arrayBuffer());if(repair){const started=performance.now(),result=repair(original,bytes);bytes=result.bytes;window.__comparisonStructuralRepairs.push({ms:performance.now()-started,...result.report});}if(window.__comparisonCaptureBaseline){noEditBytes=bytes;window.__comparisonSaved=bytes;return true;}if(preserveEnabled){if(!noEditBytes||!window.__comparisonIntent)throw new Error('comparison_source_preservation_intent_missing');const started=performance.now(),result=await preserve({bytes:original,noEditBytes,editedBytes:bytes,...window.__comparisonIntent});bytes=result.bytes;window.__comparisonPreservations.push({ms:performance.now()-started,...result.report});}window.__comparisonSaved=bytes;if(window.__holdSave){window.__heldSave=true;await new Promise(resolve=>window.__releaseSave=resolve);}writeCount++;return true;}});
+ editor=await createOfficeEditor(document.querySelector('#editor'),{hostUrl:${JSON.stringify(new URL("/office-host.html", origin.origin).href)},file,fileName:file.name,mode:'edit',saveBehavior:'callback',onDirtyChange:value=>dirty=value,onError:e=>error=e.message,onSave:async file=>{if(window.__comparisonRejectSave)throw new Error('comparison_host_write_rejected');let bytes=new Uint8Array(await file.arrayBuffer());if(window.__comparisonCaptureBaseline){noEditBytes=bytes;window.__comparisonSaved=bytes;return true;}if(preserveEnabled){if(!noEditBytes||!window.__comparisonIntent)throw new Error('comparison_source_preservation_intent_missing');const started=performance.now(),result=await preserve({bytes:original,noEditBytes,editedBytes:bytes,...window.__comparisonIntent});bytes=result.bytes;window.__comparisonPreservations.push({ms:performance.now()-started,...result.report});}if(repair){const started=performance.now(),result=repair(original,bytes);bytes=result.bytes;window.__comparisonStructuralRepairs.push({ms:performance.now()-started,...result.report});}window.__comparisonSaved=bytes;if(window.__holdSave){window.__heldSave=true;await new Promise(resolve=>window.__releaseSave=resolve);}writeCount++;return true;}});
 }catch(e){error=e.message;}
 </script>`;
 // Real loopback HTTP gives Chromium a local address space for the host iframe.
@@ -492,6 +492,8 @@ try {
         path: path.join(outputRoot, `${scenario}-before.png`),
       });
       if (preserveSource) {
+        // Raw baseline is an engine observation, never an admitted artifact.
+        // Restore authored ownership before repairing the artifact to save.
         item.stage = "source-baseline";
         await page.evaluate(() => {
           window.__comparisonCaptureBaseline = true;
