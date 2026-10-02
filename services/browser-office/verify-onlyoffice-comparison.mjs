@@ -63,10 +63,6 @@ if (preserveSource) {
     !readbackStatePath,
     "Source preservation must start from the authored input",
   );
-  assert(
-    !scenarios.includes("late-save-ack"),
-    "Source-preserved concurrent saves require a version-bound adapter",
-  );
 }
 await mkdir(outputRoot, { recursive: true, mode: 0o700 });
 if (repairStructure) await buildHarness();
@@ -361,6 +357,25 @@ try {
                 names.add(k);
           return [...names].sort();
         });
+      if (preserveSource) {
+        // Raw baseline is an engine observation, never an admitted artifact.
+        // Restore authored ownership before repairing the artifact to save.
+        item.stage = "source-baseline";
+        await page.evaluate(() => {
+          window.__comparisonCaptureBaseline = true;
+        });
+        const baseline = await save(page);
+        item.sourceBaselineExportMs = baseline.ms;
+        item.sourceBaselineSha256 = sha(Buffer.from(baseline.base64, "base64"));
+        assert.deepEqual(
+          differences(before, await snapshot(frame)),
+          [],
+          "Baseline export must not mutate the document",
+        );
+        await page.evaluate(() => {
+          window.__comparisonCaptureBaseline = false;
+        });
+      }
       if (scenario === "late-save-ack") {
         item.stage = "held-save";
         const duplicate = () =>
@@ -371,6 +386,12 @@ try {
         await page.waitForTimeout(250);
         const firstSnapshot = await snapshot(frame);
         assert.equal(firstSnapshot.slides.length, before.slides.length + 1);
+        const duplicateIntent = (state, slideIndex, cloneSourceSlideIndex) => ({
+          sourceOperations: null,
+          sourceTargets: [{ op: "native_slide_topology", slideIndex, cloneSourceSlideIndex,
+            elements: state.slides[slideIndex].shapes.map(shape => ({ text: shape.text?.replace(/\r\n/g,"\n").replace(/\n$/u,"") })) }],
+        });
+        if (preserveSource) await page.evaluate(intent => window.__comparisonIntent=intent, duplicateIntent(firstSnapshot, 1, 0));
         await page.evaluate(() => {
           window.__holdSave = true;
           window.__pendingSave = window.__ONLYOFFICE_SAVE_E2E__.save();
@@ -383,6 +404,13 @@ try {
         await page.waitForTimeout(250);
         const latest = await snapshot(frame);
         assert.equal(latest.slides.length, firstSnapshot.slides.length + 1);
+        if (preserveSource) await page.evaluate(intent => window.__comparisonIntent=intent, duplicateIntent(latest, 2, 1));
+        const overlap = await page.evaluate(async () => {
+          try { await window.__ONLYOFFICE_SAVE_E2E__.save(); return null; }
+          catch (error) { return error.message; }
+        });
+        assert.equal(overlap, "comparison_save_in_flight", "Concurrent persistence must not replace the in-flight snapshot");
+        item.overlapSaveRejected = overlap;
         await page.evaluate(() => {
           window.__releaseSave();
           window.__holdSave = false;
@@ -416,6 +444,7 @@ try {
         item.stage = "second-save";
         const currentSave = await save(page);
         item.structuralRepairs = currentSave.structuralRepairs;
+        item.sourcePreservations = currentSave.preservations;
         const currentBytes = Buffer.from(currentSave.base64, "base64");
         await writeFile(
           path.join(outputRoot, "late-save-ack-latest.pptx"),
@@ -480,25 +509,6 @@ try {
       await page.screenshot({
         path: path.join(outputRoot, `${scenario}-before.png`),
       });
-      if (preserveSource) {
-        // Raw baseline is an engine observation, never an admitted artifact.
-        // Restore authored ownership before repairing the artifact to save.
-        item.stage = "source-baseline";
-        await page.evaluate(() => {
-          window.__comparisonCaptureBaseline = true;
-        });
-        const baseline = await save(page);
-        item.sourceBaselineExportMs = baseline.ms;
-        item.sourceBaselineSha256 = sha(Buffer.from(baseline.base64, "base64"));
-        assert.deepEqual(
-          differences(before, await snapshot(frame)),
-          [],
-          "Baseline export must not mutate the document",
-        );
-        await page.evaluate(() => {
-          window.__comparisonCaptureBaseline = false;
-        });
-      }
       item.stage = "edit";
       if (!["roundtrip", "save-failure"].includes(scenario)) {
         item.setup = await frame.evaluate((s) => {
@@ -509,7 +519,7 @@ try {
             c = slide.graphicObjects;
           if (s === "dupslide") {
             m.DublicateSlide();
-            return { kind: "slide-duplicate" };
+            return { kind: "slide-duplicate", cloneSourceSlideIndex: 0 };
           }
           if (s === "delslide") {
             m.deleteSlides([slide]);
@@ -527,7 +537,9 @@ try {
                 .sort(
                   (a, b) => text(b).trim().length - text(a).trim().length,
                 )[0]
-            : slide.cSld.spTree[0];
+            : s === "delete"
+              ? slide.cSld.spTree.find(shape => !shape.isPlaceholder?.())
+              : slide.cSld.spTree[0];
           if (!target) throw new Error("No suitable first-slide target");
           c.resetSelection();
           c.selectObject(target, 0);
@@ -659,6 +671,7 @@ try {
             {
               op: "native_slide_topology",
               slideIndex: 1,
+              cloneSourceSlideIndex: item.setup.cloneSourceSlideIndex,
               elements: edited.slides[1].shapes.map((shape) => ({
                 text: shape.text?.replace(/\r\n/g, "\n").replace(/\n$/u, ""),
               })),

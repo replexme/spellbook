@@ -147,3 +147,19 @@ style, ambiguous-owner and unknown-content changes cannot take this narrow
 merge path. The runner checks the complete saved workbook payload and exact
 native workbook restoration on Undo and Redo, in addition to saved-artifact
 reopening. A cache-only readback does not satisfy this case.
+
+The diagnostic save host captures source intent, the authored package and its
+matching no-edit export before starting a save. It allows one persistence
+request at a time; another save is rejected while editing remains available.
+Worker replies are dispatched by request ID rather than replacing a shared
+message handler. Only a successful persistence callback advances the authored
+package and native baseline together. Failed saves keep the accepted baseline.
+
+`--preserve-source --scenarios late-save-ack` exercises this full path: duplicate,
+hold persistence, edit again, change the next intent, reject an overlapping save,
+release the old acknowledgement, then save the latest revision. It verifies
+dirty state, native history and both reopened artifacts. A captured duplicate
+source index disambiguates identical slides only after complete native slide
+content matches; it cannot authorize a mismatching source. The comparison host
+requires its explicit programmatic save boundary and is not production admission
+or an implementation of every native toolbar save route.
