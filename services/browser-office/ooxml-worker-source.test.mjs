@@ -4361,3 +4361,120 @@ test("restoring an authored transition preserves ancestor-only Requires prefix b
     /Transition untouched/u,
   );
 });
+
+
+test("engine alignment reserves every newly allocated notes name across the deck", async () => {
+  let source = new Uint8Array(await readFile(fixtureUrl));
+  for (let index = 1; index < 5; index += 1)
+    source = applyOoxmlCommand(source, { op: "add_slide", templateSlideIndex: 0, insertIndex: index }).bytes;
+  const original = unzipSync(source);
+  const paths = slidePaths(original);
+  const notes = (entries, slide, ordinal) => {
+    const part = `ppt/notesSlides/notesSlide${ordinal}.xml`;
+    const related = slide.replace("/slides/", "/slides/_rels/") + ".rels";
+    entries[related] = strToU8(strFromU8(entries[related]).replace("</Relationships>",
+      `<Relationship Id="notesForSlide" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/notesSlide${ordinal}.xml"/></Relationships>`));
+    entries[part] = strToU8('<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>');
+    entries["[Content_Types].xml"] = strToU8(strFromU8(entries["[Content_Types].xml"]).replace("</Types>",
+      `<Override PartName="/${part}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.notesSlide+xml"/></Types>`));
+  };
+  // Two formerly notes-free slides export names already owned by different
+  // authored slides. Their fresh allocations must not collide with each other.
+  const baseline = { ...original };
+  paths.forEach((slide, index) => notes(baseline, slide, index + 1));
+  notes(original, paths[0], 3);
+  notes(original, paths[3], 1);
+  notes(original, paths[4], 2);
+  const edited = { ...baseline, [paths[0]]: strToU8(strFromU8(baseline[paths[0]])
+    .replace("Spellbook 검증 العربية", "Edited text")) };
+  const result = preserveOriginalPptxParts(zipSync(original), zipSync(baseline), zipSync(edited),
+    ["replace_text"], [{ op: "replace_text", slideIndex: 0, shapeIndex: 0, name: "TextBox 1" }]);
+  assert.deepEqual(result.report.changedParts, [paths[0]]);
+  const saved = unzipSync(result.bytes);
+  assert.match(strFromU8(saved[paths[0]]), /Edited text/u);
+  for (const [part, bytes] of Object.entries(original))
+    if (part !== paths[0]) assert.deepEqual(saved[part], bytes, part);
+});
+
+test("direct moves resolve both inherited baselines and preserve authored geometry offsets", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml";
+  const a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+  const p = "http://schemas.openxmlformats.org/presentationml/2006/main";
+  const parse = bytes => new DOMParser().parseFromString(strFromU8(bytes), "application/xml");
+  const serialize = document => strToU8(new XMLSerializer().serializeToString(document));
+  const slide = parse(original[part]);
+  const shape = slide.getElementsByTagNameNS(p, "sp")[0];
+  const inherited = shape.getElementsByTagNameNS(a, "xfrm")[0];
+  const originalX = Number(inherited.getElementsByTagNameNS(a, "off")[0].getAttribute("x"));
+  const name = shape.getElementsByTagNameNS(p, "cNvPr")[0].getAttribute("name");
+  const nv = shape.getElementsByTagNameNS(p, "nvPr")[0];
+  const ph = slide.createElementNS(p, "p:ph"); ph.setAttribute("idx", "99"); ph.setAttribute("type", "title"); nv.appendChild(ph);
+  inherited.parentNode.removeChild(inherited);
+  original[part] = serialize(slide);
+  const layout = "ppt/slideLayouts/slideLayout1.xml";
+  original["ppt/slides/_rels/slide1.xml.rels"] = strToU8(strFromU8(original["ppt/slides/_rels/slide1.xml.rels"]).replace(/slideLayout\d+\.xml/u, "slideLayout1.xml"));
+  original[layout] = strToU8(`<p:sldLayout xmlns:p="${p}" xmlns:a="${a}"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="100" name="Inherited"/><p:cNvSpPr/><p:nvPr><p:ph type="title" idx="99"/></p:nvPr></p:nvSpPr><p:spPr>${new XMLSerializer().serializeToString(inherited)}</p:spPr></p:sp></p:spTree></p:cSld></p:sldLayout>`);
+  const baselineLayout = parse(original[layout]);
+  baselineLayout.getElementsByTagNameNS(a, "off")[0].setAttribute("x", String(originalX - 120));
+  const baseline = { ...original, [layout]: serialize(baselineLayout) };
+  const editedSlide = parse(original[part]);
+  const editedShape = editedSlide.getElementsByTagNameNS(p, "sp")[0];
+  const moved = editedSlide.importNode(inherited, true);
+  moved.getElementsByTagNameNS(a, "off")[0].setAttribute("x", String(originalX - 120 + 3600));
+  editedShape.getElementsByTagNameNS(p, "spPr")[0].insertBefore(moved, editedShape.getElementsByTagNameNS(p, "spPr")[0].firstChild);
+  const edited = { ...baseline, [part]: serialize(editedSlide) };
+  const preserve = operations => preserveOriginalPptxParts(zipSync(original), zipSync(baseline), zipSync(edited), operations,
+    operations.map(op => ({ op, slideIndex: 0, shapeIndex: 0, name })));
+  const assertGeometry = result => {
+    assert.deepEqual(result.report.changedParts, [part]);
+    const saved = unzipSync(result.bytes);
+    assert.equal(parse(saved[part]).getElementsByTagNameNS(a, "off")[0].getAttribute("x"), String(originalX + 3600));
+    for (const [key, value] of Object.entries(original))
+      if (key !== part) assert.deepEqual(saved[key], value, key);
+  };
+  assertGeometry(preserve(["move"]));
+  editedShape.getElementsByTagNameNS(a, "t")[0].textContent += " MANUAL";
+  edited[part] = serialize(editedSlide);
+  assertGeometry(preserve(["replace_text", "move"]));
+  assert.match(strFromU8(unzipSync(preserve(["replace_text", "move"]).bytes)[part]), / MANUAL/u);
+  delete baseline[layout];
+  assert.throws(() => preserve(["move"]), /cannot isolate direct move/u);
+});
+
+
+test("a newly inserted slide can introduce the first notes master without replacing authored design", async () => {
+  const bytes = new Uint8Array(await readFile(fixtureUrl));
+  const original = unzipSync(bytes);
+  const baseline = engineTopologyFixture(original);
+  const added = unzipSync(applyOoxmlCommand(bytes, { op: "add_slide", templateSlideIndex: 0, insertIndex: 1 }).bytes);
+  const inserted = slidePaths(added)[1];
+  added[inserted] = strToU8(strFromU8(added[inserted]).replace("Spellbook 검증 العربية", "Inserted content"));
+  const edited = engineTopologyFixture(added);
+  const insertedNative = slidePaths(edited)[1];
+  const rel = (id, kind, target) => `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/${kind}" Target="${target}"/>`;
+  const rels = (...entries) => strToU8(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${entries.join("")}</Relationships>`);
+  const notes = "ppt/notesSlides/notesSlide1.xml";
+  const master = "ppt/notesMasters/notesMaster1.xml";
+  const theme = "ppt/theme/theme99.xml";
+  edited[notes] = strToU8('<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>');
+  edited[master] = strToU8('<p:notesMaster xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>');
+  edited[theme] = original["ppt/theme/theme1.xml"];
+  edited["ppt/notesSlides/_rels/notesSlide1.xml.rels"] = rels(rel("rId1", "slide", "../slides/slide2.xml"), rel("rId2", "notesMaster", "../notesMasters/notesMaster1.xml"));
+  edited["ppt/notesMasters/_rels/notesMaster1.xml.rels"] = rels(rel("rId1", "theme", "../theme/theme99.xml"));
+  const related = insertedNative.replace("/slides/", "/slides/_rels/") + ".rels";
+  edited[related] = strToU8(strFromU8(edited[related]).replace("</Relationships>", `${rel("rId99", "notesSlide", "../notesSlides/notesSlide1.xml")}</Relationships>`));
+  edited["[Content_Types].xml"] = strToU8(strFromU8(edited["[Content_Types].xml"]).replace("</Types>",
+    [[notes,"presentationml.notesSlide"],[master,"presentationml.notesMaster"],[theme,"theme"]].map(([part,type]) => `<Override PartName="/${part}" ContentType="application/vnd.openxmlformats-officedocument.${type}+xml"/>`).join("") + "</Types>"));
+  const result = preserveOriginalPptxParts(bytes, zipSync(baseline), zipSync(edited), null);
+  const saved = unzipSync(result.bytes);
+  assert.equal(slidePaths(saved).length, 2);
+  const presentation = strFromU8(saved["ppt/presentation.xml"]);
+  assert.match(presentation, /<\/p:sldMasterIdLst><p:notesMasterIdLst>/u);
+  assert.match(strFromU8(saved["ppt/_rels/presentation.xml.rels"]), /relationships\/notesMaster/u);
+  const preservedOriginal = Object.entries(original).filter(([part]) => /^ppt\/(slides|slideMasters|slideLayouts|theme)\//u.test(part));
+  for (const [part,value] of preservedOriginal) assert.deepEqual(saved[part], value, part);
+  const masterEntry = Object.keys(saved).find(part => /^ppt\/notesMasters\/notesMaster[^/]+\.xml$/u.test(part));
+  assert.ok(masterEntry);
+  assert.ok(saved[masterEntry.replace("/notesMasters/", "/notesMasters/_rels/") + ".rels"]);
+});

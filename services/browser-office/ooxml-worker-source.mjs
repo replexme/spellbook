@@ -454,6 +454,7 @@ function applyAuthoredGeometryDelta(
   baseline,
   edited,
   operations,
+  geometrySources = null,
 ) {
   const transform = (shape) => {
     const frame = optionalDirectXmlChild(shape, presentationNamespace, "xfrm");
@@ -463,6 +464,25 @@ function applyAuthoredGeometryDelta(
     return properties && optionalDirectXmlChild(properties, drawingNamespace, "xfrm");
   };
   const transforms = [merged, source, baseline, edited].map(transform);
+  if (geometrySources) {
+    const { part, entries } = geometrySources;
+    for (const [index, shape] of [source, baseline, edited].entries()) {
+      if (transforms[index + 1] || !shapePlaceholder(shape)) continue;
+      try {
+        transforms[index + 1] = effectiveShapeTransform({ entries: entries[index] }, part, shape);
+      } catch {
+        // An absent or ambiguous layout/master is not a geometry baseline.
+        return false;
+      }
+    }
+  }
+  if (!transforms[0] && transforms[1]) {
+    const properties = optionalDirectXmlChild(merged, presentationNamespace,
+      merged.localName === "grpSp" ? "grpSpPr" : "spPr");
+    if (!properties) return false;
+    transforms[0] = importOoxmlSubtree(merged.ownerDocument, transforms[1], true);
+    properties.insertBefore(transforms[0], properties.firstChild);
+  }
   if (!transforms[1] && transforms[2]) {
     // A placeholder can inherit its entire transform from the layout.
     // A compound edit may already have materialized its edited transform in
@@ -555,6 +575,7 @@ function preserveUnaffectedSlideShapes(
   sourceOperations,
   targetNames = null,
   targetIndexes = null,
+  geometrySources = null,
 ) {
   if (
     !/^ppt\/slides\/slide[^/]+\.xml$/u.test(part) ||
@@ -747,7 +768,7 @@ function preserveUnaffectedSlideShapes(
       // importing the engine's children or relationship IDs. Keep diagram
       // parts, picture contents and style exactly as authored.
       const moved = importOoxmlSubtree(documents[2], source, true);
-      if (!applyAuthoredGeometryDelta(moved, source, baseline, editedShape, sourceOperations)) return null;
+      if (!applyAuthoredGeometryDelta(moved, source, baseline, editedShape, sourceOperations, geometrySources)) return null;
       // The geometry changed, but every shape ID still comes from source.
       replacements.push({ pair, editedShape, restored: true, node: moved });
       continue;
@@ -822,6 +843,7 @@ function preserveUnaffectedSlideShapes(
         baseline,
         editedShape,
         sourceOperations,
+        geometrySources,
       )
     )
       return null;
@@ -1531,6 +1553,7 @@ function alignEngineSlideParts(original, engine, targetPaths = null) {
   const authoredNotes = new Set(
     authored.map((slide) => notesOf(original, slide)).filter(Boolean),
   );
+  const taken = new Set([...Object.keys(original), ...Object.keys(engine)]);
   for (const [index, slide] of saved.entries()) {
     const engineNotes = notesOf(engine, slide);
     if (!engineNotes) continue;
@@ -1543,9 +1566,10 @@ function alignEngineSlideParts(original, engine, targetPaths = null) {
     // notes have it in the author's package.
     if (!authoredNotes.has(engineNotes)) continue;
     let ordinal = 1;
-    const taken = new Set([...Object.keys(original), ...Object.keys(engine)]);
     while (taken.has(`ppt/notesSlides/notesSlide${ordinal}.xml`)) ordinal += 1;
-    renames.set(engineNotes, `ppt/notesSlides/notesSlide${ordinal}.xml`);
+    const destination = `ppt/notesSlides/notesSlide${ordinal}.xml`;
+    taken.add(destination);
+    renames.set(engineNotes, destination);
   }
   if (!renames.size) return engine;
 
@@ -2052,7 +2076,7 @@ function mergeDirectSlideTopology(
           "notesMaster",
         );
         if (masters.length === 1) mapped = masters[0].target;
-        else
+        else if (masters.length > 1)
           throw new Error(
             "Native topology cannot identify the authored notes master.",
           );
@@ -2069,6 +2093,20 @@ function mergeDirectSlideTopology(
         mapped = nextPartPath(context.entries, target);
         copied.set(target, mapped);
         importPart(target, mapped);
+      }
+      if (kind === "notesMaster" && !relationshipsOfType(original, presentationPath, "notesMaster").length) {
+        const registered = relationshipElements(context.relationships).some(entry =>
+          entry.getAttribute("Type").endsWith("/notesMaster") &&
+          resolvePart(presentationPath, entry.getAttribute("Target")) === mapped);
+        if (!registered) {
+          const id = nextRelationshipId(context.relationships);
+          const entry = context.relationships.createElementNS(packageRelationshipNamespace, "Relationship");
+          entry.setAttribute("Id", id);
+          entry.setAttribute("Type", relationship.getAttribute("Type"));
+          entry.setAttribute("Target", relativePart(presentationPath, mapped));
+          context.relationships.documentElement.appendChild(entry);
+          registerNotesMaster(context.presentation, id);
+        }
       }
       relationship.setAttribute("Target", relativePart(destination, mapped));
     }
@@ -2716,24 +2754,7 @@ function mergePresentationParts(original, noEdit, edited) {
     );
     relationships.documentElement.appendChild(element);
     if (relationship.kind !== "notesMaster") continue;
-    const root = presentation.documentElement;
-    const list = presentation.createElementNS(
-      presentationNamespace,
-      "p:notesMasterIdLst",
-    );
-    const entry = presentation.createElementNS(
-      presentationNamespace,
-      "p:notesMasterId",
-    );
-    entry.setAttributeNS(relationshipAttributeNamespace, "r:id", id);
-    list.appendChild(entry);
-    // CT_Presentation: sldMasterIdLst, then notesMasterIdLst.
-    const slideMasters = directXmlChild(
-      root,
-      presentationNamespace,
-      "sldMasterIdLst",
-    );
-    root.insertBefore(list, slideMasters.nextSibling);
+    registerNotesMaster(presentation, id);
     presentationChanged = true;
   }
   return {
@@ -2742,6 +2763,20 @@ function mergePresentationParts(original, noEdit, edited) {
       : original[presentationPath],
     [presentationRelationshipsPath]: serializeXml(relationships),
   };
+}
+
+function registerNotesMaster(presentation, relationshipId) {
+  const root = presentation.documentElement;
+  let list = optionalDirectXmlChild(root, presentationNamespace, "notesMasterIdLst");
+  if (!list) {
+    list = presentation.createElementNS(presentationNamespace, "p:notesMasterIdLst");
+    // CT_Presentation: sldMasterIdLst, then notesMasterIdLst.
+    const masters = optionalDirectXmlChild(root, presentationNamespace, "sldMasterIdLst");
+    root.insertBefore(list, masters ? masters.nextSibling : root.firstChild);
+  }
+  const entry = presentation.createElementNS(presentationNamespace, "p:notesMasterId");
+  entry.setAttributeNS(relationshipAttributeNamespace, "r:id", relationshipId);
+  list.appendChild(entry);
 }
 
 function relationshipsOfType(entries, sourcePart, type) {
@@ -3236,6 +3271,7 @@ export function preserveOriginalPptxParts(
             sourceOperations,
             targetNamesBySlide?.get(part) ?? null,
             targetIndexesBySlide?.get(part) ?? null,
+            { part, entries: [original, noEdit, edited] },
           )
       : null;
     if (targetIndexesBySlide?.has(part) && semanticShapePatch === null)
