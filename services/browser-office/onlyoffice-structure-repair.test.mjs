@@ -41,6 +41,30 @@ function fixture(extra = false) {
 const xml = (bytes) =>
   new DOMParser().parseFromString(strFromU8(bytes), "application/xml");
 
+test("candidate workbook repair removes only known empty generated vectors and preserves authored bytes and cell data", () => {
+  const path = "ppt/embeddings/new.xlsx";
+  const app = '<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>ONLYOFFICE</Application><HeadingPairs><vt:vector size="0" baseType="variant"/></HeadingPairs><TitlesOfParts><vt:vector size="0" baseType="lpstr"/></TitlesOfParts></Properties>';
+  const workbook = {"docProps/app.xml":strToU8(app),"xl/worksheets/sheet1.xml":strToU8('<worksheet><v>42</v></worksheet>')};
+  const candidate = {...fixture(),[path]:zipSync(workbook)};
+  const repaired = repairCandidatePptxStructure(zipSync(fixture()),zipSync(candidate));
+  assert.deepEqual(repaired.report.changedParts,[path]);
+  const result = unzipSync(unzipSync(repaired.bytes)[path]);
+  assert.deepEqual(result["xl/worksheets/sheet1.xml"],workbook["xl/worksheets/sheet1.xml"]);
+  assert.doesNotMatch(strFromU8(result["docProps/app.xml"]),/HeadingPairs|TitlesOfParts/u);
+  assert.match(strFromU8(result["docProps/app.xml"]),/ONLYOFFICE/u);
+  assert.deepEqual(repairCandidatePptxStructure(zipSync(fixture()),repaired.bytes).bytes,repaired.bytes);
+  const authored = zipSync(candidate);
+  assert.deepEqual(repairCandidatePptxStructure(authored,authored).bytes,authored);
+  for (const changed of [app.replace('size="0"','size="1"'),app.replace('baseType="variant"','baseType="variant" custom="keep"'),app.replace('/></HeadingPairs>','><!--keep--></vt:vector></HeadingPairs>')]) {
+    const unknown = {...candidate,[path]:zipSync({...workbook,"docProps/app.xml":strToU8(changed)})};
+    const saved = unzipSync(repairCandidatePptxStructure(zipSync(fixture()),zipSync(unknown)).bytes);
+    const document = strFromU8(unzipSync(saved[path])["docProps/app.xml"]);
+    assert.match(document,/HeadingPairs/u);
+    if(changed.includes('custom="keep"'))assert.match(document,/custom="keep"/u);
+    if(changed.includes('<!--keep-->'))assert.match(document,/<!--keep-->/u);
+  }
+});
+
 test("candidate theme repair follows original/master ownership and preserves all theme/slide/media parts", () => {
   const candidate = fixture(true);
   const repaired = repairCandidatePptxStructure(

@@ -167,6 +167,83 @@ public sealed class ExtendedEditingTests : IDisposable
         }
     }
 
+    private static byte[] Workbook(bool invalidMetadata)
+    {
+        using var bytes = new MemoryStream();
+        using (var document = DocumentFormat.OpenXml.Packaging.SpreadsheetDocument.Create(bytes,
+            DocumentFormat.OpenXml.SpreadsheetDocumentType.Workbook))
+        {
+            var book = document.AddWorkbookPart();
+            var sheet = book.AddNewPart<DocumentFormat.OpenXml.Packaging.WorksheetPart>();
+            sheet.Worksheet = new DocumentFormat.OpenXml.Spreadsheet.Worksheet(
+                new DocumentFormat.OpenXml.Spreadsheet.SheetData());
+            book.Workbook = new DocumentFormat.OpenXml.Spreadsheet.Workbook(
+                new DocumentFormat.OpenXml.Spreadsheet.Sheets(new DocumentFormat.OpenXml.Spreadsheet.Sheet
+                { Id = book.GetIdOfPart(sheet), SheetId = 1U, Name = "Data" }));
+            document.AddExtendedFilePropertiesPart().Properties = new DocumentFormat.OpenXml.ExtendedProperties.Properties(
+                new DocumentFormat.OpenXml.ExtendedProperties.Application("test"));
+        }
+        if (invalidMetadata)
+        {
+            bytes.Position = 0;
+            using var zip = new ZipArchive(bytes, ZipArchiveMode.Update, leaveOpen: true);
+            zip.GetEntry("docProps/app.xml")!.Delete();
+            using var writer = new StreamWriter(zip.CreateEntry("docProps/app.xml").Open());
+            writer.Write("<Properties xmlns=\"http://schemas.openxmlformats.org/officeDocument/2006/extended-properties\" xmlns:vt=\"http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes\"><HeadingPairs><vt:vector size=\"0\" baseType=\"variant\"/></HeadingPairs></Properties>");
+        }
+        return bytes.ToArray();
+    }
+
+    private string EmbedWorkbook(byte[] workbook)
+    {
+        var file = Path.Combine(directory, Guid.NewGuid() + ".pptx");
+        File.Copy(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "../../../../../../../eval/public/fixtures/general-native-surface.pptx")), file);
+        using var zip = ZipFile.Open(file, ZipArchiveMode.Update);
+        using (var output = zip.CreateEntry("ppt/embeddings/test.xlsx").Open()) output.Write(workbook);
+        var typeEntry = zip.GetEntry("[Content_Types].xml")!;
+        XDocument types; using (var input = typeEntry.Open()) types = XDocument.Load(input);
+        types.Root!.Add(new XElement(types.Root.Name.Namespace + "Override",
+            new XAttribute("PartName", "/ppt/embeddings/test.xlsx"),
+            new XAttribute("ContentType", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")));
+        typeEntry.Delete(); using (var output = zip.CreateEntry("[Content_Types].xml").Open()) types.Save(output);
+        return file;
+    }
+
+    [Fact]
+    public void PresentationValidationChecksEmbeddedWorkbookSchemaWithoutRewritingIt()
+    {
+        var valid = EmbedWorkbook(Workbook(false));
+        var validReport = new PptxValidator().ValidateOpenXml(valid);
+        Assert.True(validReport.Valid, validReport.Failure + ": " + string.Join("\n", validReport.Errors));
+        var invalid = EmbedWorkbook(Workbook(true));
+        var hash = Hashing.FileSha256(invalid);
+        var report = new PptxValidator().ValidateOpenXml(invalid);
+        Assert.False(report.Valid);
+        Assert.Null(report.Failure);
+        Assert.Contains(report.Errors, error => error.Contains("test.xlsx!") && error.Contains("HeadingPairs"));
+        Assert.Equal(hash, Hashing.FileSha256(invalid));
+    }
+
+    [Fact]
+    public void UnreadableEmbeddedWorkbookCannotBecomeSuccessOrHidePresentationErrors()
+    {
+        var file = EmbedWorkbook(System.Text.Encoding.UTF8.GetBytes("invalid workbook"));
+        using (var zip = ZipFile.Open(file, ZipArchiveMode.Update))
+        {
+            var entry = zip.GetEntry("ppt/slides/slide1.xml")!;
+            XDocument slide; using (var input = entry.Open()) slide = XDocument.Load(input);
+            slide.Root!.SetAttributeValue("show", "invalid");
+            entry.Delete(); using var output = zip.CreateEntry("ppt/slides/slide1.xml").Open(); slide.Save(output);
+        }
+        var report = new PptxValidator().ValidateOpenXml(file);
+        Assert.False(report.Valid);
+        Assert.NotNull(report.Failure);
+        Assert.Contains(report.Errors, error => error.Contains("test.xlsx"));
+        Assert.Contains(report.Errors, error => error.Contains("slide1.xml"));
+        Assert.False(new PptxValidator().Validate(file, file, new HashSet<string>()).Valid);
+    }
+
     [Fact]
     public void StructureCannotBeMixedWithStaleIndexedCommands()
     {

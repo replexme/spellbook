@@ -139,6 +139,20 @@ public sealed class PptxValidator
         out IReadOnlyList<string> packageIssues)
     {
         using var archive = ZipFile.OpenRead(path);
+        return CreateValidationView(archive, new FileInfo(path).Length, () => File.OpenRead(path), out adjustments, out packageIssues);
+    }
+
+    private static Stream OpenValidationInput(byte[] bytes, out IReadOnlyList<string> adjustments,
+        out IReadOnlyList<string> packageIssues)
+    {
+        using var input = new MemoryStream(bytes, writable: false);
+        using var archive = new ZipArchive(input, ZipArchiveMode.Read);
+        return CreateValidationView(archive, bytes.Length, () => new MemoryStream(bytes, writable: false), out adjustments, out packageIssues);
+    }
+
+    private static Stream CreateValidationView(ZipArchive archive, long compressedBytes, Func<Stream> originalInput,
+        out IReadOnlyList<string> adjustments, out IReadOnlyList<string> packageIssues)
+    {
         static string SdkName(string name) => string.Concat(name.EnumerateRunes()
             .Select(rune => rune.IsAscii ? rune.ToString() : Uri.EscapeDataString(rune.ToString())));
         var mapped = archive.Entries.Select(entry => (Entry: entry, Name: SdkName(entry.FullName))).ToList();
@@ -147,7 +161,7 @@ public sealed class PptxValidator
         if (mapped.Select(pair => pair.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != mapped.Count)
             throw new InvalidDataException("Ambiguous package entry names after SDK URI encoding.");
         if (mapped.Count > PptxSafetyScanner.DefaultMaxEntries ||
-            new FileInfo(path).Length > PptxSafetyScanner.DefaultMaxCompressedBytes ||
+            compressedBytes > PptxSafetyScanner.DefaultMaxCompressedBytes ||
             mapped.Sum(pair => pair.Entry.Length) > PptxSafetyScanner.DefaultMaxUncompressedBytes)
             throw new InvalidDataException("Package exceeds the bounded SDK validation view.");
         var names = mapped.Select(pair => Uri.UnescapeDataString(pair.Entry.FullName)).ToHashSet(StringComparer.Ordinal);
@@ -174,7 +188,7 @@ public sealed class PptxValidator
         }
         adjustments = changes;
         packageIssues = issues;
-        if (changes.Count == 0) return File.OpenRead(path);
+        if (changes.Count == 0) return originalInput();
         var view = new MemoryStream();
         try
         {
@@ -216,11 +230,51 @@ public sealed class PptxValidator
                     index++;
                 }
             }
+            // Embedded chart workbooks are separate Open XML packages. The
+            // presentation SDK does not validate their sheet or metadata XML.
+            var allAdjustments = adjustments.ToList();
+            string? nestedFailure = null;
+            using var archive = ZipFile.OpenRead(path);
+            long expanded = archive.Entries.Sum(entry => entry.Length);
+            var entryCount = archive.Entries.Count;
+            foreach (var entry in archive.Entries.Where(entry =>
+                entry.FullName.StartsWith("ppt/embeddings/", StringComparison.Ordinal) &&
+                entry.FullName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase)))
+            {
+                try
+                {
+                    if (entry.Length > PptxSafetyScanner.DefaultMaxCompressedBytes)
+                        throw new InvalidDataException("Embedded workbook exceeds the compressed package bound.");
+                    using var raw = new MemoryStream();
+                    using (var content = entry.Open()) content.CopyTo(raw);
+                    raw.Position = 0;
+                    using (var nested = new ZipArchive(raw, ZipArchiveMode.Read, leaveOpen: true))
+                    {
+                        expanded += nested.Entries.Sum(part => part.Length);
+                        entryCount += nested.Entries.Count;
+                        if (expanded > PptxSafetyScanner.DefaultMaxUncompressedBytes ||
+                            entryCount > PptxSafetyScanner.DefaultMaxEntries)
+                            throw new InvalidDataException("Embedded workbooks exceed the aggregate validation bounds.");
+                    }
+                    using var workbookInput = OpenValidationInput(raw.ToArray(), out var nestedAdjustments, out var nestedIssues);
+                    using var workbook = SpreadsheetDocument.Open(workbookInput, false);
+                    foreach (var issue in validator.Validate(workbook))
+                        issues.Add($"/{entry.FullName}!{issue.Part?.Uri}:{issue.Path?.XPath}:{issue.Description}");
+                    foreach (var issue in nestedIssues) issues.Add($"/{entry.FullName}!{issue}");
+                    allAdjustments.AddRange(nestedAdjustments.Select(change => $"{entry.FullName}!{change}"));
+                }
+                catch (Exception exception) when (exception is InvalidDataException or InvalidOperationException or
+                    IOException or ArgumentException or OpenXmlPackageException)
+                {
+                    nestedFailure = "EmbeddedWorkbookReadFailure";
+                    issues.Add($"/{entry.FullName}:embedded workbook could not be validated: {exception.GetType().Name}");
+                }
+            }
             return new OpenXmlPackageValidation(
-                issues.Count == 0,
+                issues.Count == 0 && nestedFailure is null,
                 issues.Order(StringComparer.Ordinal).ToList(),
-                null,
-                adjustments);
+                nestedFailure,
+                allAdjustments);
         }
         catch (Exception exception) when (
             exception is InvalidDataException or

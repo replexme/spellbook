@@ -4110,6 +4110,40 @@ export function repairCandidatePptxStructure(originalInput, candidateInput) {
       changed = reorder(element, chartStyleNamespace, style) || changed;
     if (changed) commit(part, document, "chart-schema-child-order");
   }
+  let nestedExpanded = 0;
+  for (const part of Object.keys(entries)) {
+    if (!/^ppt\/embeddings\/[^/]+\.xlsx$/u.test(part) ||
+        samePartBytes(original[part], entries[part])) continue;
+    nestedExpanded += inspectZipPackage(entries[part]).expandedBytes;
+    if (nestedExpanded > maximumInputBytes)
+      throw new Error("Embedded workbook repair exceeds the browser memory limit.");
+    const workbook = unzipSync(entries[part]);
+    if (!workbook["docProps/app.xml"]) continue;
+    const document = parseXml(workbook, "docProps/app.xml");
+    if (document.documentElement.namespaceURI !== extendedPropertiesNamespace ||
+        document.documentElement.localName !== "Properties") continue;
+    let changed = false;
+    for (const [name, baseType] of [["HeadingPairs", "variant"], ["TitlesOfParts", "lpstr"]]) {
+      const property = optionalDirectXmlChild(document.documentElement, extendedPropertiesNamespace, name);
+      if (!property) continue;
+      const children = [...property.childNodes].filter(node => node.nodeType === 1);
+      const vector = children[0];
+      if (property.attributes.length || children.length !== 1 ||
+          [...property.childNodes].some(node => node !== vector && (node.nodeType !== 3 || node.data.trim())) ||
+          vector.namespaceURI !== "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes" ||
+          vector.localName !== "vector" || vector.attributes.length !== 2 ||
+          vector.getAttribute("size") !== "0" || vector.getAttribute("baseType") !== baseType ||
+          [...vector.childNodes].some(node => node.nodeType !== 3 || node.data.trim())) continue;
+      property.parentNode.removeChild(property);
+      changed = true;
+    }
+    if (changed) {
+      workbook["docProps/app.xml"] = serializeXml(document);
+      entries[part] = zipSync(workbook, { level: 6, mtime: deterministicZipModifiedAt });
+      changedParts.add(part);
+      repairs.push({ part, kind: "embedded-workbook-empty-property-vectors", nestedPart: "docProps/app.xml" });
+    }
+  }
   return {
     bytes: changedParts.size
       ? zipSync(entries, { level: 6, mtime: deterministicZipModifiedAt })
