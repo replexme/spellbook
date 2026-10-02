@@ -738,7 +738,7 @@ public sealed class DocumentEngineTests : IDisposable
     }
 
     [Fact]
-    public void PatcherPreservesAFileThatTheOpenXmlSdkCannotFullyLoad()
+    public void PatcherPreservesKnownMissingPartsWhileCheckingTheRemainingSchema()
     {
         var path = TestPresentationFactory.Create(directory);
         AddInternalRelationship(
@@ -771,8 +771,21 @@ public sealed class DocumentEngineTests : IDisposable
         Assert.Equal(["ppt/slides/slide1.xml"], result.Validation.ChangedParts);
         Assert.Contains(
             result.Validation.Warnings,
-            warning => warning.Contains("could not be fully checked", StringComparison.Ordinal));
+            warning => warning.Contains("already had", StringComparison.Ordinal));
         Assert.Equal("수정된 제목", Assert.Single(result.CandidateGraph.Slides[0].Elements).Text);
+        var invalid = Path.Combine(directory, "missing-thumbnail-and-invalid-schema.pptx");
+        File.Copy(path, invalid);
+        using (var archive = ZipFile.Open(invalid, ZipArchiveMode.Update))
+        {
+            var slide = ReadXml(archive, "ppt/slides/slide1.xml");
+            slide.Root!.SetAttributeValue("show", "not-a-boolean");
+            Replace(archive, "ppt/slides/slide1.xml", slide);
+        }
+        var validation = new PptxValidator().Validate(path, invalid,
+            new HashSet<string> { "ppt/slides/slide1.xml" });
+        Assert.False(validation.Valid);
+        Assert.Contains(validation.Errors, error => error.Contains("not-a-boolean", StringComparison.Ordinal));
+
     }
 
     [Fact]

@@ -197,7 +197,7 @@ public sealed class PptxSafetyScanner
         return string.Empty;
     }
 
-    private static bool TryResolveRelationshipTarget(
+    internal static bool TryResolveRelationshipTarget(
         string relationshipPath,
         string target,
         out string partPath)

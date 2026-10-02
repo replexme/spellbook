@@ -116,6 +116,58 @@ public sealed class ExtendedEditingTests : IDisposable
         Assert.NotEmpty(report.Errors);
     }
     [Fact]
+    public void UnicodeMediaValidationDoesNotRewriteSourceAndStillFindsSchemaErrors()
+    {
+        var source = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "../../../../../../../eval/public/downloads/lo-transition-media.pptx"));
+        var before = Hashing.FileSha256(source);
+        var report = new PptxValidator().ValidateOpenXml(source);
+        Assert.True(report.Valid, string.Join("\n", report.Errors));
+        Assert.Null(report.Failure);
+        Assert.Contains(report.ReaderAdjustments!, change => change.Contains("Cort%C3%A1zar.wav"));
+        Assert.Equal(before, Hashing.FileSha256(source));
+        var broken = Path.Combine(directory, "unicode-invalid-slide.pptx");
+        File.Copy(source, broken);
+        using (var zip = ZipFile.Open(broken, ZipArchiveMode.Update))
+        {
+            var part = zip.GetEntry("ppt/slides/slide1.xml")!;
+            XDocument xml; using (var input = part.Open()) xml = XDocument.Load(input);
+            xml.Root!.SetAttributeValue("show", "not-a-boolean");
+            part.Delete(); using var output = zip.CreateEntry("ppt/slides/slide1.xml").Open(); xml.Save(output);
+        }
+        var invalid = new PptxValidator().ValidateOpenXml(broken);
+        Assert.Null(invalid.Failure);
+        Assert.False(invalid.Valid);
+        Assert.NotEmpty(invalid.Errors);
+        var delta = new PptxValidator().Validate(source, broken, new HashSet<string> { "ppt/slides/slide1.xml" });
+        Assert.False(delta.Valid);
+        Assert.Contains(delta.Errors, error => error.Contains("Open XML validation"));
+    }
+
+    [Fact]
+    public void UnicodeUriCollisionsAndMissingPartsDoNotBecomeValidationSuccess()
+    {
+        var source = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "../../../../../../../eval/public/downloads/lo-transition-media.pptx"));
+        foreach (var collision in new[] { true, false })
+        {
+            var broken = Path.Combine(directory, $"unicode-ambiguous-{collision}.pptx");
+            File.Copy(source, broken);
+            using (var zip = ZipFile.Open(broken, ZipArchiveMode.Update))
+            {
+                if (collision) zip.CreateEntry("ppt/media/Cort%C3%A1zar.wav");
+                else zip.GetEntry("ppt/media/Cortázar.wav")!.Delete();
+            }
+            var invalid = new PptxValidator().ValidateOpenXml(broken);
+            Assert.False(invalid.Valid);
+            if (collision) Assert.NotNull(invalid.Failure);
+            else { Assert.Null(invalid.Failure); Assert.NotEmpty(invalid.Errors); }
+            Assert.False(new PptxValidator().Validate(source, broken,
+                new HashSet<string> { "ppt/media/Cortázar.wav", "ppt/media/Cort%C3%A1zar.wav" }).Valid);
+        }
+    }
+
+    [Fact]
     public void StructureCannotBeMixedWithStaleIndexedCommands()
     {
         var source = TestPresentationFactory.Create(directory);

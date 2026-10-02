@@ -47,13 +47,17 @@ public sealed class PptxValidator
         {
             errors.Add($"Open XML validation: {newError}");
         }
-        if (baseValidation.Failure is null && candidateValidation.Failure is not null)
+        if (candidateValidation.Failure is not null)
         {
             errors.Add($"Open XML validation could not read the candidate package: {candidateValidation.Failure}");
         }
-        else if (baseValidation.Failure is not null)
+        if (baseValidation.Failure is not null)
         {
-            warnings.Add($"The source package could not be fully checked by the Open XML SDK ({baseValidation.Failure}); minimal changed-part and safety checks remain active.");
+            errors.Add($"Open XML validation could not read the source package; absence of new errors cannot be proven: {baseValidation.Failure}");
+        }
+        if (baseValidation.ReaderAdjustments?.Count > 0 || candidateValidation.ReaderAdjustments?.Count > 0)
+        {
+            warnings.Add("The Open XML SDK read a validation-only ZIP view; source and saved package bytes are unchanged. Non-ASCII entry names use UTF-8 URI encoding in that view. Missing relationship targets are reported as validation errors and excluded only from the SDK view so the remaining schema checks can finish.");
         }
         if (baseValidation.Errors.Count > 0)
         {
@@ -125,14 +129,82 @@ public sealed class PptxValidator
         return hashes;
     }
 
+    // System.IO.Packaging resolves part URIs in escaped form but ignores a
+    // ZIP entry stored with a literal Unicode name. PowerPoint can author that
+    // entry with an escaped content-type override and an unescaped rel target.
+    // Adapt only the SDK input. Missing target relationships are recorded as
+    // errors before excluding them from this view, allowing the SDK to check
+    // the remaining package. Comparisons/hashes use the original file.
+    private static Stream OpenValidationInput(string path, out IReadOnlyList<string> adjustments,
+        out IReadOnlyList<string> packageIssues)
+    {
+        using var archive = ZipFile.OpenRead(path);
+        static string SdkName(string name) => string.Concat(name.EnumerateRunes()
+            .Select(rune => rune.IsAscii ? rune.ToString() : Uri.EscapeDataString(rune.ToString())));
+        var mapped = archive.Entries.Select(entry => (Entry: entry, Name: SdkName(entry.FullName))).ToList();
+        var changes = mapped.Where(pair => pair.Entry.FullName != pair.Name)
+            .Select(pair => $"{pair.Entry.FullName} -> {pair.Name}").ToList();
+        if (mapped.Select(pair => pair.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != mapped.Count)
+            throw new InvalidDataException("Ambiguous package entry names after SDK URI encoding.");
+        if (mapped.Count > PptxSafetyScanner.DefaultMaxEntries ||
+            new FileInfo(path).Length > PptxSafetyScanner.DefaultMaxCompressedBytes ||
+            mapped.Sum(pair => pair.Entry.Length) > PptxSafetyScanner.DefaultMaxUncompressedBytes)
+            throw new InvalidDataException("Package exceeds the bounded SDK validation view.");
+        var names = mapped.Select(pair => Uri.UnescapeDataString(pair.Entry.FullName)).ToHashSet(StringComparer.Ordinal);
+        if (names.Count != mapped.Count)
+            throw new InvalidDataException("Ambiguous package entry URI aliases.");
+        var issues = new List<string>();
+        var relationshipViews = new Dictionary<string, XDocument>(StringComparer.Ordinal);
+        foreach (var entry in archive.Entries.Where(entry => entry.FullName.EndsWith(".rels", StringComparison.Ordinal)))
+        {
+            using var stream = entry.Open();
+            var relationships = XDocument.Load(stream);
+            foreach (var relation in relationships.Root?.Elements().ToList() ?? [])
+            {
+                if (relation.Name.LocalName != "Relationship" ||
+                    string.Equals((string?)relation.Attribute("TargetMode"), "External", StringComparison.OrdinalIgnoreCase)) continue;
+                var target = (string?)relation.Attribute("Target") ?? "";
+                if (PptxSafetyScanner.TryResolveRelationshipTarget(entry.FullName, target, out var part) && names.Contains(part)) continue;
+                var issue = $"/{entry.FullName}:relationship[{(string?)relation.Attribute("Id")}]:missing or invalid internal target '{target}'.";
+                issues.Add(issue);
+                changes.Add(issue);
+                relation.Remove();
+                relationshipViews[entry.FullName] = relationships;
+            }
+        }
+        adjustments = changes;
+        packageIssues = issues;
+        if (changes.Count == 0) return File.OpenRead(path);
+        var view = new MemoryStream();
+        try
+        {
+            using (var output = new ZipArchive(view, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                foreach (var (entry, name) in mapped)
+                {
+                    using var source = entry.Open();
+                    using var destination = output.CreateEntry(name, CompressionLevel.Fastest).Open();
+                    if (relationshipViews.TryGetValue(entry.FullName, out var relationships))
+                        relationships.Save(destination, SaveOptions.DisableFormatting);
+                    else source.CopyTo(destination);
+                }
+            }
+            view.Position = 0;
+            return view;
+        }
+        catch { view.Dispose(); throw; }
+    }
+
     public OpenXmlPackageValidation ValidateOpenXml(string path)
     {
         try
         {
-            using var document = PresentationDocument.Open(path, false);
+            using var input = OpenValidationInput(path, out var adjustments, out var packageIssues);
+            using var document = PresentationDocument.Open(input, false);
             var validator = new OpenXmlValidator();
             var issues = validator.Validate(document)
                     .Select(error => $"{error.Part?.Uri}:{error.Path?.XPath}:{error.Description}")
+                    .Concat(packageIssues)
                     .ToHashSet(StringComparer.Ordinal);
             foreach (var part in document.PresentationPart?.SlideParts ?? [])
             {
@@ -147,7 +219,8 @@ public sealed class PptxValidator
             return new OpenXmlPackageValidation(
                 issues.Count == 0,
                 issues.Order(StringComparer.Ordinal).ToList(),
-                null);
+                null,
+                adjustments);
         }
         catch (Exception exception) when (
             exception is InvalidDataException or
@@ -164,4 +237,5 @@ public sealed class PptxValidator
 public sealed record OpenXmlPackageValidation(
     bool Valid,
     IReadOnlyList<string> Errors,
-    string? Failure);
+    string? Failure,
+    IReadOnlyList<string>? ReaderAdjustments = null);
