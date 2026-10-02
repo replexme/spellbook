@@ -27,7 +27,9 @@ const inputPath = path.resolve(flag("--input"));
 const outputRoot = path.resolve(flag("--output"));
 const candidateRoot = path.resolve(flag("--candidate-root"));
 const origin = new URL(flag("--origin"));
-const repairStructure = process.argv.includes("--repair-structure");
+const preserveSource = process.argv.includes("--preserve-source");
+const repairStructure =
+  preserveSource || process.argv.includes("--repair-structure");
 const readbackStatePath = flag("--readback-state", null);
 const readbackSlide = Number(flag("--readback-slide", "0"));
 assert(Number.isInteger(readbackSlide) && readbackSlide >= 0);
@@ -55,6 +57,16 @@ assert(
   scenarios.every((s) => known.includes(s)) &&
     new Set(scenarios).size === scenarios.length,
 );
+if (preserveSource) {
+  assert(
+    !readbackStatePath,
+    "Source preservation must start from the authored input",
+  );
+  assert(
+    !scenarios.includes("late-save-ack"),
+    "Source-preserved concurrent saves require a version-bound adapter",
+  );
+}
 await mkdir(outputRoot, { recursive: true, mode: 0o700 });
 if (repairStructure) await buildHarness();
 const source = await readFile(inputPath);
@@ -116,9 +128,11 @@ const report = {
   sourceBytes: source.length,
   candidate,
   integration,
-  timingScope: repairStructure
-    ? "candidate readiness / export including browser repair and host callback; excludes original-part preservation and runtime clean reconciliation"
-    : "candidate readiness / raw export including host callback; excludes product preservation and runtime clean reconciliation",
+  timingScope: preserveSource
+    ? "candidate export including browser repair, shared original-part preservation worker and host callback; excludes independent SDK validation and product admission"
+    : repairStructure
+      ? "candidate readiness / export including browser repair and host callback; excludes original-part preservation and runtime clean reconciliation"
+      : "candidate readiness / raw export including host callback; excludes product preservation and runtime clean reconciliation",
   inputSetup:
     "version-pinned internal SDK selects the target; text and arrow/delete edits use headless browser keyboard",
   expectedStateSha256: expectedStateBytes ? sha(expectedStateBytes) : null,
@@ -128,9 +142,11 @@ const report = {
   cases: [],
   engineApiMethods: null,
   externalRequestCount: 0,
-  savePipeline: repairStructure
-    ? "browser structural repair of exported artifact; excludes original-part preservation and complete product admission"
-    : "raw candidate export",
+  savePipeline: preserveSource
+    ? "shared original-part preservation in the actual save callback; excludes complete typed-feature and product admission"
+    : repairStructure
+      ? "browser structural repair of exported artifact; excludes original-part preservation and complete product admission"
+      : "raw candidate export",
 };
 const browser = await chromium.launch({
   headless: true,
@@ -148,11 +164,16 @@ import {createOfficeEditor} from ${JSON.stringify(new URL("/npm/public-api.js", 
 let editor,dirty=false,writeCount=0,error=null;
 window.__ONLYOFFICE_SAVE_E2E__={getStatus:()=>({ready:editor?.getState().status==='ready',dirty,writeCount,error}),save:async()=>{const file=await editor.save('pptx');return {fileName:file.name,size:file.size};},destroy:async()=>editor?.destroy()};
 window.__comparisonStructuralRepairs=[];
+window.__comparisonPreservations=[];
+let noEditBytes=null;
+const preserveEnabled=${JSON.stringify(preserveSource)};
+const preservationWorker=preserveEnabled?new Worker('/comparison-repair.js',{type:'module'}):null;
+const preserve=payload=>new Promise((resolve,reject)=>{const requestId=crypto.randomUUID();preservationWorker.onmessage=({data})=>{if(data.requestId!==requestId)return;if(data.error)reject(new Error(data.error));else resolve({bytes:new Uint8Array(data.bytes),report:data.report});};preservationWorker.onerror=event=>reject(new Error(event.message));preservationWorker.postMessage({requestId,operation:'preserve-native',...payload});});
 try {
  const file=new File([await (await fetch('/compare.pptx',{cache:'no-store'})).arrayBuffer()],'compare.pptx',{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'});
  const original=${repairStructure ? "new Uint8Array(await (await fetch('/original.pptx',{cache:'no-store'})).arrayBuffer())" : "null"};
  const repair=${repairStructure ? "(await import('/comparison-repair.js')).repairCandidatePptxStructure" : "null"};
- editor=await createOfficeEditor(document.querySelector('#editor'),{hostUrl:${JSON.stringify(new URL("/office-host.html", origin.origin).href)},file,fileName:file.name,mode:'edit',saveBehavior:'callback',onDirtyChange:value=>dirty=value,onError:e=>error=e.message,onSave:async file=>{if(window.__comparisonRejectSave)throw new Error('comparison_host_write_rejected');let bytes=new Uint8Array(await file.arrayBuffer());if(repair){const started=performance.now(),result=repair(original,bytes);bytes=result.bytes;window.__comparisonStructuralRepairs.push({ms:performance.now()-started,...result.report});}window.__comparisonSaved=bytes;if(window.__holdSave){window.__heldSave=true;await new Promise(resolve=>window.__releaseSave=resolve);}writeCount++;return true;}});
+ editor=await createOfficeEditor(document.querySelector('#editor'),{hostUrl:${JSON.stringify(new URL("/office-host.html", origin.origin).href)},file,fileName:file.name,mode:'edit',saveBehavior:'callback',onDirtyChange:value=>dirty=value,onError:e=>error=e.message,onSave:async file=>{if(window.__comparisonRejectSave)throw new Error('comparison_host_write_rejected');let bytes=new Uint8Array(await file.arrayBuffer());if(repair){const started=performance.now(),result=repair(original,bytes);bytes=result.bytes;window.__comparisonStructuralRepairs.push({ms:performance.now()-started,...result.report});}if(window.__comparisonCaptureBaseline){noEditBytes=bytes;window.__comparisonSaved=bytes;return true;}if(preserveEnabled){if(!noEditBytes||!window.__comparisonIntent)throw new Error('comparison_source_preservation_intent_missing');const started=performance.now(),result=await preserve({bytes:original,noEditBytes,editedBytes:bytes,...window.__comparisonIntent});bytes=result.bytes;window.__comparisonPreservations.push({ms:performance.now()-started,...result.report});}window.__comparisonSaved=bytes;if(window.__holdSave){window.__heldSave=true;await new Promise(resolve=>window.__releaseSave=resolve);}writeCount++;return true;}});
 }catch(e){error=e.message;}
 </script>`;
 // Real loopback HTTP gives Chromium a local address space for the host iframe.
@@ -271,6 +292,7 @@ async function save(page) {
       ms: performance.now() - start,
       base64: btoa(binary),
       structuralRepairs: window.__comparisonStructuralRepairs ?? [],
+      preservations: window.__comparisonPreservations ?? [],
     };
   });
 }
@@ -469,6 +491,23 @@ try {
       await page.screenshot({
         path: path.join(outputRoot, `${scenario}-before.png`),
       });
+      if (preserveSource) {
+        item.stage = "source-baseline";
+        await page.evaluate(() => {
+          window.__comparisonCaptureBaseline = true;
+        });
+        const baseline = await save(page);
+        item.sourceBaselineExportMs = baseline.ms;
+        item.sourceBaselineSha256 = sha(Buffer.from(baseline.base64, "base64"));
+        assert.deepEqual(
+          differences(before, await snapshot(frame)),
+          [],
+          "Baseline export must not mutate the document",
+        );
+        await page.evaluate(() => {
+          window.__comparisonCaptureBaseline = false;
+        });
+      }
       item.stage = "edit";
       if (!["roundtrip", "save-failure"].includes(scenario)) {
         item.setup = await frame.evaluate((s) => {
@@ -489,10 +528,14 @@ try {
             a.AddSlide();
             return { kind: "slide-add" };
           }
-          const text = x => x.getDocContent?.()?.GetText?.({ Numbering: false });
+          const text = (x) =>
+            x.getDocContent?.()?.GetText?.({ Numbering: false });
           const target = ["type", "type-move"].includes(s)
-            ? slide.cSld.spTree.filter(x => typeof text(x) === "string" && text(x).trim())
-                .sort((a,b) => text(b).trim().length - text(a).trim().length)[0]
+            ? slide.cSld.spTree
+                .filter((x) => typeof text(x) === "string" && text(x).trim())
+                .sort(
+                  (a, b) => text(b).trim().length - text(a).trim().length,
+                )[0]
             : slide.cSld.spTree[0];
           if (!target) throw new Error("No suitable first-slide target");
           c.resetSelection();
@@ -502,7 +545,9 @@ try {
           a.WordControl.m_oDrawingDocument.TargetStart();
           return {
             kind: "shape",
-            hadNonemptyText: typeof text(target) === "string" && text(target).trim().length > 0,
+            hadNonemptyText:
+              typeof text(target) === "string" &&
+              text(target).trim().length > 0,
             index: slide.cSld.spTree.indexOf(target),
             name: target.getCNvProps?.()?.name ?? null,
           };
@@ -601,8 +646,43 @@ try {
             : "host-failure-contract-broken";
         continue;
       }
+      if (preserveSource) {
+        const operations =
+          scenario === "type-move"
+            ? ["replace_text", "move"]
+            : ({
+                type: ["replace_text"],
+                move: ["move"],
+                delete: ["delete_element"],
+              }[scenario] ?? null);
+        let targets = operations
+          ? operations.map((op) => ({
+              op,
+              slideIndex: 0,
+              name: item.setup.name,
+              shapeIndex: item.setup.index,
+            }))
+          : null;
+        if (scenario === "dupslide")
+          targets = [
+            {
+              op: "native_slide_topology",
+              slideIndex: 1,
+              elements: edited.slides[1].shapes.map((shape) => ({
+                text: shape.text?.replace(/\r\n/g, "\n").replace(/\n$/u, ""),
+              })),
+            },
+          ];
+        await page.evaluate(
+          (intent) => {
+            window.__comparisonIntent = intent;
+          },
+          { sourceOperations: operations, sourceTargets: targets },
+        );
+      }
       const saved = await save(page);
       item.structuralRepairs = saved.structuralRepairs;
+      item.sourcePreservations = saved.preservations;
       const bytes = Buffer.from(saved.base64, "base64");
       item.exportMs = saved.ms;
       item.savedBytes = bytes.length;
@@ -655,9 +735,11 @@ try {
         ? "reopen-model-differs"
         : item.undoDifferences?.length || item.redoDifferences?.length
           ? "history-differs"
-          : repairStructure
-            ? "repaired-export-reopen-verified"
-            : "raw-export-reopen-verified";
+          : preserveSource
+            ? "source-preserved-save-reopen-verified"
+            : repairStructure
+              ? "repaired-export-reopen-verified"
+              : "raw-export-reopen-verified";
       const cdp = await context.newCDPSession(page);
       await cdp.send("Performance.enable");
       const metrics = await cdp.send("Performance.getMetrics");
@@ -712,6 +794,7 @@ if (
       ![
         "raw-export-reopen-verified",
         "repaired-export-reopen-verified",
+        "source-preserved-save-reopen-verified",
         "preserved-package-model-readback-verified",
         "host-failure-keeps-dirty",
         "late-ack-second-save-history-reopen-verified",
