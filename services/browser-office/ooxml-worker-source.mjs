@@ -159,6 +159,25 @@ function normalizeGeneratedPlaceholderDisplay(document, part, canonical) {
 
 function sameEngineExportPart(part, left, right, canonical = false) {
   if (samePartBytes(left, right)) return true;
+  if (left && right && /^ppt\/embeddings\/[^/]+\.xlsx$/u.test(part)) {
+    // Workbook ZIP timestamps and compression are packaging, not cell edits.
+    // Compare every entry name and payload; no workbook XML is normalized.
+    try {
+      const leftSize = inspectZipPackage(left).expandedBytes;
+      const rightSize = inspectZipPackage(right).expandedBytes;
+      if (leftSize + rightSize > maximumInputBytes) return false;
+      const before = unzipSync(left);
+      const after = unzipSync(right);
+      const names = Object.keys(before);
+      return (
+        names.length === Object.keys(after).length &&
+        names.every((name) => samePartBytes(before[name], after[name]))
+      );
+    } catch {
+      // Unknown or invalid embedded content stays a significant byte change.
+      return false;
+    }
+  }
   if (!left || !right || !part.endsWith(".xml")) return false;
   const normalized = (bytes) => {
     const document = parseXml({ [part]: bytes }, part);
@@ -3363,6 +3382,7 @@ export function preserveOriginalPptxParts(
       presentationPartsPatch && Object.hasOwn(presentationPartsPatch, part);
     if (
       authoredChange &&
+      part.endsWith(".xml") &&
       !part.endsWith(".rels") &&
       !semanticSlideSizePatch &&
       !presentationPatch &&
@@ -5954,6 +5974,7 @@ function inspectZipPackage(input) {
   }
   if (offset !== directoryOffset + directorySize)
     throw new Error("PPTX ZIP central directory size is inconsistent.");
+  return { entryCount, expandedBytes };
 }
 
 function parseXml(entries, path) {

@@ -17,6 +17,36 @@ import {
 } from "./ooxml-worker-source.mjs";
 import { persistedSlideTopologyMatches } from "./harness/product-persistence.mjs";
 
+test("embedded workbook packaging noise is ignored but every entry payload remains significant", () => {
+  const part = "ppt/embeddings/chart.xlsx";
+  const payload = {
+    "[Content_Types].xml": strToU8('<Types/>'),
+    "xl/worksheets/sheet1.xml": strToU8('<worksheet><v>7</v></worksheet>'),
+  };
+  const before = zipSync({ [part]: zipSync(payload, {level: 0, mtime: new Date('2000-01-01')}) });
+  const repack = data => zipSync({ [part]: zipSync(data, {level: 6, mtime: new Date('2020-01-01')}) });
+  assert.deepEqual(nativeExportDifferences(before, repack(payload)), []);
+  for (const changed of [
+    {...payload, "xl/worksheets/sheet1.xml": strToU8('<worksheet><v>8</v></worksheet>')},
+    {...payload, "xl/new.xml": strToU8('<new/>')},
+    {"xl/worksheets/sheet1.xml": payload["xl/worksheets/sheet1.xml"]},
+    {...payload, "xl/_rels/workbook.xml.rels": strToU8('<Relationships/>')},
+  ]) assert.deepEqual(nativeExportDifferences(before, repack(changed)), [part]);
+  assert.deepEqual(nativeExportDifferences(before, zipSync({[part]: strToU8('invalid')})), [part]);
+});
+
+test("changed opaque workbook bytes are not treated as XML relationship references", async () => {
+  const source = withOwnedDependencyGraph(new Uint8Array(await readFile(fixtureUrl)));
+  const original = unzipSync(source);
+  const part = "ppt/embeddings/Microsoft_Excel_Worksheet1.xlsx";
+  const related = "ppt/embeddings/_rels/Microsoft_Excel_Worksheet1.xlsx.rels";
+  const noEdit = {...original, [related]: strToU8('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>')};
+  const edited = {...noEdit, [part]: strToU8('changed-owned-workbook-fixture')};
+  const result = preserveOriginalPptxParts(source, zipSync(noEdit), zipSync(edited), null);
+  assert.deepEqual(unzipSync(result.bytes)[part], edited[part]);
+  assert.ok(result.report.changedParts.includes(part));
+});
+
 test("same-observation proof detects changes before a preservation budget drops them", () => {
   const picture =
     '<p:pic xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:blip/></p:pic>';
