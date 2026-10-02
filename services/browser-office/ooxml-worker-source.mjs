@@ -112,6 +112,50 @@ function samePartBytes(left, right) {
   return true;
 }
 
+// Slide-number fields contain generated display text, not an authored note.
+// Impress can switch between its default label and the computed number when
+// a hidden document is inspected or an Undo/Redo redraw occurs. Apply the
+// same rule to slide, layout/master and notes parts; keep field type,
+// formatting and all ordinary text significant.
+function normalizeGeneratedPlaceholderDisplay(document, part, canonical) {
+  if (
+    !/^ppt\/(slides|slideMasters|slideLayouts|notesSlides|notesMasters)\/[^/]+\.xml$/u.test(
+      part,
+    )
+  )
+    return;
+  const master = canonical && part.startsWith("ppt/slideMasters/");
+  const defaults = {
+    dt: ["<날짜/시간>", "<date/time>"],
+    ftr: ["<바닥글>", "<footer>"],
+    sldNum: ["<숫자>", "<number>"],
+  };
+  for (const shape of document.getElementsByTagNameNS(
+    presentationNamespace,
+    "sp",
+  )) {
+    const type = shape
+      .getElementsByTagNameNS(presentationNamespace, "ph")[0]
+      ?.getAttribute("type");
+    const labels = defaults[type];
+    if (!labels) continue;
+    for (const text of shape.getElementsByTagNameNS(drawingNamespace, "t")) {
+      const value = text.textContent;
+      const defaultLabel = !value.trim() || labels.includes(value);
+      const slideNumberField =
+        type === "sldNum" &&
+        text.parentNode?.namespaceURI === drawingNamespace &&
+        text.parentNode?.localName === "fld" &&
+        text.parentNode?.getAttribute("type") === "slidenum";
+      if (
+        (master && defaultLabel) ||
+        (slideNumberField && (defaultLabel || /^\d+$/u.test(value)))
+      )
+        text.textContent = `__office_placeholder_${type}__`;
+    }
+  }
+}
+
 function sameEngineExportPart(part, left, right, canonical = false) {
   if (samePartBytes(left, right)) return true;
   if (!left || !right || !part.endsWith(".xml")) return false;
@@ -165,28 +209,8 @@ function sameEngineExportPart(part, left, right, canonical = false) {
       "modId",
     ))
       modification.setAttribute("val", "__office_modification__");
+    normalizeGeneratedPlaceholderDisplay(document, part, canonical);
     if (canonical) {
-      // Impress updates the display text of date/footer/slide-number master
-      // placeholders while reading/exporting. Normalize only its blank and
-      // default labels, and numbers inside an actual slide-number field.
-      // Authored footer/date text and all other properties stay significant.
-      if (/^ppt\/slideMasters\/slide\w+\.xml$/u.test(part))
-        for (const shape of document.getElementsByTagNameNS(presentationNamespace, "sp")) {
-          const ph = shape.getElementsByTagNameNS(presentationNamespace, "ph")[0];
-          const type = ph?.getAttribute("type");
-          const defaults = { dt: ["<날짜/시간>", "<date/time>"],
-            ftr: ["<바닥글>", "<footer>"], sldNum: ["<숫자>", "<number>"] }[type];
-          if (!defaults) continue;
-          for (const text of shape.getElementsByTagNameNS(drawingNamespace, "t")) {
-            const value = text.textContent;
-            const slideNumber = type === "sldNum" && /^\d+$/u.test(value) &&
-              text.parentNode?.namespaceURI === drawingNamespace &&
-              text.parentNode?.localName === "fld" &&
-              text.parentNode?.getAttribute("type") === "slidenum";
-            if (!value.trim() || defaults.includes(value) || slideNumber)
-              text.textContent = `__office_placeholder_${type}__`;
-          }
-        }
       const tree = (node) => {
         if (node.nodeType === 9) return tree(node.documentElement);
         if (node.nodeType !== 1) return [node.nodeType, node.nodeValue];

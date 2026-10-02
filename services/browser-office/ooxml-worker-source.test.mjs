@@ -75,6 +75,78 @@ test("coverage proof only normalizes engine-generated master field display", () 
   assert.deepEqual(nativeExportDifferences(before,pack("Authored footer")),["ppt/slideMasters/slideMaster1.xml"]);
 });
 
+const numberPlaceholder = (
+  text,
+  { type = "sldNum", fieldType = "slidenum", field = true, bold = "0" } = {},
+) =>
+  `<p:notes xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="1" name="Number"/><p:nvPr><p:ph type="${type}"/></p:nvPr></p:nvSpPr><p:txBody><a:p>${field ? `<a:fld id="{ABC}" type="${fieldType}">` : "<a:r>"}<a:rPr b="${bold}"/><a:t>${text}</a:t>${field ? "</a:fld>" : "</a:r>"}</a:p></p:txBody></p:sp></p:spTree></p:cSld></p:notes>`;
+
+test("generated slide-number display uses one comparison rule across slides and notes", () => {
+  for (const part of [
+    "ppt/slides/slide1.xml",
+    "ppt/slideMasters/slideMaster1.xml",
+    "ppt/slideLayouts/slideLayout1.xml",
+    "ppt/notesSlides/notesSlide1.xml",
+    "ppt/notesMasters/notesMaster1.xml",
+  ]) {
+    const pack = (text) =>
+      zipSync({ [part]: strToU8(numberPlaceholder(text)) });
+    for (const display of ["&lt;숫자&gt;", "&lt;number&gt;", "", "2"])
+      assert.deepEqual(
+        nativeExportDifferences(pack("1"), pack(display)),
+        [],
+        `${part}: ${display}`,
+      );
+  }
+});
+
+test("notes comparison retains authored text, field type, placeholder role and formatting", () => {
+  const part = "ppt/notesSlides/notesSlide1.xml";
+  const pack = (text, options) =>
+    zipSync({ [part]: strToU8(numberPlaceholder(text, options)) });
+  for (const options of [
+    { field: false },
+    { type: "body" },
+    { fieldType: "datetime" },
+  ])
+    assert.deepEqual(
+      nativeExportDifferences(pack("1", options), pack("2", options)),
+      [part],
+    );
+  assert.deepEqual(nativeExportDifferences(pack("1"), pack("Authored note")), [
+    part,
+  ]);
+  assert.deepEqual(
+    nativeExportDifferences(pack("1"), pack("2", { bold: "1" })),
+    [part],
+  );
+  assert.deepEqual(
+    nativeExportDifferences(pack("1"), pack("2", { type: "body" })),
+    [part],
+  );
+  assert.deepEqual(
+    nativeExportDifferences(pack("1"), pack("2", { fieldType: "datetime" })),
+    [part],
+  );
+});
+
+test("preservation retains original notes bytes when only their generated number display changes", async () => {
+  const entries = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/notesSlides/notesSlide1.xml";
+  entries[part] = strToU8(numberPlaceholder("1"));
+  const original = zipSync(entries);
+  entries[part] = strToU8(numberPlaceholder("&lt;숫자&gt;"));
+  const preserved = preserveOriginalPptxParts(
+    original,
+    original,
+    zipSync(entries),
+    ["replace_text"],
+  );
+  assert.deepEqual(unzipSync(preserved.bytes)[part], unzipSync(original)[part]);
+  assert.deepEqual(preserved.report.changedParts, []);
+  assert(!preserved.report.suppressedOutOfBudgetParts.includes(part));
+});
+
 test("package inspection fingerprints asset bytes, including same-size replacement", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const entries = unzipSync(source);
