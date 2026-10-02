@@ -4202,6 +4202,32 @@ test("direct picture deletion retains authored dependency bytes and refuses inco
   assert.throws(() => preserve(referenced), /cannot isolate direct deletion/);
 });
 
+test("direct deletion binds a uniquely unchanged placeholder after native display-name renumbering", async () => {
+  const source = new Uint8Array(await readFile(new URL("../../eval/public/downloads/lo-custom-xml.pptx", import.meta.url)));
+  const original = unzipSync(source), baseline = { ...original }, edited = { ...original };
+  const part = "ppt/slides/slide1.xml", ns = "http://schemas.openxmlformats.org/presentationml/2006/main";
+  const document = new DOMParser().parseFromString(strFromU8(original[part]), "application/xml");
+  const tree = document.getElementsByTagNameNS(ns, "spTree")[0];
+  const shapes = [...tree.childNodes].filter(node => node.nodeType === 1 && ["sp", "pic"].includes(node.localName));
+  const properties = node => node.getElementsByTagNameNS(ns, "cNvPr")[0];
+  properties(shapes[0]).setAttribute("name", "PlaceHolder 1");
+  properties(shapes[1]).setAttribute("name", "PlaceHolder 2");
+  baseline[part] = strToU8(new XMLSerializer().serializeToString(document));
+  tree.removeChild(shapes[0]);
+  properties(shapes[1]).setAttribute("name", "PlaceHolder 1");
+  for (const [index, node] of shapes.slice(1).entries()) properties(node).setAttribute("id", String(index + 71));
+  edited[part] = strToU8(new XMLSerializer().serializeToString(document));
+  const preserve = changed => preserveOriginalPptxParts(source, zipSync(baseline), zipSync(changed), ["delete_element"],
+    [{ op: "delete_element", slideIndex: 0, shapeIndex: 0, name: "Title 3" }]);
+  const saved = unzipSync(preserve(edited).bytes);
+  assert.doesNotMatch(strFromU8(saved[part]), /name="Title 3"/u);
+  assert.match(strFromU8(saved[part]), /name="Content Placeholder 4"/u);
+  for (const [name, bytes] of Object.entries(original)) if (name !== part) assert.deepEqual(saved[name], bytes);
+  shapes[1].setAttribute("unrelatedChangedField", "must refuse");
+  const collateral = { ...edited, [part]: strToU8(new XMLSerializer().serializeToString(document)) };
+  assert.throws(() => preserve(collateral), /cannot isolate direct deletion/u);
+});
+
 test("native duplication clones an unambiguous authored slide without adding text bodies to decoration", async () => {
   const source = new Uint8Array(await readFile(fixtureUrl));
   const original = unzipSync(source);
@@ -4893,6 +4919,21 @@ for (const identity of ["unnamed", "different-name", "duplicate-name"]) {
     );
   });
 }
+
+test("chart workbook binding keeps an unrelated authored asset with the native export filename", async () => {
+  const f = await renamedChartWorkbookFixture();
+  const foreign = unzipSync(f.original[f.authored]);
+  const sheet = "xl/worksheets/sheet1.xml";
+  foreign[sheet] = strToU8(strFromU8(foreign[sheet]).replace(/(<c r="B2"[^>]*><v>)[^<]+/u, "$177.1"));
+  f.original[f.native] = zipSync(foreign);
+  const merged = unzipSync(preserveOriginalPptxParts(
+    zipSync(f.original), zipSync(f.baseline), zipSync(f.edited), null,
+  ).bytes);
+  assert.deepEqual(merged[f.native], f.original[f.native], "Foreign authored asset must not be replaced by the native namespace");
+  assert.deepEqual(merged[f.authored], f.original[f.authored]);
+  assert.deepEqual(merged[f.rels], f.original[f.rels]);
+  assert.match(strFromU8(merged["ppt/charts/chart1.xml"]), /actual owner edit/u);
+});
 
 test("chart workbook alignment rejects collision with another existing native package part", async () => {
   const f = await renamedChartWorkbookFixture();

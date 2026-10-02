@@ -1014,6 +1014,18 @@ function removeDirectShapeFromOriginal(
       return null;
     }
   };
+  const unnamedFingerprint = (node) => {
+    const copy = node.cloneNode(true);
+    for (const properties of copy.getElementsByTagNameNS(presentationNamespace, "cNvPr"))
+      properties.removeAttribute("name");
+    return comparableXml(copy);
+  };
+  const uniqueUnchangedShape = (before, after) => {
+    const fingerprint = unnamedFingerprint(before);
+    return fingerprint === unnamedFingerprint(after) &&
+      baseline.filter(node => unnamedFingerprint(node) === fingerprint).length === 1 &&
+      edited.filter(node => unnamedFingerprint(node) === fingerprint).length === 1;
+  };
   if (
     retained.some(
       (node, shapeIndex) =>
@@ -1021,7 +1033,8 @@ function removeDirectShapeFromOriginal(
         (identity(node)?.name !== identity(edited[shapeIndex])?.name &&
           (!uniqueText(node, baseline) ||
             uniqueText(node, baseline) !==
-              uniqueText(edited[shapeIndex], edited))),
+            uniqueText(edited[shapeIndex], edited)) &&
+          !uniqueUnchangedShape(node, edited[shapeIndex])),
     )
   )
     return null;
@@ -1949,12 +1962,14 @@ function chartWorkbookRenames(original, baseline) {
       source.workbook === binding.workbook
     )
       continue;
+    // Names in two different package namespaces can coincide without sharing
+    // ownership. The unique frame/chart/externalData binding is the proof.
+    // A destination already present in the same native package is a collision.
     if (
       (renames.has(binding.workbook) &&
         renames.get(binding.workbook) !== source.workbook) ||
       (destinations.has(source.workbook) &&
         destinations.get(source.workbook) !== binding.workbook) ||
-      original[binding.workbook] ||
       baseline[source.workbook]
     )
       throw new Error(
