@@ -348,16 +348,11 @@ try {
       const item = selection?.selected?.[0];
       if (item && selection.activeSlide === 0) {
         result.selectionKeys ??= Object.keys(item).join(",");
+        if (["type", "type-move", "type-continuous"].includes(scenario) &&
+          preferredTextTarget && item.elementId !== preferredTextTarget.id) continue;
         if (
           !["type", "type-move", "type-continuous"].includes(scenario) ||
-          item.hasText === true ||
-          item.text
-        )
-          return item;
-        if (
-          ["type", "type-move", "type-continuous"].includes(scenario) &&
-          item.kind &&
-          /text|title|shape|placeholder/iu.test(String(item.kind))
+          (typeof item.text === "string" && item.text.trim().length > 0)
         )
           return item;
       }
@@ -366,6 +361,10 @@ try {
   };
 
   const beforeState = await engineState();
+  // Edit authored text rather than adding text to an empty background shape.
+  const preferredTextTarget = beforeState.elements.filter(element =>
+    /^0\/[^/]+$/u.test(element.id) && typeof element.text === "string" && element.text.trim())
+    .sort((a,b) => b.text.trim().length - a.text.trim().length)[0];
   let target = null;
   if (scenario === "roundtrip") {
     result.engineApplied = true;
@@ -433,6 +432,8 @@ try {
     }
     result.target = {
       kind: target.kind,
+      elementId: target.elementId,
+      hadNonemptyText: typeof target.text === "string" && target.text.trim().length > 0,
       name: String(target.name ?? "").replace(/[^\x20-\x7e]/gu, "?"),
     };
     if (["type", "type-move", "type-continuous"].includes(scenario)) {

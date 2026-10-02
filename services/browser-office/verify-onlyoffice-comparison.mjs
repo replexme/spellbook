@@ -489,11 +489,11 @@ try {
             a.AddSlide();
             return { kind: "slide-add" };
           }
-          const target = slide.cSld.spTree.find(
-            (x) =>
-              !["type", "type-move"].includes(s) ||
-              Boolean(x.getDocContent?.()),
-          );
+          const text = x => x.getDocContent?.()?.GetText?.({ Numbering: false });
+          const target = ["type", "type-move"].includes(s)
+            ? slide.cSld.spTree.filter(x => typeof text(x) === "string" && text(x).trim())
+                .sort((a,b) => text(b).trim().length - text(a).trim().length)[0]
+            : slide.cSld.spTree[0];
           if (!target) throw new Error("No suitable first-slide target");
           c.resetSelection();
           c.selectObject(target, 0);
@@ -502,6 +502,7 @@ try {
           a.WordControl.m_oDrawingDocument.TargetStart();
           return {
             kind: "shape",
+            hadNonemptyText: typeof text(target) === "string" && text(target).trim().length > 0,
             index: slide.cSld.spTree.indexOf(target),
             name: target.getCNvProps?.()?.name ?? null,
           };
