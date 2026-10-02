@@ -8,7 +8,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { readRepositoryIdentity } from "./repository-identity.mjs";
-import { preserveOriginalPptxParts } from "./ooxml-worker-source.mjs";
+import { summarizeEngineComparison } from "./comparison-results.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const flag = (name, fallback) => {
@@ -24,7 +24,9 @@ const output = path.resolve(flag("--output"));
 const runtime = path.resolve(flag("--native-runtime"));
 const candidate = path.resolve(flag("--candidate-root"));
 const origin = flag("--origin");
-const repairStructure = process.argv.includes("--repair-structure");
+const preserveSource = process.argv.includes("--preserve-source");
+const repairStructure =
+  preserveSource || process.argv.includes("--repair-structure");
 const engines = flag("--engines", "native,onlyoffice").split(",");
 assert(
   engines.every((e) => ["native", "onlyoffice"].includes(e)) &&
@@ -72,6 +74,16 @@ for (const input of matrix.inputs) {
       `${input.label}: source drift`,
     );
 }
+const candidateIdentity = readRepositoryIdentity(candidate);
+assert.equal(
+  candidateIdentity.dirty,
+  false,
+  "Commit candidate code before recording final evidence",
+);
+const sdkPath = path.join(candidate, "dist/sdkjs/slide/sdk-all.js");
+const sdkDigest = createHash("sha256")
+  .update(await readFile(sdkPath))
+  .digest("hex");
 await mkdir(output, { recursive: false, mode: 0o700 });
 const identity = readRepositoryIdentity(root);
 assert.equal(
@@ -83,15 +95,18 @@ const report = {
   schemaVersion: 1,
   startedAt: new Date().toISOString(),
   integration: identity,
-  candidate: readRepositoryIdentity(candidate),
+  candidate: candidateIdentity,
+  candidateSdkSha256: sdkDigest,
   engines,
   inputs: matrix.inputs.map(({ path: _, ...input }) => input),
   cases: [],
   scope: {
     native: "product-preserved save and model readback",
-    onlyoffice: repairStructure
-      ? "browser-repaired export and same-engine model readback; no original-part preservation"
-      : "raw export and same-engine model readback",
+    onlyoffice: preserveSource
+      ? "authored-source-preserved real component save callback, final format repair and same-engine intent readback"
+      : repairStructure
+        ? "browser-repaired export and same-engine model readback; no original-part preservation"
+        : "raw export and same-engine model readback",
     visual:
       "screenshots require human inspection; not an automatic fidelity pass",
     powerpoint: "not run: owner-window restriction",
@@ -200,7 +215,15 @@ async function validation(input, log) {
     60_000,
   );
   try {
-    return JSON.parse(result.stdout);
+    const report = JSON.parse(result.stdout);
+    return result.code === 0
+      ? report
+      : {
+          ...report,
+          Valid: false,
+          validatorFailed: true,
+          exitCode: result.code,
+        };
   } catch {
     return {
       Valid: false,
@@ -235,7 +258,11 @@ try {
             origin,
             "--scenarios",
             input.scenarios.join(","),
-            ...(repairStructure ? ["--repair-structure"] : []),
+            ...(preserveSource
+              ? ["--preserve-source"]
+              : repairStructure
+                ? ["--repair-structure"]
+                : []),
           ],
           path.join(engineDir, "process.log"),
         );
@@ -261,74 +288,13 @@ try {
                 path.join(engineDir, `${cell.scenario}-openxml.log`),
               )
             : null;
-          let preservationTrial = null;
-          if (
-            cell.savedSha256 &&
-            cell.scenario !== "roundtrip" &&
-            input.scenarios.includes("roundtrip")
-          ) {
-            try {
-              const original = new Uint8Array(await readFile(input.path));
-              const noEdit = new Uint8Array(
-                await readFile(path.join(engineDir, "roundtrip.pptx")),
-              );
-              const edited = new Uint8Array(await readFile(saved));
-              const op = {
-                type: "replace_text",
-                move: "move",
-                delete: "delete_element",
-              }[cell.scenario];
-              const operations =
-                cell.scenario === "type-move"
-                  ? ["replace_text", "move"]
-                  : op
-                    ? [op]
-                    : null;
-              const targets =
-                operations && cell.setup?.name
-                  ? operations.map((op) => ({
-                      op,
-                      slideIndex: 0,
-                      name: cell.setup.name,
-                      shapeIndex: cell.setup.index,
-                    }))
-                  : null;
-              const trial = preserveOriginalPptxParts(
-                original,
-                noEdit,
-                edited,
-                operations,
-                targets,
-              );
-              const trialPath = path.join(
-                engineDir,
-                `${cell.scenario}-preservation-trial.pptx`,
-              );
-              await writeFile(trialPath, trial.bytes, { mode: 0o600 });
-              preservationTrial = {
-                status: "package-produced-not-engine-admitted",
-                report: trial.report,
-                openXml: await validation(
-                  trialPath,
-                  path.join(
-                    engineDir,
-                    `${cell.scenario}-preservation-trial-openxml.log`,
-                  ),
-                ),
-                proofLimit:
-                  "Package-only trial; requires candidate-engine reopen and complete intent readback before use",
-              };
-            } catch (error) {
-              preservationTrial = { status: "refused", error: error.message };
-            }
-          }
           report.cases.push({
             label: input.label,
             engine,
             ...cell,
             originalOpenXml: originalValidation,
             savedOpenXml: sdk,
-            preservationTrial,
+            engineProcessCode: process.code,
             runResources: process.resources,
           });
         }
@@ -373,6 +339,7 @@ try {
             label: input.label,
             engine,
             ...result,
+            engineProcessCode: process.code,
             originalOpenXml: originalValidation,
             savedOpenXml: sdk,
             runResources: process.resources,
@@ -408,31 +375,35 @@ try {
 } finally {
   report.finishedAt = new Date().toISOString();
   report.finalIntegration = readRepositoryIdentity(root);
+  report.finalCandidate = readRepositoryIdentity(candidate);
+  report.finalCandidateSdkSha256 = createHash("sha256")
+    .update(await readFile(sdkPath))
+    .digest("hex");
+  report.inputSourcesStable = (
+    await Promise.all(
+      matrix.inputs.map(
+        async (input) =>
+          createHash("sha256")
+            .update(await readFile(input.path))
+            .digest("hex") === input.sha256,
+      ),
+    )
+  ).every(Boolean);
   report.sourceStable =
-    JSON.stringify(report.finalIntegration) === JSON.stringify(identity);
-  report.summary = {
-    cases: report.cases.length,
-    nativeSaved: report.cases.filter(
-      (c) => c.engine === "native" && c.outcome === "saved" && !c.note,
-    ).length,
-    onlyofficeRawVerified: report.cases.filter(
-      (c) =>
-        c.engine === "onlyoffice" && c.status === "raw-export-reopen-verified",
-    ).length,
-    onlyofficeRepairedVerified: report.cases.filter(
-      (c) =>
-        c.engine === "onlyoffice" &&
-        c.status === "repaired-export-reopen-verified",
-    ).length,
-    refused: report.cases.filter((c) => c.outcome === "refused").length,
-    errors: report.cases.filter(
-      (c) =>
-        c.outcome === "error" ||
-        c.status === "failed" ||
-        c.outcome === "process-failed" ||
-        c.status === "process-failed",
-    ).length,
-  };
+    JSON.stringify(report.finalIntegration) === JSON.stringify(identity) &&
+    JSON.stringify(report.finalCandidate) ===
+      JSON.stringify(candidateIdentity) &&
+    report.finalCandidateSdkSha256 === sdkDigest &&
+    report.inputSourcesStable;
+  report.summary = summarizeEngineComparison({
+    inputs: matrix.inputs,
+    engines,
+    cases: report.cases,
+    preserveSource,
+    repairStructure,
+    sourceStable: report.sourceStable,
+  });
+  if (!report.summary.completeWithinRequestedScenarios) process.exitCode = 1;
   await writeFile(
     path.join(output, "report.json"),
     JSON.stringify(report, null, 2) + "\n",
@@ -440,5 +411,5 @@ try {
 }
 assert(
   report.sourceStable,
-  "Integration changed while comparison was running; evidence invalidated",
+  "Integration, candidate, SDK or input changed while comparison was running; evidence invalidated",
 );

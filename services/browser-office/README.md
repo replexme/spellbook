@@ -6,15 +6,17 @@
 admitted native runtime and an experimental ONLYOFFICE browser component.
 It runs each browser sequentially and headlessly. Start it with `nice -n 15`
 on macOS; do not run the native PowerPoint exporter for this background test.
-Commit the integration code first: the runner rejects dirty integration sources
-and invalidates evidence if the source changes during execution.
+Commit integration and candidate code first. The runner rejects dirty sources
+and invalidates evidence if either source identity, the generated candidate SDK
+or any input bytes change during execution.
 
 The experimental candidate is a separate checkout of
 [agentbridges-ai/onlyoffice-browser](https://github.com/agentbridges-ai/onlyoffice-browser),
 not an admitted production engine or the official DocumentServer deployment.
 Build its public component API with `pnpm run build:lib`, prepare its documented
-font assets, and start its production preview on a loopback address. No vendor
-source patch is required. The verifier serves its own local diagnostic host
+font assets, and start its production preview on a loopback address. Local
+improvement patches and their pinned boundaries are documented in
+[`onlyoffice/README.md`](./onlyoffice/README.md). The verifier serves its own local diagnostic host
 using that public API; internal presentation SDK selection and slide methods
 are explicitly version-dependent.
 
@@ -32,19 +34,26 @@ nice -n 15 node services/browser-office/verify-engine-comparison.mjs \
   --native-runtime /private/tmp/admitted-native-runtime \
   --candidate-root /private/tmp/onlyoffice-browser \
   --origin http://127.0.0.1:38767 \
+  --preserve-source \
   --output /private/tmp/engine-comparison-results
 ```
 
-The report distinguishes applied edits, raw candidate export/reopen and native
-product-preserved saves, original and saved OpenXML validation, package rewrite
-scope, history, timing and approximate task resource use. It also trials the
-existing preservation worker against candidate exports; a produced package is
-not a production admission and still needs candidate-engine readback of the
-complete intended change. Geometry/text-only candidate snapshots do not prove
-all chart, table, style, media, animation or relationship semantics. Screenshots
-must be inspected separately; API presence, valid XML and export speed are not
-visual fidelity or complete AI-contract proof. Provider authentication and
-PowerPoint reopen are separate gates.
+With `--preserve-source`, both engines persist through the actual authored-source
+preservation boundary. Candidate format repair happens inside its save callback,
+and native history and intent are checked through a fresh candidate session.
+There is no separate post-export package substitution. Omitting that flag is
+an explicit raw export diagnostic; `--repair-structure` alone repairs its format
+without implying authored-source preservation.
+
+The report records independent saved OpenXML validation, package rewrite scope,
+history, complete save timing and approximate task resource use. Missing,
+duplicate, unexpected, failed, unverified or wrong-pipeline results make the
+requested matrix incomplete and the process exits unsuccessfully. Completion
+is explicitly limited to the manifest's human-editing scenarios; it does not
+mean all product operations or engine admission passed. Geometry/text snapshots
+do not prove all chart, table, style, media, animation or relationship semantics.
+Screenshots require direct review. Provider authentication and PowerPoint reopen
+remain separate evidence boundaries.
 
 The candidate's `save-failure` diagnostic rejects the real host save callback
 and checks that its write count stays zero and dirty state survives. It does
