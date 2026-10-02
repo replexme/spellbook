@@ -9,6 +9,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { readRepositoryIdentity } from "./repository-identity.mjs";
 import { summarizeEngineComparison } from "./comparison-results.mjs";
+import { assessHumanComparisonPreservation } from "./ooxml-worker-source.mjs";
 
 const root = path.resolve(import.meta.dirname, "../..");
 const flag = (name, fallback) => {
@@ -216,7 +217,13 @@ async function validation(input, log) {
   );
   try {
     const report = JSON.parse(result.stdout);
-    return result.code === 0
+    const expectedInvalid =
+      result.code === 1 &&
+      report.Valid === false &&
+      Array.isArray(report.Errors) &&
+      report.Errors.length > 0 &&
+      report.Failure === null;
+    return result.code === 0 || expectedInvalid
       ? report
       : {
           ...report,
@@ -294,6 +301,14 @@ try {
             ...cell,
             originalOpenXml: originalValidation,
             savedOpenXml: sdk,
+            sourcePreservation:
+              preserveSource && cell.savedSha256
+                ? assessHumanComparisonPreservation(
+                    await readFile(input.path),
+                    await readFile(saved),
+                    cell.scenario,
+                  )
+                : null,
             engineProcessCode: process.code,
             runResources: process.resources,
           });
@@ -342,6 +357,14 @@ try {
             engineProcessCode: process.code,
             originalOpenXml: originalValidation,
             savedOpenXml: sdk,
+            sourcePreservation:
+              result.outcome === "saved"
+                ? assessHumanComparisonPreservation(
+                    await readFile(input.path),
+                    await readFile(saved),
+                    scenario,
+                  )
+                : null,
             runResources: process.resources,
           });
           await writeFile(

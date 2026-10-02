@@ -1,7 +1,10 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { summarizeEngineComparison } from "./comparison-results.mjs";
+import {
+  summarizeEngineComparison,
+  comparisonFormatStatus,
+} from "./comparison-results.mjs";
 
 const fixture = () => ({
   inputs: [{ label: "deck", scenarios: ["type", "move"] }],
@@ -19,6 +22,7 @@ const fixture = () => ({
         ? { outcome: "saved" }
         : { status: "source-preserved-save-reopen-verified" }),
       savedOpenXml: { Valid: true },
+      sourcePreservation: { valid: true },
     })),
   ),
 });
@@ -45,6 +49,8 @@ for (const mode of [
   "unstable-source",
   "missing-source",
   "empty-matrix",
+  "missing-preservation",
+  "collateral-preservation",
 ]) {
   test(`paired comparison refuses ${mode} results`, () => {
     const value = fixture();
@@ -59,6 +65,10 @@ for (const mode of [
     if (mode === "refused") value.cases[0].outcome = "refused";
     if (mode === "note") value.cases[0].note = "Not a saved intent proof";
     if (mode === "missing-process") delete value.cases[2].engineProcessCode;
+    if (mode === "missing-preservation")
+      delete value.cases[2].sourcePreservation;
+    if (mode === "collateral-preservation")
+      value.cases[2].sourcePreservation.valid = false;
     if (mode === "unstable-source") value.sourceStable = false;
     if (mode === "missing-source") delete value.sourceStable;
     if (mode === "empty-matrix") {
@@ -86,6 +96,47 @@ test("raw and repaired diagnostics remain explicit and cannot satisfy preserved-
     value.preserveSource = true;
     assert.equal(
       summarizeEngineComparison(value).completeWithinRequestedScenarios,
+      false,
+    );
+  }
+});
+
+test("original format errors are retained explicitly only with preserved scope and exact error provenance", () => {
+  const value = fixture(),
+    cell = value.cases[0];
+  cell.originalOpenXml = {
+    Valid: false,
+    Errors: ["original chart order"],
+    Failure: null,
+    ReaderAdjustments: [],
+  };
+  cell.savedOpenXml = structuredClone(cell.originalOpenXml);
+  assert.equal(comparisonFormatStatus(cell), "retained_original_errors");
+  const result = summarizeEngineComparison(value);
+  assert.equal(result.completeWithinRequestedScenarios, true);
+  assert.equal(result.fullyFormatValid, 3);
+  assert.equal(result.retainedOriginalFormatErrors, 1);
+  for (const change of [
+    (c) => {
+      c.savedOpenXml.Errors.push("new error");
+    },
+    (c) => {
+      c.savedOpenXml.Failure = "reader failed";
+    },
+    (c) => {
+      c.savedOpenXml.validatorFailed = true;
+    },
+    (c) => {
+      c.savedOpenXml.ReaderAdjustments.push("hidden fix");
+    },
+    (c) => {
+      c.sourcePreservation.valid = false;
+    },
+  ]) {
+    const next = structuredClone(value);
+    change(next.cases[0]);
+    assert.equal(
+      summarizeEngineComparison(next).completeWithinRequestedScenarios,
       false,
     );
   }

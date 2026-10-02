@@ -16,7 +16,24 @@ import {
   nativeExportDifferences,
   prepareChartSeriesWorkbookMutation,
   mergeNumericWorkbookDelta,
+  assessHumanComparisonPreservation,
 } from "./ooxml-worker-source.mjs";
+
+test("human comparison preservation rejects collateral payload changes even when XML is valid", async () => {
+  const source = new Uint8Array(await readFile(new URL("../../eval/public/fixtures/general-native-surface.pptx", import.meta.url)));
+  const entries = unzipSync(source), changed = { ...entries };
+  const part = "ppt/slides/slide1.xml";
+  changed[part] = strToU8(strFromU8(changed[part]).replace("</p:sld>", "<!-- edit --></p:sld>"));
+  assert.equal(assessHumanComparisonPreservation(source, zipSync(entries), "roundtrip").valid, true);
+  assert.equal(assessHumanComparisonPreservation(source, zipSync(changed), "roundtrip").valid, false);
+  assert.equal(assessHumanComparisonPreservation(source, zipSync(changed), "type").valid, true);
+  const theme = Object.keys(entries).find(name => name.startsWith("ppt/theme/") && name.endsWith(".xml"));
+  changed[theme] = strToU8(strFromU8(entries[theme]).replace("</a:theme>", "<!-- collateral --></a:theme>"));
+  assert.equal(assessHumanComparisonPreservation(source, zipSync(changed), "type").valid, false);
+  changed["unclassified.bin"] = Uint8Array.of(1);
+  assert.ok(assessHumanComparisonPreservation(source, zipSync(changed), "dupslide").violations.includes("unclassified.bin"));
+  assert.throws(() => assessHumanComparisonPreservation(source, source, "unknown"), /Unknown preservation/u);
+});
 import { persistedSlideTopologyMatches } from "./harness/product-persistence.mjs";
 
 test("embedded workbook packaging noise is ignored but every entry payload remains significant", () => {

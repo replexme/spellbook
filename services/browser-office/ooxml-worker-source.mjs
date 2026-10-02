@@ -2545,6 +2545,42 @@ function mergeDirectSlideTopology(
   return context.entries;
 }
 
+// Requested human scenarios have a narrower change boundary than arbitrary
+// human edits. Use the authored relationship graph and the canonical registry.
+export function assessHumanComparisonPreservation(originalBytes, savedBytes, scenario) {
+  for (const bytes of [originalBytes, savedBytes]) inspectZipPackage(bytes);
+  const original = unzipSync(originalBytes), saved = unzipSync(savedBytes);
+  const paths = orderedSlidePaths(original), first = paths[0];
+  if (!first) throw new Error("Comparison input has no authored slide identity.");
+  const operations = {
+    roundtrip: [], type: ["replace_text"], "type-move": ["replace_text", "move"],
+    move: ["move"], delete: ["delete_element"], newslide: ["insert_slide"],
+    dupslide: ["duplicate_slide"], delslide: ["delete_slide"],
+  }[scenario];
+  if (!operations) throw new Error("Unknown preservation comparison scenario.");
+  const topology = ["newslide", "dupslide", "delslide"].includes(scenario);
+  const budget = operations.length ? nativePreservationBudget(operations) : { allowedCategories: new Set() };
+  const allowedExisting = new Set(topology
+    ? [contentTypesPath, presentationPath, presentationRelationshipsPath]
+    : scenario === "roundtrip" ? [] : [first, relationshipsPath(first)]);
+  if (scenario === "delslide") {
+    allowedExisting.add(first); allowedExisting.add(relationshipsPath(first));
+    for (const { target } of relationshipsOfType(original, first, "notesSlide")) {
+      allowedExisting.add(target); allowedExisting.add(relationshipsPath(target));
+    }
+  }
+  const changedParts = [...new Set([...Object.keys(original), ...Object.keys(saved)])]
+    .filter(part => !samePartBytes(original[part], saved[part])).sort();
+  const violations = changedParts.filter(part => {
+    if (original[part]) return !allowedExisting.has(part);
+    return !topology || !budget.allowedCategories.has(classifyNativePackagePart(part));
+  });
+  const expectedCount = paths.length + (scenario === "delslide" ? -1 : topology ? 1 : 0);
+  if (orderedSlidePaths(saved).length !== expectedCount) violations.push("presentation_slide_count");
+  return { valid: violations.length === 0, changedParts, violations,
+    scope: "Authored package payload preservation for the requested human scenario; not the full product or visible-fidelity contract" };
+}
+
 function orderedSlidePaths(entries) {
   if (!entries[presentationPath] || !entries[presentationRelationshipsPath])
     return [];

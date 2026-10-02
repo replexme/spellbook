@@ -2,6 +2,29 @@
 
 // Completion belongs to the requested matrix, not the number of successful
 // rows a child happened to return. This never admits a production engine.
+export function comparisonFormatStatus(cell) {
+  const saved = cell.savedOpenXml,
+    original = cell.originalOpenXml;
+  if (!saved || saved.validatorFailed === true) return "failed_or_unverified";
+  if (saved.Failure) return "reader_failed";
+  if (saved.Valid === true) return "valid";
+  if (
+    !original ||
+    original.validatorFailed === true ||
+    original.Failure ||
+    !Array.isArray(original.Errors) ||
+    !original.Errors.length ||
+    !Array.isArray(saved.Errors)
+  )
+    return "failed_or_unverified";
+  const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  return equal([...original.Errors].sort(), [...saved.Errors].sort()) &&
+    equal(original.ReaderAdjustments ?? [], saved.ReaderAdjustments ?? []) &&
+    cell.sourcePreservation?.valid === true
+    ? "retained_original_errors"
+    : "new_or_unverified_errors";
+}
+
 export function summarizeEngineComparison({
   inputs,
   engines,
@@ -51,10 +74,19 @@ export function summarizeEngineComparison({
     if (!succeeded || cell.engineProcessCode !== 0)
       failures.push({ key, reason: "scenario_failed" });
     if (
-      cell.savedOpenXml?.Valid !== true ||
-      cell.savedOpenXml?.validatorFailed === true
+      !["valid", "retained_original_errors"].includes(
+        comparisonFormatStatus(cell),
+      )
     )
       failures.push({ key, reason: "saved_format_failed_or_unverified" });
+    if (
+      (cell.engine === "native" || preserveSource) &&
+      cell.sourcePreservation?.valid !== true
+    )
+      failures.push({
+        key,
+        reason: "authored_preservation_failed_or_unverified",
+      });
   }
   const verified = [...rows.values()].filter(
     (cell) =>
@@ -71,6 +103,12 @@ export function summarizeEngineComparison({
       failures.length === 0 && verified.length === expected.length,
     proofScope:
       "Human-editing scenarios in the input manifest; excludes the complete product mutation and admission contracts",
+    fullyFormatValid: verified.filter(
+      (cell) => comparisonFormatStatus(cell) === "valid",
+    ).length,
+    retainedOriginalFormatErrors: verified.filter(
+      (cell) => comparisonFormatStatus(cell) === "retained_original_errors",
+    ).length,
     nativeSaved: verified.filter((cell) => cell.engine === "native").length,
     onlyofficeRawVerified: verified.filter(
       (cell) => cell.status === "raw-export-reopen-verified",
