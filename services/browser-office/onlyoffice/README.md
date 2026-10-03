@@ -527,3 +527,26 @@ hyphenation dictionary is advertised. This Word roundtrip is not a PPTX language
 operation proof. Run timestamps and archive metadata are outside the
 scoped SDK/UI reproduction claim; whole-package reproducibility and SLSA
 certification are not claimed.
+
+### Visual diagnostics after the frozen 57-trial run
+
+The frozen canonical-source batch proved native apply, history and saved
+readback, not independent PowerPoint fidelity. Manual review found that the
+POI transparency crop fixture has a tiny uniform image: changing its native
+crop did not change visible pixels. Keep its fixed source hash and the original
+results; do not count that fixture as a visual crop oracle.
+
+`python3 scripts/generate-picture-crop-fixture.py <output.pptx>` produces a
+separate, deterministic crop diagnostic with large asymmetric image content
+and identifiable crop borders. Pass it to the typed runner with
+`--typed-case picture-crop --require-visible-change`. That mode requires a
+visible change, exact target-slide pixels after undo/redo, and matching live
+and reopened rendering. It does not replace the canonical product corpus.
+
+WordArt insertion now uses a visible 36-point label (the SDK takes half-point
+font sizes), a curved transform, an unfilled background and an explicit
+position away from the fixture's existing content. Its diagnostic checks the
+native transform, saved curve/font/bold properties and visible history and
+reopen. WordArt **creation still does not test `set_fontwork`**. Shape insertion
+also uses an explicit free area of the canonical fixture. No production engine
+or upstream distribution is changed by these diagnostic improvements.

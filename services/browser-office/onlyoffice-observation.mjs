@@ -26,6 +26,7 @@ async function snapshot(frame) {
       children: x.spTree?.map(shape) ?? [],
       hidden: x.getCNvProps?.()?.isHidden ?? null,
       ownName: x.getOwnName?.() ?? null,
+      textWarp: x.getBodyPr?.()?.prstTxWarp?.preset ?? null,
       crop: x.blipFill?.srcRect
         ? {
             l: x.blipFill.srcRect.l,

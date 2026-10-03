@@ -18,6 +18,7 @@ import path from "node:path";
 import { createServer } from "node:http";
 import { chromium } from "@playwright/test";
 import { unzipSync, strFromU8 } from "fflate";
+import { DOMParser } from "@xmldom/xmldom";
 import { prepareChartSeriesWorkbookMutation } from "./ooxml-worker-source.mjs";
 import { readRepositoryIdentity, readRepositoryEvidence, repositoryIdentityStable } from "./repository-identity.mjs";
 
@@ -102,6 +103,8 @@ const report = {
 const typedCase = flag("--typed-case");
 const failAfterApply = process.argv.includes("--fail-after-apply");
 const preexistingRedo = process.argv.includes("--preexisting-redo");
+const requireVisibleChange = process.argv.includes("--require-visible-change");
+report.requireVisibleChange = requireVisibleChange || typedCase === "wordart-insert";
 assert(!preexistingRedo || failAfterApply, "Redo preservation requires a cancelled transaction");
 let redoNativeExpected = null;
 let transaction = null, transactionBefore = null, transactionNativeBefore = null, transactionHostBefore = null;
@@ -742,23 +745,28 @@ try {
         api.CreateStroke(0, api.CreateNoFill()),
       );
       d.SetName("SBX_TYPED_9F3");
-      d.SetPosition(20 * 36000, 20 * 36000);
+      d.SetPosition(20 * 36000, 100 * 36000);
       result = slide.AddObject(d);
     } else if (kind === "wordart-insert") {
       const t = api.CreateTextPr();
-      t.SetFontSize(24);
+      // ApiTextPr sizes use half-points: 72 requests 36 points.
+      t.SetFontSize(72);
+      t.SetBold(true);
+      t.SetColor(api.RGB(39, 117, 181));
+      t.SetFontFamily("DejaVu Sans");
       const d = api.CreateWordArt(
         t,
         "SBX_TYPED_9F3",
         "textArchUp",
-        fill(),
+        api.CreateNoFill(),
         api.CreateStroke(0, api.CreateNoFill()),
         0,
         100 * 36000,
         30 * 36000,
-        20,
-        20,
       );
+      // The pinned constructor treats optional indentation as millimetres,
+      // despite its EMU documentation. SetPosition uses the documented EMUs.
+      d.SetPosition(20 * 36000, 100 * 36000);
       d.SetName("SBX_TYPED_9F3");
       result = slide.AddObject(d);
       d.SetName("SBX_TYPED_9F3");
@@ -788,6 +796,17 @@ try {
     item.slideRendering.edited = await visibleSlides(page, frame, "edited", edited.common.slides.length);
     for (let index=1;index<before.common.slides.length;index++)
       assert.deepEqual(item.slideRendering.edited[index], item.slideRendering.before[index], `Untargeted slide ${index+1} must retain visible pixels`);
+    item.targetSlideVisibleChange = item.slideRendering.edited[0].sha256 !== item.slideRendering.before[0].sha256;
+    if (requireVisibleChange || typedCase === "wordart-insert")
+      assert(item.targetSlideVisibleChange, "Requested edit must change visible slide pixels");
+    if (typedCase === "wordart-insert") {
+      item.wordArt = await frame.evaluate(() => {
+        const shape = Asc.editor.WordControl.m_oLogicDocument.Slides[0].cSld.spTree.find((shape) => shape.getOwnName?.() === "SBX_TYPED_9F3");
+        return { preset: shape?.getBodyPr()?.prstTxWarp?.preset, renderedWarp: !!shape?.txWarpStruct };
+      });
+      assert.equal(item.wordArt.preset, "textArchUp");
+      assert.equal(item.wordArt.renderedWarp, true);
+    }
     if (chartAuthority) {
       item.visibleRendering.edited = await visibleSlide(frame);
       assert.notEqual(item.visibleRendering.edited.sha256, item.visibleRendering.before.sha256, "Chart edit must redraw the visible slide");
@@ -885,6 +904,19 @@ try {
         );
       item.chartDataAuthority.persistedPayloadVerified = true;
     }
+    if (typedCase === "wordart-insert") {
+      const xml = new DOMParser().parseFromString(strFromU8(unzipSync(bytes)["ppt/slides/slide1.xml"]), "application/xml");
+      const pns = "http://schemas.openxmlformats.org/presentationml/2006/main";
+      const ans = "http://schemas.openxmlformats.org/drawingml/2006/main";
+      const shapes = Array.from(xml.getElementsByTagNameNS(pns, "sp")).filter((shape) => shape.getElementsByTagNameNS(pns, "cNvPr")[0]?.getAttribute("name") === "SBX_TYPED_9F3");
+      assert.equal(shapes.length, 1, "Saved WordArt must retain its authored name");
+      const warp = shapes[0].getElementsByTagNameNS(ans, "prstTxWarp")[0];
+      assert.equal(warp?.getAttribute("prst"), "textArchUp", "Saved WordArt must retain the requested curve");
+      const run = shapes[0].getElementsByTagNameNS(ans, "rPr")[0];
+      assert.equal(run?.getAttribute("sz"), "3600", "Saved font size must be 36 points");
+      assert.equal(run?.getAttribute("b"), "1", "Saved WordArt must retain bold text");
+      item.wordArt.savedFormatVerified = true;
+    }
     item.savedSha256 = sha(bytes);
     Object.assign(item, packageDelta(bytes));
     await writeFile(path.join(outputRoot, "saved.pptx"), bytes, {
@@ -903,6 +935,11 @@ try {
     await frame.evaluate(() => window.Asc.editor.Undo());
     await page.waitForTimeout(150);
     item.undoDifferences = differences(before, await typedProjection(frame));
+    if (requireVisibleChange || typedCase === "wordart-insert") {
+      item.targetSlideUndo = await visibleSlide(frame);
+      assert.deepEqual(item.targetSlideUndo, item.slideRendering.before[0], "Undo must restore target slide pixels");
+      await page.screenshot({path: path.join(outputRoot, "undo.png")});
+    }
     if (chartAuthority) {
       item.visibleRendering.undo = await visibleSlide(frame);
       await page.screenshot({path: path.join(outputRoot, "undo.png")});
@@ -917,6 +954,11 @@ try {
     await frame.evaluate(() => window.Asc.editor.Redo());
     await page.waitForTimeout(150);
     item.redoDifferences = differences(edited, await typedProjection(frame));
+    if (requireVisibleChange || typedCase === "wordart-insert") {
+      item.targetSlideRedo = await visibleSlide(frame);
+      assert.deepEqual(item.targetSlideRedo, item.slideRendering.edited[0], "Redo must restore target slide pixels");
+      await page.screenshot({path: path.join(outputRoot, "redo.png")});
+    }
     if (chartAuthority) {
       item.visibleRendering.redo = await visibleSlide(frame);
       await page.screenshot({path: path.join(outputRoot, "redo.png")});
@@ -936,6 +978,8 @@ try {
     item.slideRendering.reopened = await visibleSlides(page, frame, "reopened", reopened.common.slides.length);
     for (let index=1;index<before.common.slides.length;index++)
       assert.deepEqual(item.slideRendering.reopened[index], item.slideRendering.before[index], `Saved untargeted slide ${index+1} must retain visible pixels`);
+    if (requireVisibleChange || typedCase === "wordart-insert")
+      assert.deepEqual(item.slideRendering.reopened[0], item.slideRendering.edited[0], "Saved reopened target slide must match the live edit");
     if (chartAuthority) {
       item.visibleRendering.reopened = await visibleSlide(frame);
       assert.equal(item.visibleRendering.reopened.sha256, item.visibleRendering.edited.sha256, "Saved reopened chart must match the live rendering");
