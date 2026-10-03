@@ -442,6 +442,20 @@ Final compression readback now follows preferred-source compilation and all
 data replacement. UI reproduction still covers 1,186 files and SDK reproduction
 still covers six base JS files plus the local presentation SDK. Policy tests:
 38; component unit tests: 286; type checking and the full local build pass.
-Fresh runtime tests remain separate from those source/build checks. This
-addresses the identified dictionary notice gap; auxiliary WASM, x2t, the
-actual service licensing boundary and full product admission remain unverified.
+Fresh strict Brotli HTTP runtime tests passed: 18 public save/open tests and
+57 selected diagnostic trials, with stable candidate/distribution identities.
+Korean and British English document language assignments remain selectable.
+The shipped C++ spelling worker accepted a known word and rejected an invalid
+word using the new dictionary; the actual native hyphenation WASM also loaded
+the new data. Nineteen portable patches plus the pinned converter fetch exactly
+replay the whole candidate Git tree. These are scoped tests, not all 94 product
+operations or whole-editor source/licensing approval.
+
+A subsequent direct source-package inventory found 269 historical/unselected
+dictionary files still included in the wrapper archive. An archive-only build
+preflight actually failed because the converter output directory was absent;
+the SDK recipe also depended on warm checkout SDK bytes. These packaging/build
+input gaps are preserved and require a separate candidate and cold build proof.
+Runtime dictionary replacement does not certify every file in the source ZIP.
+Auxiliary WASM, x2t, the actual service licensing boundary and full product
+admission remain unverified.
