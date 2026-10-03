@@ -28,6 +28,29 @@ export function readRepositoryIdentity(repositoryRoot) {
   };
 }
 
+// Final evidence must survive a removed worktree; admission uses the strict reader.
+export function readRepositoryEvidence(repositoryRoot) {
+  try {
+    return { valid: true, ...readRepositoryIdentity(repositoryRoot) };
+  } catch (error) {
+    return {
+      valid: false,
+      revision: null,
+      dirty: true,
+      error: String(error.message ?? error),
+    };
+  }
+}
+
+export function repositoryIdentityStable(before, after) {
+  return (
+    /^[0-9a-f]{40}$/u.test(before?.revision ?? "") &&
+    before.revision === after?.revision &&
+    before.dirty === false &&
+    after.dirty === false
+  );
+}
+
 export function readRepositoryPathEquivalence(
   repositoryRoot,
   buildSourceRevision,

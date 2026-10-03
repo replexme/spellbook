@@ -7,6 +7,9 @@ import test from "node:test";
 
 import {
   browserRuntimeBuildInputPaths,
+  readRepositoryIdentity,
+  readRepositoryEvidence,
+  repositoryIdentityStable,
   readRepositoryPathEquivalence,
 } from "./repository-identity.mjs";
 
@@ -78,6 +81,42 @@ test("runtime input equivalence permits unrelated commits and rejects input drif
       ["runtime"],
     );
     assert.equal(drifted.exact, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("trial source proof rejects dirty or changed sources and preserves missing-source evidence", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "spellbook-trial-source-"));
+  const git = (...args) =>
+    execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  try {
+    git("init", "--quiet");
+    git("config", "user.name", "Spellbook Test");
+    git("config", "user.email", "test@invalid.example");
+    writeFileSync(path.join(root, "source.txt"), "one\n");
+    git("add", ".");
+    git("commit", "--quiet", "-m", "initial source");
+    const initial = readRepositoryIdentity(root);
+    assert.equal(
+      repositoryIdentityStable(initial, readRepositoryEvidence(root)),
+      true,
+    );
+    writeFileSync(path.join(root, "untracked.txt"), "change\n");
+    const dirty = readRepositoryEvidence(root);
+    assert.equal(repositoryIdentityStable(initial, dirty), false);
+    assert.equal(repositoryIdentityStable(dirty, dirty), false);
+    git("add", ".");
+    git("commit", "--quiet", "-m", "changed source");
+    assert.equal(
+      repositoryIdentityStable(initial, readRepositoryEvidence(root)),
+      false,
+    );
+    rmSync(root, { recursive: true, force: true });
+    const missing = readRepositoryEvidence(root);
+    assert.equal(missing.valid, false);
+    assert.equal(repositoryIdentityStable(initial, missing), false);
+    assert.equal(repositoryIdentityStable(undefined, missing), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

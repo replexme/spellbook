@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { readRepositoryIdentity } from "./repository-identity.mjs";
+import { readRepositoryIdentity, readRepositoryEvidence, repositoryIdentityStable } from "./repository-identity.mjs";
 import { summarizeEngineComparison } from "./comparison-results.mjs";
 import { assessHumanComparisonPreservation } from "./ooxml-worker-source.mjs";
 
@@ -404,30 +404,25 @@ try {
   }
 } finally {
   report.finishedAt = new Date().toISOString();
-  report.finalIntegration = readRepositoryIdentity(root);
-  report.finalCandidate = readRepositoryIdentity(candidate);
-  report.finalCandidateSdkSha256 = createHash("sha256")
-    .update(await readFile(sdkPath))
-    .digest("hex");
+  report.finalIntegration = readRepositoryEvidence(root);
+  report.finalCandidate = readRepositoryEvidence(candidate);
   report.inputSourcesStable = (
     await Promise.all(
       matrix.inputs.map(
         async (input) =>
-          createHash("sha256")
-            .update(await readFile(input.path))
-            .digest("hex") === input.sha256,
+          readFile(input.path).then((bytes) => createHash("sha256").update(bytes).digest("hex") === input.sha256).catch(() => false),
       ),
     )
   ).every(Boolean);
   report.finalCandidateCodeIdentity = await readOnlyOfficeCodeEvidence(candidate);
+  report.finalCandidateSdkSha256 = report.finalCandidateCodeIdentity.files?.find((file) => file.path === "sdkjs/slide/sdk-all.js")?.sha256 ?? null;
   report.finalCandidateDistribution = await readOfficeDistributionEvidence(path.join(candidate, "dist"));
   report.candidateDistributionStable = report.finalCandidateDistribution.valid && candidateDistribution.distributionSha256 === report.finalCandidateDistribution.distributionSha256;
   report.sourceStable =
     report.candidateDistributionStable &&
     candidateCodeIdentity.sha256 === report.finalCandidateCodeIdentity.sha256 &&
-    JSON.stringify(report.finalIntegration) === JSON.stringify(identity) &&
-    JSON.stringify(report.finalCandidate) ===
-      JSON.stringify(candidateIdentity) &&
+    repositoryIdentityStable(identity, report.finalIntegration) &&
+    repositoryIdentityStable(candidateIdentity, report.finalCandidate) &&
     report.finalCandidateSdkSha256 === sdkDigest &&
     report.inputSourcesStable;
   report.summary = summarizeEngineComparison({

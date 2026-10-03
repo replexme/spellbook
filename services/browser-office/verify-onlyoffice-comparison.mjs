@@ -18,7 +18,7 @@ import path from "node:path";
 import { createServer } from "node:http";
 import { chromium } from "@playwright/test";
 import { unzipSync, strFromU8 } from "fflate";
-import { readRepositoryIdentity } from "./repository-identity.mjs";
+import { readRepositoryIdentity, readRepositoryEvidence, repositoryIdentityStable } from "./repository-identity.mjs";
 import { buildHarness } from "./build-harness.mjs";
 
 const flag = (name, fallback) => {
@@ -95,6 +95,7 @@ const candidate = readRepositoryIdentity(candidateRoot);
 const integration = readRepositoryIdentity(
   path.resolve(import.meta.dirname, "../.."),
 );
+assert(!candidate.dirty && !integration.dirty, "Commit candidate and integration sources before recording trials");
 const packageDelta = (bytes) => {
   const before = unzipSync(source),
     after = unzipSync(bytes);
@@ -794,13 +795,16 @@ try {
 } finally {
   await browser.close();
   await new Promise((resolve) => diagnosticServer.close(resolve));
+  report.finalIntegration = readRepositoryEvidence(path.resolve(import.meta.dirname, "../.."));
+  report.finalCandidate = readRepositoryEvidence(candidateRoot);
+  report.sourceStable = repositoryIdentityStable(integration, report.finalIntegration) && repositoryIdentityStable(candidate, report.finalCandidate);
   report.finalCandidateCodeIdentity = await readOnlyOfficeCodeEvidence(candidateRoot);
   report.finalCandidateDistribution = await readOfficeDistributionEvidence(path.join(candidateRoot, "dist"));
   report.candidateDistributionStable = report.finalCandidateDistribution.valid && candidateDistribution.distributionSha256 === report.finalCandidateDistribution.distributionSha256;
   report.candidateCodeStable = candidateCodeIdentity.sha256 === report.finalCandidateCodeIdentity.sha256;
-  if (!report.candidateCodeStable || !report.candidateDistributionStable) {
+  if (!report.sourceStable || !report.candidateCodeStable || !report.candidateDistributionStable) {
     process.exitCode = 1;
-    report.error = !report.candidateDistributionStable ? "candidate_distribution_changed_or_unverified_during_trial" : "candidate_generated_code_changed_during_trial";
+    report.error = !report.sourceStable ? "candidate_or_integration_source_changed_during_trial" : !report.candidateDistributionStable ? "candidate_distribution_changed_or_unverified_during_trial" : "candidate_generated_code_changed_during_trial";
   }
   report.finishedAt = new Date().toISOString();
   await writeFile(
