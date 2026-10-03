@@ -330,3 +330,23 @@ explicit diagnostics and never claims complete product coverage. Even a passing
 full diagnostic batch stays `not_admitted`: the canonical product observation,
 commands, original preservation, recovery/playback and independent PowerPoint
 gates remain separate requirements.
+
+## Reproduced SDK source
+
+`0014-reproducible-preferred-sdk-source.patch` corrects the SDK source lineage.
+The shipped SDK includes CryptPad modifications; an unmodified ONLYOFFICE
+archive alone does not provide the preferred source of those SDK bytes. The
+patch adds the exact `cryptpad/onlyoffice-editor` SDK subtree at
+`ca1ddd43c1e2e149607d1c583773c20d85911bec`, its original license, a digest-bound
+fetch and a local SDK rebuild using the bundled shrinkwrap and official Grunt
+tasks. Six base JavaScript files and the locally patched presentation SDK were
+reproduced byte for byte. One locked patch list drives both reproduction and
+runtime builds. Rebuild inputs and outputs are checked again at packaging;
+stale, missing or changed receipts cannot certify the SDK. Temporary compiler
+files are removed after each run.
+
+The rebuilt-source candidate is `e2b58d9`. Its JavaScript/WASM runtime bytes
+match the previously tested `4365552` candidate; the source/legal distribution
+changes. `sdkJavaScriptRebuildVerified` is scoped to those SDK JS files. Full
+modified web-apps, auxiliary WASM, x2t reproduction, product admission and
+independent PowerPoint fidelity remain separate unfinished gates.

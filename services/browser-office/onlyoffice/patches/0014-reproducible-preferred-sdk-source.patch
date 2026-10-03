@@ -1,0 +1,437 @@
+diff --git a/NOTICE b/NOTICE
+index 3c75687..c70ade7 100644
+--- a/NOTICE
++++ b/NOTICE
+@@ -1,6 +1,8 @@
+ Spellbook research editor: modified software, not an official ONLYOFFICE product.
+ Local modifications dated 2026-10-03 by Spellbook contributors.
+ Based on agentbridges-ai/onlyoffice-browser 0.3.34 and ONLYOFFICE SDK 9.3.0.140.
++The SDK retains CryptPad browser modifications from cryptpad/onlyoffice-editor
++commit ca1ddd43c1e2e149607d1c583773c20d85911bec; its SDK source is included.
+ Changes cover native history/serialization fixes, parent-owned save persistence,
+ reviewed fonts and source-bound distribution packaging. Modified source and build
+ materials accompany the static distribution. No ONLYOFFICE endorsement is implied.
+diff --git a/bin/build.sh b/bin/build.sh
+index a8f3c4c..38d1637 100755
+--- a/bin/build.sh
++++ b/bin/build.sh
+@@ -6,16 +6,11 @@ set -e
+ echo "Starting build process..."
+ 
+ node scripts/fetch-license-materials.mjs
++node scripts/rebuild-preferred-sdk.mjs
+ 
+ # Run Vite build through the project-local binary.
+ ./node_modules/.bin/vite build
+-node scripts/patch-onlyoffice-slide-group-reader.mjs dist
+-node scripts/patch-onlyoffice-smartart-connection-map.mjs dist
+-node scripts/patch-onlyoffice-smartart-line-path.mjs dist
+-node scripts/patch-onlyoffice-smartart-transition-style.mjs dist
+-node scripts/patch-onlyoffice-chart-point-recalc.mjs dist
+-node scripts/patch-onlyoffice-field-cache-history.mjs dist
+-node scripts/patch-onlyoffice-group-redo-history.mjs dist
++node scripts/apply-local-sdk-patches.mjs dist
+ 
+ # Keep the deployable demo/runtime lean by removing low-frequency bundled
+ # assets and emitting canonical path packs for per-document-type CDN sync.
+diff --git a/readme.md b/readme.md
+index 8f042c0..af9fbb5 100644
+--- a/readme.md
++++ b/readme.md
+@@ -152,4 +152,15 @@ This project does not ship runtime font files. Generate and mount fonts before o
+ 
+ ## License
+ 
++The local research distribution includes the exact CryptPad-modified preferred
++SDK source used by its browser runtime. `scripts/rebuild-preferred-sdk.mjs`
++rebuilds six SDK JavaScript files and applies the local presentation patches,
++requiring exact SHA-256 equality. Run it after fetching the locked sources;
++on macOS set `JAVA_HOME` to an installed JDK so compilation stays in the
++background. It uses the upstream SDK shrinkwrap and its official Grunt tasks.
++The source archive, receipt and current build inputs are checked again before
++packaging. `npm run build` includes this check and removes temporary compiler
++files. The SDK-JS receipt does not verify all modified web-apps, auxiliary WASM
++engines or x2t; full editor source correspondence remains unverified.
++
+ [AGPL-3.0](LICENSE)
+diff --git a/runtime-source-lock.json b/runtime-source-lock.json
+index 0fd485b..3e4fdb6 100644
+--- a/runtime-source-lock.json
++++ b/runtime-source-lock.json
+@@ -34,6 +34,68 @@
+       "sourceUrl": "https://codeload.github.com/ONLYOFFICE/build_tools/tar.gz/849d78fea08ff3bf1329e7a7f31def02f30d0918",
+       "archive": "build-tools-source.tar.gz",
+       "archiveSha256": "0d24b2bb1a39db5971b6c3643e79b72c2bae15cdeea44b4d888aa77a5059f34d"
++    },
++    {
++      "id": "cryptpad-sdkjs",
++      "repository": "https://github.com/cryptpad/onlyoffice-editor",
++      "commit": "ca1ddd43c1e2e149607d1c583773c20d85911bec",
++      "sourcePath": "sdkjs",
++      "tree": "9082111b5fe378270e814b646b3ecc4275a27bd6",
++      "sourceTransport": "git-archive",
++      "sourceUrl": "https://github.com/cryptpad/onlyoffice-editor.git",
++      "archive": "cryptpad-sdkjs-source.tar.gz",
++      "archiveSha256": "25a8cd30bef5d843fc2a83fa8ad6efb5e5b587dddaf60d62bd30f37cef5509a0"
+     }
+-  ]
++  ],
++  "sdkRebuild": {
++    "sourceId": "cryptpad-sdkjs",
++    "tasks": [
++      "compile-word",
++      "compile-cell",
++      "compile-slide"
++    ],
++    "level": "WHITESPACE_ONLY",
++    "appCopyright": "Copyright (C) Ascensio System SIA 2012-2026. All rights reserved",
++    "baseOutputs": [
++      {
++        "path": "sdkjs/word/sdk-all-min.js",
++        "sha256": "358cbe59cdb19ad93db45b688a371eee72f99dabb8a234cb3fb99da9356d4853"
++      },
++      {
++        "path": "sdkjs/word/sdk-all.js",
++        "sha256": "36b26a7bcdceecbe4d4ce92ec0425278b3575c333e1efd5c4137cf2cd3a459a8"
++      },
++      {
++        "path": "sdkjs/cell/sdk-all-min.js",
++        "sha256": "70888a3e4d78ecf12e7711192fb70ac7ee1e0046b6c06fc6554c8cdbd0c60fe0"
++      },
++      {
++        "path": "sdkjs/cell/sdk-all.js",
++        "sha256": "9ba43cea6faa94124c1d4694d8186b7aeab0a3572fe3e841e06ee2f687b3e6f3"
++      },
++      {
++        "path": "sdkjs/slide/sdk-all-min.js",
++        "sha256": "e756aba4900987f06f1bc61e3b855fd675f3c072eeb889e6fa988a8a3c46b0ed"
++      },
++      {
++        "path": "sdkjs/slide/sdk-all.js",
++        "sha256": "56178693da975bf42c990f3906ac63d9f45c43d91c1191c99f0f2b2bb222df8e"
++      }
++    ],
++    "patchedOutputs": [
++      {
++        "path": "sdkjs/slide/sdk-all.js",
++        "sha256": "d6566c9e9157c803b8012700c1cf74bd4eadfeb2ce036a23f092af8b2d2d6cc6"
++      }
++    ],
++    "patchScripts": [
++      "scripts/patch-onlyoffice-slide-group-reader.mjs",
++      "scripts/patch-onlyoffice-smartart-connection-map.mjs",
++      "scripts/patch-onlyoffice-smartart-line-path.mjs",
++      "scripts/patch-onlyoffice-smartart-transition-style.mjs",
++      "scripts/patch-onlyoffice-chart-point-recalc.mjs",
++      "scripts/patch-onlyoffice-field-cache-history.mjs",
++      "scripts/patch-onlyoffice-group-redo-history.mjs"
++    ]
++  }
+ }
+diff --git a/scripts/apply-local-sdk-patches.mjs b/scripts/apply-local-sdk-patches.mjs
+new file mode 100644
+index 0000000..22c3f2b
+--- /dev/null
++++ b/scripts/apply-local-sdk-patches.mjs
+@@ -0,0 +1,10 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import fs from 'node:fs';
++import path from 'node:path';
++import { execFileSync } from 'node:child_process';
++const root = path.resolve(import.meta.dirname, '..');
++const lock = JSON.parse(fs.readFileSync(path.join(root, 'runtime-source-lock.json'), 'utf8'));
++const output = path.resolve(process.argv[2] || path.join(root, 'dist'));
++if (path.basename(output) !== 'dist') throw new Error('Only generated dist assets may be patched');
++for (const script of lock.sdkRebuild.patchScripts)
++  execFileSync(process.execPath, [path.join(root, script), output], { stdio: 'inherit' });
+diff --git a/scripts/build-license-materials.mjs b/scripts/build-license-materials.mjs
+index 423434c..a6c09ef 100644
+--- a/scripts/build-license-materials.mjs
++++ b/scripts/build-license-materials.mjs
+@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
+ import { execFileSync } from 'node:child_process';
+ import { verifyOnlyOfficeFontAssets } from './verify-onlyoffice-font-assets.mjs';
+ import { getRuntimeAssetPack } from './build-onlyoffice-runtime-assets.mjs';
++import { sdkBuildInputPaths, verifySdkRebuildEvidence } from './sdk-rebuild-evidence.mjs';
+ 
+ const root = path.resolve(import.meta.dirname, '..');
+ const dist = path.join(root, 'dist');
+@@ -13,6 +14,13 @@ const fonts = path.join(materials, 'font-assets');
+ const lock = JSON.parse(fs.readFileSync(path.join(root, 'runtime-source-lock.json'), 'utf8'));
+ const sha = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+ const modificationNotice = fs.readFileSync(path.join(root, 'NOTICE'), 'utf8');
++const sdkEvidence = JSON.parse(fs.readFileSync(path.join(materials, 'sdk-rebuild-evidence.json'), 'utf8'));
++verifySdkRebuildEvidence(lock, sdkEvidence, sdkBuildInputPaths(lock).map((name) => ({ path: name, sha256: sha(path.join(root, name)) })));
++for (const base of lock.sdkRebuild.baseOutputs) {
++  const expected = lock.sdkRebuild.patchedOutputs.find((value) => value.path === base.path) || base;
++  if (sha(path.join(dist, expected.path)) !== expected.sha256)
++    throw new Error('Distribution does not match the rebuilt SDK: ' + expected.path);
++}
+ const modificationNoticeHtml = modificationNotice.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\n', '<br>');
+ if (verifyOnlyOfficeFontAssets(fonts).fontSet !== 'redistributable')
+   throw new Error('Distribution requires reviewed redistributable fonts');
+@@ -44,6 +52,7 @@ const sourceDir = path.join(dist, 'sources');
+ fs.mkdirSync(sourceDir, { recursive: true });
+ for (const source of lock.sources)
+   fs.copyFileSync(path.join(materials, 'upstream', source.archive), path.join(sourceDir, source.archive));
++fs.copyFileSync(path.join(materials, 'sdk-rebuild-evidence.json'), path.join(sourceDir, 'sdk-rebuild-evidence.json'));
+ fs.copyFileSync(path.join(root, 'LICENSE'), path.join(dist, 'LICENSE-AGPL-3.0.txt'));
+ const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+   .split('\0')
+@@ -53,6 +62,8 @@ const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: '
+       fs.existsSync(path.join(root, file)) &&
+       !/^(?:public\/(?:sdkjs|web-apps|wasm|fonts|fixtures)\/|artifacts\/)/.test(file),
+   );
++for (const file of sdkBuildInputPaths(lock))
++  if (!tracked.includes(file)) throw new Error('SDK build source is absent from the wrapper source archive: ' + file);
+ const fileList = path.join(materials, 'wrapper-source-files.txt');
+ fs.writeFileSync(fileList, tracked.join('\0') + '\0');
+ execFileSync('tar', ['-czf', path.join(sourceDir, 'browser-office-source.tar.gz'), '--null', '-T', fileList], {
+@@ -69,7 +80,9 @@ fs.writeFileSync(
+ fs.writeFileSync(
+   path.join(sourceDir, 'BUILD.md'),
+   '# Build materials\n\nThe browser-office archive includes local modifications, package lockfiles and bin/build.sh. Use Node 20.19+ and the declared package manager; install locked dependencies. Copy distributed font bytes to their font-licenses.json inputFile names, with those same hashes and notices in the input permission manifest. Run the included font generator with --license-manifest and output .temp/licensing/font-assets. Run npm run build: it fetches/verifies the pinned source archives and converter release, builds the editor/library and packages the legal materials.\n\n' +
+-    'SDKJS and web-apps preferred source and build_tools are bundled at the pinned commits in distribution-manifest.json. Follow their build instructions for upstream editor assets; apply the browser-office scripts/patch-onlyoffice-*.mjs through bin/build.sh.\n\n' +
++    'The shipped SDK uses CryptPad browser modifications, not the unmodified ONLYOFFICE SDK. cryptpad-sdkjs-source.tar.gz exports only sdkjs from cryptpad/onlyoffice-editor commit ca1ddd43c1e2e149607d1c583773c20d85911bec, tree 9082111b5fe378270e814b646b3ecc4275a27bd6. Its original SDK license and notices are included. The unmodified SDK archive is a reference, not the complete preferred source of these distributed SDK bytes.\n\n' +
++    'Run node scripts/rebuild-preferred-sdk.mjs after fetching the locked source archives. It uses the bundled SDK npm-shrinkwrap.json, Node 22, an installed JDK (set JAVA_HOME on macOS), official compile-word/compile-cell/compile-slide tasks, WHITESPACE_ONLY and the exact copyright/build variables in runtime-source-lock.json. Six SDK base JS files and the locally patched presentation SDK must match the locked SHA-256 values. Temporary compiler files are removed after the run; sdk-rebuild-evidence.json records the result. npm run build also requires this rebuild before packaging.\n\n' +
++    'web-apps source and build_tools are bundled as upstream references. Correspondence of all modified web-apps, auxiliary WASM engines and x2t bytes has not yet been established by the SDK-JS rebuild. The entire upstream editor remains unverified; do not treat sdkJavaScriptRebuildVerified as full corresponding-source completion.\n\n' +
+     'x2t-source.tar.gz includes the modified ONLYOFFICE core, Dockerfile, build.sh and dependencies/build instructions for v9.3.0+4. Run its ./build.sh locally. Published x2t WASM SHA-256 is bound in runtime-source-lock.json.\n\n' +
+     'Font source locations, hashes and full OFL notices are in font-licenses.json. The reviewed generator runs allfontsgen with system-font scanning disabled. Provide these exact input bytes with the permission manifest to generate-onlyoffice-font-assets.mjs.\n\n' +
+     'Source packaging and release-byte identity are checked here. Rebuilding the entire upstream editor to reproduce its shipped bytes has not been performed by this packaging step.\n',
+@@ -102,6 +115,7 @@ fs.writeFileSync(
+       x2tVersion: lock.x2tVersion,
+       sourceMaterialsPackaged: true,
+       upstreamEditorRebuildVerified: false,
++      sdkJavaScriptRebuildVerified: true,
+       sources: [
+         ...lock.sources,
+         {
+diff --git a/scripts/fetch-git-source-archive.mjs b/scripts/fetch-git-source-archive.mjs
+new file mode 100644
+index 0000000..5d6fa54
+--- /dev/null
++++ b/scripts/fetch-git-source-archive.mjs
+@@ -0,0 +1,33 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import { execFileSync } from 'node:child_process';
++import { createHash } from 'node:crypto';
++import { createGzip } from 'node:zlib';
++import { pipeline } from 'node:stream/promises';
++
++// Export only the preferred SDK source, not the upstream repository's fonts.
++export async function fetchGitSourceArchive(source, output) {
++  if (!/^[a-f0-9]{40}$/.test(source.commit) || !/^[a-f0-9]{40}$/.test(source.tree) || source.sourcePath !== 'sdkjs')
++    throw new Error('Pinned SDK commit, tree and subtree required');
++  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'office-sdk-source-'));
++  const git = (...args) => execFileSync('git', args, { cwd: temporary, encoding: 'utf8', timeout: 300000, maxBuffer: 8 * 1024 * 1024 });
++  const pending = output + '.pending';
++  try {
++    git('init', '--quiet');
++    git('remote', 'add', 'origin', source.sourceUrl);
++    git('fetch', '--quiet', '--filter=blob:none', '--depth=1', 'origin', source.commit);
++    if (git('rev-parse', 'FETCH_HEAD').trim() !== source.commit || git('rev-parse', source.commit + ':' + source.sourcePath).trim() !== source.tree)
++      throw new Error('Preferred SDK source identity mismatch');
++    const tar = path.join(temporary, 'source.tar');
++    git('archive', '--format=tar', '--output=' + tar, source.commit, source.sourcePath);
++    await pipeline(fs.createReadStream(tar), createGzip({ level: 9 }), fs.createWriteStream(pending, { flags: 'wx' }));
++    const sha = createHash('sha256').update(fs.readFileSync(pending)).digest('hex');
++    if (sha !== source.archiveSha256) throw new Error('Preferred SDK archive hash mismatch');
++    fs.renameSync(pending, output);
++  } finally {
++    fs.rmSync(pending, { force: true });
++    fs.rmSync(temporary, { recursive: true, force: true });
++  }
++}
+diff --git a/scripts/fetch-license-materials.mjs b/scripts/fetch-license-materials.mjs
+index d0bd2e5..bae35e4 100644
+--- a/scripts/fetch-license-materials.mjs
++++ b/scripts/fetch-license-materials.mjs
+@@ -4,6 +4,7 @@ import path from 'node:path';
+ import { createHash } from 'node:crypto';
+ import { execFileSync } from 'node:child_process';
+ import { verifyOnlyOfficeFontAssets } from './verify-onlyoffice-font-assets.mjs';
++import { fetchGitSourceArchive } from './fetch-git-source-archive.mjs';
+ 
+ const root = path.resolve(import.meta.dirname, '..');
+ const output = path.resolve(process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || path.join(root, '.temp/licensing'));
+@@ -21,8 +22,13 @@ async function obtain(url, file, expected) {
+   if (sha(bytes) !== expected) throw new Error('Source/release hash mismatch: ' + url);
+   fs.writeFileSync(file, bytes);
+ }
+-for (const source of lock.sources)
+-  await obtain(source.sourceUrl, path.join(upstream, source.archive), source.archiveSha256);
++for (const source of lock.sources) {
++  const file = path.join(upstream, source.archive);
++  if (source.sourceTransport === 'git-archive') {
++    if (!fs.existsSync(file) || sha(fs.readFileSync(file)) !== source.archiveSha256)
++      await fetchGitSourceArchive(source, file);
++  } else await obtain(source.sourceUrl, file, source.archiveSha256);
++}
+ const release = path.join(upstream, 'x2t-release.tar.gz');
+ await obtain(
+   'https://github.com/agentbridges-ai/onlyoffice-x2t-wasm/releases/download/v9.3.0%2B4/onlyoffice-x2t-wasm-v9.3.0%2B4.tar.gz',
+diff --git a/scripts/rebuild-preferred-sdk.mjs b/scripts/rebuild-preferred-sdk.mjs
+new file mode 100644
+index 0000000..0c2be16
+--- /dev/null
++++ b/scripts/rebuild-preferred-sdk.mjs
+@@ -0,0 +1,74 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import fs from 'node:fs';
++import path from 'node:path';
++import { execFileSync, spawnSync } from 'node:child_process';
++import { createHash } from 'node:crypto';
++import { sdkBuildInputPaths, verifySdkRebuildEvidence } from './sdk-rebuild-evidence.mjs';
++
++const root = path.resolve(import.meta.dirname, '..');
++const materials = path.resolve(process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || path.join(root, '.temp/licensing'));
++const lock = JSON.parse(fs.readFileSync(path.join(root, 'runtime-source-lock.json'), 'utf8'));
++const source = lock.sources.find((value) => value.id === lock.sdkRebuild.sourceId);
++const archive = path.join(materials, 'upstream', source.archive);
++const sha = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
++const readBuildInputs = () => sdkBuildInputPaths(lock).map((name) => ({ path: name, sha256: sha(path.join(root, name)) }));
++if (sha(archive) !== source.archiveSha256) throw new Error('Preferred SDK archive changed');
++if (process.platform === 'darwin' && !process.env.JAVA_HOME) throw new Error('Set JAVA_HOME to an installed JDK for background SDK compilation');
++const temporary = fs.mkdtempSync(path.join(materials, 'sdk-rebuild-'));
++const log = fs.openSync(path.join(materials, 'sdk-rebuild.log'), 'w');
++const evidenceFile = path.join(materials, 'sdk-rebuild-evidence.json');
++// A failed rebuild must never retain a previously successful receipt.
++fs.rmSync(evidenceFile, { force: true });
++const env = {
++  ...process.env,
++  APP_COPYRIGHT: lock.sdkRebuild.appCopyright,
++  PRODUCT_VERSION: '0.0.0',
++  BUILD_NUMBER: '0',
++  COMPANY_NAME: 'onlyoffice',
++  PUBLISHER_URL: 'https://www.onlyoffice.com/',
++  JAVA_TOOL_OPTIONS: '-XX:ActiveProcessorCount=1 -Xmx2048m',
++  PATH: (process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin') + path.delimiter : '') + process.env.PATH,
++};
++const run = (command, args, cwd = temporary) => execFileSync(command, args, { cwd, env, stdio: ['ignore', log, log], timeout: 3600000 });
++const evidence = { schemaVersion: 1, status: 'running', sourceCommit: source.commit, sourceTree: source.tree, sourceArchiveSha256: source.archiveSha256, startedAt: new Date().toISOString(), baseOutputs: [], patchedOutputs: [], scope: 'Six SDK JavaScript files and local presentation SDK patches only. Excludes web-apps, auxiliary WASM engines and x2t reproduction.' };
++evidence.buildInputs = readBuildInputs();
++try {
++  run('tar', ['-xzf', archive]);
++  const sdk = path.join(temporary, 'sdkjs');
++  const build = path.join(sdk, 'build');
++  evidence.dependencyLockSha256 = sha(path.join(build, 'npm-shrinkwrap.json'));
++  run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], build);
++  evidence.nodeVersion = process.version;
++  const java = spawnSync('java', ['-version'], { env, encoding: 'utf8', timeout: 10000 });
++  if (java.error || java.status !== 0) throw new Error('Installed JDK required');
++  evidence.javaVersion = (java.stderr + java.stdout).trim();
++  // The upstream shrinkwrap does not include grunt-cli; invoke the locked
++  // Grunt library directly instead of relying on an unpinned global command.
++  const entry = path.join(build, 'run-sdk-build.cjs');
++  fs.writeFileSync(entry, 'require("./node_modules/grunt").tasks(' + JSON.stringify(lock.sdkRebuild.tasks) + ',' + JSON.stringify({ level: lock.sdkRebuild.level }) + ');\n');
++  run(process.execPath, [entry], build);
++  for (const expected of lock.sdkRebuild.baseOutputs) {
++    const actual = sha(path.join(sdk, 'deploy', expected.path));
++    if (actual !== expected.sha256 || sha(path.join(root, 'public', expected.path)) !== expected.sha256) throw new Error('SDK base output mismatch: ' + expected.path);
++    evidence.baseOutputs.push({ ...expected, exactMatch: true });
++  }
++  const generated = path.join(temporary, 'dist');
++  fs.cpSync(path.join(sdk, 'deploy/sdkjs'), path.join(generated, 'sdkjs'), { recursive: true });
++  run(process.execPath, [path.join(root, 'scripts/apply-local-sdk-patches.mjs'), generated]);
++  for (const expected of lock.sdkRebuild.patchedOutputs) {
++    if (sha(path.join(generated, expected.path)) !== expected.sha256) throw new Error('Patched SDK output mismatch: ' + expected.path);
++    evidence.patchedOutputs.push({ ...expected, exactMatch: true });
++  }
++  evidence.status = 'sdk-js-and-local-patches-reproduced';
++  verifySdkRebuildEvidence(lock, evidence, readBuildInputs());
++} catch (error) {
++  evidence.status = 'failed';
++  evidence.error = String(error.message ?? error);
++  process.exitCode = 1;
++} finally {
++  evidence.finishedAt = new Date().toISOString();
++  fs.writeFileSync(evidenceFile, JSON.stringify(evidence, null, 2) + '\n');
++  fs.closeSync(log);
++  fs.rmSync(temporary, { recursive: true, force: true });
++}
++console.log(JSON.stringify(evidence));
+diff --git a/scripts/sdk-rebuild-evidence.mjs b/scripts/sdk-rebuild-evidence.mjs
+new file mode 100644
+index 0000000..b93b318
+--- /dev/null
++++ b/scripts/sdk-rebuild-evidence.mjs
+@@ -0,0 +1,29 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++export const sdkBuildInputPaths = (lock) => [
++  'runtime-source-lock.json', 'scripts/rebuild-preferred-sdk.mjs', 'scripts/sdk-rebuild-evidence.mjs', 'scripts/apply-local-sdk-patches.mjs', ...lock.sdkRebuild.patchScripts,
++];
++export function verifySdkRebuildEvidence(lock, evidence, currentInputs) {
++  const source = lock.sources.find((value) => value.id === lock.sdkRebuild?.sourceId);
++  if (!source || evidence?.schemaVersion !== 1 || evidence.status !== 'sdk-js-and-local-patches-reproduced' || evidence.sourceCommit !== source.commit || evidence.sourceTree !== source.tree || evidence.sourceArchiveSha256 !== source.archiveSha256)
++    throw new Error('Matching preferred-source SDK rebuild evidence required');
++  for (const kind of ['baseOutputs', 'patchedOutputs']) {
++    const expected = lock.sdkRebuild[kind];
++    const actual = evidence[kind];
++    if (!expected?.length || actual?.length !== expected.length || new Set(actual.map((value) => value.path)).size !== actual.length)
++      throw new Error('Incomplete or duplicate SDK rebuild outputs: ' + kind);
++    for (const file of expected) {
++      const verified = actual.find((value) => value.path === file.path);
++      if (verified?.exactMatch !== true || verified.sha256 !== file.sha256)
++        throw new Error('SDK rebuild output mismatch: ' + file.path);
++    }
++  }
++  const paths = sdkBuildInputPaths(lock);
++  if (evidence.buildInputs?.length !== paths.length || currentInputs?.length !== paths.length || new Set(evidence.buildInputs.map((file) => file.path)).size !== paths.length)
++    throw new Error('Complete SDK build source identity required');
++  for (const name of paths) {
++    const original = evidence.buildInputs.find((file) => file.path === name);
++    const current = currentInputs.find((file) => file.path === name);
++    if (!original || !current || original.sha256 !== current.sha256) throw new Error('SDK build source changed: ' + name);
++  }
++  return { sdkJavaScriptRebuildVerified: true, upstreamEditorRebuildVerified: false };
++}
+diff --git a/scripts/sdk-rebuild-evidence.test.mjs b/scripts/sdk-rebuild-evidence.test.mjs
+new file mode 100644
+index 0000000..05362f5
+--- /dev/null
++++ b/scripts/sdk-rebuild-evidence.test.mjs
+@@ -0,0 +1,41 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { sdkBuildInputPaths, verifySdkRebuildEvidence as verify } from './sdk-rebuild-evidence.mjs';
++const lock = { sources: [{ id: 'sdk', commit: 'commit', tree: 'tree', archiveSha256: 'archive' }], sdkRebuild: { sourceId: 'sdk', patchScripts: ['scripts/patch.mjs'], baseOutputs: [{ path: 'base.js', sha256: 'base' }], patchedOutputs: [{ path: 'patched.js', sha256: 'patched' }] } };
++const inputs = () => sdkBuildInputPaths(lock).map((path) => ({ path, sha256: 'unchanged' }));
++const verifySdkRebuildEvidence = (lock, receipt, current = inputs()) => verify(lock, receipt, current);
++const receipt = () => ({ schemaVersion: 1, status: 'sdk-js-and-local-patches-reproduced', sourceCommit: 'commit', sourceTree: 'tree', sourceArchiveSha256: 'archive', buildInputs: inputs(), baseOutputs: [{ path: 'base.js', sha256: 'base', exactMatch: true }], patchedOutputs: [{ path: 'patched.js', sha256: 'patched', exactMatch: true }] });
++test('SDK reproduction never certifies the entire editor', () => {
++  assert.deepEqual(verifySdkRebuildEvidence(lock, receipt()), { sdkJavaScriptRebuildVerified: true, upstreamEditorRebuildVerified: false });
++});
++for (const field of ['sourceCommit', 'sourceTree', 'sourceArchiveSha256', 'status']) test('rejects changed ' + field, () => {
++  const evidence = receipt(); evidence[field] = 'changed';
++  assert.throws(() => verifySdkRebuildEvidence(lock, evidence), /rebuild evidence/);
++});
++for (const kind of ['baseOutputs', 'patchedOutputs']) {
++  test('rejects missing or duplicate ' + kind, () => {
++    const evidence = receipt(); evidence[kind] = [];
++    assert.throws(() => verifySdkRebuildEvidence(lock, evidence), /outputs/);
++    evidence[kind] = [receipt()[kind][0], receipt()[kind][0]];
++    assert.throws(() => verifySdkRebuildEvidence(lock, evidence), /outputs/);
++  });
++  test('rejects mismatched or unverified ' + kind, () => {
++    for (const field of ['path', 'sha256', 'exactMatch']) {
++      const evidence = receipt(); evidence[kind][0][field] = 'changed';
++      assert.throws(() => verifySdkRebuildEvidence(lock, evidence), /output mismatch/);
++    }
++  });
++}
++test('rejects rebuild source changes after successful SDK compilation', () => {
++  for (const input of inputs()) {
++    const current = inputs(); current.find((file) => file.path === input.path).sha256 = 'changed';
++    assert.throws(() => verifySdkRebuildEvidence(lock, receipt(), current), /source changed/);
++  }
++});
++test('rejects incomplete or duplicate SDK build-source readback', () => {
++  const evidence = receipt(); evidence.buildInputs.pop();
++  assert.throws(() => verifySdkRebuildEvidence(lock, evidence), /source identity/);
++  const duplicate = receipt(); duplicate.buildInputs[1] = duplicate.buildInputs[0];
++  assert.throws(() => verifySdkRebuildEvidence(lock, duplicate), /source identity/);
++});
