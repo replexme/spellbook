@@ -23,3 +23,16 @@ path = ["eval/public/**", "eval/corpus.example.json"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Spellbook contributors"
 SPDX-License-Identifier = "MPL-2.0"
+
+
+[[annotations]]
+path = ["services/browser-office/onlyoffice/patches/**"]
+precedence = "override"
+SPDX-FileCopyrightText = ["Ascensio System SIA and upstream contributors", "2026 Spellbook contributors"]
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+[[annotations]]
+path = ["services/browser-office/onlyoffice/patches/0008-source-bound-distribution-and-reviewed-fonts.patch"]
+precedence = "override"
+SPDX-FileCopyrightText = ["Ascensio System SIA and upstream contributors", "2026 Spellbook contributors"]
+SPDX-License-Identifier = "AGPL-3.0-only AND CC-BY-SA-4.0"
