@@ -459,3 +459,38 @@ input gaps are preserved and require a separate candidate and cold build proof.
 Runtime dictionary replacement does not certify every file in the source ZIP.
 Auxiliary WASM, x2t, the actual service licensing boundary and full product
 admission remain unverified.
+
+
+## Archive-only build owns runtime inputs and regression inputs
+
+Patch `0020-archive-only-runtime-build.patch` (candidate `9cabad5`) removes
+warm-checkout runtime dependencies. The pinned converter release initializes
+its own output directory. Preferred-source SDK compilation and the canonical
+local patch list materialize 426 selected SDK assets into a generated runtime
+staging directory. Vite consumes that directory rather than tracked upstream
+assets. UI compilation owns its print adaptation and generates missing
+compressed variants; final compression follows font/data replacement. A
+packaged wrapper file manifest allows source repackaging without Git and
+excludes all historical/unselected dictionary directories.
+
+An actual archive-only full build passed, with exact scoped SDK/UI reproduction,
+281 valid compressed pairs and no historical dictionary entries in the wrapper
+archive. SDK/UI/WASM plain bytes matched the preceding `1ffd3f0` candidate.
+This candidate still omitted test documents used by the preserved save/open
+harness: a real HTTP fixture request returned 404. Its extracted source also
+failed five engine regression suites because their unmodified SDK test input
+was missing, and macOS AppleDouble metadata was discovered as 21 extra test
+modules. Those failures are retained and not hidden by the full-build success.
+
+Patch `0021-cold-source-test-inputs-and-portable-archive.patch` (candidate
+`e6263c0`) retains the 19 tracked harness documents as explicit wrapper inputs,
+emits the pinned pre-patch presentation SDK as a regression input from the same
+SDK build, and verifies its digest before tests use it. Source archives disable
+macOS metadata sidecars. SDK regression tests still reproduce the original
+exceptions/hooks using the unmodified bytes before testing their fixes. The
+whole Git tree replays exactly from all 21 patches plus the pinned converter
+asset fetch. Component tests (286), script tests (51), type checking, public
+Office tests (428), the gateway, docs and public boundary pass. The final cold
+build and its runtime checks remain separate pending steps until inspected.
+Neither patch certifies auxiliary WASM C++ builds, x2t reproduction, the actual
+service licensing boundary or full product operation admission.

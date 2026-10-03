@@ -1,0 +1,351 @@
+diff --git a/bin/build.sh b/bin/build.sh
+index 38d1637..b2d4041 100755
+--- a/bin/build.sh
++++ b/bin/build.sh
+@@ -10,7 +10,7 @@ node scripts/rebuild-preferred-sdk.mjs
+ 
+ # Run Vite build through the project-local binary.
+ ./node_modules/.bin/vite build
+-node scripts/apply-local-sdk-patches.mjs dist
++# The preferred-source SDK build already applies the canonical patch list.
+ 
+ # Keep the deployable demo/runtime lean by removing low-frequency bundled
+ # assets and emitting canonical path packs for per-document-type CDN sync.
+@@ -19,7 +19,7 @@ node scripts/build-onlyoffice-runtime-assets.mjs \
+     --prune-root \
+     --split-output .onlyoffice-runtime-asset-packs
+ 
+-node scripts/patch-onlyoffice-print-fallback.mjs dist
++# The preferred-source UI build owns its print adaptation.
+ 
+ # Inject timestamp into sw.js for versioning
+ SW_PATH="dist/sw.js"
+diff --git a/scripts/build-license-materials.mjs b/scripts/build-license-materials.mjs
+index 18cd044..0430174 100644
+--- a/scripts/build-license-materials.mjs
++++ b/scripts/build-license-materials.mjs
+@@ -8,6 +8,7 @@ import { getRuntimeAssetPack, buildRuntimeAssets, DEFAULT_DICTIONARIES } from '.
+ import { syncRuntimeCompressedAssets } from './runtime-compressed-assets.mjs';
+ import { uiBuildInputPaths, verifyUiRebuildEvidence } from './ui-rebuild-evidence.mjs';
+ import { sdkBuildInputPaths, verifySdkRebuildEvidence } from './sdk-rebuild-evidence.mjs';
++import { wrapperSourceFiles, packageWrapperSource } from './wrapper-source-files.mjs';
+ 
+ const root = path.resolve(import.meta.dirname, '..');
+ const dist = path.join(root, 'dist');
+@@ -98,21 +99,10 @@ for (const source of lock.sources)
+ fs.copyFileSync(path.join(materials, 'sdk-rebuild-evidence.json'), path.join(sourceDir, 'sdk-rebuild-evidence.json'));
+ fs.copyFileSync(path.join(materials, 'ui-rebuild-evidence.json'), path.join(sourceDir, 'ui-rebuild-evidence.json'));
+ fs.copyFileSync(path.join(root, 'LICENSE'), path.join(dist, 'LICENSE-AGPL-3.0.txt'));
+-const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+-  .split('\0')
+-  .filter(
+-    (file) =>
+-      file &&
+-      fs.existsSync(path.join(root, file)) &&
+-      !/^(?:public\/(?:sdkjs|web-apps|wasm|fonts|fixtures)\/|artifacts\/)/.test(file),
+-  );
++const tracked = wrapperSourceFiles(root);
+ for (const file of [...sdkBuildInputPaths(lock), ...uiBuildInputPaths()])
+   if (!tracked.includes(file)) throw new Error('SDK build source is absent from the wrapper source archive: ' + file);
+-const fileList = path.join(materials, 'wrapper-source-files.txt');
+-fs.writeFileSync(fileList, tracked.join('\0') + '\0');
+-execFileSync('tar', ['-czf', path.join(sourceDir, 'browser-office-source.tar.gz'), '--null', '-T', fileList], {
+-  cwd: root,
+-});
++packageWrapperSource(root, path.join(sourceDir, 'browser-office-source.tar.gz'), materials, tracked);
+ fs.writeFileSync(
+   path.join(dist, 'NOTICE.txt'),
+   modificationNotice +
+@@ -125,9 +115,9 @@ fs.writeFileSync(
+ );
+ fs.writeFileSync(
+   path.join(sourceDir, 'BUILD.md'),
+-  '# Build materials\n\nThe browser-office archive includes local modifications, package lockfiles and bin/build.sh. Use Node 20.19+ and the declared package manager; install locked dependencies. Copy distributed font bytes to their font-licenses.json inputFile names, with those same hashes and notices in the input permission manifest. Run the included font generator with --license-manifest and output .temp/licensing/font-assets. Run npm run build: it fetches/verifies the pinned source archives and converter release, builds the editor/library and packages the legal materials.\n\n' +
++  '# Build materials\n\nThe browser-office archive includes local modifications, package lockfiles and bin/build.sh, plus wrapper-source-files.json for rebuilding without Git. Generated upstream runtime directories and unselected dictionary data are excluded. Use Node 22+ and the declared package manager; install locked dependencies. Copy distributed font bytes to their font-licenses.json inputFile names, with those same hashes and notices in the input permission manifest. Run the included font generator with --license-manifest and output .temp/licensing/font-assets. Run npm run build: it fetches/verifies the pinned source archives and converter release, builds the editor/library and packages the legal materials.\n\n' +
+     'The shipped SDK uses CryptPad browser modifications, not the unmodified ONLYOFFICE SDK. cryptpad-sdkjs-source.tar.gz exports only sdkjs from cryptpad/onlyoffice-editor commit ca1ddd43c1e2e149607d1c583773c20d85911bec, tree 9082111b5fe378270e814b646b3ecc4275a27bd6. Its original SDK license and notices are included. The unmodified SDK archive is a reference, not the complete preferred source of these distributed SDK bytes.\n\n' +
+-    'Run node scripts/rebuild-preferred-sdk.mjs after fetching the locked source archives. It uses the bundled SDK npm-shrinkwrap.json, Node 22, an installed JDK (set JAVA_HOME on macOS), official compile-word/compile-cell/compile-slide tasks, WHITESPACE_ONLY and the exact copyright/build variables in runtime-source-lock.json. Six SDK base JS files and the locally patched presentation SDK must match the locked SHA-256 values. Temporary compiler files are removed after the run; sdk-rebuild-evidence.json records the result. npm run build also requires this rebuild before packaging.\n\n' +
++    'Run node scripts/rebuild-preferred-sdk.mjs after fetching the locked source archives. It uses the bundled SDK npm-shrinkwrap.json, Node 22, an installed JDK (set JAVA_HOME on macOS), official compile-word/compile-cell/compile-slide tasks, WHITESPACE_ONLY and the exact copyright/build variables in runtime-source-lock.json. Six SDK base JS files and the locally patched presentation SDK must match the locked SHA-256 values. Temporary compiler files are removed after the run; sdk-rebuild-evidence.json records the result. npm run build also requires this rebuild before packaging. It materializes the selected SDK assets from these same compiler outputs into a generated staging directory; the build never depends on tracked public/sdkjs bytes. Auxiliary WASM files are copied from the pinned archive and are not certified as C++ source rebuilds.\n\n' +
+     'cryptpad-ui-source.tar.gz provides the preferred web-apps, original wrapper, separate RequireJS vendor input, licenses and build recipes at the exact SDK commit. It excludes upstream fonts. source-overrides contains the readable browser adaptations, which patch the original HTML templates before compilation. UI compilation also requires cryptpad-sdkjs-source.tar.gz for its inlined utilities. Run node scripts/rebuild-preferred-ui.mjs after reviewed fonts have been materialized. Packaging synchronizes all compressed runtime assets after this source build. ui-rebuild-evidence.json binds the recipe inputs, dependency archives and every deployed UI output; packaging rejects missing, different or stale outputs.\n\n' +
+     'SDK JavaScript and deployed UI asset reproduction are scoped proofs. Auxiliary WASM engines, x2t reproduction and the full editor remain unverified; do not treat either scoped flag as complete corresponding-source or licensing approval. Every compressed runtime variant is checked against its final plain bytes, after font/UI modifications and before split-pack synchronization.\n\n' +
+     'x2t-source.tar.gz includes the modified ONLYOFFICE core, Dockerfile, build.sh and dependencies/build instructions for v9.3.0+4. Run its ./build.sh locally. Published x2t WASM SHA-256 is bound in runtime-source-lock.json.\n\n' +
+diff --git a/scripts/fetch-license-materials.mjs b/scripts/fetch-license-materials.mjs
+index bae35e4..62433ea 100644
+--- a/scripts/fetch-license-materials.mjs
++++ b/scripts/fetch-license-materials.mjs
+@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
+ import { execFileSync } from 'node:child_process';
+ import { verifyOnlyOfficeFontAssets } from './verify-onlyoffice-font-assets.mjs';
+ import { fetchGitSourceArchive } from './fetch-git-source-archive.mjs';
++import { wrapperSourceFiles } from './wrapper-source-files.mjs';
+ 
+ const root = path.resolve(import.meta.dirname, '..');
+ const output = path.resolve(process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || path.join(root, '.temp/licensing'));
+@@ -35,9 +36,17 @@ await obtain(
+   release,
+   '94dd84fa067ebed4fde5763bd5592cb506ac61c3cd3c54cec84953535fb6c5c5',
+ );
++const runtime = path.join(output, 'runtime-assets');
++fs.rmSync(runtime, { recursive: true, force: true });
++fs.mkdirSync(path.join(runtime, 'wasm/x2t'), { recursive: true });
++for (const file of wrapperSourceFiles(root).filter((file) => file.startsWith('public/'))) {
++  const destination = path.join(runtime, file.slice('public/'.length));
++  fs.mkdirSync(path.dirname(destination), { recursive: true });
++  fs.copyFileSync(path.join(root, file), destination);
++}
+ for (const file of ['x2t.js', 'x2t.js.br', 'x2t.wasm', 'x2t.wasm.br']) {
+   const bytes = execFileSync('tar', ['-xOf', release, './' + file], { maxBuffer: 64 * 1024 * 1024 });
+   if (file === 'x2t.wasm' && sha(bytes) !== lock.x2tWasmSha256) throw new Error('Converter hash mismatch');
+-  fs.writeFileSync(path.join(root, 'public/wasm/x2t', file), bytes);
++  fs.writeFileSync(path.join(runtime, 'wasm/x2t', file), bytes);
+ }
+ console.log('Verified pinned source archives and converter release. Generate reviewed font assets before building.');
+diff --git a/scripts/rebuild-preferred-sdk.mjs b/scripts/rebuild-preferred-sdk.mjs
+index 0c2be16..9fab86f 100644
+--- a/scripts/rebuild-preferred-sdk.mjs
++++ b/scripts/rebuild-preferred-sdk.mjs
+@@ -4,6 +4,7 @@ import path from 'node:path';
+ import { execFileSync, spawnSync } from 'node:child_process';
+ import { createHash } from 'node:crypto';
+ import { sdkBuildInputPaths, verifySdkRebuildEvidence } from './sdk-rebuild-evidence.mjs';
++import { collectRuntimeAssets } from './build-onlyoffice-runtime-assets.mjs';
+ 
+ const root = path.resolve(import.meta.dirname, '..');
+ const materials = path.resolve(process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || path.join(root, '.temp/licensing'));
+@@ -45,11 +46,11 @@ try {
+   // The upstream shrinkwrap does not include grunt-cli; invoke the locked
+   // Grunt library directly instead of relying on an unpinned global command.
+   const entry = path.join(build, 'run-sdk-build.cjs');
+-  fs.writeFileSync(entry, 'require("./node_modules/grunt").tasks(' + JSON.stringify(lock.sdkRebuild.tasks) + ',' + JSON.stringify({ level: lock.sdkRebuild.level }) + ');\n');
++  fs.writeFileSync(entry, 'require("./node_modules/grunt").tasks(' + JSON.stringify([...lock.sdkRebuild.tasks, 'copy-other']) + ',' + JSON.stringify({ level: lock.sdkRebuild.level }) + ');\n');
+   run(process.execPath, [entry], build);
+   for (const expected of lock.sdkRebuild.baseOutputs) {
+     const actual = sha(path.join(sdk, 'deploy', expected.path));
+-    if (actual !== expected.sha256 || sha(path.join(root, 'public', expected.path)) !== expected.sha256) throw new Error('SDK base output mismatch: ' + expected.path);
++    if (actual !== expected.sha256) throw new Error('SDK base output mismatch: ' + expected.path);
+     evidence.baseOutputs.push({ ...expected, exactMatch: true });
+   }
+   const generated = path.join(temporary, 'dist');
+@@ -59,6 +60,17 @@ try {
+     if (sha(path.join(generated, expected.path)) !== expected.sha256) throw new Error('Patched SDK output mismatch: ' + expected.path);
+     evidence.patchedOutputs.push({ ...expected, exactMatch: true });
+   }
++  // The generated SDK tree is owned by this source build, never a warm checkout.
++  const targetRoot = path.join(materials, 'runtime-assets');
++  fs.rmSync(path.join(targetRoot, 'sdkjs'), { recursive: true, force: true });
++  evidence.materializedRuntimeOutputs = [];
++  for (const asset of collectRuntimeAssets(generated, {}).selected) {
++    if (!asset.path.startsWith('sdkjs/') || asset.path.endsWith('.br')) continue;
++    const target = path.join(targetRoot, asset.path);
++    fs.mkdirSync(path.dirname(target), { recursive: true });
++    fs.copyFileSync(path.join(generated, asset.path), target);
++    evidence.materializedRuntimeOutputs.push({ path: asset.path, sha256: sha(target) });
++  }
+   evidence.status = 'sdk-js-and-local-patches-reproduced';
+   verifySdkRebuildEvidence(lock, evidence, readBuildInputs());
+ } catch (error) {
+diff --git a/scripts/rebuild-preferred-ui.mjs b/scripts/rebuild-preferred-ui.mjs
+index dce4030..0f3e244 100644
+--- a/scripts/rebuild-preferred-ui.mjs
++++ b/scripts/rebuild-preferred-ui.mjs
+@@ -6,7 +6,7 @@ import { createHash } from 'node:crypto';
+ import { patchPreferredUiSource } from './patch-preferred-ui-source.mjs';
+ import { collectRuntimeAssets, getRuntimeAssetPack } from './build-onlyoffice-runtime-assets.mjs';
+ import { materializeRuntimeDictionaries } from './runtime-dictionaries.mjs';
+-import { compressRuntimeAsset } from './runtime-compressed-assets.mjs';
++import { compressRuntimeAsset, syncRuntimeCompressedAssets } from './runtime-compressed-assets.mjs';
+ import { uiBuildInputPaths, verifyUiRebuildEvidence } from './ui-rebuild-evidence.mjs';
+ 
+ const root = path.resolve(import.meta.dirname, '..');
+@@ -112,9 +112,10 @@ try {
+   // Preferred-source compilation owns deployed UI bytes. The shared selector
+   // materializes its runtime outputs; debug maps stay out of the distribution.
+   const materializedOutputs = [];
++  syncRuntimeCompressedAssets(path.dirname(deployed));
+   for (const asset of collectRuntimeAssets(path.dirname(deployed), {}).selected) {
+     const target = path.join(root, 'dist', asset.path);
+-    if (!asset.path.startsWith('web-apps/') || asset.path.endsWith('.br')) continue;
++    if (!asset.path.startsWith('web-apps/')) continue;
+     fs.mkdirSync(path.dirname(target), { recursive: true });
+     fs.copyFileSync(path.join(path.dirname(deployed), asset.path), target);
+     materializedOutputs.push(asset.path);
+diff --git a/scripts/runtime-compressed-assets.mjs b/scripts/runtime-compressed-assets.mjs
+index 1d5e9e8..f496730 100644
+--- a/scripts/runtime-compressed-assets.mjs
++++ b/scripts/runtime-compressed-assets.mjs
+@@ -16,7 +16,16 @@ export function syncRuntimeCompressedAssets(root) {
+       const file = path.join(directory, entry.name);
+       if (entry.isDirectory()) walk(file);
+       else if (!entry.isFile()) throw new Error('Non-file compressed runtime input: ' + file);
+-      else if (entry.name.endsWith('.br')) {
++      else if (
++        /^(?:sdkjs|web-apps|wasm)\//.test(path.relative(root, file).split(path.sep).join('/')) &&
++        /\.(?:js|css|html|wasm)$/.test(file) && !fs.existsSync(file + '.br')
++      ) {
++        // A source-only build has no old compressed outputs to discover.
++        // Materialize the same runtime variants from final plain bytes.
++        fs.writeFileSync(file + '.br', compressRuntimeAsset(fs.readFileSync(file)));
++        pairs++;
++        updated++;
++      } else if (entry.name.endsWith('.br')) {
+         const plain = file.slice(0, -3);
+         if (!fs.existsSync(plain) || !fs.lstatSync(plain).isFile())
+           throw new Error('Compressed asset lacks a regular plain counterpart: ' + file);
+diff --git a/scripts/runtime-compressed-assets.test.mjs b/scripts/runtime-compressed-assets.test.mjs
+index 84c0d59..e06f9e2 100644
+--- a/scripts/runtime-compressed-assets.test.mjs
++++ b/scripts/runtime-compressed-assets.test.mjs
+@@ -46,3 +46,14 @@ test('orphan compressed asset is rejected', () =>
+     fs.writeFileSync(path.join(root, 'orphan.js.br'), compressRuntimeAsset(Buffer.from('orphan')));
+     assert.throws(() => syncRuntimeCompressedAssets(root), /counterpart/);
+   }));
++
++test('cold output creates compressed variants without relying on old pairs', () =>
++  temporary((root) => {
++    for (const name of ['sdkjs/common/AllFonts.js', 'web-apps/main/index.html', 'wasm/x2t/engine.wasm']) {
++      const f = path.join(root, name); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'cold runtime bytes');
++    }
++    assert.deepEqual(syncRuntimeCompressedAssets(root), { pairs: 3, updated: 3 });
++    for (const name of ['sdkjs/common/AllFonts.js', 'web-apps/main/index.html', 'wasm/x2t/engine.wasm'])
++      assert.equal(brotliDecompressSync(fs.readFileSync(path.join(root, name + '.br'))).toString(), 'cold runtime bytes');
++    assert.deepEqual(syncRuntimeCompressedAssets(root), { pairs: 3, updated: 0 });
++  }));
+diff --git a/scripts/sdk-rebuild-evidence.mjs b/scripts/sdk-rebuild-evidence.mjs
+index b93b318..947085d 100644
+--- a/scripts/sdk-rebuild-evidence.mjs
++++ b/scripts/sdk-rebuild-evidence.mjs
+@@ -1,6 +1,6 @@
+ // SPDX-License-Identifier: AGPL-3.0-only
+ export const sdkBuildInputPaths = (lock) => [
+-  'runtime-source-lock.json', 'scripts/rebuild-preferred-sdk.mjs', 'scripts/sdk-rebuild-evidence.mjs', 'scripts/apply-local-sdk-patches.mjs', ...lock.sdkRebuild.patchScripts,
++  'runtime-source-lock.json', 'scripts/rebuild-preferred-sdk.mjs', 'scripts/sdk-rebuild-evidence.mjs', 'scripts/build-onlyoffice-runtime-assets.mjs', 'scripts/apply-local-sdk-patches.mjs', ...lock.sdkRebuild.patchScripts,
+ ];
+ export function verifySdkRebuildEvidence(lock, evidence, currentInputs) {
+   const source = lock.sources.find((value) => value.id === lock.sdkRebuild?.sourceId);
+diff --git a/scripts/wrapper-source-files.mjs b/scripts/wrapper-source-files.mjs
+new file mode 100644
+index 0000000..fdddae4
+--- /dev/null
++++ b/scripts/wrapper-source-files.mjs
+@@ -0,0 +1,45 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import fs from 'node:fs';
++import path from 'node:path';
++import { execFileSync } from 'node:child_process';
++
++export const WRAPPER_SOURCE_MANIFEST = 'wrapper-source-files.json';
++export const isWrapperSourceFile = (file) =>
++  typeof file === 'string' && file.length > 0 &&
++  !path.isAbsolute(file) && !file.split(/[\\/]/).some((part) => part === '..' || part === '.' || part === '') &&
++  !/^(?:public\/(?:sdkjs|web-apps|wasm|fonts|fixtures|dictionaries)\/|artifacts\/)/.test(file);
++
++export function wrapperSourceFiles(root) {
++  const manifest = path.join(root, WRAPPER_SOURCE_MANIFEST);
++  let files;
++  if (fs.existsSync(manifest)) {
++    files = JSON.parse(fs.readFileSync(manifest, 'utf8'));
++    if (!Array.isArray(files) || files.some((file) => !isWrapperSourceFile(file)))
++      throw new Error('Invalid wrapper source manifest');
++  } else {
++    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: root, encoding: 'utf8' }).trim();
++    if (fs.realpathSync(top) !== fs.realpathSync(root)) throw new Error('Wrapper source requires its own repository or packaged manifest');
++    files = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
++      .split('\0').filter(isWrapperSourceFile);
++  }
++  return [...new Set(files)].filter((file) => {
++    if (!fs.existsSync(path.join(root, file))) throw new Error('Missing wrapper source: ' + file);
++    if (!fs.lstatSync(path.join(root, file)).isFile()) throw new Error('Non-file wrapper source: ' + file);
++    return file !== WRAPPER_SOURCE_MANIFEST;
++  }).sort();
++}
++
++export function packageWrapperSource(root, archive, materials, files = wrapperSourceFiles(root)) {
++  const staged = fs.mkdtempSync(path.join(materials, 'wrapper-source-'));
++  try {
++    for (const file of files) {
++      const target = path.join(staged, file);
++      fs.mkdirSync(path.dirname(target), { recursive: true });
++      fs.copyFileSync(path.join(root, file), target);
++    }
++    fs.writeFileSync(path.join(staged, WRAPPER_SOURCE_MANIFEST), JSON.stringify(files, null, 2) + '\n');
++    const fileList = path.join(materials, 'wrapper-source-files.txt');
++    fs.writeFileSync(fileList, [...files, WRAPPER_SOURCE_MANIFEST].join('\0') + '\0');
++    execFileSync('tar', ['-czf', archive, '-C', staged, '--null', '-T', fileList]);
++  } finally { fs.rmSync(staged, { recursive: true, force: true }); }
++}
+diff --git a/scripts/wrapper-source-files.test.mjs b/scripts/wrapper-source-files.test.mjs
+new file mode 100644
+index 0000000..4460322
+--- /dev/null
++++ b/scripts/wrapper-source-files.test.mjs
+@@ -0,0 +1,46 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import { execFileSync } from 'node:child_process';
++import { isWrapperSourceFile, wrapperSourceFiles, packageWrapperSource, WRAPPER_SOURCE_MANIFEST } from './wrapper-source-files.mjs';
++
++test('wrapper excludes every generated third-party runtime tree including dictionaries', () => {
++  for (const directory of ['sdkjs', 'web-apps', 'wasm', 'fonts', 'fixtures', 'dictionaries'])
++    assert.equal(isWrapperSourceFile('public/' + directory + '/old-data'), false);
++  for (const file of ['../secret', '/secret', 'a/../../secret', 'a\\..\\secret', ''])
++    assert.equal(isWrapperSourceFile(file), false);
++  assert.equal(isWrapperSourceFile('scripts/rebuild-preferred-sdk.mjs'), true);
++});
++test('source archive rebuild uses its packaged manifest without a Git checkout', () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapper-source-'));
++  try {
++    fs.writeFileSync(path.join(root, 'build.sh'), 'build');
++    fs.writeFileSync(path.join(root, WRAPPER_SOURCE_MANIFEST), JSON.stringify(['build.sh']));
++    assert.deepEqual(wrapperSourceFiles(root), ['build.sh']);
++    fs.writeFileSync(path.join(root, WRAPPER_SOURCE_MANIFEST), JSON.stringify(['public/dictionaries/old.dic']));
++    assert.throws(() => wrapperSourceFiles(root), /Invalid wrapper/);
++    fs.writeFileSync(path.join(root, WRAPPER_SOURCE_MANIFEST), JSON.stringify(['missing.sh']));
++    assert.throws(() => wrapperSourceFiles(root), /Missing wrapper/);
++    fs.symlinkSync('build.sh', path.join(root, 'link.sh'));
++    fs.writeFileSync(path.join(root, WRAPPER_SOURCE_MANIFEST), JSON.stringify(['link.sh']));
++    assert.throws(() => wrapperSourceFiles(root), /Non-file wrapper/);
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
++
++test('packaged source archive preserves files and can package itself without Git', () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapper-package-'));
++  try {
++    const source = path.join(root, 'source'), materials = path.join(root, 'materials'), extracted = path.join(root, 'extracted');
++    for (const dir of [source, materials, extracted]) fs.mkdirSync(dir);
++    fs.writeFileSync(path.join(source, 'build.sh'), 'actual source bytes');
++    fs.writeFileSync(path.join(source, WRAPPER_SOURCE_MANIFEST), JSON.stringify(['build.sh']));
++    const archive = path.join(root, 'source.tar.gz'); packageWrapperSource(source, archive, materials);
++    execFileSync('tar', ['-xzf', archive, '-C', extracted]);
++    assert.equal(fs.readFileSync(path.join(extracted, 'build.sh'), 'utf8'), 'actual source bytes');
++    assert.deepEqual(wrapperSourceFiles(extracted), ['build.sh']);
++    packageWrapperSource(extracted, path.join(root, 'rebuilt.tar.gz'), materials);
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
+diff --git a/vite.config.ts b/vite.config.ts
+index cd4a5f3..ac7180c 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -174,10 +174,12 @@ const __filename = fileURLToPath(import.meta.url);
+ 
+ const __dirname = path.dirname(__filename);
+ 
+-export default defineConfig({
++export default defineConfig(({ command }) => ({
+   root: 'pages',
+   base: './',
+-  publicDir: resolve(__dirname, 'public'),
++  publicDir: command === 'build'
++    ? resolve(process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || resolve(__dirname, '.temp/licensing'), 'runtime-assets')
++    : resolve(__dirname, 'public'),
+   plugins: [serveGeneratedFontAssets(), serveWorkspaceSrc()],
+   worker: {
+     rollupOptions: {
+@@ -220,4 +222,4 @@ export default defineConfig({
+       },
+     },
+   },
+-});
++}));

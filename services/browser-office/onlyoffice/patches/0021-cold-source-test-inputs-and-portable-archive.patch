@@ -1,0 +1,184 @@
+diff --git a/scripts/build-license-materials.mjs b/scripts/build-license-materials.mjs
+index 0430174..277dd97 100644
+--- a/scripts/build-license-materials.mjs
++++ b/scripts/build-license-materials.mjs
+@@ -115,7 +115,7 @@ fs.writeFileSync(
+ );
+ fs.writeFileSync(
+   path.join(sourceDir, 'BUILD.md'),
+-  '# Build materials\n\nThe browser-office archive includes local modifications, package lockfiles and bin/build.sh, plus wrapper-source-files.json for rebuilding without Git. Generated upstream runtime directories and unselected dictionary data are excluded. Use Node 22+ and the declared package manager; install locked dependencies. Copy distributed font bytes to their font-licenses.json inputFile names, with those same hashes and notices in the input permission manifest. Run the included font generator with --license-manifest and output .temp/licensing/font-assets. Run npm run build: it fetches/verifies the pinned source archives and converter release, builds the editor/library and packages the legal materials.\n\n' +
++  '# Build materials\n\nThe browser-office archive includes local modifications, package lockfiles and bin/build.sh, plus wrapper-source-files.json for rebuilding without Git. Generated upstream runtime directories and unselected dictionary data are excluded; tracked test documents remain explicit harness inputs. Regression tests use the pinned pre-patch SDK emitted by the same source build. macOS metadata sidecars are excluded from archives. Use Node 22+ and the declared package manager; install locked dependencies. Copy distributed font bytes to their font-licenses.json inputFile names, with those same hashes and notices in the input permission manifest. Run the included font generator with --license-manifest and output .temp/licensing/font-assets. Run npm run build: it fetches/verifies the pinned source archives and converter release, builds the editor/library and packages the legal materials.\n\n' +
+     'The shipped SDK uses CryptPad browser modifications, not the unmodified ONLYOFFICE SDK. cryptpad-sdkjs-source.tar.gz exports only sdkjs from cryptpad/onlyoffice-editor commit ca1ddd43c1e2e149607d1c583773c20d85911bec, tree 9082111b5fe378270e814b646b3ecc4275a27bd6. Its original SDK license and notices are included. The unmodified SDK archive is a reference, not the complete preferred source of these distributed SDK bytes.\n\n' +
+     'Run node scripts/rebuild-preferred-sdk.mjs after fetching the locked source archives. It uses the bundled SDK npm-shrinkwrap.json, Node 22, an installed JDK (set JAVA_HOME on macOS), official compile-word/compile-cell/compile-slide tasks, WHITESPACE_ONLY and the exact copyright/build variables in runtime-source-lock.json. Six SDK base JS files and the locally patched presentation SDK must match the locked SHA-256 values. Temporary compiler files are removed after the run; sdk-rebuild-evidence.json records the result. npm run build also requires this rebuild before packaging. It materializes the selected SDK assets from these same compiler outputs into a generated staging directory; the build never depends on tracked public/sdkjs bytes. Auxiliary WASM files are copied from the pinned archive and are not certified as C++ source rebuilds.\n\n' +
+     'cryptpad-ui-source.tar.gz provides the preferred web-apps, original wrapper, separate RequireJS vendor input, licenses and build recipes at the exact SDK commit. It excludes upstream fonts. source-overrides contains the readable browser adaptations, which patch the original HTML templates before compilation. UI compilation also requires cryptpad-sdkjs-source.tar.gz for its inlined utilities. Run node scripts/rebuild-preferred-ui.mjs after reviewed fonts have been materialized. Packaging synchronizes all compressed runtime assets after this source build. ui-rebuild-evidence.json binds the recipe inputs, dependency archives and every deployed UI output; packaging rejects missing, different or stale outputs.\n\n' +
+diff --git a/scripts/rebuild-preferred-sdk.mjs b/scripts/rebuild-preferred-sdk.mjs
+index 9fab86f..b24662a 100644
+--- a/scripts/rebuild-preferred-sdk.mjs
++++ b/scripts/rebuild-preferred-sdk.mjs
+@@ -51,6 +51,12 @@ try {
+   for (const expected of lock.sdkRebuild.baseOutputs) {
+     const actual = sha(path.join(sdk, 'deploy', expected.path));
+     if (actual !== expected.sha256) throw new Error('SDK base output mismatch: ' + expected.path);
++    // Keep the pinned pre-patch SDK as an explicit regression-test input.
++    if (expected.path === 'sdkjs/slide/sdk-all.js') {
++      const baseline = path.join(materials, 'sdk-base-runtime', expected.path);
++      fs.mkdirSync(path.dirname(baseline), { recursive: true });
++      fs.copyFileSync(path.join(sdk, 'deploy', expected.path), baseline);
++    }
+     evidence.baseOutputs.push({ ...expected, exactMatch: true });
+   }
+   const generated = path.join(temporary, 'dist');
+diff --git a/scripts/wrapper-source-files.mjs b/scripts/wrapper-source-files.mjs
+index fdddae4..2f00309 100644
+--- a/scripts/wrapper-source-files.mjs
++++ b/scripts/wrapper-source-files.mjs
+@@ -7,7 +7,7 @@ export const WRAPPER_SOURCE_MANIFEST = 'wrapper-source-files.json';
+ export const isWrapperSourceFile = (file) =>
+   typeof file === 'string' && file.length > 0 &&
+   !path.isAbsolute(file) && !file.split(/[\\/]/).some((part) => part === '..' || part === '.' || part === '') &&
+-  !/^(?:public\/(?:sdkjs|web-apps|wasm|fonts|fixtures|dictionaries)\/|artifacts\/)/.test(file);
++  !/^(?:public\/(?:sdkjs|web-apps|wasm|fonts|dictionaries)\/|artifacts\/)/.test(file);
+ 
+ export function wrapperSourceFiles(root) {
+   const manifest = path.join(root, WRAPPER_SOURCE_MANIFEST);
+@@ -40,6 +40,10 @@ export function packageWrapperSource(root, archive, materials, files = wrapperSo
+     fs.writeFileSync(path.join(staged, WRAPPER_SOURCE_MANIFEST), JSON.stringify(files, null, 2) + '\n');
+     const fileList = path.join(materials, 'wrapper-source-files.txt');
+     fs.writeFileSync(fileList, [...files, WRAPPER_SOURCE_MANIFEST].join('\0') + '\0');
+-    execFileSync('tar', ['-czf', archive, '-C', staged, '--null', '-T', fileList]);
++    // macOS tar otherwise adds AppleDouble entries that test discovery treats
++    // as duplicate TypeScript modules after a platform-neutral extraction.
++    execFileSync('tar', ['-czf', archive, '-C', staged, '--null', '-T', fileList], {
++      env: { ...process.env, COPYFILE_DISABLE: '1' },
++    });
+   } finally { fs.rmSync(staged, { recursive: true, force: true }); }
+ }
+diff --git a/scripts/wrapper-source-files.test.mjs b/scripts/wrapper-source-files.test.mjs
+index 4460322..4b14104 100644
+--- a/scripts/wrapper-source-files.test.mjs
++++ b/scripts/wrapper-source-files.test.mjs
+@@ -8,11 +8,12 @@ import { execFileSync } from 'node:child_process';
+ import { isWrapperSourceFile, wrapperSourceFiles, packageWrapperSource, WRAPPER_SOURCE_MANIFEST } from './wrapper-source-files.mjs';
+ 
+ test('wrapper excludes every generated third-party runtime tree including dictionaries', () => {
+-  for (const directory of ['sdkjs', 'web-apps', 'wasm', 'fonts', 'fixtures', 'dictionaries'])
++  for (const directory of ['sdkjs', 'web-apps', 'wasm', 'fonts', 'dictionaries'])
+     assert.equal(isWrapperSourceFile('public/' + directory + '/old-data'), false);
+   for (const file of ['../secret', '/secret', 'a/../../secret', 'a\\..\\secret', ''])
+     assert.equal(isWrapperSourceFile(file), false);
+   assert.equal(isWrapperSourceFile('scripts/rebuild-preferred-sdk.mjs'), true);
++  assert.equal(isWrapperSourceFile('public/fixtures/office/local.xlsx'), true);
+ });
+ test('source archive rebuild uses its packaged manifest without a Git checkout', () => {
+   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'wrapper-source-'));
+@@ -38,6 +39,7 @@ test('packaged source archive preserves files and can package itself without Git
+     fs.writeFileSync(path.join(source, 'build.sh'), 'actual source bytes');
+     fs.writeFileSync(path.join(source, WRAPPER_SOURCE_MANIFEST), JSON.stringify(['build.sh']));
+     const archive = path.join(root, 'source.tar.gz'); packageWrapperSource(source, archive, materials);
++    assert.deepEqual(execFileSync('tar', ['-tzf', archive], { encoding: 'utf8' }).trim().split('\n').sort(), ['build.sh', WRAPPER_SOURCE_MANIFEST].sort());
+     execFileSync('tar', ['-xzf', archive, '-C', extracted]);
+     assert.equal(fs.readFileSync(path.join(extracted, 'build.sh'), 'utf8'), 'actual source bytes');
+     assert.deepEqual(wrapperSourceFiles(extracted), ['build.sh']);
+diff --git a/test/helpers/base-slide-sdk.ts b/test/helpers/base-slide-sdk.ts
+new file mode 100644
+index 0000000..befca10
+--- /dev/null
++++ b/test/helpers/base-slide-sdk.ts
+@@ -0,0 +1,18 @@
++import fs from 'node:fs';
++import path from 'node:path';
++import { createHash } from 'node:crypto';
++
++// The same unmodified bytes reproduce the original defect and test its fix.
++// An extracted source archive obtains these bytes from the pinned SDK build.
++export function readPinnedBaseSlideSdk(): string {
++  const relative = 'sdkjs/slide/sdk-all.js';
++  const materials = process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || '.temp/licensing';
++  const rebuilt = path.join(materials, 'sdk-base-runtime', relative);
++  const file = fs.existsSync(rebuilt) ? rebuilt : path.join('public', relative);
++  const bytes = fs.readFileSync(file);
++  const lock = JSON.parse(fs.readFileSync('runtime-source-lock.json', 'utf8'));
++  const expected = lock.sdkRebuild.baseOutputs.find((output: { path: string }) => output.path === relative);
++  if (createHash('sha256').update(bytes).digest('hex') !== expected?.sha256)
++    throw new Error('Regression tests require the exact pinned pre-patch slide SDK');
++  return bytes.toString('utf8');
++}
+diff --git a/test/unit/chart-point-recalc.test.ts b/test/unit/chart-point-recalc.test.ts
+index 4a2dcf1..be36292 100644
+--- a/test/unit/chart-point-recalc.test.ts
++++ b/test/unit/chart-point-recalc.test.ts
+@@ -1,9 +1,9 @@
+-import { readFileSync } from 'node:fs';
++import { readPinnedBaseSlideSdk } from '../helpers/base-slide-sdk';
+ import vm from 'node:vm';
+ import { describe, expect, it } from 'vitest';
+ import { patchChartPointRecalc } from '../../scripts/patch-onlyoffice-chart-point-recalc.mjs';
+ 
+-const source = readFileSync('public/sdkjs/slide/sdk-all.js', 'utf8');
++const source = readPinnedBaseSlideSdk();
+ function point(text: string, chart: unknown) {
+   class NumericPoint {
+     getChartSpace() { return chart; }
+diff --git a/test/unit/slide-group-reader.test.ts b/test/unit/slide-group-reader.test.ts
+index f2d526a..8a0b96d 100644
+--- a/test/unit/slide-group-reader.test.ts
++++ b/test/unit/slide-group-reader.test.ts
+@@ -1,9 +1,9 @@
+-import { readFileSync } from 'node:fs';
++import { readPinnedBaseSlideSdk } from '../helpers/base-slide-sdk';
+ import vm from 'node:vm';
+ import { describe, expect, it } from 'vitest';
+ import { patchSlideGroupReader } from '../../scripts/patch-onlyoffice-slide-group-reader.mjs';
+ 
+-const source = readFileSync('public/sdkjs/slide/sdk-all.js', 'utf8');
++const source = readPinnedBaseSlideSdk();
+ const between = (text: string, start: string, end: string) =>
+   text.slice(text.indexOf(start), text.indexOf(end, text.indexOf(start)));
+ const original = between(source, 'this.ReadGroupShape=function(type)', 'this.IsNoSlideSpTree=function');
+diff --git a/test/unit/smartart-connection-map.test.ts b/test/unit/smartart-connection-map.test.ts
+index dcaf830..0d800a2 100644
+--- a/test/unit/smartart-connection-map.test.ts
++++ b/test/unit/smartart-connection-map.test.ts
+@@ -1,9 +1,9 @@
+-import { readFileSync } from 'node:fs';
++import { readPinnedBaseSlideSdk } from '../helpers/base-slide-sdk';
+ import vm from 'node:vm';
+ import { describe, expect, it } from 'vitest';
+ import { patchSmartArtConnectionMap } from '../../scripts/patch-onlyoffice-smartart-connection-map.mjs';
+ 
+-const source = readFileSync('public/sdkjs/slide/sdk-all.js', 'utf8');
++const source = readPinnedBaseSlideSdk();
+ const extract = (text: string) => {
+   const start = text.indexOf('SmartArtAlgorithm.prototype.checkPresOfCxn=function(');
+   return text.slice(start, text.indexOf('SmartArtAlgorithm.prototype.checkPresOfData=', start));
+diff --git a/test/unit/smartart-line-path.test.ts b/test/unit/smartart-line-path.test.ts
+index 627ba25..e0b0f67 100644
+--- a/test/unit/smartart-line-path.test.ts
++++ b/test/unit/smartart-line-path.test.ts
+@@ -1,9 +1,9 @@
+-import { readFileSync } from 'node:fs';
++import { readPinnedBaseSlideSdk } from '../helpers/base-slide-sdk';
+ import vm from 'node:vm';
+ import { describe, expect, it } from 'vitest';
+ import { patchSmartArtLinePathFill } from '../../scripts/patch-onlyoffice-smartart-line-path.mjs';
+ 
+-const source = readFileSync('public/sdkjs/slide/sdk-all.js', 'utf8');
++const source = readPinnedBaseSlideSdk();
+ function generatedLine(text: string) {
+   class ShadowShape {}
+   const history: string[] = [];
+diff --git a/test/unit/smartart-transition-style.test.ts b/test/unit/smartart-transition-style.test.ts
+index 8dbf8a5..305aa77 100644
+--- a/test/unit/smartart-transition-style.test.ts
++++ b/test/unit/smartart-transition-style.test.ts
+@@ -1,8 +1,8 @@
+-import { readFileSync } from 'node:fs';
++import { readPinnedBaseSlideSdk } from '../helpers/base-slide-sdk';
+ import vm from 'node:vm';
+ import { describe, expect, it } from 'vitest';
+ import { patchSmartArtTransitionStyle } from '../../scripts/patch-onlyoffice-smartart-transition-style.mjs';
+-const source = readFileSync('public/sdkjs/slide/sdk-all.js', 'utf8');
++const source = readPinnedBaseSlideSdk();
+ function style(text: string, kind: string, authored?: string) {
+   class SmartArtAlgorithm {
+     getNewGUID() {
