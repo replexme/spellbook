@@ -327,3 +327,11 @@ General document fixes must be represented in both LibreOffice source lines or
 explicitly proven unnecessary on one line. Collabora-only transport commands
 are not copied into ZetaOffice: the browser calls the same bounded operation
 program directly through ZetaJS and UNO.
+
+The Linux build root must be case-sensitive. A macOS host bind mount can make
+`text/textfield.idl` resolve to `text/TextField.idl`, preventing the UNOIDL source
+provider from finding the `textfield` module and causing `unoidl-write` to crash
+before any focused editing test runs. The build probes the filesystem before
+cloning or reusing its source. Use a task-owned Docker named volume or a Linux
+build directory; copying output artifacts to the host after verification is safe.
+The filesystem guard is part of the runtime build identity.
