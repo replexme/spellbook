@@ -1,0 +1,71 @@
+diff --git a/NOTICE b/NOTICE
+new file mode 100644
+index 0000000..3c75687
+--- /dev/null
++++ b/NOTICE
+@@ -0,0 +1,7 @@
++Spellbook research editor: modified software, not an official ONLYOFFICE product.
++Local modifications dated 2026-10-03 by Spellbook contributors.
++Based on agentbridges-ai/onlyoffice-browser 0.3.34 and ONLYOFFICE SDK 9.3.0.140.
++Changes cover native history/serialization fixes, parent-owned save persistence,
++reviewed fonts and source-bound distribution packaging. Modified source and build
++materials accompany the static distribution. No ONLYOFFICE endorsement is implied.
++ONLYOFFICE is a trademark of Ascensio System SIA.
+diff --git a/scripts/build-license-materials.mjs b/scripts/build-license-materials.mjs
+index 5b9a5c6..423434c 100644
+--- a/scripts/build-license-materials.mjs
++++ b/scripts/build-license-materials.mjs
+@@ -12,6 +12,8 @@ const materials = path.resolve(process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || p
+ const fonts = path.join(materials, 'font-assets');
+ const lock = JSON.parse(fs.readFileSync(path.join(root, 'runtime-source-lock.json'), 'utf8'));
+ const sha = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
++const modificationNotice = fs.readFileSync(path.join(root, 'NOTICE'), 'utf8');
++const modificationNoticeHtml = modificationNotice.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('\n', '<br>');
+ if (verifyOnlyOfficeFontAssets(fonts).fontSet !== 'redistributable')
+   throw new Error('Distribution requires reviewed redistributable fonts');
+ if (sha(path.join(dist, 'wasm/x2t/x2t.wasm')) !== lock.x2tWasmSha256)
+@@ -58,7 +60,8 @@ execFileSync('tar', ['-czf', path.join(sourceDir, 'browser-office-source.tar.gz'
+ });
+ fs.writeFileSync(
+   path.join(dist, 'NOTICE.txt'),
+-  'Browser Office Editor: AGPL-3.0; local modifications included in sources/browser-office-source.tar.gz.\n' +
++  modificationNotice + '\n' +
++    'Browser Office Editor: AGPL-3.0; local modifications included in sources/browser-office-source.tar.gz.\n' +
+     'ONLYOFFICE 9.3.0.140: Copyright Ascensio System SIA 2010-2024. AGPL-3.0 with upstream additional terms; original logo retained.\n' +
+     'ONLYOFFICE GUI illustrations, icons and technical writing: CC-BY-SA-4.0. See the bundled upstream sources and https://creativecommons.org/licenses/by-sa/4.0/ .\n' +
+     'Fonts: OFL-1.1, unchanged font bytes. Complete individual copyright and license notices: font-licenses.json.\n',
+@@ -86,7 +89,7 @@ const links = lock.sources
+   .join('');
+ fs.writeFileSync(
+   path.join(dist, 'licensing.html'),
+-  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Office licenses and source</title><body style="font-family:system-ui;max-width:56rem;margin:2rem auto;padding:0 1rem"><h1>Office licenses and source</h1><p>This editor uses ONLYOFFICE under AGPL-3.0. Copyright Ascensio System SIA 2010-2024. Distributed without warranty. You may use, modify and redistribute it under its license terms.</p><p><a href="LICENSE-AGPL-3.0.txt">Full AGPL license</a> · <a href="NOTICE.txt">Third-party notices</a> · <a href="font-licenses.json">Font copyright and licenses</a></p><h2>Source for this distribution</h2><ul><li><a href="sources/browser-office-source.tar.gz">Browser editor and local modifications</a></li>${links}<li><a href="sources/BUILD.md">Build instructions</a></li></ul><p><a href="distribution-manifest.json">Exact source commits and distributed file hashes</a></p></body></html>`,
++  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Office licenses and source</title><body style="font-family:system-ui;max-width:56rem;margin:2rem auto;padding:0 1rem"><h1>Office licenses and source</h1><p>${modificationNoticeHtml}</p><p>This editor uses ONLYOFFICE under AGPL-3.0. Copyright Ascensio System SIA 2010-2024. Distributed without warranty. You may use, modify and redistribute it under its license terms.</p><p><a href="LICENSE-AGPL-3.0.txt">Full AGPL license</a> · <a href="NOTICE.txt">Third-party notices</a> · <a href="font-licenses.json">Font copyright and licenses</a></p><h2>Source for this distribution</h2><ul><li><a href="sources/browser-office-source.tar.gz">Browser editor and local modifications</a></li>${links}<li><a href="sources/BUILD.md">Build instructions</a></li></ul><p><a href="distribution-manifest.json">Exact source commits and distributed file hashes</a></p></body></html>`,
+ );
+ scan();
+ fs.writeFileSync(
+diff --git a/src/index.ts b/src/index.ts
+index 964f913..a696a08 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -25,7 +25,7 @@ app.innerHTML = `
+   <section class="demo-toolbar" aria-label="Office editor demo controls">
+     <div>
+       <h1>Browser Office Editor</h1>
+-      <p>Local DOCX, XLSX, PPTX, and CSV preview/edit component demo. <a href="/licensing.html" target="_blank" rel="noopener">Licenses and source code</a></p>
++      <p>Local DOCX, XLSX, PPTX, and CSV preview/edit component demo. Modified editor based on ONLYOFFICE. <a href="/licensing.html" target="_blank" rel="noopener">Licenses and source code</a></p>
+     </div>
+     <div class="demo-actions">
+       <fieldset class="mode-selector" aria-label="Open mode">
+diff --git a/src/office-host.ts b/src/office-host.ts
+index d1fb4b1..2716ff8 100644
+--- a/src/office-host.ts
++++ b/src/office-host.ts
+@@ -23,7 +23,7 @@ type RuntimeOptions = Parameters<typeof createRuntimeOfficeEditor>[1];
+ const legalNotice = document.createElement('footer');
+ legalNotice.className = 'office-license-notice';
+ legalNotice.innerHTML =
+-  '<span>ONLYOFFICE</span> · <a href="/licensing.html" target="_blank" rel="noopener">Licenses and source code</a>';
++  '<span>Modified editor based on ONLYOFFICE</span> · <a href="/licensing.html" target="_blank" rel="noopener">Licenses and source code</a>';
+ document.body.append(legalNotice);
+ 
+ const params = new URLSearchParams(window.location.search);
