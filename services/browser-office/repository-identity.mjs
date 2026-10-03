@@ -4,6 +4,7 @@ export const browserRuntimeBuildInputPaths = Object.freeze([
   "services/browser-office/upstream.json",
   "services/browser-office/libreoffice/Dockerfile.toolchain",
   "services/browser-office/libreoffice/build-candidate-runtime.sh",
+  "services/browser-office/libreoffice/assert-build-filesystem.mjs",
   "services/browser-office/libreoffice/patches",
   "services/browser-office/libreoffice/upstream.mjs",
   "services/browser-office/libreoffice/verify-source.mjs",

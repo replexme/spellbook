@@ -76,6 +76,10 @@ mkdir -p \
   "$CCACHE_DIR" \
   "$SPELLBOOK_BROWSER_BUILD_ROOT/tarballs"
 
+# Linux tools must see distinct type identifiers, even on a macOS host.
+node "$spellbook_repo_root/services/browser-office/libreoffice/assert-build-filesystem.mjs" \
+  "$SPELLBOOK_BROWSER_BUILD_ROOT"
+
 source_root="$SPELLBOOK_BROWSER_BUILD_ROOT/source"
 source_identity="$source_commit:$patch_level:$expected_patch_sha"
 source_marker="$SPELLBOOK_BROWSER_BUILD_ROOT/source.identity"

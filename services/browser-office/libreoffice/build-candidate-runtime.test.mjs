@@ -84,3 +84,9 @@ test("runs the declared focused native regressions instead of the unrelated UI s
     /done < <\(node "\$upstream_reader" get sourceCandidate\.requiredCppunitTargets\)/u,
   );
 });
+
+
+test("checks filesystem semantics before cloning or reusing build source", () => {
+  const guard = script.indexOf("assert-build-filesystem.mjs");
+  assert.ok(guard > 0 && guard < script.indexOf('source_root="$SPELLBOOK_BROWSER_BUILD_ROOT/source"'));
+});
