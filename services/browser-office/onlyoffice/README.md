@@ -396,3 +396,26 @@ strict HTTP save test exposed the missing icon even though document saving
 succeeded. That failure is preserved; full fresh HTTP runtime validation remains
 a separate requirement. The final runtime manifest describes materialized files
 and no longer prunes already reviewed fonts or source/legal materials.
+
+## Runtime resource capabilities follow the deployed dictionary profile
+
+Patch `0018-native-dictionary-resource-profile.patch` (candidate `0e4f2cc`)
+fixes two strict HTTP failures hidden by fallback HTML: the compact build
+retained only `en_US` dictionaries while the native engine still advertised
+other dictionary languages, and its hyphenation engine requested
+`hyph_en_US.dic` instead of the bundled legacy filename. The runtime selector's
+existing dictionary profile now also owns advertised language capabilities.
+The source build materializes the engine's requested path from the same exact
+dictionary bytes and configures the language provider before constructing the
+three main editor APIs. Unsupported document languages are not relabeled.
+
+Preferred-source compilation now owns all selected UI output, including its
+compression, while SDK/WASM output is preserved outside that UI boundary. A
+fresh source rebuild exactly reproduced 1,186 UI files, and final decoding
+verified all 279 compressed pairs. All 18 public save/open browser tests passed
+under actual Brotli HTTP delivery, including RTF and terminal cleanup, with no
+missing resources. Unit tests: 286; source/compression/dictionary policy tests:
+36. Whole-editor source/licensing proof and full-product operation admission
+remain unverified. The existing dictionary bytes match a historical upstream
+commit whose locale directory omitted individual legal notices; that provenance
+and licensing gap is not certified by the resource-path fix.

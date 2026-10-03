@@ -1,0 +1,301 @@
+diff --git a/scripts/build-license-materials.mjs b/scripts/build-license-materials.mjs
+index f6f6b4e..cebc642 100644
+--- a/scripts/build-license-materials.mjs
++++ b/scripts/build-license-materials.mjs
+@@ -4,7 +4,7 @@ import path from 'node:path';
+ import { createHash } from 'node:crypto';
+ import { execFileSync } from 'node:child_process';
+ import { verifyOnlyOfficeFontAssets } from './verify-onlyoffice-font-assets.mjs';
+-import { getRuntimeAssetPack, buildRuntimeAssets } from './build-onlyoffice-runtime-assets.mjs';
++import { getRuntimeAssetPack, buildRuntimeAssets, DEFAULT_DICTIONARIES } from './build-onlyoffice-runtime-assets.mjs';
+ import { syncRuntimeCompressedAssets } from './runtime-compressed-assets.mjs';
+ import { uiBuildInputPaths, verifyUiRebuildEvidence } from './ui-rebuild-evidence.mjs';
+ import { sdkBuildInputPaths, verifySdkRebuildEvidence } from './sdk-rebuild-evidence.mjs';
+@@ -81,7 +81,7 @@ const finalRuntime = buildRuntimeAssets({
+   input: dist,
+   dryRun: true,
+   types: ['word', 'cell', 'slide'],
+-  dictionaries: ['en_US'],
++  dictionaries: DEFAULT_DICTIONARIES,
+   keepHelp: false,
+ });
+ fs.writeFileSync(path.join(dist, 'onlyoffice-runtime-assets.json'), JSON.stringify(finalRuntime, null, 2) + '\n');
+diff --git a/scripts/build-onlyoffice-runtime-assets.mjs b/scripts/build-onlyoffice-runtime-assets.mjs
+index 603f11a..442b91a 100755
+--- a/scripts/build-onlyoffice-runtime-assets.mjs
++++ b/scripts/build-onlyoffice-runtime-assets.mjs
+@@ -4,7 +4,7 @@ import path from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ 
+ const DEFAULT_TYPES = ['word', 'cell', 'slide'];
+-const DEFAULT_DICTIONARIES = ['en_US'];
++export const DEFAULT_DICTIONARIES = Object.freeze(['en_US']);
+ const PACKS = ['core', ...DEFAULT_TYPES];
+ 
+ const TYPE_CONFIG = {
+diff --git a/scripts/patch-preferred-ui-source.mjs b/scripts/patch-preferred-ui-source.mjs
+index 3e8a2a2..12a4349 100644
+--- a/scripts/patch-preferred-ui-source.mjs
++++ b/scripts/patch-preferred-ui-source.mjs
+@@ -2,8 +2,9 @@
+ import fs from 'node:fs';
+ import path from 'node:path';
+ import { createHash } from 'node:crypto';
++import { renderDictionaryBootstrap } from './runtime-dictionaries.mjs';
+ 
+-export function patchPreferredUiSource(sourceRoot, overridesRoot) {
++export function patchPreferredUiSource(sourceRoot, overridesRoot, dictionaryProfile) {
+   const modify = (name, expected, transform) => {
+     const file = path.join(sourceRoot, name);
+     const bytes = fs.readFileSync(file);
+@@ -11,12 +12,24 @@ export function patchPreferredUiSource(sourceRoot, overridesRoot) {
+       throw new Error('Preferred UI patch input changed: ' + name);
+     fs.writeFileSync(file, transform(bytes.toString('utf8')));
+   };
++  const viewportSources = {
++    documenteditor: 'e3479002364605eb3bb0011ae161c305f31d45a078bb6fd7950ffe167c3988fc',
++    spreadsheeteditor: '73e4682d4ba963596716453160f6c631a766aebddf078183f937299e4480a92e',
++    presentationeditor: 'eff38381eeb5da9a61a1e04f17866b1c3537c3ca551e95d5d3b643d8810e0258',
++  };
++  for (const [editor, expected] of Object.entries(viewportSources))
++    modify(`web-apps/apps/${editor}/main/app/controller/Viewport.js`, expected, (text) => {
++      const anchor = 'this.api = new Asc.';
++      if (text.split(anchor).length !== 2) throw new Error('Native API initialization boundary changed: ' + editor);
++      return text.replace(anchor, 'window.__onlyOfficeBrowserConfigureDictionaries(AscCommon);\n            ' + anchor);
++    });
+   const templates = {
+     documenteditor: '5a9afcc3b0c8c05b868ec555b186e2b85016dd3676fe6eb25e8dccc70d11c95a',
+     spreadsheeteditor: '822e3acb19e1c3fe445ddd93e9fcce9d9583ebec834ac46df1f4a21e1b249245',
+     presentationeditor: '63ab7c70f1a10346b3c0081e34729586830689950011af84a87b23084b32a2a8',
+   };
+-  const bootstrap = fs.readFileSync(path.join(overridesRoot, 'main-application-bootstrap.html'), 'utf8');
++  const bootstrap = fs.readFileSync(path.join(overridesRoot, 'main-application-bootstrap.html'), 'utf8')
++    .replace('/* RUNTIME_DICTIONARY_BOOTSTRAP */', renderDictionaryBootstrap(dictionaryProfile));
+   for (const [editor, expected] of Object.entries(templates))
+     modify(`web-apps/apps/${editor}/main/index.html.deploy`, expected, (text) => {
+       const start = text.indexOf('<script src="../../../vendor/requirejs/require.js"');
+diff --git a/scripts/rebuild-preferred-ui.mjs b/scripts/rebuild-preferred-ui.mjs
+index 5ee3bc4..51f18e6 100644
+--- a/scripts/rebuild-preferred-ui.mjs
++++ b/scripts/rebuild-preferred-ui.mjs
+@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
+ import { createHash } from 'node:crypto';
+ import { patchPreferredUiSource } from './patch-preferred-ui-source.mjs';
+ import { collectRuntimeAssets, getRuntimeAssetPack } from './build-onlyoffice-runtime-assets.mjs';
++import { materializeRuntimeDictionaries } from './runtime-dictionaries.mjs';
+ import { compressRuntimeAsset } from './runtime-compressed-assets.mjs';
+ import { uiBuildInputPaths, verifyUiRebuildEvidence } from './ui-rebuild-evidence.mjs';
+ 
+@@ -45,7 +46,8 @@ const run = (command, args, cwd = temporary) =>
+ try {
+   run('tar', ['-xzf', archive]);
+   for (const dependency of dependencies) run('tar', ['-xzf', path.join(materials, 'upstream', dependency.archive)]);
+-  patchPreferredUiSource(temporary, path.join(root, 'source-overrides'));
++  const dictionaryProfile = materializeRuntimeDictionaries(path.join(root, 'public'), path.join(root, 'dist'));
++  patchPreferredUiSource(temporary, path.join(root, 'source-overrides'), dictionaryProfile);
+   const imagePrefix = 'web-apps/apps/common/main/resources/img';
+   const sourceImageFiles = () => {
+     const files = [];
+@@ -97,16 +99,15 @@ try {
+     }
+     generatedResourceOutputs.push({ path: image.path, sha256: sha(image.file) });
+   }
+-  // The upstream static bundle may omit generated assets which the UI requests.
+-  // One shared selector defines deployable runtime files; debug maps stay out.
++  // Preferred-source compilation owns deployed UI bytes. The shared selector
++  // materializes its runtime outputs; debug maps stay out of the distribution.
+   const materializedOutputs = [];
+   for (const asset of collectRuntimeAssets(path.dirname(deployed), {}).selected) {
+     const target = path.join(root, 'dist', asset.path);
+-    if (!fs.existsSync(target)) {
+-      fs.mkdirSync(path.dirname(target), { recursive: true });
+-      fs.copyFileSync(path.join(path.dirname(deployed), asset.path), target);
+-      materializedOutputs.push(asset.path);
+-    }
++    if (!asset.path.startsWith('web-apps/') || asset.path.endsWith('.br')) continue;
++    fs.mkdirSync(path.dirname(target), { recursive: true });
++    fs.copyFileSync(path.join(path.dirname(deployed), asset.path), target);
++    materializedOutputs.push(asset.path);
+   }
+   const outputs = [];
+   const walk = (directory, relative = 'web-apps') => {
+@@ -121,6 +122,7 @@ try {
+           const plain = rebuilt.slice(0, -3);
+           if (!fs.existsSync(plain)) throw new Error('Preferred source lacks compression input: ' + name);
+           fs.writeFileSync(rebuilt, compressRuntimeAsset(fs.readFileSync(plain)));
++          fs.copyFileSync(rebuilt, file);
+         }
+         const digest = sha(file);
+         if (!fs.existsSync(rebuilt) || sha(rebuilt) !== digest) {
+diff --git a/scripts/runtime-dictionaries.mjs b/scripts/runtime-dictionaries.mjs
+new file mode 100644
+index 0000000..8c4c76f
+--- /dev/null
++++ b/scripts/runtime-dictionaries.mjs
+@@ -0,0 +1,54 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import fs from 'node:fs';
++import path from 'node:path';
++import { DEFAULT_DICTIONARIES } from './build-onlyoffice-runtime-assets.mjs';
++
++// Derive advertised capabilities and engine paths from the selected real assets.
++// Document language metadata is never changed to a different installed locale.
++export function materializeRuntimeDictionaries(sourceRoot, targetRoot, locales = DEFAULT_DICTIONARIES) {
++  const profile = {};
++  for (const locale of locales) {
++    if (!/^[A-Za-z0-9_]+$/.test(locale) || Object.hasOwn(profile, locale))
++      throw new Error('Invalid or duplicate runtime dictionary locale: ' + locale);
++    const directory = path.join(sourceRoot, 'dictionaries', locale);
++    const output = path.join(targetRoot, 'dictionaries', locale);
++    const copy = (name, target = name) => {
++      const source = path.join(directory, name);
++      if (!fs.statSync(source).isFile()) throw new Error('Dictionary must be a regular file: ' + source);
++      fs.mkdirSync(output, { recursive: true });
++      fs.copyFileSync(source, path.join(output, target));
++    };
++    copy(locale + '.aff');
++    copy(locale + '.dic');
++    const canonical = 'hyph_' + locale + '.dic';
++    const legacy = locale + '_hyph.dic';
++    const hyphen = fs.existsSync(path.join(directory, canonical)) ? canonical
++      : fs.existsSync(path.join(directory, legacy)) ? legacy : null;
++    if (hyphen) copy(hyphen, canonical);
++    profile[locale] = { hyphen: Boolean(hyphen) };
++  }
++  return profile;
++}
++
++export function configureRuntimeDictionaries(common, profile) {
++  if (!common || typeof common.spellcheckGetLanguages !== 'function')
++    throw new Error('Native dictionary language provider is unavailable');
++  const original = common.spellcheckGetLanguages;
++  if (original.__onlyOfficeBrowserRuntimeDictionaries) return;
++  function installedLanguages() {
++    const available = original(), selected = {};
++    for (const id of Object.keys(available)) {
++      const language = available[id];
++      if (Object.hasOwn(profile, language.name))
++        selected[id] = { ...language, hyphen: language.hyphen && profile[language.name].hyphen };
++    }
++    return selected;
++  }
++  installedLanguages.__onlyOfficeBrowserRuntimeDictionaries = true;
++  common.spellcheckGetLanguages = installedLanguages;
++}
++
++export function renderDictionaryBootstrap(profile) {
++  return 'window.__onlyOfficeBrowserConfigureDictionaries = function (common) { (' +
++    configureRuntimeDictionaries.toString() + ')(common, ' + JSON.stringify(profile) + '); };';
++}
+diff --git a/scripts/runtime-dictionaries.test.mjs b/scripts/runtime-dictionaries.test.mjs
+new file mode 100644
+index 0000000..bbbac5e
+--- /dev/null
++++ b/scripts/runtime-dictionaries.test.mjs
+@@ -0,0 +1,45 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import vm from 'node:vm';
++import { test } from 'node:test';
++import { materializeRuntimeDictionaries, configureRuntimeDictionaries, renderDictionaryBootstrap } from './runtime-dictionaries.mjs';
++
++test('selected spell and hyphen resources use the exact native request path', () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-dictionaries-'));
++  try {
++    const source = path.join(root, 'source/dictionaries/en_US');
++    fs.mkdirSync(source, { recursive: true });
++    fs.writeFileSync(path.join(source, 'en_US.aff'), 'SET UTF-8');
++    fs.writeFileSync(path.join(source, 'en_US.dic'), '1\nword');
++    fs.writeFileSync(path.join(source, 'en_US_hyph.dic'), 'UTF-8\n.wo1rd');
++    const profile = materializeRuntimeDictionaries(path.join(root, 'source'), path.join(root, 'dist'));
++    assert.deepEqual(profile, { en_US: { hyphen: true } });
++    assert.equal(fs.readFileSync(path.join(root, 'dist/dictionaries/en_US/hyph_en_US.dic'), 'utf8'), 'UTF-8\n.wo1rd');
++    assert.throws(() => materializeRuntimeDictionaries(path.join(root, 'source'), path.join(root, 'dist'), ['en_GB']));
++    assert.throws(() => materializeRuntimeDictionaries(path.join(root, 'source'), path.join(root, 'dist'), ['../outside']), /Invalid/);
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
++
++test('native language capabilities exclude uninstalled dictionaries without relabeling document languages', () => {
++  const original = { 1033: { name: 'en_US', hyphen: true }, 2057: { name: 'en_GB', hyphen: true }, 1042: { name: 'ko_KR', hyphen: false } };
++  const common = { spellcheckGetLanguages: () => original };
++  configureRuntimeDictionaries(common, { en_US: { hyphen: false } });
++  assert.deepEqual(common.spellcheckGetLanguages(), { 1033: { name: 'en_US', hyphen: false } });
++  assert.equal(original[2057].name, 'en_GB');
++  assert.equal(original[1033].hyphen, true);
++  const configured = common.spellcheckGetLanguages;
++  configureRuntimeDictionaries(common, { en_US: { hyphen: false } });
++  assert.equal(common.spellcheckGetLanguages, configured);
++  assert.throws(() => configureRuntimeDictionaries({}, {}), /provider/);
++});
++
++test('compiled inline bootstrap executes without Node dependencies', () => {
++  const context = { window: {} };
++  vm.runInNewContext(renderDictionaryBootstrap({ en_US: { hyphen: true } }), context);
++  const common = { spellcheckGetLanguages: () => ({ 1033: { name: 'en_US', hyphen: true }, 2057: { name: 'en_GB', hyphen: true } }) };
++  context.window.__onlyOfficeBrowserConfigureDictionaries(common);
++  assert.deepEqual(Object.keys(common.spellcheckGetLanguages()), ['1033']);
++});
+diff --git a/scripts/ui-rebuild-evidence.mjs b/scripts/ui-rebuild-evidence.mjs
+index 5b52fce..c5a4619 100644
+--- a/scripts/ui-rebuild-evidence.mjs
++++ b/scripts/ui-rebuild-evidence.mjs
+@@ -6,6 +6,7 @@ export const uiBuildInputPaths = () => [
+   'scripts/patch-preferred-ui-source.mjs',
+   'scripts/patch-onlyoffice-print-fallback.mjs',
+   'scripts/runtime-compressed-assets.mjs',
++  'scripts/runtime-dictionaries.mjs',
+   'scripts/build-onlyoffice-runtime-assets.mjs',
+   'source-overrides/browser-api.js',
+   'source-overrides/main-application-bootstrap.html',
+diff --git a/source-overrides/README.md b/source-overrides/README.md
+index c7acf41..e547b97 100644
+--- a/source-overrides/README.md
++++ b/source-overrides/README.md
+@@ -9,3 +9,11 @@ These readable sources retain the upstream AGPL-3.0 context. They are not an off
+ The preferred CryptPad bundle includes web-apps, onlyoffice-editor, its separate RequireJS vendor input, licenses and build recipes at one exact commit. Upstream fonts are excluded. Reviewed fonts are supplied through the separate license manifest. Runtime compression is regenerated and verified after all final UI and font modifications. SDK, deployed UI assets and compression checks do not certify auxiliary WASM, x2t reproduction, the complete editor or a proprietary hosted service's legal boundary.
+ 
+ Generated deployable assets missing from the imported static bundle are materialized from the preferred UI build through the shared runtime selector. Debug source maps are excluded. The final compact manifest is refreshed before distribution and split-pack identity is recorded.
++
++The compact dictionary profile is defined once by the runtime asset selector.
++The preferred UI build derives spell/hyphen capabilities from those selected
++real dictionary files, materializes the native `hyph_<locale>.dic` path from
++the original dictionary bytes, and configures the native language provider
++before each main editor API is constructed. Unsupported document languages are
++not relabeled. UI output is materialized from preferred-source compilation,
++including regenerated compression, rather than retaining copied generated UI.
+diff --git a/source-overrides/main-application-bootstrap.html b/source-overrides/main-application-bootstrap.html
+index 6d277c9..030840c 100644
+--- a/source-overrides/main-application-bootstrap.html
++++ b/source-overrides/main-application-bootstrap.html
+@@ -1,5 +1,6 @@
+ <script src="../../../vendor/requirejs/require.js"></script>
+     <script>
++        /* RUNTIME_DICTIONARY_BOOTSTRAP */
+         (function () {
+             if (window.__onlyOfficeBrowserApplicationHookInstalled) return;
+             window.__onlyOfficeBrowserApplicationHookInstalled = true;
+diff --git a/test/e2e/save.spec.ts b/test/e2e/save.spec.ts
+index 51f227b..5f3d1a8 100644
+--- a/test/e2e/save.spec.ts
++++ b/test/e2e/save.spec.ts
+@@ -262,6 +262,17 @@ for (const type of ['doc', 'docx', 'odt', 'rtf', 'xls', 'xlsx', 'ods', 'csv', 'p
+     expect(status.state?.status).toBe('ready');
+     expect(status.error).toBe('');
+     expect(status.initialSize).toBeGreaterThan(0);
++    if (type === 'rtf') {
++      const editorFrame = page.frames().find((frame) => frame.url().includes('/documenteditor/main/'));
++      expect(editorFrame).toBeTruthy();
++      const languages = await editorFrame!.evaluate(() => {
++        const common = (window as unknown as { AscCommon: { spellcheckGetLanguages: () => Record<string, { name: string; hyphen: boolean }> } }).AscCommon;
++        return common.spellcheckGetLanguages();
++      });
++      expect(languages['1033']).toEqual({ name: 'en_US', hyphen: true });
++      expect(languages['2057']).toBeUndefined();
++      expect(Object.values(languages).every((language) => language.name === 'en_US')).toBe(true);
++    }
+     expect(failures).toEqual([]);
+   });
+ }
