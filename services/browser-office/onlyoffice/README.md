@@ -419,3 +419,29 @@ missing resources. Unit tests: 286; source/compression/dictionary policy tests:
 remain unverified. The existing dictionary bytes match a historical upstream
 commit whose locale directory omitted individual legal notices; that provenance
 and licensing gap is not certified by the resource-path fix.
+
+## Pinned dictionary data retains original notices
+
+Patch `0019-pinned-dictionary-source-and-notices.patch` (candidate `1ffd3f0`)
+replaces the historical compact dictionary files whose source directory omitted
+individual notices. The selected `en_US` data comes from official
+`ONLYOFFICE/dictionaries` commit
+`d3223bbb777883db66ac3cd249f71c6ebdc992c7`, tree
+`3c779ae7bcdbf5b5c82dba59ef005d5b40e7c9d7`. The source archive is scoped to
+that locale and pinned to SHA-256
+`c73efc78d1530bf75eb62a5740afe4e3fcc2b6b873c34b855ceb973706a56bf4`.
+A fresh Git fetch/archive produced the same hash. The data, SCOWL/hyphenation
+README files, WordNet notice and original license file are copied together.
+Invalid input retains the previous generated directory; valid replacement
+eliminates stale data/compression. Source packaging includes this archive and
+its build dependency receipt.
+
+All SDK, UI and WASM bytes remain identical to the preceding `0e4f2cc`
+candidate. Dictionary data, notices and source/materialization metadata change.
+Final compression readback now follows preferred-source compilation and all
+data replacement. UI reproduction still covers 1,186 files and SDK reproduction
+still covers six base JS files plus the local presentation SDK. Policy tests:
+38; component unit tests: 286; type checking and the full local build pass.
+Fresh runtime tests remain separate from those source/build checks. This
+addresses the identified dictionary notice gap; auxiliary WASM, x2t, the
+actual service licensing boundary and full product admission remain unverified.

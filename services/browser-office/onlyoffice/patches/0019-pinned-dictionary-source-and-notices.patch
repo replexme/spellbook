@@ -1,0 +1,227 @@
+diff --git a/runtime-source-lock.json b/runtime-source-lock.json
+index 7d13585..f0d0f82 100644
+--- a/runtime-source-lock.json
++++ b/runtime-source-lock.json
+@@ -84,6 +84,21 @@
+       "sourceUrl": "https://github.com/cryptpad/onlyoffice-editor.git",
+       "archive": "cryptpad-ui-source.tar.gz",
+       "archiveSha256": "384461afc2cb96739b594d33711422de5d1e1b2d07396108c2ba62015fb92865"
++    },
++    {
++      "id": "en-us-dictionaries",
++      "repository": "https://github.com/ONLYOFFICE/dictionaries",
++      "commit": "d3223bbb777883db66ac3cd249f71c6ebdc992c7",
++      "components": [
++        {
++          "path": "en_US",
++          "object": "3c779ae7bcdbf5b5c82dba59ef005d5b40e7c9d7"
++        }
++      ],
++      "sourceTransport": "git-archive",
++      "sourceUrl": "https://github.com/ONLYOFFICE/dictionaries.git",
++      "archive": "reviewed-en-us-source.tar.gz",
++      "archiveSha256": "c73efc78d1530bf75eb62a5740afe4e3fcc2b6b873c34b855ceb973706a56bf4"
+     }
+   ],
+   "sdkRebuild": {
+@@ -157,7 +172,8 @@
+       "apps/presentationeditor/main/app.reporter.js"
+     ],
+     "dependencySourceIds": [
+-      "cryptpad-sdkjs"
++      "cryptpad-sdkjs",
++      "en-us-dictionaries"
+     ]
+   }
+ }
+diff --git a/scripts/build-license-materials.mjs b/scripts/build-license-materials.mjs
+index cebc642..18cd044 100644
+--- a/scripts/build-license-materials.mjs
++++ b/scripts/build-license-materials.mjs
+@@ -58,11 +58,11 @@ for (const file of [
+   fs.mkdirSync(path.dirname(destination), { recursive: true });
+   fs.copyFileSync(path.join(fonts, file), destination);
+ }
+-// Materialize compression after the final reviewed font replacement. No later
+-// packaging step may change runtime bytes without repeating this readback.
++// Preferred-source compilation materializes UI and dictionary resources after
++// the reviewed fonts. Compression then reads back all final runtime bytes.
++execFileSync(process.execPath, [path.join(root, 'scripts/rebuild-preferred-ui.mjs')], { cwd: root, stdio: 'inherit' });
+ const compressed = syncRuntimeCompressedAssets(dist);
+ console.log('Synchronized runtime compressed pairs:', JSON.stringify(compressed));
+-execFileSync(process.execPath, [path.join(root, 'scripts/rebuild-preferred-ui.mjs')], { cwd: root, stdio: 'inherit' });
+ const uiEvidence = JSON.parse(fs.readFileSync(path.join(materials, 'ui-rebuild-evidence.json'), 'utf8'));
+ const uiOutputs = [];
+ function readUiOutputs(directory = path.join(dist, 'web-apps'), relative = 'web-apps') {
+@@ -120,6 +120,7 @@ fs.writeFileSync(
+     'Browser Office Editor: AGPL-3.0; local modifications included in sources/browser-office-source.tar.gz.\n' +
+     'ONLYOFFICE 9.3.0.140: Copyright Ascensio System SIA 2010-2024. AGPL-3.0 with upstream additional terms; original logo retained.\n' +
+     'ONLYOFFICE GUI illustrations, icons and technical writing: CC-BY-SA-4.0. See the bundled upstream sources and https://creativecommons.org/licenses/by-sa/4.0/ .\n' +
++    'Dictionary data and original copyright/permission notices: dictionaries/en_US/. Pinned upstream source is bundled in sources/reviewed-en-us-source.tar.gz.\n' +
+     'Fonts: OFL-1.1, unchanged font bytes. Complete individual copyright and license notices: font-licenses.json.\n',
+ );
+ fs.writeFileSync(
+@@ -127,9 +128,10 @@ fs.writeFileSync(
+   '# Build materials\n\nThe browser-office archive includes local modifications, package lockfiles and bin/build.sh. Use Node 20.19+ and the declared package manager; install locked dependencies. Copy distributed font bytes to their font-licenses.json inputFile names, with those same hashes and notices in the input permission manifest. Run the included font generator with --license-manifest and output .temp/licensing/font-assets. Run npm run build: it fetches/verifies the pinned source archives and converter release, builds the editor/library and packages the legal materials.\n\n' +
+     'The shipped SDK uses CryptPad browser modifications, not the unmodified ONLYOFFICE SDK. cryptpad-sdkjs-source.tar.gz exports only sdkjs from cryptpad/onlyoffice-editor commit ca1ddd43c1e2e149607d1c583773c20d85911bec, tree 9082111b5fe378270e814b646b3ecc4275a27bd6. Its original SDK license and notices are included. The unmodified SDK archive is a reference, not the complete preferred source of these distributed SDK bytes.\n\n' +
+     'Run node scripts/rebuild-preferred-sdk.mjs after fetching the locked source archives. It uses the bundled SDK npm-shrinkwrap.json, Node 22, an installed JDK (set JAVA_HOME on macOS), official compile-word/compile-cell/compile-slide tasks, WHITESPACE_ONLY and the exact copyright/build variables in runtime-source-lock.json. Six SDK base JS files and the locally patched presentation SDK must match the locked SHA-256 values. Temporary compiler files are removed after the run; sdk-rebuild-evidence.json records the result. npm run build also requires this rebuild before packaging.\n\n' +
+-    'cryptpad-ui-source.tar.gz provides the preferred web-apps, original wrapper, separate RequireJS vendor input, licenses and build recipes at the exact SDK commit. It excludes upstream fonts. source-overrides contains the readable browser adaptations, which patch the original HTML templates before compilation. UI compilation also requires cryptpad-sdkjs-source.tar.gz for its inlined utilities. Run node scripts/rebuild-preferred-ui.mjs against the materialized final dist after reviewed fonts and canonical runtime compression. ui-rebuild-evidence.json binds the recipe inputs, dependency archives and every deployed UI output; packaging rejects missing, different or stale outputs.\n\n' +
++    'cryptpad-ui-source.tar.gz provides the preferred web-apps, original wrapper, separate RequireJS vendor input, licenses and build recipes at the exact SDK commit. It excludes upstream fonts. source-overrides contains the readable browser adaptations, which patch the original HTML templates before compilation. UI compilation also requires cryptpad-sdkjs-source.tar.gz for its inlined utilities. Run node scripts/rebuild-preferred-ui.mjs after reviewed fonts have been materialized. Packaging synchronizes all compressed runtime assets after this source build. ui-rebuild-evidence.json binds the recipe inputs, dependency archives and every deployed UI output; packaging rejects missing, different or stale outputs.\n\n' +
+     'SDK JavaScript and deployed UI asset reproduction are scoped proofs. Auxiliary WASM engines, x2t reproduction and the full editor remain unverified; do not treat either scoped flag as complete corresponding-source or licensing approval. Every compressed runtime variant is checked against its final plain bytes, after font/UI modifications and before split-pack synchronization.\n\n' +
+     'x2t-source.tar.gz includes the modified ONLYOFFICE core, Dockerfile, build.sh and dependencies/build instructions for v9.3.0+4. Run its ./build.sh locally. Published x2t WASM SHA-256 is bound in runtime-source-lock.json.\n\n' +
++    'The compact en_US dictionaries are copied from the pinned official dictionary source archive with all original SCOWL, hyphenation, WordNet and license notices. The native engine language list and hyphenation filename are derived from these same selected files; dictionary metadata never relabels authored document languages.\n\n' +
+     'Font source locations, hashes and full OFL notices are in font-licenses.json. The reviewed generator runs allfontsgen with system-font scanning disabled. Provide these exact input bytes with the permission manifest to generate-onlyoffice-font-assets.mjs.\n\n' +
+     'Source packaging and release-byte identity are checked here. Rebuilding the entire upstream editor to reproduce its shipped bytes has not been performed by this packaging step.\n',
+ );
+diff --git a/scripts/fetch-git-source-archive.mjs b/scripts/fetch-git-source-archive.mjs
+index 05e5930..ab3181c 100644
+--- a/scripts/fetch-git-source-archive.mjs
++++ b/scripts/fetch-git-source-archive.mjs
+@@ -12,6 +12,7 @@ export async function fetchGitSourceArchive(source, output) {
+   const components = source.components || [{ path: source.sourcePath, object: source.tree }];
+   const allowed = new Set([
+     'sdkjs',
++    'en_US',
+     'web-apps',
+     'onlyoffice-editor',
+     'vendor/requirejs',
+diff --git a/scripts/rebuild-preferred-ui.mjs b/scripts/rebuild-preferred-ui.mjs
+index 51f18e6..dce4030 100644
+--- a/scripts/rebuild-preferred-ui.mjs
++++ b/scripts/rebuild-preferred-ui.mjs
+@@ -45,8 +45,18 @@ const run = (command, args, cwd = temporary) =>
+   });
+ try {
+   run('tar', ['-xzf', archive]);
+-  for (const dependency of dependencies) run('tar', ['-xzf', path.join(materials, 'upstream', dependency.archive)]);
+-  const dictionaryProfile = materializeRuntimeDictionaries(path.join(root, 'public'), path.join(root, 'dist'));
++  for (const dependency of dependencies) {
++    const dictionary = dependency.id === 'en-us-dictionaries';
++    const destination = dictionary ? path.join(temporary, 'dictionaries') : temporary;
++    fs.mkdirSync(destination, { recursive: true });
++    run('tar', ['-xzf', path.join(materials, 'upstream', dependency.archive), '-C', destination]);
++  }
++  if (!dependencies.some((source) => source.id === 'en-us-dictionaries'))
++    throw new Error('Pinned dictionary data and notices are required');
++  for (const name of ['README_en_US.txt', 'README_hyph_en_US.txt', 'WordNet_license.txt', 'license.txt'])
++    if (!fs.statSync(path.join(temporary, 'dictionaries/en_US', name)).isFile())
++      throw new Error('Dictionary notice is missing: ' + name);
++  const dictionaryProfile = materializeRuntimeDictionaries(temporary, path.join(root, 'dist'));
+   patchPreferredUiSource(temporary, path.join(root, 'source-overrides'), dictionaryProfile);
+   const imagePrefix = 'web-apps/apps/common/main/resources/img';
+   const sourceImageFiles = () => {
+diff --git a/scripts/runtime-dictionaries.mjs b/scripts/runtime-dictionaries.mjs
+index 8c4c76f..fbe6186 100644
+--- a/scripts/runtime-dictionaries.mjs
++++ b/scripts/runtime-dictionaries.mjs
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: AGPL-3.0-only
+ import fs from 'node:fs';
+ import path from 'node:path';
++import { compressRuntimeAsset } from './runtime-compressed-assets.mjs';
+ import { DEFAULT_DICTIONARIES } from './build-onlyoffice-runtime-assets.mjs';
+ 
+ // Derive advertised capabilities and engine paths from the selected real assets.
+@@ -12,19 +13,29 @@ export function materializeRuntimeDictionaries(sourceRoot, targetRoot, locales =
+       throw new Error('Invalid or duplicate runtime dictionary locale: ' + locale);
+     const directory = path.join(sourceRoot, 'dictionaries', locale);
+     const output = path.join(targetRoot, 'dictionaries', locale);
+-    const copy = (name, target = name) => {
+-      const source = path.join(directory, name);
+-      if (!fs.statSync(source).isFile()) throw new Error('Dictionary must be a regular file: ' + source);
+-      fs.mkdirSync(output, { recursive: true });
+-      fs.copyFileSync(source, path.join(output, target));
+-    };
+-    copy(locale + '.aff');
+-    copy(locale + '.dic');
++    if (path.resolve(directory) === path.resolve(output)) throw new Error('Dictionary output must differ from source');
++    for (const name of [locale + '.aff', locale + '.dic'])
++      if (!fs.lstatSync(path.join(directory, name)).isFile()) throw new Error('Dictionary must be a regular file: ' + name);
+     const canonical = 'hyph_' + locale + '.dic';
+     const legacy = locale + '_hyph.dic';
+     const hyphen = fs.existsSync(path.join(directory, canonical)) ? canonical
+       : fs.existsSync(path.join(directory, legacy)) ? legacy : null;
+-    if (hyphen) copy(hyphen, canonical);
++    const entries = fs.readdirSync(directory);
++    for (const name of entries)
++      if (!fs.lstatSync(path.join(directory, name)).isFile()) throw new Error('Dictionary source must contain regular files: ' + name);
++    fs.mkdirSync(path.dirname(output), { recursive: true });
++    const staged = fs.mkdtempSync(path.join(path.dirname(output), '.' + locale + '-'));
++    try {
++      // Preserve the complete selected source directory, including every notice.
++      for (const name of entries) fs.copyFileSync(path.join(directory, name), path.join(staged, name));
++      if (hyphen) fs.copyFileSync(path.join(directory, hyphen), path.join(staged, canonical));
++      for (const name of [locale + '.aff', locale + '.dic', ...(hyphen ? [canonical] : [])])
++        fs.writeFileSync(path.join(staged, name + '.br'), compressRuntimeAsset(fs.readFileSync(path.join(staged, name))));
++      // The output is a generated resource tree. Do not retain stale data or
++      // compression from an earlier dictionary source version.
++      fs.rmSync(output, { recursive: true, force: true });
++      fs.renameSync(staged, output);
++    } finally { fs.rmSync(staged, { recursive: true, force: true }); }
+     profile[locale] = { hyphen: Boolean(hyphen) };
+   }
+   return profile;
+diff --git a/scripts/runtime-dictionaries.test.mjs b/scripts/runtime-dictionaries.test.mjs
+index bbbac5e..294f54e 100644
+--- a/scripts/runtime-dictionaries.test.mjs
++++ b/scripts/runtime-dictionaries.test.mjs
+@@ -43,3 +43,29 @@ test('compiled inline bootstrap executes without Node dependencies', () => {
+   context.window.__onlyOfficeBrowserConfigureDictionaries(common);
+   assert.deepEqual(Object.keys(common.spellcheckGetLanguages()), ['1033']);
+ });
++
++test('replacement retains source notices and eliminates stale previous data and compression', () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-dictionary-notices-'));
++  try {
++    const source = path.join(root, 'source/dictionaries/en_US'), output = path.join(root, 'dist/dictionaries/en_US');
++    fs.mkdirSync(source, { recursive: true }); fs.mkdirSync(output, { recursive: true });
++    for (const [name, value] of Object.entries({ 'en_US.aff': 'SET UTF-8', 'en_US.dic': '1\nword', 'hyph_en_US.dic': 'UTF-8\n.wo1rd', 'README_en_US.txt': 'Original author and permission', 'license.txt': 'Original terms' })) fs.writeFileSync(path.join(source, name), value);
++    fs.writeFileSync(path.join(output, 'obsolete.dic'), 'old'); fs.writeFileSync(path.join(output, 'en_US.dic.br'), 'invalid');
++    materializeRuntimeDictionaries(path.join(root, 'source'), path.join(root, 'dist'));
++    assert.equal(fs.readFileSync(path.join(output, 'README_en_US.txt'), 'utf8'), 'Original author and permission');
++    assert.equal(fs.readFileSync(path.join(output, 'license.txt'), 'utf8'), 'Original terms');
++    assert.equal(fs.existsSync(path.join(output, 'obsolete.dic')), false);
++    assert.equal(fs.readFileSync(path.join(source, 'en_US.dic'), 'utf8'), '1\nword');
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
++
++test('invalid replacement inputs retain the existing generated directory', () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'office-dictionary-invalid-'));
++  try {
++    const source = path.join(root, 'source/dictionaries/en_US'), output = path.join(root, 'dist/dictionaries/en_US');
++    fs.mkdirSync(source, { recursive: true }); fs.mkdirSync(output, { recursive: true });
++    fs.writeFileSync(path.join(source, 'en_US.aff'), 'SET UTF-8');fs.writeFileSync(path.join(output, 'current.dic'), 'retain');
++    assert.throws(() => materializeRuntimeDictionaries(path.join(root, 'source'), path.join(root, 'dist')));
++    assert.equal(fs.readFileSync(path.join(output, 'current.dic'), 'utf8'), 'retain');
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
+diff --git a/source-overrides/README.md b/source-overrides/README.md
+index e547b97..97e033c 100644
+--- a/source-overrides/README.md
++++ b/source-overrides/README.md
+@@ -17,3 +17,8 @@ the original dictionary bytes, and configures the native language provider
+ before each main editor API is constructed. Unsupported document languages are
+ not relabeled. UI output is materialized from preferred-source compilation,
+ including regenerated compression, rather than retaining copied generated UI.
++
++Dictionary resources now come from a separate pinned official source archive,
++including its original notices. The UI source recipe verifies this dependency
++before deriving capabilities and replacing the generated dictionary directory.
++Final compression checks run after source compilation and all data replacement.
+diff --git a/test/e2e/save.spec.ts b/test/e2e/save.spec.ts
+index 5f3d1a8..8cbebee 100644
+--- a/test/e2e/save.spec.ts
++++ b/test/e2e/save.spec.ts
+@@ -272,6 +272,12 @@ for (const type of ['doc', 'docx', 'odt', 'rtf', 'xls', 'xlsx', 'ods', 'csv', 'p
+       expect(languages['1033']).toEqual({ name: 'en_US', hyphen: true });
+       expect(languages['2057']).toBeUndefined();
+       expect(Object.values(languages).every((language) => language.name === 'en_US')).toBe(true);
++      const formattingLanguages = await editorFrame!.evaluate(() => {
++        const application = (window as unknown as { __onlyOfficeBrowserApplication: { getController: (name: string) => { languages: Array<{ code: number }> } } }).__onlyOfficeBrowserApplication;
++        return application.getController('Main').languages.map((language) => language.code);
++      });
++      expect(formattingLanguages).toContain(2057);
++      expect(formattingLanguages).toContain(1042);
+     }
+     expect(failures).toEqual([]);
+   });
