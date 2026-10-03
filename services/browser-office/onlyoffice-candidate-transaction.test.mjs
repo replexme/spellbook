@@ -161,3 +161,18 @@ test("commit requires one nonempty native history point", async () => {
     f.cleanup();
   }
 });
+
+
+test("native Redo capability permits cancellation while verifying Redo and ForceSave", async () => {
+  const f = fixture({redo:true});
+  try {
+    f.h.spellbookGroupRedoRollbackVersion=1;
+    f.h.ForceSave=true;
+    const checkpoint=await beginCandidateTransaction(f.frame);
+    assert.equal(checkpoint.canRedo,true);
+    assert.equal((await finishCandidateTransaction(f.frame,checkpoint,false)).canRedo,true);
+    const next=await beginCandidateTransaction(f.frame);
+    f.h.ForceSave=false;
+    await assert.rejects(finishCandidateTransaction(f.frame,next,false),/rollback_history_mismatch/);
+  } finally {f.cleanup()}
+});

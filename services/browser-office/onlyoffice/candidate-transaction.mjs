@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 // Diagnostic adapter for the pinned presentation SDK. Product admission remains
-// separate; preserving a pre-existing Redo branch is not proven by this adapter.
+// separate. A Redo branch requires the provider's explicit rollback capability.
 export async function beginCandidateTransaction(frame) {
   return frame.evaluate(() => {
     const a = window.Asc.editor,
       h = window.AscCommon.History;
     if (a.isGroupActions() || h.UndoRedoInProgress || h.TurnOffHistory !== 0)
       throw new Error("candidate_transaction_busy");
-    if (h.Can_Redo())
+    if (h.Can_Redo() && h.spellbookGroupRedoRollbackVersion !== 1)
       throw new Error("candidate_transaction_redo_branch_not_admitted");
     if (
       ![
@@ -23,6 +23,8 @@ export async function beginCandidateTransaction(frame) {
       points: h.Points.length,
       savedIndex: h.SavedIndex,
       userSavedIndex: h.UserSavedIndex,
+      forceSave: h.ForceSave,
+      canRedo: h.Can_Redo(),
     };
     a.startGroupActions();
     a.executeGroupActionsStart();
@@ -54,9 +56,10 @@ export async function finishCandidateTransaction(frame, checkpoint, commit) {
         if (
           h.Index !== checkpoint.index ||
           h.Points.length !== checkpoint.points ||
-          h.Can_Redo() ||
+          h.Can_Redo() !== checkpoint.canRedo ||
           h.SavedIndex !== checkpoint.savedIndex ||
-          h.UserSavedIndex !== checkpoint.userSavedIndex
+          h.UserSavedIndex !== checkpoint.userSavedIndex ||
+          h.ForceSave !== checkpoint.forceSave
         )
           throw new Error("candidate_transaction_rollback_history_mismatch");
       }

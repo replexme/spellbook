@@ -96,6 +96,9 @@ const report = {
 };
 const typedCase = flag("--typed-case");
 const failAfterApply = process.argv.includes("--fail-after-apply");
+const preexistingRedo = process.argv.includes("--preexisting-redo");
+assert(!preexistingRedo || failAfterApply, "Redo preservation requires a cancelled transaction");
+let redoNativeExpected = null;
 let transaction = null, transactionBefore = null, transactionNativeBefore = null, transactionHostBefore = null;
 const knownTypedCases = [
   "table-row-add",
@@ -464,6 +467,23 @@ try {
   // workbook preparation, before any transaction can mutate authored content.
   const transactionBaseline = chartAuthority ? await captureStableOnlyOfficeBaseline(page, save, {retainPreservationBaseline:true}) : sourceBaseline;
   item.transactionBaselineStabilization = {ms:transactionBaseline.ms, attempts:transactionBaseline.attempts, transitions:transactionBaseline.transitions};
+  if (preexistingRedo) {
+    await frame.evaluate(() => {
+      const a = window.Asc.editor, api = window.AscBuilder.Slide.Api;
+      a.startGroupActions(); a.executeGroupActionsStart();
+      api.GetPresentation().GetSlideByIndex(0).SetBackground(api.CreateSolidFill(api.CreateRGBColor(17,61,103)));
+      a.endGroupActions();
+    });
+    // Rendering warms provider caches. Keep their exact normalized state as
+    // the expected real Redo output, then return to the original document.
+    await visibleSlides(page, frame, "existing-redo-future", before.common.slides.length);
+    redoNativeExpected = await readCandidateNativeEvidence(frame,candidateRoot);
+    await frame.evaluate(() => window.Asc.editor.Undo());
+    await visibleSlides(page, frame, "existing-redo-undone", before.common.slides.length);
+    await captureStableOnlyOfficeBaseline(page, save, {retainPreservationBaseline:true});
+    assert(await frame.evaluate(() => window.AscCommon.History.Can_Redo()), "Existing native Redo branch required");
+    item.preexistingRedo = {prepared:true,expectedContentSha256:redoNativeExpected.contentSha256};
+  }
   transactionBefore = await typedProjection(frame);
   assert.deepEqual(differences(before,transactionBefore),[],"No-edit preparation cannot alter observed content");
   transactionHostBefore = await page.evaluate(() => window.__ONLYOFFICE_SAVE_E2E__.getStatus());
@@ -961,6 +981,16 @@ try {
       assert.deepEqual(item.nativeAfterFailure,transactionNativeBefore,"Cancellation must restore native content and saved-state flags");
       item.hostAfterFailure = await page.evaluate(() => window.__ONLYOFFICE_SAVE_E2E__.getStatus());
       assert.deepEqual(item.hostAfterFailure,transactionHostBefore,"Cancellation must restore host saved state without persisting a file");
+      if (preexistingRedo) {
+        await transaction.frame.evaluate(() => window.Asc.editor.Redo());
+        await visibleSlides(page, transaction.frame, "existing-redo-replayed", transactionBefore.common.slides.length);
+        const replayed = await readCandidateNativeEvidence(transaction.frame,candidateRoot);
+        assert.equal(replayed.contentSha256,redoNativeExpected.contentSha256,"Retained Redo must reproduce its complete native document");
+        await transaction.frame.evaluate(() => window.Asc.editor.Undo());
+        await visibleSlides(page, transaction.frame, "existing-redo-reverted", transactionBefore.common.slides.length);
+        assert.deepEqual(await readCandidateNativeEvidence(transaction.frame,candidateRoot),transactionNativeBefore,"Undo of retained Redo must restore the pre-transaction native checkpoint");
+        item.preexistingRedo.replayedAndUndone = true;
+      }
       item.rollbackVerified = true;
     } catch (rollbackError) {
       item.rollbackVerified = false;
