@@ -209,7 +209,6 @@ content. First-slide non-chart visual review remains a separate requirement;
 these screenshots do not turn representative setters into complete operation
 contracts.
 
-
 The typed diagnostic adapter uses the pinned SDK's native group-action boundary
 for commit/cancellation. `--fail-after-apply` injects an exception after the real
 mutation and its postconditions, before any save. Success requires restoration
@@ -232,7 +231,6 @@ are the actual native providers. Presentation has no end-group recalc override,
 so cancellation's own change list is passed through the same native recalc path
 as `Document_Undo`; history arrays are not rewritten by the adapter.
 
-
 All comparison runners additionally hash the actual generated JavaScript/WASM
 code tree before and after the trial, including both SDK halves, the embedded
 spreadsheet SDK, converter and diagnostic host component. Git ignores these
@@ -240,3 +238,21 @@ outputs, so a clean repository and `sdk-all.js` alone do not establish their
 identity. A missing SDK half, a changed file set or a changed code payload
 invalidates the trial. Fonts and non-code assets remain explicitly outside
 this code identity; it is not an engine-admission or visual-fidelity receipt.
+
+## Distribution materials and reviewed fonts
+
+Patch `0008-source-bound-distribution-and-reviewed-fonts.patch` follows the seven native candidate patches. It adds the reviewed font pipeline, static legal/source page and source-bound converter release. Candidate commits are `8dae732` (font permissions) and `fe13950` (runtime distribution). The patch omits large converter binaries: `scripts/fetch-license-materials.mjs` obtains and verifies the pinned `v9.3.0+4` release before a build, including the WASM digest in `runtime-source-lock.json`.
+
+The default font generator accepts only SHA-256-bound OFL-1.1 inputs with their source and complete notices. It disables Docker system-font scanning, verifies generated font bytes, emits permissions with the distribution and keeps staging beside the shared output directory. For macOS Colima, use directories under a shared workspace, rather than unshared system temporary directories. Remove the font-generator Docker image when generation ends.
+
+Put generated reviewed fonts at `.temp/licensing/font-assets`, or under `ONLYOFFICE_LICENSE_MATERIALS_DIR/font-assets`. The build downloads and checks pinned source archives for SDKJS, web-apps, x2t and build_tools, then packages local modifications, license/attribution notices and build materials. The shared core CDN pack also carries fonts and legal/source assets. A configured preview font override must pass the same reviewed-font validation.
+
+Verify the assembled static distribution with:
+
+```bash
+pnpm browser-office:verify:distribution /path/to/candidate/dist
+```
+
+This checks shipped file/source archive hashes, required notices, and individual font permissions; changed or unlisted files fail. It does not certify legal independence of a future private integration or prove byte-identical rebuilding of the whole upstream editor. The manifest keeps `upstreamEditorRebuildVerified: false` explicit. Existing native correctness, original-package preservation, recovery and representative-application gates remain required for an engine switch.
+
+Local validation on 2026-10-03: 282 candidate unit tests, 16 headless format/open/save checks, live legal/source URLs, 18 served reviewed fonts, and the assembled distribution check passed. These results belong to the source-bound converter and reviewed font package; earlier timing and rendering results from the old converter/font package do not establish this candidate's performance or layout equivalence.

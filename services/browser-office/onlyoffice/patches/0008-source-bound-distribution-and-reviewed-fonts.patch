@@ -1,0 +1,741 @@
+diff --git a/bin/build.sh b/bin/build.sh
+index 474203d..db2f301 100755
+--- a/bin/build.sh
++++ b/bin/build.sh
+@@ -5,6 +5,8 @@ set -e
+ 
+ echo "Starting build process..."
+ 
++node scripts/fetch-license-materials.mjs
++
+ # Run Vite build through the project-local binary.
+ ./node_modules/.bin/vite build
+ node scripts/patch-onlyoffice-slide-group-reader.mjs dist
+@@ -39,4 +41,7 @@ else
+     echo "Warning: dist/sw.js not found, skipping version injection."
+ fi
+ 
++npm run build:lib
++node scripts/build-license-materials.mjs
++
+ echo "Build completed successfully!"
+diff --git a/docs/fonts.md b/docs/fonts.md
+index ff4f37c..1fff1c9 100644
+--- a/docs/fonts.md
++++ b/docs/fonts.md
+@@ -15,7 +15,8 @@ Use Docker to run the official OnlyOffice generator against a directory of fonts
+ ```bash
+ npm run fonts:generate -- \
+   --input /absolute/path/to/fonts \
+-  --output .onlyoffice-font-assets
++  --output .onlyoffice-font-assets \
++  --license-manifest /absolute/path/to/font-licenses.json
+ ```
+ 
+ Installed package users can run the same generator through the published CLI:
+@@ -23,10 +24,13 @@ Installed package users can run the same generator through the published CLI:
+ ```bash
+ npx onlyoffice-browser-generate-font-assets \
+   --input /absolute/path/to/fonts \
+-  --output .onlyoffice-font-assets
++  --output .onlyoffice-font-assets \
++  --license-manifest /absolute/path/to/font-licenses.json
+ ```
+ 
+-By default the script exports a compact `zh-core` set focused on Simplified Chinese Office documents and classic English fonts. The visible font registry is limited to Microsoft YaHei, Microsoft YaHei UI, SimSun, NSimSun, SimSun-ExtB, SimHei, KaiTi, FangSong, DengXian, Aptos, Calibri, Arial, Times New Roman, Consolas, Cambria, and Cambria Math. It keeps these source files only: Microsoft YaHei regular/bold, SimSun/NSimSun, SimSun-ExtB, SimHei, KaiTi, FangSong, DengXian regular/bold, Aptos regular/italic/bold/bold-italic, Calibri regular/italic/bold/bold-italic, Arial regular/italic/bold/bold-italic, Times New Roman regular/italic/bold/bold-italic, Consolas regular/bold, Cambria/Cambria Math regular, and common Office symbol fonts such as Symbol, Wingdings, Webdings, Marlett, Bookshelf Symbol 7, MT Extra, Monotype Sorts, MS Reference Specialty, and Segoe UI Symbol. Symbol fonts are retained for list bullets, equations, inserted symbols, and document glyph resolution but are hidden from the font picker unless explicitly added through `--keep-font`. Traditional Chinese and other language-specific fonts are omitted by default to keep first paint fast.
++The default `redistributable` profile uses only the supplied fonts. It disables system-font scanning inside the temporary Docker container, verifies every input and generated font against a SHA-256-bound OFL-1.1 permission manifest, and emits `font-licenses.json` with the distribution. The manifest contains `fonts` entries with `file`, `sha256`, `license`, full `notice`, and an HTTPS `source`. Use input/output paths shared with Docker; staging is created beside the output.
++
++The legacy `zh-core` and `full` profiles must be selected explicitly. They can import fonts from the Docker image and do not establish redistribution rights. Do not publish their output as the reviewed `redistributable` distribution.
+ 
+ ## Fixed `zh-core` Configuration
+ 
+diff --git a/public/favicon.ico b/public/favicon.ico
+new file mode 100644
+index 0000000000000000000000000000000000000000..96d08b595b7f3d262b52f12a2885e2b3cdab88a9
+GIT binary patch
+literal 5430
+zcmeI$ZA_JA7{Kuh0cjjqWaL)Hz&?cNp_hr1MkBtYVr_kJF&ERVR(OP>nj2Wm(&Y=m
+zlo}&}C9!;&Sk?!ZyyWsN5e0I|6l`t2AmJoDM>t0m=-mD9v*$24oJS9#bFH53x9fhc
+z`?|0Dz=!AD=Mf2#DH0ba#5ma<CGw<*L=pA9EkxuO#<R##B5BZh&qdz%QcB7H?%)4l
+zeYH#eWh{JN8;-$YI84k!I41P>eDtMD0u)1CA$p-q^pM|(83?Fv-WN`}gJkAwFa#B#
+zLF#s49&X$J?UH`+Bb3}yG(k;LBkMB|f^mDjzUjJ*@-XAo=!7!iBwvQ-5P?WzTtys&
+z*}99&<>4WW?3wYgLy&-SxS&j2BA<sS=r#Vtk*~llnDucoSB7}VOZoO4a6_3mPCf%6
+zkdm`MMIZ-_aH8KB+lUrjgU3;d0hsmGdw!Mn-nAMiAA{WQ#(apjp{+g^#jrz}xJJGZ
+zF~+(_iJRes?;iU8>-pKef<$b=?<hnJbY4C<wJ!zVU>GVuL)6tE+2}K!sQdQ8jqi~J
+zc{c0MadKMrh9VQqP?OZe`lSeEuW6X=Z%>_Dc6?Vf3eW{*qK|wj<{=ywB%=&Yn62w%
+zZZ-6082OuDIa)2Sq7pZtOq?gb3Q^E&{LyoHxCpa8F6PRS0D0kH`A)c@OdKV@1i=vJ
+zZ)K6l#Yx<N3n!2Ri>^TkUd1t(_0@Y;B^@Z;4&~#Pk)KNxt-oW-Ol*b&%7mSK5n{dT
+zi1V-$gYey_dUkz@;CUR!b$p7)p!3pqW@9S$Vi+nwx^@pzynTo>unAYN9nV0Xs4eyi
+zVr<d(j<z*Zu^g>Xlhn-mOoWcw%e&{8Xg{@TI@X{Y>MrY|Ujd>=e~#Xkm4c_R4L70g
+zu>ty5!V2j*vAi1UK5(;V)z!u&JD~0ZH+xoHIkHHQh;0~vy2ozNzY=pG-3L=gdxZNn
+z=!Uw>y6E>IqA{{(*MTJQV=B32Xn~rfX4b!kP>kE_azmorK`Qg#Vi+nwL)7g-3U1rK
+zvo2l&G?Ti`a6p-`lP^Ln0_uBdf1FHEB=xyC374UXm;(zY+V4MI&u{;+m*YXD4h8d8
+zK-5i<*b5?IYr`%CNz?-(ho;CUBJ0S9jm-z^{NW~Vy?*6jTx%KYTHQ<c^z_zy7?*xe
+zp<heHVdOmp?=XBX$|v=nVxqrGee3hLI>nC!a^?5~UD%3Q7+0HB)F*}@;v&?+4dp}U
+zYOw&i*0XL&fx`kD+Mx_*iCLItc!$`D(eo>~4^PXz)&>PPYO!$ruRmHhv^7+K-wht+
+z1wS8onz@xY4_&Xda%PP{X3~nD**VSMrK28hC?7gkXFIm<<)o~hH(8U9NY0uTtV9RA
+zXVW&uZ$Y11wJe;0cfOsm4dI;KP8;X9zlcBJMSJ__iTxd)Rf2P$M+G@6a|^H^Zs;>#
+z3ulffyl<^5p5tg+w-^m@gY(rGI#-YM_`2c**1Q2rZ_B${HqL=FN<ccOv%zw;G4nL|
+zp8rQ$yALk3ARFhvcVj?0sI$RxxnVBf10GX|i_ri#_)Zx^=jxG;Ab8f9JXfvcD`7WO
+f5a-~oKT|yqBpx6)V|fe(`#v4~-|ISEuh;$!sVj;D
+
+literal 0
+HcmV?d00001
+
+diff --git a/runtime-source-lock.json b/runtime-source-lock.json
+new file mode 100644
+index 0000000..0fd485b
+--- /dev/null
++++ b/runtime-source-lock.json
+@@ -0,0 +1,39 @@
++{
++  "sdkVersion": "9.3.0.140",
++  "x2tVersion": "v9.3.0+4",
++  "x2tWasmSha256": "68d225de76693d0341531b44fc24a2f9a8e0f06aa4c3d903399cb32a8008d5e7",
++  "sources": [
++    {
++      "id": "sdkjs",
++      "repository": "https://github.com/ONLYOFFICE/sdkjs",
++      "commit": "33521f0ccfbf5f1ceb2a0e3db2b434d7c5bcd6ec",
++      "sourceUrl": "https://codeload.github.com/ONLYOFFICE/sdkjs/tar.gz/33521f0ccfbf5f1ceb2a0e3db2b434d7c5bcd6ec",
++      "archive": "sdkjs-source.tar.gz",
++      "archiveSha256": "706da1a3fc69230f1e0d632926c3f2a8c26538afe92c702357d5235edaa7171e"
++    },
++    {
++      "id": "web-apps",
++      "repository": "https://github.com/ONLYOFFICE/web-apps",
++      "commit": "1dbf9a562e9c8ce366f1b637788d2b5490cee517",
++      "sourceUrl": "https://codeload.github.com/ONLYOFFICE/web-apps/tar.gz/1dbf9a562e9c8ce366f1b637788d2b5490cee517",
++      "archive": "web-apps-source.tar.gz",
++      "archiveSha256": "2163430d0a62d53dc5dc4fd7f2c9a7084da6e3be23a325376d5df4201bcd640b"
++    },
++    {
++      "id": "x2t",
++      "repository": "https://github.com/agentbridges-ai/onlyoffice-x2t-wasm",
++      "commit": "5790fda684ac1a837f1ab92fcaaf4a0de9ec4ec1",
++      "sourceUrl": "https://codeload.github.com/agentbridges-ai/onlyoffice-x2t-wasm/tar.gz/5790fda684ac1a837f1ab92fcaaf4a0de9ec4ec1",
++      "archive": "x2t-source.tar.gz",
++      "archiveSha256": "eadfe3aef842f780c124178d87886762ea6500c0cc5dbc61aed066d0e99c9410"
++    },
++    {
++      "id": "build-tools",
++      "repository": "https://github.com/ONLYOFFICE/build_tools",
++      "commit": "849d78fea08ff3bf1329e7a7f31def02f30d0918",
++      "sourceUrl": "https://codeload.github.com/ONLYOFFICE/build_tools/tar.gz/849d78fea08ff3bf1329e7a7f31def02f30d0918",
++      "archive": "build-tools-source.tar.gz",
++      "archiveSha256": "0d24b2bb1a39db5971b6c3643e79b72c2bae15cdeea44b4d888aa77a5059f34d"
++    }
++  ]
++}
+diff --git a/scripts/build-license-materials.mjs b/scripts/build-license-materials.mjs
+new file mode 100644
+index 0000000..852e9c7
+--- /dev/null
++++ b/scripts/build-license-materials.mjs
+@@ -0,0 +1,134 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import fs from 'node:fs';
++import path from 'node:path';
++import { createHash } from 'node:crypto';
++import { execFileSync } from 'node:child_process';
++import { verifyOnlyOfficeFontAssets } from './verify-onlyoffice-font-assets.mjs';
++
++const root = path.resolve(import.meta.dirname, '..');
++const dist = path.join(root, 'dist');
++const materials = path.resolve(process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || path.join(root, '.temp/licensing'));
++const fonts = path.join(materials, 'font-assets');
++const lock = JSON.parse(fs.readFileSync(path.join(root, 'runtime-source-lock.json'), 'utf8'));
++const sha = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
++if (verifyOnlyOfficeFontAssets(fonts).fontSet !== 'redistributable')
++  throw new Error('Distribution requires reviewed redistributable fonts');
++if (sha(path.join(dist, 'wasm/x2t/x2t.wasm')) !== lock.x2tWasmSha256)
++  throw new Error('Converter bytes do not match the source-bound release');
++
++// Validate everything before replacing font assets or writing release metadata.
++for (const source of lock.sources) {
++  if (sha(path.join(materials, 'upstream', source.archive)) !== source.archiveSha256)
++    throw new Error('Source archive identity changed: ' + source.id);
++}
++const fontManifest = JSON.parse(fs.readFileSync(path.join(fonts, 'onlyoffice-browser-font-assets.json'), 'utf8'));
++fs.rmSync(path.join(dist, 'fonts'), { recursive: true, force: true });
++for (const file of [
++  fontManifest.allFonts,
++  fontManifest.fontSelection,
++  'server/FileConverter/bin/AllFonts.js',
++  'onlyoffice-browser-font-assets.json',
++  'onlyoffice-browser-font-source-map.json',
++  'font-licenses.json',
++  ...fontManifest.fonts,
++  ...fontManifest.fontThumbnails,
++]) {
++  const destination = path.join(dist, file);
++  fs.mkdirSync(path.dirname(destination), { recursive: true });
++  fs.copyFileSync(path.join(fonts, file), destination);
++}
++const sourceDir = path.join(dist, 'sources');
++fs.mkdirSync(sourceDir, { recursive: true });
++for (const source of lock.sources)
++  fs.copyFileSync(path.join(materials, 'upstream', source.archive), path.join(sourceDir, source.archive));
++fs.copyFileSync(path.join(root, 'LICENSE'), path.join(dist, 'LICENSE-AGPL-3.0.txt'));
++const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
++  .split('\0')
++  .filter(
++    (file) =>
++      file &&
++      fs.existsSync(path.join(root, file)) &&
++      !/^(?:public\/(?:sdkjs|web-apps|wasm|fonts|fixtures)\/|artifacts\/)/.test(file),
++  );
++const fileList = path.join(materials, 'wrapper-source-files.txt');
++fs.writeFileSync(fileList, tracked.join('\0') + '\0');
++execFileSync('tar', ['-czf', path.join(sourceDir, 'browser-office-source.tar.gz'), '--null', '-T', fileList], {
++  cwd: root,
++});
++fs.writeFileSync(
++  path.join(dist, 'NOTICE.txt'),
++  'Browser Office Editor: AGPL-3.0; local modifications included in sources/browser-office-source.tar.gz.\n' +
++    'ONLYOFFICE 9.3.0.140: Copyright Ascensio System SIA 2010-2024. AGPL-3.0 with upstream additional terms; original logo retained.\n' +
++    'ONLYOFFICE GUI illustrations, icons and technical writing: CC-BY-SA-4.0. See the bundled upstream sources and https://creativecommons.org/licenses/by-sa/4.0/ .\n' +
++    'Fonts: OFL-1.1, unchanged font bytes. Complete individual copyright and license notices: font-licenses.json.\n',
++);
++fs.writeFileSync(
++  path.join(sourceDir, 'BUILD.md'),
++  '# Build materials\n\nThe browser-office archive includes local modifications, package lockfiles and bin/build.sh. Use Node 20.19+ and the declared package manager; install locked dependencies. Copy distributed font bytes to their font-licenses.json inputFile names, with those same hashes and notices in the input permission manifest. Run the included font generator with --license-manifest and output .temp/licensing/font-assets. Run npm run build: it fetches/verifies the pinned source archives and converter release, builds the editor/library and packages the legal materials.\n\n' +
++    'SDKJS and web-apps preferred source and build_tools are bundled at the pinned commits in distribution-manifest.json. Follow their build instructions for upstream editor assets; apply the browser-office scripts/patch-onlyoffice-*.mjs through bin/build.sh.\n\n' +
++    'x2t-source.tar.gz includes the modified ONLYOFFICE core, Dockerfile, build.sh and dependencies/build instructions for v9.3.0+4. Run its ./build.sh locally. Published x2t WASM SHA-256 is bound in runtime-source-lock.json.\n\n' +
++    'Font source locations, hashes and full OFL notices are in font-licenses.json. The reviewed generator runs allfontsgen with system-font scanning disabled. Provide these exact input bytes with the permission manifest to generate-onlyoffice-font-assets.mjs.\n\n' +
++    'Source packaging and release-byte identity are checked here. Rebuilding the entire upstream editor to reproduce its shipped bytes has not been performed by this packaging step.\n',
++);
++const files = [];
++function scan(directory = dist) {
++  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
++    const file = path.join(directory, entry.name);
++    if (entry.isDirectory()) scan(file);
++    else if (entry.isFile() && entry.name !== 'distribution-manifest.json')
++      files.push({ path: path.relative(dist, file).replaceAll(path.sep, '/'), sha256: sha(file) });
++    else if (!entry.isFile()) throw new Error('Distribution must not contain symlinks: ' + file);
++  }
++}
++const links = lock.sources
++  .map((source) => `<li>${source.id}: <a href="sources/${source.archive}">Download source</a></li>`)
++  .join('');
++fs.writeFileSync(
++  path.join(dist, 'licensing.html'),
++  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Office licenses and source</title><body style="font-family:system-ui;max-width:56rem;margin:2rem auto;padding:0 1rem"><h1>Office licenses and source</h1><p>This editor uses ONLYOFFICE under AGPL-3.0. Copyright Ascensio System SIA 2010-2024. Distributed without warranty. You may use, modify and redistribute it under its license terms.</p><p><a href="LICENSE-AGPL-3.0.txt">Full AGPL license</a> · <a href="NOTICE.txt">Third-party notices</a> · <a href="font-licenses.json">Font copyright and licenses</a></p><h2>Source for this distribution</h2><ul><li><a href="sources/browser-office-source.tar.gz">Browser editor and local modifications</a></li>${links}<li><a href="sources/BUILD.md">Build instructions</a></li></ul><p><a href="distribution-manifest.json">Exact source commits and distributed file hashes</a></p></body></html>`,
++);
++scan();
++fs.writeFileSync(
++  path.join(dist, 'distribution-manifest.json'),
++  JSON.stringify(
++    {
++      schemaVersion: 1,
++      engine: 'onlyoffice',
++      sdkVersion: lock.sdkVersion,
++      x2tVersion: lock.x2tVersion,
++      sourceMaterialsPackaged: true,
++      upstreamEditorRebuildVerified: false,
++      sources: [
++        ...lock.sources,
++        {
++          id: 'browser-office',
++          archive: 'browser-office-source.tar.gz',
++          archiveSha256: sha(path.join(sourceDir, 'browser-office-source.tar.gz')),
++        },
++      ],
++      files,
++    },
++    null,
++    2,
++  ) + '\n',
++);
++console.log(
++  'Packaged reviewed fonts, license notices and pinned source/build materials. Upstream editor byte reproducibility remains unverified.',
++);
++
++// A core + type CDN deployment must carry the same legal/source/font assets.
++const corePack = path.join(root, '.onlyoffice-runtime-asset-packs/core');
++if (fs.existsSync(corePack)) {
++  for (const file of [...files.map((entry) => entry.path), 'distribution-manifest.json']) {
++    if (
++      /^(?:sdkjs\/(?:word|cell|slide)\/|web-apps\/apps\/(?:documenteditor|spreadsheeteditor|presentationeditor)\/)/.test(
++        file,
++      )
++    )
++      continue;
++    const destination = path.join(corePack, file);
++    fs.mkdirSync(path.dirname(destination), { recursive: true });
++    fs.rmSync(destination, { force: true });
++    fs.linkSync(path.join(dist, file), destination);
++  }
++}
+diff --git a/scripts/fetch-license-materials.mjs b/scripts/fetch-license-materials.mjs
+new file mode 100644
+index 0000000..d0bd2e5
+--- /dev/null
++++ b/scripts/fetch-license-materials.mjs
+@@ -0,0 +1,37 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import fs from 'node:fs';
++import path from 'node:path';
++import { createHash } from 'node:crypto';
++import { execFileSync } from 'node:child_process';
++import { verifyOnlyOfficeFontAssets } from './verify-onlyoffice-font-assets.mjs';
++
++const root = path.resolve(import.meta.dirname, '..');
++const output = path.resolve(process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || path.join(root, '.temp/licensing'));
++const upstream = path.join(output, 'upstream');
++const lock = JSON.parse(fs.readFileSync(path.join(root, 'runtime-source-lock.json'), 'utf8'));
++if (verifyOnlyOfficeFontAssets(path.join(output, 'font-assets')).fontSet !== 'redistributable')
++  throw new Error('Build requires reviewed redistributable font assets');
++fs.mkdirSync(upstream, { recursive: true });
++const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
++async function obtain(url, file, expected) {
++  if (fs.existsSync(file) && sha(fs.readFileSync(file)) === expected) return;
++  const response = await fetch(url);
++  if (!response.ok) throw new Error('Source download failed: ' + url);
++  const bytes = Buffer.from(await response.arrayBuffer());
++  if (sha(bytes) !== expected) throw new Error('Source/release hash mismatch: ' + url);
++  fs.writeFileSync(file, bytes);
++}
++for (const source of lock.sources)
++  await obtain(source.sourceUrl, path.join(upstream, source.archive), source.archiveSha256);
++const release = path.join(upstream, 'x2t-release.tar.gz');
++await obtain(
++  'https://github.com/agentbridges-ai/onlyoffice-x2t-wasm/releases/download/v9.3.0%2B4/onlyoffice-x2t-wasm-v9.3.0%2B4.tar.gz',
++  release,
++  '94dd84fa067ebed4fde5763bd5592cb506ac61c3cd3c54cec84953535fb6c5c5',
++);
++for (const file of ['x2t.js', 'x2t.js.br', 'x2t.wasm', 'x2t.wasm.br']) {
++  const bytes = execFileSync('tar', ['-xOf', release, './' + file], { maxBuffer: 64 * 1024 * 1024 });
++  if (file === 'x2t.wasm' && sha(bytes) !== lock.x2tWasmSha256) throw new Error('Converter hash mismatch');
++  fs.writeFileSync(path.join(root, 'public/wasm/x2t', file), bytes);
++}
++console.log('Verified pinned source archives and converter release. Generate reviewed font assets before building.');
+diff --git a/scripts/generate-onlyoffice-font-assets.mjs b/scripts/generate-onlyoffice-font-assets.mjs
+index aa01494..02079be 100755
+--- a/scripts/generate-onlyoffice-font-assets.mjs
++++ b/scripts/generate-onlyoffice-font-assets.mjs
+@@ -1,8 +1,8 @@
+ #!/usr/bin/env node
+ 
++import { createHash } from 'node:crypto';
+ import { spawnSync } from 'node:child_process';
+ import fs from 'node:fs';
+-import os from 'node:os';
+ import path from 'node:path';
+ import { fileURLToPath, pathToFileURL } from 'node:url';
+ import { verifyOnlyOfficeFontAssets } from './verify-onlyoffice-font-assets.mjs';
+@@ -12,10 +12,10 @@ export const FONT_GENERATOR_IMAGE_ENV = 'ONLYOFFICE_BROWSER_FONT_GENERATOR_IMAGE
+ export const FONT_SET_ENV = 'ONLYOFFICE_BROWSER_FONT_SET';
+ export const GENERATED_FONT_ASSETS_MANIFEST = 'onlyoffice-browser-font-assets.json';
+ export const GENERATED_FONT_SOURCE_MAP = 'onlyoffice-browser-font-source-map.json';
+-export const DEFAULT_FONT_SET = 'zh-core';
++export const DEFAULT_FONT_SET = 'redistributable';
+ 
+ const SUPPORTED_FONT_EXTENSIONS = new Set(['.ttf', '.tte', '.otf', '.otc', '.ttc', '.woff', '.woff2']);
+-const FONT_SETS = new Set(['zh-core', 'full']);
++const FONT_SETS = new Set(['redistributable', 'zh-core', 'full']);
+ const ZH_CORE_FONT_FAMILIES = [
+   'Arial',
+   'Aptos',
+@@ -143,10 +143,12 @@ Options:
+   --input <dir>    Directory containing font files. Required.
+   --output <dir>   Output directory for generated OnlyOffice font assets. Required.
+   --image <image>  Docker image. Defaults to ${DEFAULT_FONT_GENERATOR_IMAGE}.
+-  --font-set <set> Font set to export: zh-core or full. Defaults to ${DEFAULT_FONT_SET}.
++  --font-set <set> Font set to export: redistributable, zh-core or full. Defaults to ${DEFAULT_FONT_SET}.
+   --keep-font <family>
+                   Extra exact font family to keep when --font-set zh-core is used.
+                   May be repeated.
++  --license-manifest <file>
++                  Required for redistributable: hash-bound OFL font permissions.
+   --help           Show this help.`;
+ }
+ 
+@@ -165,6 +167,7 @@ export function parseGenerateFontAssetsArgs(argv, env = process.env) {
+     image: env[FONT_GENERATOR_IMAGE_ENV] || DEFAULT_FONT_GENERATOR_IMAGE,
+     fontSet: env[FONT_SET_ENV] || DEFAULT_FONT_SET,
+     keepFonts: [],
++    licenseManifest: '',
+     help: false,
+   };
+ 
+@@ -179,6 +182,10 @@ export function parseGenerateFontAssetsArgs(argv, env = process.env) {
+         options.output = readOption(argv, index, arg);
+         index += 1;
+         break;
++      case '--license-manifest':
++        options.licenseManifest = readOption(argv, index, arg);
++        index += 1;
++        break;
+       case '--image':
+         options.image = readOption(argv, index, arg);
+         index += 1;
+@@ -265,7 +272,39 @@ export function validateGenerateFontAssetsOptions(options) {
+     throw new Error(`Output path exists and is not a directory: ${output}`);
+   }
+ 
+-  return { input, output, image: options.image, fontSet: options.fontSet, keepFonts: options.keepFonts, fontFiles };
++  let fontLicenses;
++  if (options.fontSet === 'redistributable') {
++    if (!options.licenseManifest) throw new Error('Redistributable fonts require --license-manifest');
++    fontLicenses = JSON.parse(fs.readFileSync(options.licenseManifest, 'utf8'));
++    if (!Array.isArray(fontLicenses.fonts) || fontLicenses.fonts.length !== fontFiles.length)
++      throw new Error('Font license manifest must cover every input font exactly once');
++    const seen = new Set();
++    for (const font of fontFiles) {
++      const relative = path.relative(input, font).replaceAll(path.sep, '/');
++      const matches = fontLicenses.fonts.filter((entry) => entry.file === relative);
++      if (matches.length !== 1 || seen.has(relative))
++        throw new Error('Missing or duplicate font permission: ' + relative);
++      seen.add(relative);
++      const entry = matches[0];
++      if (
++        entry.license !== 'OFL-1.1' ||
++        !entry.notice?.includes('SIL OPEN FONT LICENSE') ||
++        !entry.source?.startsWith('https://')
++      )
++        throw new Error('Missing OFL permission and source: ' + relative);
++      if (createHash('sha256').update(fs.readFileSync(font)).digest('hex') !== entry.sha256)
++        throw new Error('Font permission hash mismatch: ' + relative);
++    }
++  }
++  return {
++    fontLicenses,
++    input,
++    output,
++    image: options.image,
++    fontSet: options.fontSet,
++    keepFonts: options.keepFonts,
++    fontFiles,
++  };
+ }
+ 
+ function removeIfExists(targetPath) {
+@@ -359,7 +398,14 @@ find "$IN" -type f \\( \\
+ \\) -print0 | xargs -0 -I{} cp -f "{}" "$EXTRA/"
+ 
+ fc-cache -f "$EXTRA" || true
+-/usr/bin/documentserver-generate-allfonts.sh true true
++${
++  options.fontSet === 'redistributable'
++    ? `# Use only reviewed input fonts; never scan container/system fonts.
++export LD_LIBRARY_PATH="$DS_DIR/server/FileConverter/bin:\${LD_LIBRARY_PATH:-}"
++"$DS_DIR/server/tools/allfontsgen" --input="$EXTRA" --use-system=false --use-system-user-fonts=false --allfonts-web="$DS_DIR/sdkjs/common/AllFonts.js" --allfonts="$DS_DIR/server/FileConverter/bin/AllFonts.js" --images="$DS_DIR/sdkjs/common/Images" --selection="$DS_DIR/server/FileConverter/bin/font_selection.bin" --output-web="$DS_DIR/fonts"
++`
++    : '/usr/bin/documentserver-generate-allfonts.sh true true'
++}
+ 
+ mkdir -p "$OUT/sdkjs/common/Images" "$OUT/fonts" "$OUT/server/FileConverter/bin"
+ cp -f "$DS_DIR/sdkjs/common/AllFonts.js" "$OUT/sdkjs/common/AllFonts.js"
+@@ -538,7 +584,7 @@ used_source_index_set = set()
+ new_infos = []
+ for original_info in web_infos:
+     info = list(original_info)
+-    keep_actual_font = font_set == "full" or info[0] in kept_family_names
++    keep_actual_font = font_set != "zh-core" or info[0] in kept_family_names
+     exact_source_index = exact_source_index_for_family(info[0]) if font_set == "zh-core" and keep_actual_font else -1
+     exact_source_face_index = face_index_for_source(info, exact_source_index) if exact_source_index >= 0 else 0
+     for slot_index in range(1, len(info), 2):
+@@ -637,8 +683,10 @@ function runDockerGenerator(options) {
+   runCommand('docker', args, { stdio: 'inherit' });
+ }
+ 
+-function createFontStagingDirectory(fontFiles) {
+-  const stagingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onlyoffice-browser-font-input-'));
++function createFontStagingDirectory(fontFiles, output) {
++  // Keep staging beside output so Docker file sharing covers both mounts (Colima on macOS).
++  fs.mkdirSync(path.dirname(output), { recursive: true });
++  const stagingDir = fs.mkdtempSync(path.join(path.dirname(output), '.onlyoffice-browser-font-input-'));
+   const usedNames = new Set();
+ 
+   for (const fontFile of fontFiles) {
+@@ -712,6 +760,7 @@ function writeGeneratedManifest(output, options) {
+     generator: 'documentserver-generate-allfonts.sh',
+     image: options.image,
+     fontSet: options.fontSet,
++    ...(options.fontLicenses ? { fontLicenses: 'font-licenses.json' } : {}),
+     generatedAt: new Date().toISOString(),
+     allFonts: 'sdkjs/common/AllFonts.js',
+     fontSelection: 'server/FileConverter/bin/font_selection.bin',
+@@ -730,7 +779,7 @@ export function generateOnlyOfficeFontAssets(options) {
+   console.log(`Using Docker image: ${validated.image}`);
+   console.log(`Found ${validated.fontFiles.length} font files in ${validated.input}`);
+   assertDockerAvailable();
+-  const stagingDir = createFontStagingDirectory(validated.fontFiles);
++  const stagingDir = createFontStagingDirectory(validated.fontFiles, validated.output);
+   console.log(`Prepared temporary font input: ${stagingDir}`);
+   try {
+     prepareOutputDirectory(validated.output);
+@@ -738,6 +787,21 @@ export function generateOnlyOfficeFontAssets(options) {
+     console.log('Running official OnlyOffice font generator...');
+     runDockerGenerator({ ...validated, input: stagingDir });
+     assertGeneratedAssets(validated.output);
++    if (validated.fontLicenses) {
++      const licensesByHash = new Map(validated.fontLicenses.fonts.map((entry) => [entry.sha256, entry]));
++      const distributedFonts = listGeneratedFontAssetPaths(validated.output).map((file) => {
++        const sha256 = createHash('sha256')
++          .update(fs.readFileSync(path.join(validated.output, file)))
++          .digest('hex');
++        const permission = licensesByHash.get(sha256);
++        if (!permission) throw new Error('Generator added an unlicensed font: ' + file);
++        return { ...permission, inputFile: permission.file, file, sha256 };
++      });
++      fs.writeFileSync(
++        path.join(validated.output, 'font-licenses.json'),
++        JSON.stringify({ fonts: distributedFonts }, null, 2) + '\n',
++      );
++    }
+     writeGeneratedManifest(validated.output, validated);
+     verifyOnlyOfficeFontAssets(validated.output);
+   } finally {
+diff --git a/scripts/verify-onlyoffice-font-assets.mjs b/scripts/verify-onlyoffice-font-assets.mjs
+index 6f504eb..9899e61 100755
+--- a/scripts/verify-onlyoffice-font-assets.mjs
++++ b/scripts/verify-onlyoffice-font-assets.mjs
+@@ -1,6 +1,7 @@
+ #!/usr/bin/env node
+ 
+ import fs from 'node:fs';
++import { createHash } from 'node:crypto';
+ import path from 'node:path';
+ import { pathToFileURL } from 'node:url';
+ 
+@@ -295,7 +296,10 @@ function verifyZhCoreFallbackChain(root, source, sourceMapRelativePath) {
+   const fontRanges = parseJsArray(source, '__fonts_ranges');
+   const sourceMap = JSON.parse(fs.readFileSync(path.resolve(root, sourceMapRelativePath), 'utf8'));
+   const sourceByPackedFile = new Map(
+-    (sourceMap.fonts || []).map((entry) => [String(entry.file || '').replace(/^fonts\//, ''), String(entry.source || '')]),
++    (sourceMap.fonts || []).map((entry) => [
++      String(entry.file || '').replace(/^fonts\//, ''),
++      String(entry.source || ''),
++    ]),
+   );
+ 
+   for (const [familyName, expectedSource] of ZH_CORE_REQUIRED_FALLBACK_SOURCES) {
+@@ -362,6 +366,33 @@ export function verifyOnlyOfficeFontAssets(input) {
+   if (manifest.fontSourceMap) assertFile(root, manifest.fontSourceMap);
+   for (const thumbnail of manifest.fontThumbnails) assertFile(root, thumbnail);
+   for (const font of manifest.fonts) assertFile(root, font);
++  if (manifest.fontSet === 'redistributable') {
++    if (manifest.fontLicenses !== 'font-licenses.json')
++      throw new Error('Redistributable fonts require font-licenses.json');
++    const permissions = JSON.parse(fs.readFileSync(path.join(root, manifest.fontLicenses), 'utf8')).fonts;
++    if (!Array.isArray(permissions) || permissions.length !== manifest.fonts.length)
++      throw new Error('Incomplete font permissions');
++    for (const font of manifest.fonts) {
++      const entries = permissions.filter((entry) => entry.file === font);
++      if (entries.length !== 1) throw new Error('Missing or duplicate font permission: ' + font);
++      const entry = entries[0];
++      if (
++        entry.license !== 'OFL-1.1' ||
++        !entry.notice?.includes('SIL OPEN FONT LICENSE') ||
++        !entry.source?.startsWith('https://')
++      )
++        throw new Error('Missing OFL permission and source: ' + font);
++      if (
++        createHash('sha256')
++          .update(fs.readFileSync(path.resolve(root, font)))
++          .digest('hex') !== entry.sha256
++      )
++        throw new Error('Font permission hash mismatch: ' + font);
++    }
++    const actualFonts = fs.readdirSync(path.join(root, 'fonts')).map((name) => 'fonts/' + name);
++    if (actualFonts.length !== manifest.fonts.length || actualFonts.some((file) => !manifest.fonts.includes(file)))
++      throw new Error('Unlisted font files would be distributed');
++  }
+   verifyAllFonts(root, manifest.allFonts, manifest.fontThumbnails);
+   if (manifest.fontSet === 'zh-core') {
+     const source = fs.readFileSync(path.resolve(root, manifest.allFonts), 'utf8');
+diff --git a/src/index.ts b/src/index.ts
+index 0c20547..964f913 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -25,7 +25,7 @@ app.innerHTML = `
+   <section class="demo-toolbar" aria-label="Office editor demo controls">
+     <div>
+       <h1>Browser Office Editor</h1>
+-      <p>Local DOCX, XLSX, PPTX, and CSV preview/edit component demo.</p>
++      <p>Local DOCX, XLSX, PPTX, and CSV preview/edit component demo. <a href="/licensing.html" target="_blank" rel="noopener">Licenses and source code</a></p>
+     </div>
+     <div class="demo-actions">
+       <fieldset class="mode-selector" aria-label="Open mode">
+@@ -63,7 +63,10 @@ function getDefaultOfficeHostUrl(): string {
+   if (configured) return new URL(configured, window.location.href).href;
+ 
+   const hostUrl = new URL('/office-host.html', window.location.href);
+-  if (hostUrl.hostname === 'localhost' || (hostUrl.hostname.endsWith('.localhost') && hostUrl.hostname !== 'host.localhost')) {
++  if (
++    hostUrl.hostname === 'localhost' ||
++    (hostUrl.hostname.endsWith('.localhost') && hostUrl.hostname !== 'host.localhost')
++  ) {
+     hostUrl.hostname = 'host.localhost';
+   } else if (hostUrl.hostname === 'host.localhost') {
+     hostUrl.hostname = 'app.localhost';
+@@ -125,7 +128,11 @@ async function removeRecord(record: DemoRecord): Promise<void> {
+ 
+ async function openEditor(options: DemoEditorOptions): Promise<DemoRecord> {
+   const id = nextPanelId++;
+-  const title = options.fileName || (options.file instanceof File ? options.file.name : undefined) || options.emptyType || 'document';
++  const title =
++    options.fileName ||
++    (options.file instanceof File ? options.file.name : undefined) ||
++    options.emptyType ||
++    'document';
+   const panel = document.createElement('article');
+   panel.className = 'editor-panel';
+   panel.innerHTML = `
+diff --git a/src/office-host.ts b/src/office-host.ts
+index 7724ef7..8e8018e 100644
+--- a/src/office-host.ts
++++ b/src/office-host.ts
+@@ -20,10 +20,17 @@ import './styles/base.css';
+ 
+ type RuntimeOptions = Parameters<typeof createRuntimeOfficeEditor>[1];
+ 
++const legalNotice = document.createElement('footer');
++legalNotice.className = 'office-license-notice';
++legalNotice.innerHTML =
++  '<span>ONLYOFFICE</span> · <a href="/licensing.html" target="_blank" rel="noopener">Licenses and source code</a>';
++document.body.append(legalNotice);
++
+ const params = new URLSearchParams(window.location.search);
+ const sessionId = params.get('sessionId') || '';
+ const parentOrigin = params.get('parentOrigin') || '';
+ const root = document.querySelector<HTMLElement>('#office-host') ?? document.body;
++root.style.height = 'calc(100vh - 26px)';
+ const HOST_RESET_PATH = '/reset.html';
+ const SAVE_ACK_TIMEOUT_MS = 60_000;
+ /** Bump whenever already-open host frames must be recreated. */
+diff --git a/src/styles/base.css b/src/styles/base.css
+index 6a0c4fc..a9d3065 100644
+--- a/src/styles/base.css
++++ b/src/styles/base.css
+@@ -14,7 +14,7 @@ body {
+     system-ui,
+     -apple-system,
+     BlinkMacSystemFont,
+-    "Segoe UI",
++    'Segoe UI',
+     sans-serif;
+ }
+ 
+@@ -206,3 +206,14 @@ button:disabled {
+     min-height: 520px;
+   }
+ }
++
++.office-license-notice {
++  height: 26px;
++  display: flex;
++  justify-content: center;
++  align-items: center;
++  gap: 6px;
++  background: #f6f8fc;
++  color: #39485f;
++  font-size: 12px;
++}
+diff --git a/test/unit/generate-onlyoffice-font-assets.test.ts b/test/unit/generate-onlyoffice-font-assets.test.ts
+index e378e3e..b92430d 100644
+--- a/test/unit/generate-onlyoffice-font-assets.test.ts
++++ b/test/unit/generate-onlyoffice-font-assets.test.ts
+@@ -1,4 +1,5 @@
+ import fs from 'node:fs';
++import { createHash } from 'node:crypto';
+ import os from 'node:os';
+ import path from 'node:path';
+ import { pathToFileURL } from 'node:url';
+@@ -73,6 +74,7 @@ describe('generate-onlyoffice-font-assets options', () => {
+       image: DEFAULT_FONT_GENERATOR_IMAGE,
+       fontSet: DEFAULT_FONT_SET,
+       keepFonts: [],
++      licenseManifest: '',
+       help: false,
+     });
+   });
+@@ -153,7 +155,7 @@ describe('generate-onlyoffice-font-assets options', () => {
+     fs.writeFileSync(path.join(input, 'notes.txt'), '');
+ 
+     const validated = validateGenerateFontAssetsOptions(
+-      parseGenerateFontAssetsArgs(['--input', input, '--output', output]),
++      parseGenerateFontAssetsArgs(['--input', input, '--output', output, '--font-set', 'full']),
+     );
+ 
+     expect(validated.fontFiles).toEqual([path.join(input, 'nested', 'msyh.ttc')]);
+@@ -213,10 +215,49 @@ describe('generate-onlyoffice-font-assets options', () => {
+   it('stages input fonts before cleaning the output directory', () => {
+     const source = generateOnlyOfficeFontAssets.toString();
+ 
+-    expect(source.indexOf('createFontStagingDirectory(validated.fontFiles)')).toBeGreaterThanOrEqual(0);
++    expect(source.indexOf('createFontStagingDirectory(validated.fontFiles, validated.output)')).toBeGreaterThanOrEqual(
++      0,
++    );
+     expect(source.indexOf('prepareOutputDirectory(validated.output)')).toBeGreaterThanOrEqual(0);
+-    expect(source.indexOf('createFontStagingDirectory(validated.fontFiles)')).toBeLessThan(
++    expect(source.indexOf('createFontStagingDirectory(validated.fontFiles, validated.output)')).toBeLessThan(
+       source.indexOf('prepareOutputDirectory(validated.output)'),
+     );
+   });
+ });
++
++describe('redistributable font boundary', () => {
++  it('rejects unreviewed inputs, changed bytes and fonts introduced outside the manifest', () => {
++    const input = makeTempDir();
++    const output = makeTempDir();
++    const font = path.join(input, 'font.ttf');
++    fs.writeFileSync(font, 'reviewed-font-bytes');
++    const args = ['--input', input, '--output', output];
++    expect(() => validateGenerateFontAssetsOptions(parseGenerateFontAssetsArgs(args, {}))).toThrow('license-manifest');
++    const manifest = path.join(input, 'permissions.json');
++    fs.writeFileSync(
++      manifest,
++      JSON.stringify({
++        fonts: [
++          {
++            file: 'font.ttf',
++            license: 'OFL-1.1',
++            notice: 'SIL OPEN FONT LICENSE',
++            source: 'https://example.test/font',
++            sha256: createHash('sha256').update(fs.readFileSync(font)).digest('hex'),
++          },
++        ],
++      }),
++    );
++    args.push('--license-manifest', manifest);
++    expect(validateGenerateFontAssetsOptions(parseGenerateFontAssetsArgs(args, {})).fontFiles).toHaveLength(1);
++    fs.writeFileSync(font, 'replaced-with-unlicensed-font');
++    expect(() => validateGenerateFontAssetsOptions(parseGenerateFontAssetsArgs(args, {}))).toThrow('hash mismatch');
++    fs.writeFileSync(path.join(input, 'unknown.ttf'), 'extra');
++    expect(() => validateGenerateFontAssetsOptions(parseGenerateFontAssetsArgs(args, {}))).toThrow('every input font');
++  });
++  it('does not import the Docker image fonts into the redistributable generation', () => {
++    const script = dockerGenerationScript({ fontSet: 'redistributable', keepFonts: [] });
++    expect(script).toContain('--input="$EXTRA" --use-system=false');
++    expect(script).not.toContain('/usr/bin/documentserver-generate-allfonts.sh true true');
++  });
++});
+diff --git a/vite.config.ts b/vite.config.ts
+index e6b215b..cd4a5f3 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
+ import path, { resolve } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ import { defineConfig } from 'vite';
++import { createRequire } from 'node:module';
+ import type { Plugin } from 'vite';
+ 
+ export const FONT_ASSETS_DIR_ENV = 'ONLYOFFICE_BROWSER_FONT_ASSETS_DIR';
+@@ -126,6 +127,13 @@ function serveGeneratedFontAssets(): Plugin {
+       server.middlewares.use(middleware);
+     },
+     configurePreviewServer(server) {
++      if (configuredDir) {
++        const { verifyOnlyOfficeFontAssets } = createRequire(import.meta.url)(
++          './scripts/verify-onlyoffice-font-assets.mjs',
++        );
++        if (verifyOnlyOfficeFontAssets(fontAssetsRoot).fontSet !== 'redistributable')
++          throw new Error('Preview requires reviewed redistributable font assets');
++      }
+       server.middlewares.use(middleware);
+     },
+   };

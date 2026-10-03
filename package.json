@@ -67,7 +67,8 @@
     "selfhost:verify:worker-storage-pressure": "node scripts/verify-document-worker-storage-pressure.mjs",
     "selfhost:restore": "node scripts/selfhost-restore.mjs",
     "selfhost:up": "node scripts/selfhost-up.mjs",
-    "selfhost:down": "docker compose --profile wopi --profile browser down"
+    "selfhost:down": "docker compose --profile wopi --profile browser down",
+    "browser-office:verify:distribution": "node services/browser-office/distribution-check.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",
