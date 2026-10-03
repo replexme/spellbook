@@ -356,3 +356,29 @@ independent PowerPoint fidelity remain separate unfinished gates.
 `0015-public-save-waits-for-native-cleanup.patch` separates artifact persistence (`SAVE_ACK`) from completed native cleanup (`SAVE_COMPLETE`). The parent keeps the pending result until the host has released its save owner after the native runtime finishes. A failed overlapping request cannot clear another request's owner. Persistence failures also finish cleanup before the public promise rejects. The parent library and host use the paired `onlyoffice-browser-host/v2` contract and must be deployed together.
 
 A deterministic headless browser regression holds the saved File's second read after persistence acknowledgement. The old distribution incorrectly resolves `save()` while this cleanup is held. The patched distribution must keep the promise pending, then allow an immediate second save after release. This is a completion-boundary fix, not a retry or timing delay. The source-bound candidate's preceding diagnostic batch had 56/57 successes, including a real SmartArt move/Redo failure when a subsequent save found the native save lock still held. That failure remains preserved as evidence. Fresh runtime validation is required for candidate `15e97cc`; earlier successes are not copied forward.
+
+## Preferred UI source and coherent compressed runtime
+
+Patch `0016-preferred-ui-source-and-coherent-runtime-compression.patch` pins the
+modified CryptPad UI, wrapper, separate RequireJS vendor input, licenses and
+build recipes at the SDK commit. Its archive excludes upstream fonts. The
+readable browser API and shared application hook are included as preferred
+adaptation sources; the hook and template element fix are applied to original
+source templates before compilation. The UI recipe also verifies and extracts
+its preferred SDK dependency for inlined utilities. All 1,185 deployed UI
+assets, including compression variants, were reproduced against candidate
+`8160301`; six base SDK JS files and the locally patched presentation SDK also
+remain exactly reproduced. Build source, archive and output changes invalidate
+the packaged receipts. These scoped proofs do not certify auxiliary WASM, x2t,
+the entire editor, a hosted integration's license boundary or product admission.
+
+An actual decode comparison found 20 stale compression variants among 279
+runtime pairs in the preceding distribution: 19 UI files and the final font
+list. Independent file hashes could not detect their semantic mismatch. Final
+UI and reviewed font bytes now precede compression, and final split packs share
+that same materialized distribution. Every `.br` file must decode exactly to
+its listed plain counterpart. The public verifier rejects stale or corrupt
+compression and missing counterparts; the preceding candidate is rejected by
+this stronger check. A server that sends actual `Content-Encoding: br` responses
+is used for fresh browser validation; Vite-only successes are retained as
+historical evidence rather than claimed as compression-path verification.
