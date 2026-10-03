@@ -5,6 +5,7 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { brotliCompressSync } from "node:zlib";
 import {
   verifyOfficeDistribution,
   readOfficeDistributionEvidence,
@@ -23,6 +24,7 @@ test("distribution rejects unreviewed fonts, changed source/code and unlisted fi
     "sources/editor.tar.gz": sources,
     "fonts/000.ttf": font,
     "editor.js": "compiled editor",
+    "editor.js.br": brotliCompressSync(Buffer.from("compiled editor")),
     "onlyoffice-browser-font-assets.json": JSON.stringify({
       fontSet: "redistributable",
       fonts: ["fonts/000.ttf"],
@@ -71,6 +73,20 @@ test("distribution rejects unreviewed fonts, changed source/code and unlisted fi
     await reset();
     const original = await readOfficeDistributionEvidence(root);
     assert.equal(original.valid, true);
+    assert.equal(original.runtimeCompressedPairsVerified, 1);
+    // Correct independent file hashes do not make stale compressed code valid.
+    content["editor.js.br"] = brotliCompressSync(Buffer.from("old editor"));
+    await reset();
+    await assert.rejects(verifyOfficeDistribution(root), /content differs from plain/);
+    content["editor.js.br"] = Buffer.from("corrupt encoding");
+    await reset();
+    await assert.rejects(verifyOfficeDistribution(root), /Invalid compressed/);
+    content["editor.js.br"] = brotliCompressSync(Buffer.from("compiled editor"));
+    content["orphan.js.br"] = brotliCompressSync(Buffer.from("orphan"));
+    await reset();
+    await assert.rejects(verifyOfficeDistribution(root), /lacks a listed counterpart/);
+    delete content["orphan.js.br"];
+    await reset();
     assert.match(original.distributionSha256, /^[a-f0-9]{64}$/u);
     assert.equal(
       (await verifyOfficeDistribution(root)).upstreamEditorRebuildVerified,

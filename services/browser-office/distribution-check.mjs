@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import { createHash } from "node:crypto";
+import { brotliDecompressSync } from "node:zlib";
 import { readFile, readdir, lstat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +42,20 @@ export async function verifyOfficeDistribution(root) {
     expected.set(file.path, file.sha256);
     if ((await hash(file.path)) !== file.sha256)
       throw new Error("Distribution hash mismatch: " + file.path);
+  }
+  // A hashed but stale precompressed file can serve different code or fonts.
+  // Every compression variant must decode to its final plain counterpart.
+  let runtimeCompressedPairsVerified = 0;
+  for (const name of expected.keys()) {
+    if (!name.endsWith(".br")) continue;
+    const plain = name.slice(0, -3);
+    if (!expected.has(plain)) throw new Error("Compressed asset lacks a listed counterpart: " + name);
+    let decoded;
+    try { decoded = brotliDecompressSync(await readFile(resolve(name))); }
+    catch { throw new Error("Invalid compressed runtime asset: " + name); }
+    if (!decoded.equals(await readFile(resolve(plain))))
+      throw new Error("Compressed runtime content differs from plain asset: " + name);
+    runtimeCompressedPairsVerified++;
   }
   async function walk(relative = "") {
     for (const entry of await readdir(resolve(relative || "."), {
@@ -106,6 +121,7 @@ export async function verifyOfficeDistribution(root) {
     files: expected.size,
     fonts: fonts.fonts.length,
     sourceMaterialsPackaged: true,
+    runtimeCompressedPairsVerified,
     upstreamEditorRebuildVerified:
       manifest.upstreamEditorRebuildVerified === true,
   };
