@@ -519,7 +519,11 @@ WASM/test-document plain byte matches `1ffd3f0`; compression is regenerated
 from those bytes. The actual downloaded wrapper archive digest equals its
 listed source digest. Strict Brotli save/open tests pass 18/18, and the native
 spelling/hyphenation engines parse the pinned data. The 57 selected diagnostic
-batch is still running and is not counted complete until its final source and
-distribution fences pass. Run timestamps and archive metadata are outside the
+trials also pass on this exact cold-built distribution, with unchanged source
+and distribution fences. This still does not admit the full 94-command product
+contract. Actual Korean and British English text language survives native apply,
+public DOCX save and fresh Word reopen; only the shipped US English spelling/
+hyphenation dictionary is advertised. This Word roundtrip is not a PPTX language
+operation proof. Run timestamps and archive metadata are outside the
 scoped SDK/UI reproduction claim; whole-package reproducibility and SLSA
 certification are not claimed.
