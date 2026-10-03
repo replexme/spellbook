@@ -1,0 +1,104 @@
+diff --git a/scripts/base-slide-sdk-test-input.d.mts b/scripts/base-slide-sdk-test-input.d.mts
+new file mode 100644
+index 0000000..ffedf08
+--- /dev/null
++++ b/scripts/base-slide-sdk-test-input.d.mts
+@@ -0,0 +1 @@
++export function readPinnedBaseSlideSdk(): string;
+diff --git a/scripts/base-slide-sdk-test-input.mjs b/scripts/base-slide-sdk-test-input.mjs
+new file mode 100644
+index 0000000..1b9763b
+--- /dev/null
++++ b/scripts/base-slide-sdk-test-input.mjs
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import fs from 'node:fs';
++import path from 'node:path';
++import { createHash } from 'node:crypto';
++
++// The same unmodified bytes reproduce the original defect and test its fix.
++// An extracted source archive obtains these bytes from the pinned SDK build.
++export function readPinnedBaseSlideSdk() {
++  const relative = 'sdkjs/slide/sdk-all.js';
++  const materials = process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || '.temp/licensing';
++  const rebuilt = path.join(materials, 'sdk-base-runtime', relative);
++  const file = fs.existsSync(rebuilt) ? rebuilt : path.join('public', relative);
++  const bytes = fs.readFileSync(file);
++  const lock = JSON.parse(fs.readFileSync('runtime-source-lock.json', 'utf8'));
++  const expected = lock.sdkRebuild.baseOutputs.find((output) => output.path === relative);
++  if (createHash('sha256').update(bytes).digest('hex') !== expected?.sha256)
++    throw new Error('Regression tests require the exact pinned pre-patch slide SDK');
++  return bytes.toString('utf8');
++}
+diff --git a/scripts/base-slide-sdk-test-input.test.mjs b/scripts/base-slide-sdk-test-input.test.mjs
+new file mode 100644
+index 0000000..e6cd298
+--- /dev/null
++++ b/scripts/base-slide-sdk-test-input.test.mjs
+@@ -0,0 +1,25 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import fs from 'node:fs';
++import os from 'node:os';
++import path from 'node:path';
++import { createHash } from 'node:crypto';
++import { spawnSync } from 'node:child_process';
++
++test('stale rebuilt regression input cannot fall back to a valid warm SDK', () => {
++  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'base-sdk-input-'));
++  try {
++    const relative = 'sdkjs/slide/sdk-all.js';
++    const warm = path.join(root, 'public', relative), rebuilt = path.join(root, '.temp/licensing/sdk-base-runtime', relative);
++    for (const file of [warm, rebuilt]) fs.mkdirSync(path.dirname(file), { recursive: true });
++    const valid = 'pinned SDK input'; fs.writeFileSync(warm, valid); fs.writeFileSync(rebuilt, 'stale rebuilt bytes');
++    fs.writeFileSync(path.join(root, 'runtime-source-lock.json'), JSON.stringify({ sdkRebuild: { baseOutputs: [{ path: relative, sha256: createHash('sha256').update(valid).digest('hex') }] } }));
++    const run = () => spawnSync(process.execPath, ['--input-type=module', '-e',
++      `import { readPinnedBaseSlideSdk } from ${JSON.stringify(new URL('./base-slide-sdk-test-input.mjs', import.meta.url).href)}; process.stdout.write(readPinnedBaseSlideSdk());`],
++      { cwd: root, encoding: 'utf8', env: { ...process.env, ONLYOFFICE_LICENSE_MATERIALS_DIR: path.join(root, '.temp/licensing') } });
++    const stale = run(); assert.notEqual(stale.status, 0); assert.match(stale.stderr, /exact pinned pre-patch/);
++    fs.writeFileSync(rebuilt, valid); fs.writeFileSync(warm, 'wrong warm bytes');
++    const verified = run(); assert.equal(verified.status, 0); assert.equal(verified.stdout, valid);
++  } finally { fs.rmSync(root, { recursive: true, force: true }); }
++});
+diff --git a/scripts/patch-onlyoffice-group-redo-history.test.mjs b/scripts/patch-onlyoffice-group-redo-history.test.mjs
+index c3f90b6..17ede1c 100644
+--- a/scripts/patch-onlyoffice-group-redo-history.test.mjs
++++ b/scripts/patch-onlyoffice-group-redo-history.test.mjs
+@@ -2,10 +2,10 @@
+ import assert from 'node:assert/strict';
+ import test from 'node:test';
+ import vm from 'node:vm';
+-import {readFileSync} from 'node:fs';
++import {readPinnedBaseSlideSdk} from './base-slide-sdk-test-input.mjs';
+ import {patchGroupRedo,unpatchGroupRedo} from './patch-onlyoffice-group-redo-history.mjs';
+ // Exercise the actual pinned provider methods, not copies of our replacement.
+-const source=readFileSync(new URL('../public/sdkjs/slide/sdk-all.js',import.meta.url),'utf8');
++const source=readPinnedBaseSlideSdk();
+ function methods(text,names){return names.map(name=>{const a=text.indexOf('CHistory.prototype.'+name+'=');assert(a>=0,name);let b=text.indexOf(';CHistory.prototype.',a);assert(b>a,name);return text.slice(a,b+1)}).join('')}
+ function fixture(patched=true){
+  class CHistory {}
+diff --git a/test/helpers/base-slide-sdk.ts b/test/helpers/base-slide-sdk.ts
+index befca10..64de0f8 100644
+--- a/test/helpers/base-slide-sdk.ts
++++ b/test/helpers/base-slide-sdk.ts
+@@ -1,18 +1 @@
+-import fs from 'node:fs';
+-import path from 'node:path';
+-import { createHash } from 'node:crypto';
+-
+-// The same unmodified bytes reproduce the original defect and test its fix.
+-// An extracted source archive obtains these bytes from the pinned SDK build.
+-export function readPinnedBaseSlideSdk(): string {
+-  const relative = 'sdkjs/slide/sdk-all.js';
+-  const materials = process.env.ONLYOFFICE_LICENSE_MATERIALS_DIR || '.temp/licensing';
+-  const rebuilt = path.join(materials, 'sdk-base-runtime', relative);
+-  const file = fs.existsSync(rebuilt) ? rebuilt : path.join('public', relative);
+-  const bytes = fs.readFileSync(file);
+-  const lock = JSON.parse(fs.readFileSync('runtime-source-lock.json', 'utf8'));
+-  const expected = lock.sdkRebuild.baseOutputs.find((output: { path: string }) => output.path === relative);
+-  if (createHash('sha256').update(bytes).digest('hex') !== expected?.sha256)
+-    throw new Error('Regression tests require the exact pinned pre-patch slide SDK');
+-  return bytes.toString('utf8');
+-}
++export { readPinnedBaseSlideSdk } from '../../scripts/base-slide-sdk-test-input.mjs';

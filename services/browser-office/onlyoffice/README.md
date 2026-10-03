@@ -494,3 +494,16 @@ Office tests (428), the gateway, docs and public boundary pass. The final cold
 build and its runtime checks remain separate pending steps until inspected.
 Neither patch certifies auxiliary WASM C++ builds, x2t reproduction, the actual
 service licensing boundary or full product operation admission.
+
+
+Patch `0022-canonical-sdk-regression-input.patch` (candidate `d816ab0`)
+shares the exact same digest-checked unmodified SDK input between TypeScript
+component regressions and Node's existing Redo regression suite. The preceding
+cold build passed the full build, 286 component tests and type checking but the
+Node suite still used the old public SDK path; that real failure is retained.
+The new loader refuses a stale rebuilt input even when a valid warm copy is
+present. Its TypeScript declaration is included. Local component tests (286),
+script tests (52) and type checking pass, and all 22 portable patches plus the
+pinned converter fetch replay the whole candidate Git tree exactly. Final
+archive-only build and strict HTTP runtime results are recorded separately
+once inspected; no whole-editor or full-product admission flag is raised.
