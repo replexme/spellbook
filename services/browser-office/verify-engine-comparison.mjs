@@ -1,5 +1,5 @@
 import { readOfficeDistributionEvidence } from "./distribution-check.mjs";
-import { readOnlyOfficeCodeIdentity } from "./onlyoffice/code-identity.mjs";
+import { readOnlyOfficeCodeIdentity, readOnlyOfficeCodeEvidence } from "./onlyoffice/code-identity.mjs";
 /* SPDX-License-Identifier: MPL-2.0 */
 // One matrix controls both engines. Run with `nice -n 15 node ...`; children
 // are sequential and every browser adapter is headless. No native Office app,
@@ -419,7 +419,7 @@ try {
       ),
     )
   ).every(Boolean);
-  report.finalCandidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidate);
+  report.finalCandidateCodeIdentity = await readOnlyOfficeCodeEvidence(candidate);
   report.finalCandidateDistribution = await readOfficeDistributionEvidence(path.join(candidate, "dist"));
   report.candidateDistributionStable = report.finalCandidateDistribution.valid && candidateDistribution.distributionSha256 === report.finalCandidateDistribution.distributionSha256;
   report.sourceStable =

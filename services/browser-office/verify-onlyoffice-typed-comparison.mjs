@@ -1,6 +1,6 @@
 import { readOfficeDistributionEvidence } from "./distribution-check.mjs";
 import { readCandidateNativeEvidence } from "./onlyoffice/native-evidence.mjs";
-import { readOnlyOfficeCodeIdentity } from "./onlyoffice/code-identity.mjs";
+import { readOnlyOfficeCodeIdentity, readOnlyOfficeCodeEvidence } from "./onlyoffice/code-identity.mjs";
 import { beginCandidateTransaction, finishCandidateTransaction } from "./onlyoffice/candidate-transaction.mjs";
 import { captureStableOnlyOfficeBaseline } from "./onlyoffice-baseline.mjs";
 import { observeOnlyOfficeCandidate as typedProjection } from "./onlyoffice-observation.mjs";
@@ -986,7 +986,7 @@ try {
   await context.close();
   await browser.close();
   await new Promise((r) => diagnosticServer.close(r));
-  report.finalCandidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidateRoot);
+  report.finalCandidateCodeIdentity = await readOnlyOfficeCodeEvidence(candidateRoot);
   report.finalCandidateDistribution = await readOfficeDistributionEvidence(path.join(candidateRoot, "dist"));
   report.candidateDistributionStable = report.finalCandidateDistribution.valid && candidateDistribution.distributionSha256 === report.finalCandidateDistribution.distributionSha256;
   report.candidateCodeStable = candidateCodeIdentity.sha256 === report.finalCandidateCodeIdentity.sha256;

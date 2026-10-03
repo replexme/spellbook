@@ -4,7 +4,10 @@ import test from "node:test";
 import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { readOnlyOfficeCodeIdentity } from "./onlyoffice/code-identity.mjs";
+import {
+  readOnlyOfficeCodeIdentity,
+  readOnlyOfficeCodeEvidence,
+} from "./onlyoffice/code-identity.mjs";
 
 async function fixture(run) {
   const root = await mkdtemp(path.join(tmpdir(), "candidate-code-identity-"));
@@ -28,6 +31,10 @@ async function fixture(run) {
 test("ignored native-history SDK half, converter and host changes invalidate the code identity", async () => {
   await fixture(async (root, write) => {
     const original = await readOnlyOfficeCodeIdentity(root);
+    assert.equal(
+      (await readOnlyOfficeCodeEvidence(root)).sha256,
+      original.sha256,
+    );
     assert.equal(original.files.length, 6);
     await write("sdkjs/slide/sdk-all-min.js", "changed-native-history");
     const updated = await readOnlyOfficeCodeIdentity(root);
@@ -54,11 +61,16 @@ test("missing SDK halves or symlinked generated code cannot produce a complete i
     const missing = path.join(root, "dist/sdkjs/cell/sdk-all-min.js");
     await rm(missing);
     await assert.rejects(readOnlyOfficeCodeIdentity(root), /SDK is incomplete/);
+    const missingEvidence = await readOnlyOfficeCodeEvidence(root);
+    assert.equal(missingEvidence.valid, false);
+    assert.equal(missingEvidence.sha256, null);
+    assert.match(missingEvidence.error, /SDK is incomplete/);
     await write("sdkjs/cell/sdk-all-min.js");
     await symlink(
       path.join(root, "dist/npm/public-api.js"),
       path.join(root, "dist/npm/aliased.js"),
     );
     await assert.rejects(readOnlyOfficeCodeIdentity(root), /regular file/);
+    assert.equal((await readOnlyOfficeCodeEvidence(root)).valid, false);
   });
 });

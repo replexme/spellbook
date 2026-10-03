@@ -1,5 +1,5 @@
 import { readOfficeDistributionEvidence } from "./distribution-check.mjs";
-import { readOnlyOfficeCodeIdentity } from "./onlyoffice/code-identity.mjs";
+import { readOnlyOfficeCodeIdentity, readOnlyOfficeCodeEvidence } from "./onlyoffice/code-identity.mjs";
 import { captureStableOnlyOfficeBaseline } from "./onlyoffice-baseline.mjs";
 import { observeOnlyOfficeCandidate } from "./onlyoffice-observation.mjs";
 /* SPDX-License-Identifier: MPL-2.0 */
@@ -790,7 +790,7 @@ try {
 } finally {
   await browser.close();
   await new Promise((resolve) => diagnosticServer.close(resolve));
-  report.finalCandidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidateRoot);
+  report.finalCandidateCodeIdentity = await readOnlyOfficeCodeEvidence(candidateRoot);
   report.finalCandidateDistribution = await readOfficeDistributionEvidence(path.join(candidateRoot, "dist"));
   report.candidateDistributionStable = report.finalCandidateDistribution.valid && candidateDistribution.distributionSha256 === report.finalCandidateDistribution.distributionSha256;
   report.candidateCodeStable = candidateCodeIdentity.sha256 === report.finalCandidateCodeIdentity.sha256;

@@ -44,3 +44,20 @@ export async function readOnlyOfficeCodeIdentity(candidateRoot) {
     files,
   };
 }
+
+// Final trial evidence must survive a removed SDK half or converter. Initial
+// admission still uses the strict reader and refuses to start in that state.
+export async function readOnlyOfficeCodeEvidence(candidateRoot) {
+  try {
+    return {
+      valid: true,
+      ...(await readOnlyOfficeCodeIdentity(candidateRoot)),
+    };
+  } catch (error) {
+    return {
+      valid: false,
+      sha256: null,
+      error: String(error.message ?? error),
+    };
+  }
+}
