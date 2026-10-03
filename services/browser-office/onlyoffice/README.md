@@ -382,3 +382,17 @@ compression and missing counterparts; the preceding candidate is rejected by
 this stronger check. A server that sends actual `Content-Encoding: br` responses
 is used for fresh browser validation; Vite-only successes are retained as
 historical evidence rather than claimed as compression-path verification.
+
+## Cold source builds materialize generated resources
+
+Patch `0017-materialize-cold-build-generated-ui-assets.patch` (candidate
+`1bb5c68`) fixes the shared image build order: the common-copy stage preceded
+generation of `formats@2.5x.svg`, so warm source trees hid a missing deployable
+icon. Newly generated shared images are materialized after all compiler stages
+through the existing runtime asset selector. Debug maps stay outside that
+selector. A pristine rebuild exactly reproduced all 1,186 deployed UI files,
+and all 279 compressed pairs decoded to their plain counterparts. The initial
+strict HTTP save test exposed the missing icon even though document saving
+succeeded. That failure is preserved; full fresh HTTP runtime validation remains
+a separate requirement. The final runtime manifest describes materialized files
+and no longer prunes already reviewed fonts or source/legal materials.

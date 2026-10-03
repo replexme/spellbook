@@ -1,0 +1,145 @@
+diff --git a/scripts/build-license-materials.mjs b/scripts/build-license-materials.mjs
+index b76efad..f6f6b4e 100644
+--- a/scripts/build-license-materials.mjs
++++ b/scripts/build-license-materials.mjs
+@@ -4,7 +4,7 @@ import path from 'node:path';
+ import { createHash } from 'node:crypto';
+ import { execFileSync } from 'node:child_process';
+ import { verifyOnlyOfficeFontAssets } from './verify-onlyoffice-font-assets.mjs';
+-import { getRuntimeAssetPack } from './build-onlyoffice-runtime-assets.mjs';
++import { getRuntimeAssetPack, buildRuntimeAssets } from './build-onlyoffice-runtime-assets.mjs';
+ import { syncRuntimeCompressedAssets } from './runtime-compressed-assets.mjs';
+ import { uiBuildInputPaths, verifyUiRebuildEvidence } from './ui-rebuild-evidence.mjs';
+ import { sdkBuildInputPaths, verifySdkRebuildEvidence } from './sdk-rebuild-evidence.mjs';
+@@ -75,6 +75,16 @@ function readUiOutputs(directory = path.join(dist, 'web-apps'), relative = 'web-
+   }
+ }
+ readUiOutputs();
++// Refresh the compact identity from final materialized runtime files. Do not
++// prune here: reviewed fonts and legal/source files have already been added.
++const finalRuntime = buildRuntimeAssets({
++  input: dist,
++  dryRun: true,
++  types: ['word', 'cell', 'slide'],
++  dictionaries: ['en_US'],
++  keepHelp: false,
++});
++fs.writeFileSync(path.join(dist, 'onlyoffice-runtime-assets.json'), JSON.stringify(finalRuntime, null, 2) + '\n');
+ verifyUiRebuildEvidence(
+   lock,
+   uiEvidence,
+diff --git a/scripts/build-onlyoffice-runtime-assets.mjs b/scripts/build-onlyoffice-runtime-assets.mjs
+index 490de73..603f11a 100755
+--- a/scripts/build-onlyoffice-runtime-assets.mjs
++++ b/scripts/build-onlyoffice-runtime-assets.mjs
+@@ -175,7 +175,7 @@ export function getRuntimeAssetPack(relativePath, options = {}) {
+   const dictionaries = options.dictionaries || DEFAULT_DICTIONARIES;
+   const keepHelp = Boolean(options.keepHelp);
+ 
+-  if (!isRuntimeAsset(normalized)) return null;
++  if (!isRuntimeAsset(normalized) || normalized.endsWith('.map')) return null;
+   if (!keepHelp && isHelpAsset(normalized)) return null;
+   if (normalized.startsWith('fonts/')) return null;
+   if (normalized.startsWith('server/FileConverter/')) return null;
+diff --git a/scripts/rebuild-preferred-ui.mjs b/scripts/rebuild-preferred-ui.mjs
+index f2c89a0..5ee3bc4 100644
+--- a/scripts/rebuild-preferred-ui.mjs
++++ b/scripts/rebuild-preferred-ui.mjs
+@@ -4,6 +4,7 @@ import path from 'node:path';
+ import { execFileSync } from 'node:child_process';
+ import { createHash } from 'node:crypto';
+ import { patchPreferredUiSource } from './patch-preferred-ui-source.mjs';
++import { collectRuntimeAssets, getRuntimeAssetPack } from './build-onlyoffice-runtime-assets.mjs';
+ import { compressRuntimeAsset } from './runtime-compressed-assets.mjs';
+ import { uiBuildInputPaths, verifyUiRebuildEvidence } from './ui-rebuild-evidence.mjs';
+ 
+@@ -45,6 +46,23 @@ try {
+   run('tar', ['-xzf', archive]);
+   for (const dependency of dependencies) run('tar', ['-xzf', path.join(materials, 'upstream', dependency.archive)]);
+   patchPreferredUiSource(temporary, path.join(root, 'source-overrides'));
++  const imagePrefix = 'web-apps/apps/common/main/resources/img';
++  const sourceImageFiles = () => {
++    const files = [];
++    const walk = (directory, relative = imagePrefix) => {
++      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
++        const name = relative + '/' + entry.name,
++          file = path.join(directory, entry.name);
++        if (entry.isDirectory()) walk(file, name);
++        else if (entry.isFile()) files.push({ path: name, file });
++        else throw new Error('Non-file preferred UI image source: ' + name);
++      }
++    };
++    walk(path.join(temporary, imagePrefix));
++    return files;
++  };
++  const initialImageFiles = new Set(sourceImageFiles().map((file) => file.path));
++
+   const build = path.join(temporary, 'web-apps/build');
+   run('npm', ['ci', '--ignore-scripts', '--no-audit', '--no-fund'], build);
+   // The locked image plugin's local tool must exist; never skip image tasks.
+@@ -66,6 +84,30 @@ try {
+     path.join(root, 'scripts/patch-onlyoffice-print-fallback.mjs'),
+     path.join(temporary, 'web-apps/deploy'),
+   ]);
++  // Shared image generators run after the upstream common-copy phase. A
++  // pristine build must materialize newly generated outputs, rather than rely
++  // on an earlier build leaving them in the source tree.
++  const generatedResourceOutputs = [];
++  for (const image of sourceImageFiles()) {
++    if (initialImageFiles.has(image.path) || !getRuntimeAssetPack(image.path)) continue;
++    const target = path.join(temporary, 'web-apps/deploy', image.path);
++    if (!fs.existsSync(target)) {
++      fs.mkdirSync(path.dirname(target), { recursive: true });
++      fs.copyFileSync(image.file, target);
++    }
++    generatedResourceOutputs.push({ path: image.path, sha256: sha(image.file) });
++  }
++  // The upstream static bundle may omit generated assets which the UI requests.
++  // One shared selector defines deployable runtime files; debug maps stay out.
++  const materializedOutputs = [];
++  for (const asset of collectRuntimeAssets(path.dirname(deployed), {}).selected) {
++    const target = path.join(root, 'dist', asset.path);
++    if (!fs.existsSync(target)) {
++      fs.mkdirSync(path.dirname(target), { recursive: true });
++      fs.copyFileSync(path.join(path.dirname(deployed), asset.path), target);
++      materializedOutputs.push(asset.path);
++    }
++  }
+   const outputs = [];
+   const walk = (directory, relative = 'web-apps') => {
+     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+@@ -116,6 +158,8 @@ try {
+     sourceCommit: source.commit,
+     sourceArchiveSha256: source.archiveSha256,
+     dependencies: dependencies.map(({ id, archiveSha256 }) => ({ id, archiveSha256 })),
++    materializedOutputs,
++    generatedResourceOutputs,
+     buildRuntime: { node: process.versions.node, brotli: process.versions.brotli },
+     buildInputs: originalInputs,
+     outputs,
+diff --git a/source-overrides/README.md b/source-overrides/README.md
+index dd63ee0..c7acf41 100644
+--- a/source-overrides/README.md
++++ b/source-overrides/README.md
+@@ -7,3 +7,5 @@ These readable sources retain the upstream AGPL-3.0 context. They are not an off
+ `main-application-bootstrap.html` contains the shared readable application hook from the browser component. `scripts/patch-preferred-ui-source.mjs` inserts it into the three original source templates before Grunt builds them, and fixes the original template element lookup in its source file. Expected source hashes guard the patch boundaries. The internal UI build version remains 0.0.0, while the upstream banner retains 9.3.0 build 140, matching the reviewed component.
+ 
+ The preferred CryptPad bundle includes web-apps, onlyoffice-editor, its separate RequireJS vendor input, licenses and build recipes at one exact commit. Upstream fonts are excluded. Reviewed fonts are supplied through the separate license manifest. Runtime compression is regenerated and verified after all final UI and font modifications. SDK, deployed UI assets and compression checks do not certify auxiliary WASM, x2t reproduction, the complete editor or a proprietary hosted service's legal boundary.
++
++Generated deployable assets missing from the imported static bundle are materialized from the preferred UI build through the shared runtime selector. Debug source maps are excluded. The final compact manifest is refreshed before distribution and split-pack identity is recorded.
+diff --git a/test/unit/build-onlyoffice-runtime-assets.test.ts b/test/unit/build-onlyoffice-runtime-assets.test.ts
+index 343aa35..730f88e 100644
+--- a/test/unit/build-onlyoffice-runtime-assets.test.ts
++++ b/test/unit/build-onlyoffice-runtime-assets.test.ts
+@@ -56,6 +56,11 @@ describe('build-onlyoffice-runtime-assets', () => {
+     const mod = await modulePromise;
+ 
+     expect(mod.getRuntimeAssetPack('web-apps/apps/api/documents/api.js')).toBe('core');
++    expect(mod.getRuntimeAssetPack('web-apps/apps/common/main/resources/img/doc-formats/formats@2.5x.svg')).toBe(
++      'core',
++    );
++    expect(mod.getRuntimeAssetPack('web-apps/apps/documenteditor/main/app.js.map')).toBeNull();
++    expect(mod.getRuntimeAssetPack('web-apps/apps/presentationeditor/main/code.js.map')).toBeNull();
+     expect(mod.getRuntimeAssetPack('web-apps/vendor/fetch/fetch.umd.js')).toBe('core');
+     expect(mod.getRuntimeAssetPack('sdkjs/common/zlib/engine/zlib.wasm')).toBe('core');
+     expect(mod.getRuntimeAssetPack('wasm/x2t/x2t.wasm')).toBe('core');
