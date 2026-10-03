@@ -1,3 +1,4 @@
+import { readOnlyOfficeFontCoverage } from "./onlyoffice-font-coverage.mjs";
 import { readOfficeDistributionEvidence } from "./distribution-check.mjs";
 import { readCandidateNativeEvidence } from "./onlyoffice/native-evidence.mjs";
 import { readOnlyOfficeCodeIdentity, readOnlyOfficeCodeEvidence } from "./onlyoffice/code-identity.mjs";
@@ -73,7 +74,9 @@ const packageDelta = (bytes) => {
 const candidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidateRoot);
 const candidateDistribution = await readOfficeDistributionEvidence(path.join(candidateRoot, "dist"));
 assert(candidateDistribution.valid, "Reviewed complete candidate distribution required: " + candidateDistribution.error);
+const inputFontCoverage = await readOnlyOfficeFontCoverage(candidateRoot, source);
 const report = {
+  inputFontCoverage,
   candidateCodeIdentity,
   candidateDistribution,
   schemaVersion: 1,
@@ -274,6 +277,7 @@ async function visibleSlides(page, frame, label, count) {
 }
 
 try {
+  assert(inputFontCoverage.valid, "Candidate font catalog does not cover input text: " + JSON.stringify(inputFontCoverage.missing));
   let { frame, ms } = await open(page);
   item.openMs = ms;
   await page.evaluate(() => {

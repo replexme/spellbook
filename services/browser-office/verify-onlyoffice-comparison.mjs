@@ -1,3 +1,4 @@
+import { readOnlyOfficeFontCoverage } from "./onlyoffice-font-coverage.mjs";
 import { readOfficeDistributionEvidence } from "./distribution-check.mjs";
 import { readOnlyOfficeCodeIdentity, readOnlyOfficeCodeEvidence } from "./onlyoffice/code-identity.mjs";
 import { captureStableOnlyOfficeBaseline } from "./onlyoffice-baseline.mjs";
@@ -124,7 +125,9 @@ const packageDelta = (bytes) => {
 const candidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidateRoot);
 const candidateDistribution = await readOfficeDistributionEvidence(path.join(candidateRoot, "dist"));
 assert(candidateDistribution.valid, "Reviewed complete candidate distribution required: " + candidateDistribution.error);
+const inputFontCoverage = await readOnlyOfficeFontCoverage(candidateRoot, source);
 const report = {
+  inputFontCoverage,
   candidateCodeIdentity,
   candidateDistribution,
   schemaVersion: 1,
@@ -270,6 +273,7 @@ async function save(page) {
   });
 }
 try {
+  assert(inputFontCoverage.valid, "Candidate font catalog does not cover input text: " + JSON.stringify(inputFontCoverage.missing));
   for (const scenario of scenarios) {
     served = source;
     const context = await browser.newContext({
