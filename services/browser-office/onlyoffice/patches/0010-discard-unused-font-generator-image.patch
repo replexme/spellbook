@@ -1,0 +1,58 @@
+diff --git a/scripts/generate-onlyoffice-font-assets.mjs b/scripts/generate-onlyoffice-font-assets.mjs
+index 02079be..5939bb7 100755
+--- a/scripts/generate-onlyoffice-font-assets.mjs
++++ b/scripts/generate-onlyoffice-font-assets.mjs
+@@ -806,6 +806,11 @@ export function generateOnlyOfficeFontAssets(options) {
+     verifyOnlyOfficeFontAssets(validated.output);
+   } finally {
+     fs.rmSync(stagingDir, { recursive: true, force: true });
++    const users = runCommand('docker', ['ps', '-a', '--filter', `ancestor=${validated.image}`, '--format', '{{.ID}}']);
++    if (!users.stdout.trim()) {
++      runCommand('docker', ['image', 'rm', validated.image]);
++      console.log(`Removed unused font-generator image: ${validated.image}`);
++    }
+   }
+ }
+ 
+diff --git a/test/unit/generate-onlyoffice-font-assets.test.ts b/test/unit/generate-onlyoffice-font-assets.test.ts
+index b92430d..ab0119a 100644
+--- a/test/unit/generate-onlyoffice-font-assets.test.ts
++++ b/test/unit/generate-onlyoffice-font-assets.test.ts
+@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
+ import os from 'node:os';
+ import path from 'node:path';
+ import { pathToFileURL } from 'node:url';
+-import { afterEach, describe, expect, it } from 'vitest';
++import { afterEach, describe, expect, it, test } from 'vitest';
+ 
+ interface GeneratorOptions {
+   input: string;
+@@ -261,3 +261,28 @@ describe('redistributable font boundary', () => {
+     expect(script).not.toContain('/usr/bin/documentserver-generate-allfonts.sh true true');
+   });
+ });
++
++test('failed generation removes its unused Docker image and staged inputs', () => {
++  const input = makeTempDir();
++  const output = makeTempDir();
++  const commands = path.join(input, 'docker-commands.log');
++  const executable = path.join(input, 'docker');
++  fs.writeFileSync(path.join(input, 'font.ttf'), 'input');
++  fs.writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n" "$*" >> "' + commands + '"\n');
++  fs.chmodSync(executable, 0o755);
++  const originalPath = process.env.PATH;
++  process.env.PATH = input + path.delimiter + originalPath;
++  try {
++    expect(() =>
++      generateOnlyOfficeFontAssets(
++        parseGenerateFontAssetsArgs(['--input', input, '--output', output, '--font-set', 'full'], {}),
++      ),
++    ).toThrow('Generated asset is missing');
++    expect(fs.readFileSync(commands, 'utf8')).toContain('image rm ' + DEFAULT_FONT_GENERATOR_IMAGE);
++    expect(
++      fs.readdirSync(path.dirname(output)).some((name) => name.startsWith('.onlyoffice-browser-font-input-')),
++    ).toBe(false);
++  } finally {
++    process.env.PATH = originalPath;
++  }
++});

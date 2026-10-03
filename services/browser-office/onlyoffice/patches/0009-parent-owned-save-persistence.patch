@@ -1,0 +1,208 @@
+diff --git a/src/office-host.ts b/src/office-host.ts
+index 8e8018e..d1fb4b1 100644
+--- a/src/office-host.ts
++++ b/src/office-host.ts
+@@ -613,7 +613,10 @@ async function handleInit(message: Extract<OfficeHostParentMessage, { type: 'INI
+       interfaceTheme: message.options.interfaceTheme,
+       lang: message.options.lang,
+       plugins: message.options.plugins,
+-      saveBehavior: message.options.saveBehavior,
++      // The parent alone owns callback/download persistence. The isolated
++      // runtime must send bytes through SAVE_RESULT and wait for its ACK;
++      // downloading here bypasses that response and strands parent save().
++      saveBehavior: 'callback',
+       onReady: (instance) => {
+         postState('STATE', instance.getState());
+       },
+diff --git a/test/e2e/save.spec.ts b/test/e2e/save.spec.ts
+index 4bdd855..404324b 100644
+--- a/test/e2e/save.spec.ts
++++ b/test/e2e/save.spec.ts
+@@ -1,3 +1,5 @@
++import { readFile } from 'node:fs/promises';
++import path from 'node:path';
+ import { expect, type ElementHandle, type Page, test } from '@playwright/test';
+ 
+ type SaveButtonState = {
+@@ -45,7 +47,8 @@ function collectPageFailures(page: Page): string[] {
+ 
+ async function getStatus(page: Page): Promise<SaveE2EStatus> {
+   return page.evaluate(() => {
+-    const api = (window as Window & { __ONLYOFFICE_SAVE_E2E__?: { getStatus: () => SaveE2EStatus } }).__ONLYOFFICE_SAVE_E2E__;
++    const api = (window as Window & { __ONLYOFFICE_SAVE_E2E__?: { getStatus: () => SaveE2EStatus } })
++      .__ONLYOFFICE_SAVE_E2E__;
+     if (!api) throw new Error('Save E2E controller is not installed');
+     return api.getStatus();
+   });
+@@ -103,25 +106,23 @@ async function getSaveButtonState(page: Page): Promise<SaveButtonState | null> {
+   const button = await findSaveButton(page);
+   if (!button) return null;
+   const frame = await button.ownerFrame();
+-  return button.evaluate(
+-    (element, frameUrl) => {
+-      const className = typeof element.className === 'string' ? element.className : '';
+-      const disabled =
+-        (element instanceof HTMLButtonElement && element.disabled) ||
+-        element.getAttribute('aria-disabled') === 'true' ||
+-        element.hasAttribute('disabled') ||
+-        /\b(disabled|disable|inactive)\b/i.test(className) ||
+-        Boolean(element.closest('.disabled, .disable, [aria-disabled="true"], [disabled]'));
+-      return {
+-        disabled,
+-        frameUrl,
+-        label: element.textContent?.trim() || '',
+-        title: element.getAttribute('title') || element.getAttribute('aria-label') || element.getAttribute('data-hint') || '',
+-        className,
+-      };
+-    },
+-    frame?.url() || '',
+-  );
++  return button.evaluate((element, frameUrl) => {
++    const className = typeof element.className === 'string' ? element.className : '';
++    const disabled =
++      (element instanceof HTMLButtonElement && element.disabled) ||
++      element.getAttribute('aria-disabled') === 'true' ||
++      element.hasAttribute('disabled') ||
++      /\b(disabled|disable|inactive)\b/i.test(className) ||
++      Boolean(element.closest('.disabled, .disable, [aria-disabled="true"], [disabled]'));
++    return {
++      disabled,
++      frameUrl,
++      label: element.textContent?.trim() || '',
++      title:
++        element.getAttribute('title') || element.getAttribute('aria-label') || element.getAttribute('data-hint') || '',
++      className,
++    };
++  }, frame?.url() || '');
+ }
+ 
+ async function clickNativeSave(page: Page): Promise<void> {
+@@ -137,7 +138,10 @@ async function makeSpreadsheetDirty(page: Page): Promise<void> {
+   if (!box) throw new Error('Editor box is not visible');
+ 
+   for (let attempt = 0; attempt < 4; attempt += 1) {
+-    await page.mouse.click(box.x + Math.min(260 + attempt * 28, box.width - 80), box.y + Math.min(220 + attempt * 24, box.height - 80));
++    await page.mouse.click(
++      box.x + Math.min(260 + attempt * 28, box.width - 80),
++      box.y + Math.min(220 + attempt * 24, box.height - 80),
++    );
+     await page.keyboard.type(`save-e2e-${Date.now()}-${attempt}`);
+     await page.keyboard.press('Enter');
+     try {
+@@ -162,9 +166,7 @@ test('local xlsx saves through callback without downloads or autosave', async ({
+   await waitForReady(page);
+ 
+   await expect(page.locator('#save-e2e-root > button, #save-e2e-root [data-action="save"]')).toHaveCount(0);
+-  await expect
+-    .poll(() => getSaveButtonState(page).then((state) => state?.disabled), { timeout: 20_000 })
+-    .toBe(true);
++  await expect.poll(() => getSaveButtonState(page).then((state) => state?.disabled), { timeout: 20_000 }).toBe(true);
+ 
+   const initial = await getStatus(page);
+   expect(initial.writeCount).toBe(0);
+@@ -172,9 +174,7 @@ test('local xlsx saves through callback without downloads or autosave', async ({
+   expect(initial.lastHash).toBe(initial.initialHash);
+ 
+   await makeSpreadsheetDirty(page);
+-  await expect
+-    .poll(() => getSaveButtonState(page).then((state) => state?.disabled), { timeout: 20_000 })
+-    .toBe(false);
++  await expect.poll(() => getSaveButtonState(page).then((state) => state?.disabled), { timeout: 20_000 }).toBe(false);
+ 
+   await page.waitForTimeout(2_000);
+   expect((await getStatus(page)).writeCount).toBe(0);
+@@ -199,9 +199,7 @@ test('new xlsx saves through browser download without callback writes', async ({
+ 
+   await expect(page.locator('#save-e2e-root > button, #save-e2e-root [data-action="save"]')).toHaveCount(0);
+   await makeSpreadsheetDirty(page);
+-  await expect
+-    .poll(() => getSaveButtonState(page).then((state) => state?.disabled), { timeout: 20_000 })
+-    .toBe(false);
++  await expect.poll(() => getSaveButtonState(page).then((state) => state?.disabled), { timeout: 20_000 }).toBe(false);
+ 
+   const downloadPromise = page.waitForEvent('download', { timeout: 45_000 });
+   await clickNativeSave(page);
+@@ -230,20 +228,17 @@ for (const [type, outputType] of Object.entries(legacySaveOutputs) as Array<
+     await page.goto(`/save-e2e.html?scenario=local-file&type=${type}`);
+     await waitForReady(page);
+ 
+-    const result = await page.evaluate(
+-      async (targetExt): Promise<SaveE2EResult> => {
+-        const api = (
+-          window as Window & {
+-            __ONLYOFFICE_SAVE_E2E__?: {
+-              save: (targetExt?: string) => Promise<SaveE2EResult>;
+-            };
+-          }
+-        ).__ONLYOFFICE_SAVE_E2E__;
+-        if (!api) throw new Error('Save E2E controller is not installed');
+-        return api.save(targetExt);
+-      },
+-      type.toUpperCase(),
+-    );
++    const result = await page.evaluate(async (targetExt): Promise<SaveE2EResult> => {
++      const api = (
++        window as Window & {
++          __ONLYOFFICE_SAVE_E2E__?: {
++            save: (targetExt?: string) => Promise<SaveE2EResult>;
++          };
++        }
++      ).__ONLYOFFICE_SAVE_E2E__;
++      if (!api) throw new Error('Save E2E controller is not installed');
++      return api.save(targetExt);
++    }, type.toUpperCase());
+ 
+     expect(result.fileName).toMatch(new RegExp(`\\.${outputType}$`, 'i'));
+     expect(result.size).toBeGreaterThan(0);
+@@ -270,3 +265,51 @@ for (const type of ['doc', 'docx', 'odt', 'rtf', 'xls', 'xlsx', 'ods', 'csv', 'p
+     expect(failures).toEqual([]);
+   });
+ }
++
++test('download persistence resolves the public save promise with the exact downloaded PPTX', async ({ page }) => {
++  const failures = collectPageFailures(page);
++  await page.goto('/');
++  await page
++    .locator('#file-input')
++    .setInputFiles(path.resolve('public/fixtures/regressions/office-preview-showcase.pptx'));
++  await page.waitForFunction(
++    () => {
++      const api = (
++        window as Window & { __officeDemo?: { records: Array<{ instance: { getState: () => { status: string } } }> } }
++      ).__officeDemo;
++      return api?.records[0]?.instance.getState().status === 'ready';
++    },
++    null,
++    { timeout: 90_000 },
++  );
++  const downloaded = page.waitForEvent('download');
++  const saved = await page.evaluate(async () => {
++    const api = (
++      window as Window & {
++        __officeDemo?: { records: Array<{ instance: { save: (format: string) => Promise<File> } }> };
++      }
++    ).__officeDemo;
++    if (!api) throw new Error('Demo controller unavailable');
++    const file = await api.records[0].instance.save('PPTX');
++    const bytes = new Uint8Array(await file.arrayBuffer());
++    const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
++    return {
++      name: file.name,
++      size: file.size,
++      header: Array.from(bytes.slice(0, 4)),
++      hash: Array.from(hash)
++        .map((n) => n.toString(16).padStart(2, '0'))
++        .join(''),
++    };
++  });
++  const download = await downloaded;
++  const filePath = await download.path();
++  if (!filePath) throw new Error('Download has no readable artifact');
++  const bytes = await readFile(filePath);
++  const { createHash } = await import('node:crypto');
++  expect(saved.name).toBe(download.suggestedFilename());
++  expect(saved.size).toBe(bytes.length);
++  expect(saved.hash).toBe(createHash('sha256').update(bytes).digest('hex'));
++  expect(saved.header).toEqual([0x50, 0x4b, 0x03, 0x04]);
++  expect(failures).toEqual([]);
++});
