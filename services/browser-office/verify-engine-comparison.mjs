@@ -1,3 +1,4 @@
+import { readOfficeDistributionEvidence } from "./distribution-check.mjs";
 import { readOnlyOfficeCodeIdentity } from "./onlyoffice/code-identity.mjs";
 /* SPDX-License-Identifier: MPL-2.0 */
 // One matrix controls both engines. Run with `nice -n 15 node ...`; children
@@ -94,8 +95,11 @@ assert.equal(
   "Commit comparison code before recording final evidence",
 );
 const candidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidate);
+const candidateDistribution = await readOfficeDistributionEvidence(path.join(candidate, "dist"));
+assert(candidateDistribution.valid, "Reviewed complete candidate distribution required: " + candidateDistribution.error);
 const report = {
   candidateCodeIdentity,
+  candidateDistribution,
   schemaVersion: 1,
   startedAt: new Date().toISOString(),
   integration: identity,
@@ -416,7 +420,10 @@ try {
     )
   ).every(Boolean);
   report.finalCandidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidate);
+  report.finalCandidateDistribution = await readOfficeDistributionEvidence(path.join(candidate, "dist"));
+  report.candidateDistributionStable = report.finalCandidateDistribution.valid && candidateDistribution.distributionSha256 === report.finalCandidateDistribution.distributionSha256;
   report.sourceStable =
+    report.candidateDistributionStable &&
     candidateCodeIdentity.sha256 === report.finalCandidateCodeIdentity.sha256 &&
     JSON.stringify(report.finalIntegration) === JSON.stringify(identity) &&
     JSON.stringify(report.finalCandidate) ===

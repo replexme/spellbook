@@ -239,6 +239,15 @@ identity. A missing SDK half, a changed file set or a changed code payload
 invalidates the trial. Fonts and non-code assets remain explicitly outside
 this code identity; it is not an engine-admission or visual-fidelity receipt.
 
+All three comparison runners also require a reviewed complete static distribution
+before opening a document. They reuse `distribution-check.mjs` to validate code,
+fonts, other assets, source archives and notices against the distribution manifest,
+and bind that manifest's SHA-256 to the trial. Final readback revalidates all files;
+a missing, altered or newly reviewed replacement distribution invalidates the
+trial. This closes the previous gap in which font changes could leave the code
+identity unchanged. The generated-code identity remains separate for diagnostics;
+neither identity proves visual equivalence or complete source reproducibility.
+
 ## Distribution materials and reviewed fonts
 
 Patch `0008-source-bound-distribution-and-reviewed-fonts.patch` follows the seven native candidate patches. It adds the reviewed font pipeline, static legal/source page and source-bound converter release. Candidate commits are `8dae732` (font permissions) and `fe13950` (runtime distribution). The patch omits large converter binaries: `scripts/fetch-license-materials.mjs` obtains and verifies the pinned `v9.3.0+4` release before a build, including the WASM digest in `runtime-source-lock.json`.

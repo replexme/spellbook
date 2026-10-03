@@ -24,9 +24,8 @@ export async function verifyOfficeDistribution(root) {
       .update(await readFile(file))
       .digest("hex");
   };
-  const manifest = JSON.parse(
-    await readFile(resolve("distribution-manifest.json"), "utf8"),
-  );
+  const manifestBytes = await readFile(resolve("distribution-manifest.json"));
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
   if (manifest.schemaVersion !== 1 || manifest.engine !== "onlyoffice")
     throw new Error("Unsupported Office distribution manifest");
   if (
@@ -95,7 +94,14 @@ export async function verifyOfficeDistribution(root) {
     )
       throw new Error("Missing or mismatched font permission: " + file);
   }
+  if (
+    !manifestBytes.equals(await readFile(resolve("distribution-manifest.json")))
+  )
+    throw new Error("Distribution manifest changed during verification");
   return {
+    distributionSha256: createHash("sha256")
+      .update(manifestBytes)
+      .digest("hex"),
     engine: manifest.engine,
     files: expected.size,
     fonts: fonts.fonts.length,
@@ -103,6 +109,16 @@ export async function verifyOfficeDistribution(root) {
     upstreamEditorRebuildVerified:
       manifest.upstreamEditorRebuildVerified === true,
   };
+}
+
+// Trial finalization must retain a failed readback in its report rather than
+// losing the report when an asset was removed or changed during execution.
+export async function readOfficeDistributionEvidence(root) {
+  try {
+    return { valid: true, ...(await verifyOfficeDistribution(root)) };
+  } catch (error) {
+    return { valid: false, error: String(error.message ?? error) };
+  }
 }
 
 if (

@@ -1,3 +1,4 @@
+import { readOfficeDistributionEvidence } from "./distribution-check.mjs";
 import { readCandidateNativeEvidence } from "./onlyoffice/native-evidence.mjs";
 import { readOnlyOfficeCodeIdentity } from "./onlyoffice/code-identity.mjs";
 import { beginCandidateTransaction, finishCandidateTransaction } from "./onlyoffice/candidate-transaction.mjs";
@@ -70,8 +71,11 @@ const packageDelta = (bytes) => {
   };
 };
 const candidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidateRoot);
+const candidateDistribution = await readOfficeDistributionEvidence(path.join(candidateRoot, "dist"));
+assert(candidateDistribution.valid, "Reviewed complete candidate distribution required: " + candidateDistribution.error);
 const report = {
   candidateCodeIdentity,
+  candidateDistribution,
   schemaVersion: 1,
   startedAt: new Date().toISOString(),
   inputName: path.basename(inputPath),
@@ -983,10 +987,12 @@ try {
   await browser.close();
   await new Promise((r) => diagnosticServer.close(r));
   report.finalCandidateCodeIdentity = await readOnlyOfficeCodeIdentity(candidateRoot);
+  report.finalCandidateDistribution = await readOfficeDistributionEvidence(path.join(candidateRoot, "dist"));
+  report.candidateDistributionStable = report.finalCandidateDistribution.valid && candidateDistribution.distributionSha256 === report.finalCandidateDistribution.distributionSha256;
   report.candidateCodeStable = candidateCodeIdentity.sha256 === report.finalCandidateCodeIdentity.sha256;
-  if (!report.candidateCodeStable) {
+  if (!report.candidateCodeStable || !report.candidateDistributionStable) {
     process.exitCode = 1;
-    report.error = "candidate_generated_code_changed_during_trial";
+    report.error = !report.candidateDistributionStable ? "candidate_distribution_changed_or_unverified_during_trial" : "candidate_generated_code_changed_during_trial";
   }
   report.finishedAt = new Date().toISOString();
   await writeFile(

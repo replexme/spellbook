@@ -5,7 +5,10 @@ import { mkdtemp, writeFile, mkdir, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { verifyOfficeDistribution } from "./distribution-check.mjs";
+import {
+  verifyOfficeDistribution,
+  readOfficeDistributionEvidence,
+} from "./distribution-check.mjs";
 
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 test("distribution rejects unreviewed fonts, changed source/code and unlisted files", async () => {
@@ -66,6 +69,9 @@ test("distribution rejects unreviewed fonts, changed source/code and unlisted fi
   }
   try {
     await reset();
+    const original = await readOfficeDistributionEvidence(root);
+    assert.equal(original.valid, true);
+    assert.match(original.distributionSha256, /^[a-f0-9]{64}$/u);
     assert.equal(
       (await verifyOfficeDistribution(root)).upstreamEditorRebuildVerified,
       false,
@@ -78,13 +84,31 @@ test("distribution rejects unreviewed fonts, changed source/code and unlisted fi
       await reset();
       await writeFile(path.join(root, file), "replaced bytes");
       await assert.rejects(verifyOfficeDistribution(root), /hash mismatch/);
+      const failed = await readOfficeDistributionEvidence(root);
+      assert.equal(failed.valid, false);
+      assert.match(failed.error, /hash mismatch/);
     }
+    // A second reviewed font package can be valid in isolation while changing
+    // rendering and invalidating an earlier trial's distribution identity.
+    content["fonts/000.ttf"] = "another reviewed OFL font";
+    const permissions = JSON.parse(content["font-licenses.json"]);
+    permissions.fonts[0].sha256 = digest(content["fonts/000.ttf"]);
+    content["font-licenses.json"] = JSON.stringify(permissions);
+    await reset();
+    const replacement = await readOfficeDistributionEvidence(root);
+    assert.equal(replacement.valid, true);
+    assert.notEqual(
+      replacement.distributionSha256,
+      original.distributionSha256,
+    );
     await reset();
     await writeFile(path.join(root, "fonts/unlicensed.ttf"), "unreviewed font");
     await assert.rejects(
       verifyOfficeDistribution(root),
       /Unlisted distribution file/,
     );
+    await rm(path.join(root, "distribution-manifest.json"));
+    assert.equal((await readOfficeDistributionEvidence(root)).valid, false);
     content["onlyoffice-browser-font-assets.json"] = JSON.stringify({
       fontSet: "full",
       fonts: ["fonts/000.ttf"],
