@@ -350,3 +350,9 @@ match the previously tested `4365552` candidate; the source/legal distribution
 changes. `sdkJavaScriptRebuildVerified` is scoped to those SDK JS files. Full
 modified web-apps, auxiliary WASM, x2t reproduction, product admission and
 independent PowerPoint fidelity remain separate unfinished gates.
+
+## Terminal save completion
+
+`0015-public-save-waits-for-native-cleanup.patch` separates artifact persistence (`SAVE_ACK`) from completed native cleanup (`SAVE_COMPLETE`). The parent keeps the pending result until the host has released its save owner after the native runtime finishes. A failed overlapping request cannot clear another request's owner. Persistence failures also finish cleanup before the public promise rejects. The parent library and host use the paired `onlyoffice-browser-host/v2` contract and must be deployed together.
+
+A deterministic headless browser regression holds the saved File's second read after persistence acknowledgement. The old distribution incorrectly resolves `save()` while this cleanup is held. The patched distribution must keep the promise pending, then allow an immediate second save after release. This is a completion-boundary fix, not a retry or timing delay. The source-bound candidate's preceding diagnostic batch had 56/57 successes, including a real SmartArt move/Redo failure when a subsequent save found the native save lock still held. That failure remains preserved as evidence. Fresh runtime validation is required for candidate `15e97cc`; earlier successes are not copied forward.

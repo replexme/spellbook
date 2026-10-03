@@ -1,0 +1,502 @@
+diff --git a/readme.md b/readme.md
+index af9fbb5..9378874 100644
+--- a/readme.md
++++ b/readme.md
+@@ -164,3 +164,7 @@ files. The SDK-JS receipt does not verify all modified web-apps, auxiliary WASM
+ engines or x2t; full editor source correspondence remains unverified.
+ 
+ [AGPL-3.0](LICENSE)
++
++### Save completion across the host boundary
++
++The paired parent library and host use `onlyoffice-browser-host/v2`. `SAVE_ACK` confirms persistence of the returned artifact; `SAVE_COMPLETE` is emitted only after native save state and the host request owner have been released. The public `save()` promise waits for both stages, including failure cleanup. Deploy the parent library and host together; a v1 host is not compatible with this completion contract.
+diff --git a/src/lib/office-editor.ts b/src/lib/office-editor.ts
+index afcb121..9eacc12 100644
+--- a/src/lib/office-editor.ts
++++ b/src/lib/office-editor.ts
+@@ -189,6 +189,8 @@ export class OfficeEditorStartupError extends Error {
+ type PendingRequest = {
+   resolve: (file: File) => void;
+   reject: (error: Error) => void;
++  persistedFile?: File;
++  persistenceError?: Error;
+ };
+ 
+ type PendingConfirmationRequest = {
+@@ -825,6 +827,9 @@ class BrowserOfficeEditorProxy implements OfficeEditorInstance {
+       case 'SAVE_RESULT':
+         void this.handleSaveResult(message);
+         return;
++      case 'SAVE_COMPLETE':
++        this.handleSaveComplete(message);
++        return;
+       case 'DOWNLOAD_RESULT':
+         void this.handleDownloadResult(message);
+         return;
+@@ -949,29 +954,42 @@ class BrowserOfficeEditorProxy implements OfficeEditorInstance {
+     });
+     const requestId = message.requestId;
+     const request = requestId ? this.pendingRequests.get(requestId) : undefined;
+-    if (requestId && request) {
+-      this.pendingRequests.delete(requestId);
+-    }
+-
+     try {
+       await this.persistSavedFile(file);
+       // Persistence acknowledges this artifact, not the current document.
+       // The runtime owns dirty state and verifies it against the saved snapshot.
+-      request?.resolve(file);
++      if (request) request.persistedFile = file;
+       if (requestId) {
+         this.postSaveAck(requestId, true);
+       }
+     } catch (error) {
+       const normalized = toError(error);
+       this.setDirty(true);
+-      request?.reject(normalized);
+-      this.options.onError?.(normalized, this);
++      if (request) request.persistenceError = normalized;
++      else this.options.onError?.(normalized, this);
+       if (requestId) {
+         this.postSaveAck(requestId, false, normalized.message);
+       }
+     }
+   }
+ 
++  private handleSaveComplete(message: Extract<OfficeHostChildMessage, { type: 'SAVE_COMPLETE' }>): void {
++    const request = this.pendingRequests.get(message.requestId);
++    if (!request) return;
++    this.pendingRequests.delete(message.requestId);
++    const error =
++      request.persistenceError ||
++      (!message.ok
++        ? new Error(message.message || 'Editor save failed')
++        : !request.persistedFile
++          ? new Error('Editor completed save without an acknowledged artifact')
++          : null);
++    if (error) {
++      request.reject(error);
++      this.options.onError?.(error, this);
++    } else request.resolve(request.persistedFile!);
++  }
++
+   private async handleDownloadResult(
+     message: Extract<OfficeHostChildMessage, { type: 'DOWNLOAD_RESULT' }>,
+   ): Promise<void> {
+diff --git a/src/lib/office-host-protocol.ts b/src/lib/office-host-protocol.ts
+index a865654..327f59d 100644
+--- a/src/lib/office-host-protocol.ts
++++ b/src/lib/office-host-protocol.ts
+@@ -1,4 +1,4 @@
+-export const OFFICE_HOST_PROTOCOL = 'onlyoffice-browser-host/v1';
++export const OFFICE_HOST_PROTOCOL = 'onlyoffice-browser-host/v2';
+ 
+ export type OfficeHostSourceKind = 'local-file' | 'new-document' | 'buffer' | 'url';
+ export type OfficeHostSaveBehavior = 'auto' | 'callback' | 'download';
+@@ -89,6 +89,7 @@ export type OfficeHostParentMessage =
+     })
+   | (OfficeHostBaseMessage & {
+       type: 'SAVE';
++      requestId: string;
+       targetExt?: string;
+     })
+   | (OfficeHostBaseMessage & {
+@@ -146,6 +147,12 @@ export type OfficeHostChildMessage =
+       fileName: string;
+       mimeType: string;
+     })
++  | (OfficeHostBaseMessage & {
++      type: 'SAVE_COMPLETE';
++      requestId: string;
++      ok: boolean;
++      message?: string;
++    })
+   | (OfficeHostBaseMessage & {
+       type: 'DOWNLOAD_RESULT';
+       buffer: ArrayBuffer;
+@@ -183,7 +190,16 @@ export type OfficeHostChildMessage =
+     })
+   | (OfficeHostBaseMessage & {
+       type: 'ERROR';
+-      phase: 'handshake' | 'init' | 'save' | 'confirm' | 'plugin' | 'setReadonly' | 'setInterfaceTheme' | 'destroy' | 'runtime';
++      phase:
++        | 'handshake'
++        | 'init'
++        | 'save'
++        | 'confirm'
++        | 'plugin'
++        | 'setReadonly'
++        | 'setInterfaceTheme'
++        | 'destroy'
++        | 'runtime';
+       message: string;
+     })
+   | (OfficeHostBaseMessage & {
+diff --git a/src/office-host.ts b/src/office-host.ts
+index 2716ff8..964842e 100644
+--- a/src/office-host.ts
++++ b/src/office-host.ts
+@@ -35,7 +35,7 @@ const HOST_RESET_PATH = '/reset.html';
+ const SAVE_ACK_TIMEOUT_MS = 60_000;
+ /** Bump whenever already-open host frames must be recreated. */
+ const OFFICE_BROWSER_PACKAGE_VERSION = '0.3.34';
+-const OFFICE_HOST_BUILD_ID = 'office-host-0.3.34-r1';
++const OFFICE_HOST_BUILD_ID = 'office-host-0.3.34-r2';
+ const OFFICE_RUNTIME_ASSET_MANIFEST_PATH = '/onlyoffice-runtime-assets.json';
+ const STARTUP_HEARTBEAT_INTERVAL_MS = 5_000;
+ const PLUGIN_REQUEST_TIMEOUT_MS = 30_000;
+@@ -49,6 +49,7 @@ let startupPhase: OfficeHostStartupPhase = 'connected';
+ let startupHeartbeatInterval: number | null = null;
+ let startupHeartbeatWorker: Worker | null = null;
+ let activeSaveRequestId: string | undefined;
++let activeSaveRuntimeError: Error | undefined;
+ let nativeSaveRequestSequence = 0;
+ const pluginRuntimes = new Map<string, OfficePluginRuntime<Window>>();
+ const configuredPluginGuids = new Set<string>();
+@@ -627,6 +628,12 @@ async function handleInit(message: Extract<OfficeHostParentMessage, { type: 'INI
+         postState('STATE', state);
+       },
+       onError: (error) => {
++        // The save owner reports its terminal result after native cleanup.
++        // Do not notify the parent early and invite a retry while it is busy.
++        if (activeSaveRequestId) {
++          activeSaveRuntimeError ||= error;
++          return;
++        }
+         postError('runtime', error);
+       },
+       onSave: (file) => postSavedFile(file, activeSaveRequestId),
+@@ -773,18 +780,31 @@ function handleSaveAck(message: Extract<OfficeHostParentMessage, { type: 'SAVE_A
+ }
+ 
+ async function handleSave(message: Extract<OfficeHostParentMessage, { type: 'SAVE' }>): Promise<void> {
++  let error: Error | undefined;
+   try {
+     if (!editor) {
+       throw new Error('Editor is not open');
+     }
++    if (activeSaveRequestId) throw new Error('A save request is already in progress for this editor');
+     activeSaveRequestId = message.requestId;
++    activeSaveRuntimeError = undefined;
+     await editor.save(message.targetExt);
+-  } catch (error) {
+-    if (!(error instanceof Error && error.name === 'OnlyOfficeHostSaveAckError')) {
+-      postError('save', error, message.requestId);
+-    }
++    if (activeSaveRuntimeError) throw activeSaveRuntimeError;
++  } catch (cause) {
++    error = toError(cause);
+   } finally {
+-    if (activeSaveRequestId === message.requestId) activeSaveRequestId = undefined;
++    if (activeSaveRequestId === message.requestId) {
++      activeSaveRequestId = undefined;
++      activeSaveRuntimeError = undefined;
++    }
++    postPortMessage({
++      protocol: OFFICE_HOST_PROTOCOL,
++      type: 'SAVE_COMPLETE',
++      sessionId,
++      requestId: message.requestId,
++      ok: !error,
++      message: error?.message,
++    });
+   }
+ }
+ 
+diff --git a/test/e2e/save.spec.ts b/test/e2e/save.spec.ts
+index 404324b..51f227b 100644
+--- a/test/e2e/save.spec.ts
++++ b/test/e2e/save.spec.ts
+@@ -313,3 +313,70 @@ test('download persistence resolves the public save promise with the exact downl
+   expect(saved.header).toEqual([0x50, 0x4b, 0x03, 0x04]);
+   expect(failures).toEqual([]);
+ });
++
++test('public save waits for native cleanup before allowing the next save', async ({ page }) => {
++  const failures = collectPageFailures(page);
++  await page.goto('/save-e2e.html?scenario=local-file&type=pptx');
++  await waitForReady(page);
++  const host = page.frames().find((frame) => new URL(frame.url()).pathname === '/office-host.html');
++  expect(host).toBeTruthy();
++
++  // Hold the second read of the saved File: the first transports its bytes to
++  // the parent; the second updates the native snapshot after persistence ACK.
++  await host!.evaluate(() => {
++    const state = { entered: false, release: () => {} };
++    (window as Window & { __saveCleanupGate?: typeof state }).__saveCleanupGate = state;
++    const original = File.prototype.arrayBuffer;
++    const reads = new WeakMap<File, number>();
++    File.prototype.arrayBuffer = async function () {
++      const count = (reads.get(this) || 0) + 1;
++      reads.set(this, count);
++      if (count === 2) {
++        File.prototype.arrayBuffer = original;
++        await new Promise<void>((resolve) => {
++          state.release = resolve;
++          state.entered = true;
++        });
++      }
++      return original.call(this);
++    };
++  });
++  await page.evaluate(() => {
++    const api = window.__ONLYOFFICE_SAVE_E2E__!;
++    const state = { settled: false, promise: Promise.resolve<SaveE2EResult | null>(null) };
++    state.promise = api.save('pptx').then((result) => {
++      state.settled = true;
++      return result;
++    });
++    (window as Window & { __saveCleanupResult?: typeof state }).__saveCleanupResult = state;
++  });
++  try {
++    await host!.waitForFunction(
++      () => (window as Window & { __saveCleanupGate?: { entered: boolean } }).__saveCleanupGate?.entered,
++    );
++    expect((await getStatus(page)).writeCount).toBe(1);
++    // Cross a browser task boundary while the gate stays closed. A parent that
++    // resolves on ACK alone incorrectly reports success here.
++    const settled = await page.evaluate(async () => {
++      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
++      return (window as Window & { __saveCleanupResult?: { settled: boolean } }).__saveCleanupResult!.settled;
++    });
++    expect(settled).toBe(false);
++  } finally {
++    await host!.evaluate(() =>
++      (window as Window & { __saveCleanupGate?: { release: () => void } }).__saveCleanupGate!.release(),
++    );
++  }
++  const results = await page.evaluate(async () => {
++    const first = await (
++      window as Window & {
++        __saveCleanupResult?: { promise: Promise<SaveE2EResult> };
++      }
++    ).__saveCleanupResult!.promise;
++    const second = await window.__ONLYOFFICE_SAVE_E2E__!.save('pptx');
++    return [first, second];
++  });
++  expect(results.every((result) => result.size > 0)).toBe(true);
++  expect((await getStatus(page)).writeCount).toBe(2);
++  expect(failures).toEqual([]);
++});
+diff --git a/test/unit/office-editor.test.ts b/test/unit/office-editor.test.ts
+index 4887fea..7055f9c 100644
+--- a/test/unit/office-editor.test.ts
++++ b/test/unit/office-editor.test.ts
+@@ -34,6 +34,7 @@ async function waitForIframe(container: HTMLElement): Promise<HTMLIFrameElement>
+ async function connectHost(
+   container: HTMLElement,
+   onChildMessage?: (message: OfficeHostParentMessage, childPort: MessagePort) => void,
++  autoCompleteSave = true,
+ ): Promise<{ childPort: MessagePort; iframe: HTMLIFrameElement; messages: OfficeHostParentMessage[] }> {
+   const iframe = await waitForIframe(container);
+   const parentWindow = container.ownerDocument.defaultView || window;
+@@ -48,6 +49,16 @@ async function connectHost(
+     childPort.onmessage = (event: MessageEvent<OfficeHostParentMessage>) => {
+       messages.push(event.data);
+       onChildMessage?.(event.data, childPort!);
++      if (event.data.type === 'SAVE_ACK' && autoCompleteSave) {
++        childPort!.postMessage({
++          protocol: OFFICE_HOST_PROTOCOL,
++          type: 'SAVE_COMPLETE',
++          sessionId,
++          requestId: event.data.requestId,
++          ok: event.data.ok,
++          message: event.data.message,
++        });
++      }
+       if (event.data.type === 'INIT') {
+         const sourceKind =
+           event.data.options.source.kind === 'empty' ? 'new-document' : event.data.options.source.sourceKind;
+@@ -653,6 +664,138 @@ describe('office-editor parent proxy', () => {
+     );
+   });
+ 
++  it('waits for native save cleanup after parent persistence acknowledgement', async () => {
++    const container = document.createElement('div');
++    document.body.appendChild(container);
++    const onSave = vi.fn();
++    const promise = createOfficeEditor(container, {
++      hostUrl: HOST_URL,
++      file: new File(['a'], 'alpha.docx'),
++      onSave,
++      destroyTimeoutMs: 1,
++    });
++    let acknowledge!: (message: OfficeHostParentMessage) => void;
++    const ack = new Promise<OfficeHostParentMessage>((resolve) => {
++      acknowledge = resolve;
++    });
++    const { childPort, iframe } = await connectHost(
++      container,
++      (message, port) => {
++        if (message.type === 'SAVE')
++          port.postMessage({
++            protocol: OFFICE_HOST_PROTOCOL,
++            type: 'SAVE_RESULT',
++            sessionId: message.sessionId,
++            requestId: message.requestId,
++            buffer: new Uint8Array([9]).buffer,
++            fileName: 'alpha.docx',
++            mimeType: '',
++          });
++        if (message.type === 'SAVE_ACK') acknowledge(message);
++      },
++      false,
++    );
++    const instance = await promise;
++    let settled = false;
++    const pending = instance.save().then((file) => {
++      settled = true;
++      return file;
++    });
++    const message = await ack;
++    await flush();
++    expect(onSave).toHaveBeenCalledTimes(1);
++    expect(settled).toBe(false);
++    childPort.postMessage({
++      protocol: OFFICE_HOST_PROTOCOL,
++      type: 'SAVE_COMPLETE',
++      sessionId: getSessionId(iframe),
++      requestId: message.requestId,
++      ok: true,
++    });
++    await expect(pending).resolves.toMatchObject({ name: 'alpha.docx', size: 1 });
++    await instance.destroy();
++  });
++
++  it('waits for native cleanup before reporting persistence failure and allowing retry', async () => {
++    const container = document.createElement('div');
++    document.body.appendChild(container);
++    const onError = vi.fn();
++    const promise = createOfficeEditor(container, {
++      hostUrl: HOST_URL,
++      file: new File(['a'], 'alpha.docx'),
++      destroyTimeoutMs: 1,
++      onSave: async () => {
++        throw new Error('write failed');
++      },
++      onError,
++    });
++    let acknowledge!: (message: OfficeHostParentMessage) => void;
++    const ack = new Promise<OfficeHostParentMessage>((resolve) => {
++      acknowledge = resolve;
++    });
++    const { childPort, iframe } = await connectHost(
++      container,
++      (message, port) => {
++        if (message.type === 'SAVE')
++          port.postMessage({
++            protocol: OFFICE_HOST_PROTOCOL,
++            type: 'SAVE_RESULT',
++            sessionId: message.sessionId,
++            requestId: message.requestId,
++            buffer: new Uint8Array([9]).buffer,
++            fileName: 'alpha.docx',
++            mimeType: '',
++          });
++        if (message.type === 'SAVE_ACK') acknowledge(message);
++      },
++      false,
++    );
++    const instance = await promise;
++    let settled = false;
++    const pending = instance.save().catch((error) => {
++      settled = true;
++      return error;
++    });
++    const message = await ack;
++    await flush();
++    expect(settled).toBe(false);
++    expect(onError).not.toHaveBeenCalled();
++    childPort.postMessage({
++      protocol: OFFICE_HOST_PROTOCOL,
++      type: 'SAVE_COMPLETE',
++      sessionId: getSessionId(iframe),
++      requestId: message.requestId,
++      ok: false,
++      message: 'write failed',
++    });
++    expect(await pending).toMatchObject({ message: 'write failed' });
++    expect(onError).toHaveBeenCalledTimes(1);
++    await instance.destroy();
++  });
++
++  it('rejects a completion that has no acknowledged artifact', async () => {
++    const container = document.createElement('div');
++    document.body.appendChild(container);
++    const promise = createOfficeEditor(container, {
++      hostUrl: HOST_URL,
++      file: new File(['a'], 'alpha.docx'),
++      destroyTimeoutMs: 1,
++    });
++    await connectHost(container, (message, port) => {
++      if (message.type === 'SAVE')
++        port.postMessage({
++          protocol: OFFICE_HOST_PROTOCOL,
++          type: 'SAVE_COMPLETE',
++          sessionId: message.sessionId,
++          requestId: message.requestId,
++          ok: true,
++        });
++    });
++    const instance = await promise;
++    await expect(instance.save()).rejects.toThrow('without an acknowledged artifact');
++    await instance.destroy();
++  });
++
+   it('handles native save results without a pending programmatic save request', async () => {
+     const container = document.createElement('div');
+     document.body.appendChild(container);
+@@ -913,16 +1056,33 @@ describe('office-editor parent proxy', () => {
+     document.body.appendChild(container);
+     let release!: () => void;
+     let entered!: () => void;
+-    const gate = new Promise<void>((resolve) => { release = resolve; });
+-    const started = new Promise<void>((resolve) => { entered = resolve; });
++    const gate = new Promise<void>((resolve) => {
++      release = resolve;
++    });
++    const started = new Promise<void>((resolve) => {
++      entered = resolve;
++    });
+     const promise = createOfficeEditor(container, {
+-      hostUrl: HOST_URL, file: new File(['a'], 'alpha.docx'), destroyTimeoutMs: 1,
+-      onSave: async () => { entered(); await gate; return true; },
++      hostUrl: HOST_URL,
++      file: new File(['a'], 'alpha.docx'),
++      destroyTimeoutMs: 1,
++      onSave: async () => {
++        entered();
++        await gate;
++        return true;
++      },
+     });
+     const { childPort, iframe, messages } = await connectHost(container, (message, port) => {
+       if (message.type !== 'SAVE') return;
+-      port.postMessage({ protocol: OFFICE_HOST_PROTOCOL, type: 'SAVE_RESULT', sessionId: message.sessionId,
+-        requestId: message.requestId, buffer: new Uint8Array([9, 8, 7]).buffer, fileName: 'alpha.docx', mimeType: '' });
++      port.postMessage({
++        protocol: OFFICE_HOST_PROTOCOL,
++        type: 'SAVE_RESULT',
++        sessionId: message.sessionId,
++        requestId: message.requestId,
++        buffer: new Uint8Array([9, 8, 7]).buffer,
++        fileName: 'alpha.docx',
++        mimeType: '',
++      });
+     });
+     const instance = await promise;
+     const sessionId = getSessionId(iframe);
+@@ -936,7 +1096,12 @@ describe('office-editor parent proxy', () => {
+     expect(instance.getState().dirty).toBe(true);
+     await waitForMessage();
+     expect(messages).toContainEqual(expect.objectContaining({ type: 'SAVE_ACK', ok: true }));
+-    childPort.postMessage({ protocol: OFFICE_HOST_PROTOCOL, type: 'STATE', sessionId, state: { ...state, dirty: false } });
++    childPort.postMessage({
++      protocol: OFFICE_HOST_PROTOCOL,
++      type: 'STATE',
++      sessionId,
++      state: { ...state, dirty: false },
++    });
+     await waitForMessage();
+     expect(instance.getState().dirty).toBe(false);
+     await instance.destroy();
