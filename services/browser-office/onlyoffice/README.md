@@ -303,3 +303,30 @@ Regular and Bold, with full OFL notices and SHA-256-bound sources at
 `notofonts/arabic` gh-pages commit `43674fa5a3ad7e1a8e1b9249319b51b1ee68be26`.
 The earlier 18-font results remain historical; fresh screenshots and trials are
 required for the resulting 20-font package.
+
+### Canonical comparison batch
+
+`../onlyoffice/comparison-plan.mjs` owns the typed diagnostic catalog and its
+related product operation names. Input paths and immutable fixture hashes come
+from `contracts/native-mutation-conformance.json`; the complete product operation
+list comes from the existing conformance planner. WordArt creation deliberately
+has no `set_fontwork` claim. Related operations are pointers for the remaining
+investigation, not operation admission.
+
+Run the headless batch from a clean committed repository and candidate:
+
+```sh
+nice -n 15 node services/browser-office/verify-onlyoffice-batch.mjs \
+  --candidate-root /absolute/path/to/reviewed-candidate \
+  --origin http://127.0.0.1:38804 \
+  --output /absolute/path/to/new-results-directory
+```
+
+All registered cases run normally, with failure rollback, and with an existing
+Redo branch. The report retains the full product denominator and the operations
+without a related diagnostic. Missing, duplicate, failed, mismatched-fixture or
+mixed-source/distribution results cannot complete the batch. `--cases` selects
+explicit diagnostics and never claims complete product coverage. Even a passing
+full diagnostic batch stays `not_admitted`: the canonical product observation,
+commands, original preservation, recovery/playback and independent PowerPoint
+gates remain separate requirements.

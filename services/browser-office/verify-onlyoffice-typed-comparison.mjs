@@ -1,3 +1,4 @@
+import { typedComparisonCases } from "./onlyoffice/comparison-plan.mjs";
 import { readOnlyOfficeFontCoverage } from "./onlyoffice-font-coverage.mjs";
 import { readOfficeDistributionEvidence } from "./distribution-check.mjs";
 import { readCandidateNativeEvidence } from "./onlyoffice/native-evidence.mjs";
@@ -104,27 +105,7 @@ const preexistingRedo = process.argv.includes("--preexisting-redo");
 assert(!preexistingRedo || failAfterApply, "Redo preservation requires a cancelled transaction");
 let redoNativeExpected = null;
 let transaction = null, transactionBefore = null, transactionNativeBefore = null, transactionHostBefore = null;
-const knownTypedCases = [
-  "table-row-add",
-  "table-cell-style",
-  "table-cell-append",
-  "table-cell-text",
-  "chart-data",
-  "chart-type",
-  "slide-transition",
-  "animation-timing",
-  "object-hyperlink",
-  "shape-fill",
-  "slide-background",
-  "layout-switch",
-  "shape-insert",
-  "wordart-insert",
-  "smartart-move",
-  "picture-crop",
-  "smartart-text",
-  "smartart-add",
-  "smartart-delete",
-];
+const knownTypedCases = Object.keys(typedComparisonCases);
 assert(knownTypedCases.includes(typedCase), "Unknown typed comparison case");
 
 const browser = await chromium.launch({
@@ -248,6 +229,7 @@ await context.route("**/*", async (route) => {
 });
 const item = {
   typedCase,
+  relatedProductOperations: typedComparisonCases[typedCase].relatedOperations,
   stage: "open",
   status: "running",
   proofLimit:
