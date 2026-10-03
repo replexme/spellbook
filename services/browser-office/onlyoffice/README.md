@@ -219,10 +219,12 @@ this boundary rather than implementing its own rollback. A rollback error is a
 failure and cannot become an expected-failure pass.
 
 This remains diagnostic, not product admission. A pre-existing Redo branch is
-rejected before mutation: native `startGroupPoints` discards it, and the pinned
-API has no proven public mechanism to restore it after cancellation. This
-limitation must be resolved before the full product contract can use the
-adapter. Unknown/nested group state cannot cancel someone else's history.
+refused unless the native provider declares the reviewed group rollback
+capability. Patch 0013 connects the provider's existing SaveRedoPoints and
+PopRedoPoints to its own group lifecycle, restores saved-state flags on cancel,
+and releases retained references on commit or native history clear. The adapter
+never rewrites the native history arrays. Unknown/nested group state cannot
+cancel someone else's history.
 The official [CreateNewHistoryPoint API](https://api.onlyoffice.com/docs/office-api/usage-api/presentation-api/ApiPresentation/Methods/CreateNewHistoryPoint/)
 provides a checkpoint, not automatic exception rollback. The pinned
 [base group-action implementation](https://github.com/ONLYOFFICE/sdkjs/blob/v9.3.0.140/common/apiBase.js)
@@ -281,3 +283,23 @@ Patch `0011-final-distribution-synchronizes-all-runtime-packs.patch` (candidate 
 Patch `0012-modified-editor-dated-attribution.patch` (candidate `09b1882`) adds a tracked modification notice with the author, date, upstream origin and trademark attribution. The generated notice and source page read that same file; the editor footer and demo identify the modified software. Original SDK branding remains visible. The rebuilt package passed 283 unit and 17 headless save/open tests, complete distribution verification, live source-link readback and direct screenshot review. The [official licensing and trademark guide](https://www.onlyoffice.com/blog/2026/05/onlyoffice-license-and-trademark-policy) supplies the attribution requirements; the pinned 9.3 SDK's own terms remain the version-specific authority.
 
 The reviewed-font/source-bound candidate at `d10b1ad` additionally passed all 28 requested paired trials (14 per engine), including authored-package preservation, saving and same-engine reopening. Independent Open XML checks found 22 valid outputs and six retaining exactly the original input errors. All 19 representative normal typed cases and 19 injected failures passed at public integration `a9e52bf`, with full distribution identity bound to each trial. Those trials precede the attribution-only wrapper rebuild at `09b1882`; they do not promote that later artifact, the full 94-command ONLYOFFICE product contract or PowerPoint fidelity. Evidence lives in ignored `artifacts/office-audit-20261003/licensed-paired/` and `licensed-typed/`.
+
+
+Patch `0013-native-group-redo-history.patch` includes candidate `506ce1d` and
+`4365552`. The first passed 19 normal, 19 cancellation and 19 pre-existing Redo
+cancellation trials on a fixed reviewed distribution. Each retained Redo was
+actually executed and undone with whole native-document readback. The second
+adds native history-clear ownership cleanup, covered by a fifth provider-method
+regression. It still requires fresh runtime validation before treating the later
+artifact as verified.
+
+Direct screenshot review then found missing Arabic in the earlier 18-font
+package. Korean rendered, while Arabic in the public mixed-script fixture became
+boxes. Input-specific generated fallback coverage is now required by both
+ONLYOFFICE trial runners, independently of licensing and byte preservation. It
+checks DrawingML text coverage and does not prove shaping, layout fidelity or
+PowerPoint equivalence. The candidate font input adds unmodified Noto Sans Arabic
+Regular and Bold, with full OFL notices and SHA-256-bound sources at
+`notofonts/arabic` gh-pages commit `43674fa5a3ad7e1a8e1b9249319b51b1ee68be26`.
+The earlier 18-font results remain historical; fresh screenshots and trials are
+required for the resulting 20-font package.

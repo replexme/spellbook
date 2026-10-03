@@ -1,0 +1,103 @@
+diff --git a/bin/build.sh b/bin/build.sh
+index db2f301..a8f3c4c 100755
+--- a/bin/build.sh
++++ b/bin/build.sh
+@@ -15,6 +15,7 @@ node scripts/patch-onlyoffice-smartart-line-path.mjs dist
+ node scripts/patch-onlyoffice-smartart-transition-style.mjs dist
+ node scripts/patch-onlyoffice-chart-point-recalc.mjs dist
+ node scripts/patch-onlyoffice-field-cache-history.mjs dist
++node scripts/patch-onlyoffice-group-redo-history.mjs dist
+ 
+ # Keep the deployable demo/runtime lean by removing low-frequency bundled
+ # assets and emitting canonical path packs for per-document-type CDN sync.
+diff --git a/scripts/patch-onlyoffice-group-redo-history.mjs b/scripts/patch-onlyoffice-group-redo-history.mjs
+new file mode 100644
+index 0000000..521ef0a
+--- /dev/null
++++ b/scripts/patch-onlyoffice-group-redo-history.mjs
+@@ -0,0 +1,34 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++// A native history group owns the discarded Redo branch until it commits.
++// Cancellation first runs the provider's Undo, then returns its own Redo points.
++import assert from 'node:assert/strict';
++import {createHash} from 'node:crypto';
++import {readFile,writeFile} from 'node:fs/promises';
++import path from 'node:path';
++import {fileURLToPath} from 'node:url';
++import {brotliCompressSync,constants} from 'node:zlib';
++const marker='/* spellbook-native-group-redo-v1 */';
++const anchor='CHistory.prototype.startGroupPoints=function(){this.Create_NewPoint(AscDFH.historydescription_GroupPointsOpen)};';
++const replacement=marker+'CHistory.prototype.spellbookGroupRedoRollbackVersion=1;CHistory.prototype.startGroupPoints=function(){if(this.spellbookGroupRedoCheckpoint)throw new Error("native_group_redo_nested");var checkpoint=null;if(this.Can_Redo()){if(this.UndoRedoInProgress||this.TurnOffHistory!==0||this._getLongPointIndex()!==-1||this.StoredData.length!==0)throw new Error("native_group_redo_busy");checkpoint={index:this.Index,storedDepth:this.StoredData.length,savedIndex:this.SavedIndex,userSavedIndex:this.UserSavedIndex,forceSave:this.ForceSave};this.SaveRedoPoints()}this.Create_NewPoint(AscDFH.historydescription_GroupPointsOpen);if(checkpoint)this.spellbookGroupRedoCheckpoint=checkpoint};';
++const cancelAnchor='this.Index=startIndex-1;this.ClearRedo();this.UndoRedoInProgress=false;';
++const cancelReplacement='this.Index=startIndex-1;this.ClearRedo();if(this.spellbookGroupRedoCheckpoint){var checkpoint=this.spellbookGroupRedoCheckpoint;if(this.Index!==checkpoint.index)throw new Error("native_group_redo_scope_lost");if(this.StoredData.length!==checkpoint.storedDepth+1)throw new Error("native_group_redo_storage_lost");this.PopRedoPoints();this.SavedIndex=checkpoint.savedIndex;this.UserSavedIndex=checkpoint.userSavedIndex;this.ForceSave=checkpoint.forceSave;this.spellbookGroupRedoCheckpoint=null}this.UndoRedoInProgress=false;';
++const commitAnchor='this.Points.length=startIndex+1;this.Index=startIndex};CHistory.prototype.getGroupChanges=';
++const commitReplacement='this.Points.length=startIndex+1;this.Index=startIndex;if(this.spellbookGroupRedoCheckpoint){if(this.StoredData.length!==this.spellbookGroupRedoCheckpoint.storedDepth+1)throw new Error("native_group_redo_storage_lost");this.StoredData.pop();this.spellbookGroupRedoCheckpoint=null}};CHistory.prototype.getGroupChanges=';
++const clearAnchor='this.Points.length=0;this.TurnOffHistory=0;this.private_ClearRecalcData()';
++const clearReplacement='this.Points.length=0;if(this.spellbookGroupRedoCheckpoint){this.StoredData.length=this.spellbookGroupRedoCheckpoint.storedDepth;this.spellbookGroupRedoCheckpoint=null}this.TurnOffHistory=0;this.private_ClearRecalcData()';
++export function unpatchGroupRedo(source){return source.replace(replacement,anchor).replace(cancelReplacement,cancelAnchor).replace(commitReplacement,commitAnchor).replace(clearReplacement,clearAnchor)}
++export function patchGroupRedo(source){
++ if(source.includes(marker)){assert(source.includes(replacement)&&source.includes(cancelReplacement)&&source.includes(commitReplacement)&&source.includes(clearReplacement),'Incomplete native Redo patch');return source}
++ for(const text of [anchor,cancelAnchor,commitAnchor,clearAnchor])assert.equal(source.split(text).length,2,'Pinned native history boundary changed');
++ return source.replace(anchor,replacement).replace(cancelAnchor,cancelReplacement).replace(commitAnchor,commitReplacement).replace(clearAnchor,clearReplacement);
++}
++if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
++ const root=path.resolve(process.argv[2]||'');assert.equal(path.basename(root),'dist');
++ const target=path.join(root,'sdkjs/slide/sdk-all.js'),source=await readFile(target,'utf8');
++ // The full asset is pinned before this patch; prior drawing/field patches are
++ // independently digest-bound by the preceding build steps.
++ assert.equal(createHash('sha256').update(unpatchGroupRedo(source)).digest('hex'),'9211ddee5950e63b3420736c5d81e5fc75dbb41e7e9205c95323376df14f9a73','Unexpected pinned presentation SDK');
++ const patched=patchGroupRedo(source);
++ await writeFile(target,patched);await writeFile(target+'.br',brotliCompressSync(Buffer.from(patched),{params:{[constants.BROTLI_PARAM_QUALITY]:5}}));
++ console.log(JSON.stringify({patch:marker,before:createHash('sha256').update(source).digest('hex'),after:createHash('sha256').update(patched).digest('hex')}));
++}
+diff --git a/scripts/patch-onlyoffice-group-redo-history.test.mjs b/scripts/patch-onlyoffice-group-redo-history.test.mjs
+new file mode 100644
+index 0000000..c3f90b6
+--- /dev/null
++++ b/scripts/patch-onlyoffice-group-redo-history.test.mjs
+@@ -0,0 +1,45 @@
++// SPDX-License-Identifier: AGPL-3.0-only
++import assert from 'node:assert/strict';
++import test from 'node:test';
++import vm from 'node:vm';
++import {readFileSync} from 'node:fs';
++import {patchGroupRedo,unpatchGroupRedo} from './patch-onlyoffice-group-redo-history.mjs';
++// Exercise the actual pinned provider methods, not copies of our replacement.
++const source=readFileSync(new URL('../public/sdkjs/slide/sdk-all.js',import.meta.url),'utf8');
++function methods(text,names){return names.map(name=>{const a=text.indexOf('CHistory.prototype.'+name+'=');assert(a>=0,name);let b=text.indexOf(';CHistory.prototype.',a);assert(b>a,name);return text.slice(a,b+1)}).join('')}
++function fixture(patched=true){
++ class CHistory {}
++ const context={CHistory,AscDFH:{historydescription_GroupPointsOpen:901,historydescription_GroupPoints:902},window:{AscCommon:{g_specialPasteHelper:{specialPasteStart:false,SpecialPasteButton_Hide(){}}}}};
++ vm.runInNewContext(methods(patched?patchGroupRedo(source):source,['startGroupPoints','cancelGroupPoints','endGroupPoints','_getLongPointIndex','SaveRedoPoints','PopRedoPoints']),context);
++ const text=patched?patchGroupRedo(source):source;
++ const start=text.indexOf('Clear:function(){this.Index=-1;');const end=text.indexOf(',Can_Undo:',start);assert(start>=0&&end>start);vm.runInNewContext('CHistory.prototype.Clear='+text.slice(start+'Clear:'.length,end)+';',context);
++ const h=new CHistory();h.private_ClearRecalcData=()=>{};Object.assign(h,{Index:0,Points:[{Description:1,Items:[],Additional:{}},{Description:2,Items:[{old:0,next:1}],Additional:{}},{Description:3,Items:[{old:1,next:2}],Additional:{}}],StoredData:[],SavedIndex:2,UserSavedIndex:2,ForceSave:false,TurnOffHistory:0,UndoRedoInProgress:false,GroupChanges:[],value:0});
++ h.Can_Redo=()=>h.Index<h.Points.length-1;
++ h.ClearRedo=()=>{h.Points.length=h.Index+1};
++ h.Create_NewPoint=function(description){if(this.SavedIndex>this.Index){this.SavedIndex=this.Index;this.UserSavedIndex=this.Index;this.ForceSave=true}this.Points[++this.Index]={Description:description,Items:[],Additional:{}};this.Points.length=this.Index+1};
++ h.private_UndoPoint=function(point,changes){for(const item of [...point.Items].reverse()){this.value=item.old;changes.push(item)}};
++ return h;
++}
++test('native cancellation restores the original Redo point identities and saved flags',()=>{
++ const broken=fixture(false);broken.startGroupPoints();broken.cancelGroupPoints();assert.equal(broken.Can_Redo(),false);
++ const h=fixture(),redo=h.Points.slice(1);h.startGroupPoints();h.Points[h.Index].Items.push({old:0,next:9});h.value=9;h.cancelGroupPoints();
++ assert.equal(h.value,0);assert.equal(h.Index,0);assert.equal(h.Points[1],redo[0]);assert.equal(h.Points[2],redo[1]);assert.equal(h.SavedIndex,2);assert.equal(h.UserSavedIndex,2);assert.equal(h.ForceSave,false);assert.equal(h.StoredData.length,0);assert.equal(h.Can_Redo(),true);
++ // The retained native actions are executable after cancellation.
++ for(const point of h.Points.slice(1))for(const item of point.Items)h.value=item.next;
++ assert.equal(h.value,2);
++ h.startGroupPoints();h.cancelGroupPoints();assert.equal(h.StoredData.length,0);assert.equal(h.Can_Redo(),true);
++});
++test('commit follows normal branch replacement and releases saved Redo references',()=>{
++ const h=fixture();h.startGroupPoints();h.Points[h.Index].Items.push({old:0,next:9});h.value=9;h.endGroupPoints();assert.equal(h.value,9);assert.equal(h.Index,1);assert.equal(h.Points.length,2);assert.equal(h.Can_Redo(),false);assert.equal(h.StoredData.length,0);assert.equal(h.spellbookGroupRedoCheckpoint,null);assert.equal(h.Points[1].Description,902);
++});
++test('busy and nested transactions refuse before discarding any native Redo',()=>{
++ for(const key of ['TurnOffHistory','UndoRedoInProgress']){const h=fixture();h[key]=1;assert.throws(()=>h.startGroupPoints(),/busy/);assert.equal(h.Points.length,3);assert.equal(h.StoredData.length,0)}
++ const h=fixture();h.startGroupPoints();assert.throws(()=>h.startGroupPoints(),/nested/);h.cancelGroupPoints();assert.equal(h.Can_Redo(),true);
++});
++test('generated patch is reversible, idempotent and refuses changed native boundaries',()=>{
++ const next=patchGroupRedo(source);assert.equal(unpatchGroupRedo(next),source);assert.equal(patchGroupRedo(next),next);assert.throws(()=>patchGroupRedo(source.replace('this.Index=startIndex-1;this.ClearRedo();','this.Index=startIndex-1;')),/boundary changed/);
++});
++
++test('clearing native document history releases the cancelled scope and retained Redo',()=>{
++ const h=fixture();h.startGroupPoints();assert.equal(h.StoredData.length,1);h.Clear();assert.equal(h.Points.length,0);assert.equal(h.StoredData.length,0);assert.equal(h.spellbookGroupRedoCheckpoint,null);h.startGroupPoints();h.cancelGroupPoints();assert.equal(h.Index,-1);
++});
