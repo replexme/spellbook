@@ -507,3 +507,19 @@ script tests (52) and type checking pass, and all 22 portable patches plus the
 pinned converter fetch replay the whole candidate Git tree exactly. Final
 archive-only build and strict HTTP runtime results are recorded separately
 once inspected; no whole-editor or full-product admission flag is raised.
+
+
+The frozen `d816ab0` candidate now has an actual final archive-only full-build
+readback: 156 wrapper inputs, 19 explicit test documents, 286 component tests,
+52 script tests and type checking pass without tracked upstream runtime trees.
+The resulting wrapper contains 157 files including its own manifest, zero
+historical/unselected dictionaries and zero AppleDouble sidecars. The final
+1,756-file/20-font distribution validates 281 compressed pairs. Every SDK/UI/
+WASM/test-document plain byte matches `1ffd3f0`; compression is regenerated
+from those bytes. The actual downloaded wrapper archive digest equals its
+listed source digest. Strict Brotli save/open tests pass 18/18, and the native
+spelling/hyphenation engines parse the pinned data. The 57 selected diagnostic
+batch is still running and is not counted complete until its final source and
+distribution fences pass. Run timestamps and archive metadata are outside the
+scoped SDK/UI reproduction claim; whole-package reproducibility and SLSA
+certification are not claimed.
