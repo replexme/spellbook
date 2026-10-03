@@ -5,10 +5,13 @@ if [[ "$(uname -s)" != "Linux" ]]; then
   echo "The browser LibreOffice candidate build requires Linux." >&2
   exit 1
 fi
-if [[ "$(uname -m)" != "x86_64" ]]; then
-  echo "The admitted browser toolchain currently requires Linux x86_64." >&2
-  exit 1
-fi
+case "$(uname -m)" in
+  x86_64|aarch64) ;;
+  *)
+    echo "The pinned browser toolchain requires Linux x86_64 or aarch64." >&2
+    exit 1
+    ;;
+esac
 if [[ "$EUID" -eq 0 ]]; then
   echo "LibreOffice refuses root compilation; run as an unprivileged build user." >&2
   exit 1
