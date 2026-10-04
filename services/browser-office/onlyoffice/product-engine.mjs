@@ -306,6 +306,8 @@ export function createOnlyOfficeProductEngine({
                 "set_table_cell",
                 "set_table_row_height",
                 "set_table_column_width",
+                "insert_table_rows",
+                "delete_table_rows",
               ].includes(command.op) &&
               shape.graphicObject?.Content?.some((row) =>
                 row.Content.some(
@@ -314,6 +316,26 @@ export function createOnlyOfficeProductEngine({
               )
             )
               throw Error("onlyoffice_product_merged_table_target_unavailable");
+            if (
+              ["insert_table_rows", "delete_table_rows"].includes(command.op)
+            ) {
+              const table = shape.graphicObject;
+              if (
+                !table?.Content ||
+                commands.length !== 1 ||
+                !Number.isSafeInteger(command.index) ||
+                command.index < 0 ||
+                !Number.isSafeInteger(command.count) ||
+                command.count < 1 ||
+                command.count > 100 ||
+                (command.op === "insert_table_rows"
+                  ? command.index > table.Content.length ||
+                    table.Content.length + command.count > 1000
+                  : command.index + command.count > table.Content.length ||
+                    command.count >= table.Content.length)
+              )
+                throw Error("onlyoffice_product_table_row_topology_invalid");
+            }
             if (command.op === "set_table_column_width") {
               const table = shape.graphicObject;
               if (
@@ -982,6 +1004,25 @@ export function createOnlyOfficeProductEngine({
                   window.AscFormat.LOCKS_MASKS.noResize,
                   command.lockSize,
                 );
+              return true;
+            }
+            case "insert_table_rows": {
+              for (let i = 0; i < command.count; i++) {
+                const last = d.Table.Content.length;
+                const append = command.index === last;
+                const cell = d
+                  .GetRow(append ? last - 1 : command.index)
+                  .GetCell(0);
+                if (!d.AddRow(cell, !append))
+                  throw Error("onlyoffice_product_native_rejected");
+              }
+              return true;
+            }
+            case "delete_table_rows": {
+              for (let i = 0; i < command.count; i++) {
+                const cell = d.GetRow(command.index).GetCell(0);
+                d.RemoveRow(cell);
+              }
               return true;
             }
             case "set_table_column_width": {

@@ -44,6 +44,8 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "set_table_cell",
   "set_table_row_height",
   "set_table_column_width",
+  "insert_table_rows",
+  "delete_table_rows",
   ...Object.keys(formatting),
 ]);
 const rgb = (color) => ({
@@ -282,6 +284,8 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
           "set_table_cell",
           "set_table_row_height",
           "set_table_column_width",
+          "insert_table_rows",
+          "delete_table_rows",
         ].includes(c.op),
       ) &&
       !group.some((c) => c.op === "resize")
@@ -323,7 +327,59 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
     for (const [op, command] of [...final].sort(
       ([a], [b]) => Number(!!formatting[b]) - Number(!!formatting[a]),
     )) {
-      if (op === "set_table_row_height") {
+      if (["insert_table_rows", "delete_table_rows"].includes(op)) {
+        const previous = oldDrawing.tableCells.length;
+        const expected =
+          previous +
+          (op === "insert_table_rows" ? command.count : -command.count);
+        if (newDrawing.tableCells.length !== expected)
+          throw Error("onlyoffice_product_intent_mismatch:table_row_count");
+        const tableIndex = a.elements
+          .slice(0, index)
+          .filter((e) => e.kind === "table").length;
+        const oldTable = a.narrow.table[tableIndex],
+          newTable = b.narrow.table[tableIndex];
+        if (!oldTable || newTable.rows !== expected)
+          throw Error("onlyoffice_product_intent_mismatch:table_row_count");
+        const arrays = [
+          [oldDrawing.tableCells, newDrawing.tableCells],
+          [oldDrawing.tableParagraphs, newDrawing.tableParagraphs],
+          [
+            oldDrawing.tableLayout.rowHeights,
+            newDrawing.tableLayout.rowHeights,
+          ],
+          [oldTable.cells, newTable.cells],
+        ];
+        for (const [original, actual] of arrays) {
+          if (op === "delete_table_rows")
+            original.splice(command.index, command.count);
+          else
+            original.splice(
+              command.index,
+              0,
+              ...structuredClone(
+                actual.slice(command.index, command.index + command.count),
+              ),
+            );
+        }
+        if (
+          op === "insert_table_rows" &&
+          newDrawing.tableCells
+            .slice(command.index, command.index + command.count)
+            .some(
+              (row) =>
+                row.length !== oldDrawing.tableCells[0].length ||
+                row.some(
+                  (text) =>
+                    text.replace(/\r\n/g, "\n").replace(/\n$/, "") !== "",
+                ),
+            )
+        )
+          throw Error(
+            "onlyoffice_product_intent_mismatch:new_table_row_content",
+          );
+        oldTable.rows = expected;
+      } else if (op === "set_table_row_height") {
         const heights = new Map(
           group.filter((c) => c.op === op).map((c) => [c.index, c]),
         );

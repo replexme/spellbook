@@ -833,7 +833,15 @@ function preserveUnaffectedSlideShapes(
       continue;
     }
     // Preserve authored properties wherever the two native exports agree.
-    const merged = mergeElementThreeWay(documents[2], source, baseline, editedShape);
+    const rowRequests = geometrySources?.targets?.filter(target =>
+      ["insert_table_rows", "delete_table_rows"].includes(target.op) &&
+      Number.isSafeInteger(target.index) && Number.isSafeInteger(target.count) &&
+      target.shapeIndex === index);
+    const merged = rowRequests?.length
+      ? mergeNativeTableRows(documents[2], source, baseline, editedShape, rowRequests)
+      : mergeElementThreeWay(documents[2], source, baseline, editedShape);
+    if (rowRequests?.length && !merged)
+      throw new Error("Native table row topology cannot preserve authored rows in " + part);
     if (merged)
       replacements.push({ pair, editedShape, restored: false, node: merged });
   }
@@ -948,6 +956,48 @@ function preserveUnaffectedSlideShapes(
   )
     return null;
   return serializeXml(documents[2]);
+}
+
+// Row coordinates come from the validated native request, never from a guess
+// at repeated or empty cell text. Existing rows keep their authored XML; only
+// genuinely new rows come from the native editor's selected-row defaults.
+function mergeNativeTableRows(document, source, baseline, edited, requests) {
+  const originals = [source, baseline, edited];
+  const tables = originals.map(shape => [...shape.getElementsByTagNameNS(drawingNamespace, "tbl")]);
+  if (tables.some(t => t.length !== 1)) return null;
+  const rows = tables.map(t => xmlElementChildren(t[0]).filter(c =>
+    c.namespaceURI === drawingNamespace && c.localName === "tr"));
+  if (rows[0].length !== rows[1].length) return null;
+  const order = rows[0].map((_, i) => i);
+  for (const request of requests) {
+    if (request.count < 1 || request.count > 100 || request.index < 0 || request.index > order.length) return null;
+    if (request.op === "insert_table_rows")
+      order.splice(request.index, 0, ...Array(request.count).fill(null));
+    else {
+      if (request.index + request.count > order.length || request.count >= order.length) return null;
+      order.splice(request.index, request.count);
+    }
+  }
+  if (order.length !== rows[2].length) return null;
+  const copies = originals.map(shape => shape.cloneNode(true));
+  for (const shape of copies) {
+    const table = shape.getElementsByTagNameNS(drawingNamespace, "tbl")[0];
+    for (const row of xmlElementChildren(table).filter(c =>
+      c.namespaceURI === drawingNamespace && c.localName === "tr")) table.removeChild(row);
+  }
+  const merged = mergeElementThreeWay(document, ...copies);
+  if (!merged) return null;
+  const table = merged.getElementsByTagNameNS(drawingNamespace, "tbl")[0];
+  const successor = xmlElementChildren(table).find(c =>
+    c.namespaceURI === drawingNamespace && c.localName === "extLst");
+  for (const [index, original] of order.entries()) {
+    const row = original === null
+      ? importOoxmlSubtree(document, rows[2][index], true)
+      : mergeElementThreeWay(document, rows[0][original], rows[1][original], rows[2][index]);
+    if (!row) return null;
+    table.insertBefore(row, successor ?? null);
+  }
+  return merged;
 }
 
 function removeDirectShapeFromOriginal(
@@ -3832,6 +3882,17 @@ export function preserveOriginalPptxParts(
       "Native snapshot comparison exceeds the browser memory limit.",
     );
 
+  const tableRowTargetsByPart = new Map();
+  if (sourceTargets?.some(t => sourceOperations.includes(t.op) && ["insert_table_rows", "delete_table_rows"].includes(t.op))) {
+    const paths = orderedSlidePaths(original);
+    for (const target of sourceTargets.filter(t => sourceOperations.includes(t.op) && ["insert_table_rows", "delete_table_rows"].includes(t.op))) {
+      const part = paths[target.slideIndex];
+      if (!part) throw new Error("Native table row target has no authored slide.");
+      const targets = tableRowTargetsByPart.get(part) ?? [];
+      targets.push(target);
+      tableRowTargetsByPart.set(part, targets);
+    }
+  }
   const shapeScopes = humanEdit
     ? null
     : slideShapeTargets(sourceOperations, sourceTargets);
@@ -3984,7 +4045,7 @@ export function preserveOriginalPptxParts(
             sourceOperations,
             targetNamesBySlide?.get(part) ?? null,
             targetIndexesBySlide?.get(part) ?? null,
-            { part, entries: [original, noEdit, edited] },
+            { part, entries: [original, noEdit, edited], targets: tableRowTargetsByPart.get(part) },
           )
       : null;
     if (targetIndexesBySlide?.has(part) && semanticShapePatch === null)

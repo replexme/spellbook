@@ -755,6 +755,8 @@ const engine = createOnlyOfficeProductEngine({
           "set_table_cell",
           "set_table_row_height",
           "set_table_column_width",
+          "insert_table_rows",
+          "delete_table_rows",
         ].includes(flags("--operation", "move"))
       )
         inspectedTableDetails = await tableDetails(opened.frame);
@@ -781,6 +783,8 @@ const engine = createOnlyOfficeProductEngine({
           "set_table_cell",
           "set_table_row_height",
           "set_table_column_width",
+          "insert_table_rows",
+          "delete_table_rows",
         ].includes(flags("--operation", "move"))
       )
         commandTableDetails = await tableDetails(mainFrame);
@@ -816,6 +820,9 @@ const engine = createOnlyOfficeProductEngine({
             op: c.op,
             slideIndex,
             shapeIndex,
+            ...(["insert_table_rows", "delete_table_rows"].includes(c.op)
+              ? { index: c.index, count: c.count }
+              : {}),
             name:
               before.slides[slideIndex].elements[shapeIndex].objectName ?? "",
           };
@@ -1005,6 +1012,8 @@ try {
               "set_table_cell",
               "set_table_row_height",
               "set_table_column_width",
+              "insert_table_rows",
+              "delete_table_rows",
             ].includes(operation)
           ? before.slides[selectedSlideIndex].elements.find(
               (element) => element.kind === "table",
@@ -1051,6 +1060,8 @@ try {
       replace_text: { text: flags("--text", "Verified product text") },
       set_table_row_height: { index: 0, height: 2000 },
       set_table_column_width: { index: 0, width: 5000 },
+      insert_table_rows: { index: 1, count: 1 },
+      delete_table_rows: { index: 1, count: 1 },
       set_table_cell: {
         row: 0,
         column: 0,

@@ -1419,3 +1419,80 @@ test("column grid totals retain fractions until the final physical outline", () 
     /unrequested_change/,
   );
 });
+
+for (const op of ["insert_table_rows", "delete_table_rows"])
+  test(`${op} preserves existing row contents and refuses unrequested changes`, () => {
+    const before = document();
+    before.slides[0].elements[0].kind = "table";
+    const drawing = before.slides[0].onlyoffice.drawings[0];
+    drawing.tableCells = [["first\r\n"], ["second\r\n"]];
+    drawing.tableParagraphs = ["first", "second"].map((text) => [
+      [
+        {
+          text: text + "\r\n",
+          alignment: "left",
+          runs: [{ text, style: { GetBold: true } }],
+        },
+      ],
+    ]);
+    drawing.tableLayout = {
+      authoredFrame: { extY: 300 },
+      computedHeight: 300,
+      rowHeights: [
+        { value: 150, rule: 0, computedHeight: 150 },
+        { value: 150, rule: 0, computedHeight: 150 },
+      ],
+    };
+    before.slides[0].narrow.table = [
+      {
+        rows: 2,
+        cells: [
+          { text: "first\r\n", fill: null },
+          { text: "second\r\n", fill: null },
+        ].map((c) => [c]),
+      },
+    ];
+    const after = structuredClone(before),
+      changed = after.slides[0].onlyoffice.drawings[0],
+      table = after.slides[0].narrow.table[0];
+    if (op === "delete_table_rows") {
+      changed.tableCells.splice(1, 1);
+      changed.tableParagraphs.splice(1, 1);
+      changed.tableLayout.rowHeights.splice(1, 1);
+      table.cells.splice(1, 1);
+      after.slides[0].elements[0].height =
+        changed.tableLayout.computedHeight = 150;
+      table.rows = 1;
+    } else {
+      changed.tableCells.splice(1, 0, ["\r\n"]);
+      changed.tableParagraphs.splice(1, 0, [
+        [{ text: "\r\n", alignment: "left", runs: [] }],
+      ]);
+      changed.tableLayout.rowHeights.splice(1, 0, {
+        value: 150,
+        rule: 0,
+        computedHeight: 150,
+      });
+      table.cells.splice(1, 0, [{ text: "\r\n", fill: null }]);
+      after.slides[0].elements[0].height =
+        changed.tableLayout.computedHeight = 450;
+      table.rows = 3;
+    }
+    const commands = [{ op, elementId: "0/0", index: 1, count: 1 }];
+    assert.doesNotThrow(() =>
+      verifyOnlyOfficeProductIntent(before, after, commands),
+    );
+    changed.tableParagraphs[0][0][0].runs[0].style.GetBold = false;
+    assert.throws(
+      () => verifyOnlyOfficeProductIntent(before, after, commands),
+      /unrequested_change/,
+    );
+    changed.tableParagraphs[0][0][0].runs[0].style.GetBold = true;
+    if (op === "insert_table_rows") {
+      changed.tableCells[1][0] = "unrequested cell data\r\n";
+      assert.throws(
+        () => verifyOnlyOfficeProductIntent(before, after, commands),
+        /new_table_row_content/,
+      );
+    }
+  });
