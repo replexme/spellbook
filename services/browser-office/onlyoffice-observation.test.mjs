@@ -35,7 +35,13 @@ function candidate() {
         },
       },
     },
-    AscBuilder: { Slide: { Api: { GetPresentation: () => presentation } } },
+    AscBuilder: {
+      Slide: { Api: { GetPresentation: () => presentation } },
+      GetApiDrawing: (shape) =>
+        slides
+          .flatMap((slide) => slide.GetAllDrawings())
+          .find((drawing) => drawing.Drawing === shape) ?? null,
+    },
   };
   const frame = {
     evaluate: (fn) =>
@@ -269,6 +275,7 @@ test("dynamic field definitions are stable across rendered cache changes and rem
   ])
     drawing[method] = () => 0;
   slides[0].GetAllDrawings = () => [drawing];
+  slides[0].Slide.cSld.spTree = [drawing.Drawing];
   const before = (await observeOnlyOfficeCandidate(frame)).extended.slides[0]
     .drawings[0];
   rendered = "<#>\r\n";
@@ -289,4 +296,99 @@ test("dynamic field definitions are stable across rendered cache changes and rem
     ),
     JSON.parse(JSON.stringify(before)),
   );
+});
+
+test("one synchronous native read retains connectors omitted by the public drawing list", async () => {
+  const { frame, slides, window } = candidate();
+  window.AscDFH = { historyitem_type_Cnx: 7 };
+  const shape = {
+    getObjectType: () => 7,
+    getOwnName: () => "connector",
+    x: 0,
+    y: 0,
+    extX: 10,
+    extY: 10,
+    isShape: () => true,
+  };
+  window.AscBuilder.ApiShape = class {
+    constructor(native) {
+      this.Drawing = native;
+    }
+    GetClassType() {
+      return "shape";
+    }
+    GetHyperlink() {
+      return null;
+    }
+  };
+  for (const method of [
+    "GetPosX",
+    "GetPosY",
+    "GetWidth",
+    "GetHeight",
+    "GetRotation",
+    "GetFlipH",
+    "GetFlipV",
+  ])
+    window.AscBuilder.ApiShape.prototype[method] = () => 0;
+  slides[0].Slide.cSld.spTree = [shape];
+  assert.equal(slides[0].GetAllDrawings().length, 0);
+  const evaluate = frame.evaluate;
+  let calls = 0;
+  frame.evaluate = (fn) => {
+    calls++;
+    return evaluate(fn);
+  };
+  const result = await observeOnlyOfficeCandidate(frame);
+  assert.equal(calls, 1);
+  assert.equal(result.common.slides[0].shapes[0].type, "connector");
+  assert.equal(result.extended.slides[0].drawings[0].type, "connector");
+  assert.equal(result.narrow[0].drawingStyle.length, 1);
+  assert.equal(result.unavailable.length, 0);
+});
+
+test("chart series type is read from its containing native chart instead of a broken parent getter", async () => {
+  const { frame, slides } = candidate();
+  const series = { idx: 0, parent: {} };
+  const chart = { series: [series], getChartType: () => 42 };
+  const shape = {
+    x: 0,
+    y: 0,
+    extX: 10,
+    extY: 10,
+    getOwnName: () => "chart",
+    isChart: () => true,
+  };
+  const drawing = {
+    Drawing: shape,
+    Chart: {
+      chart: { plotArea: { charts: [chart] } },
+      getAllSeries: () => [series],
+    },
+    GetClassType: () => "chart",
+    GetChartType: () => "bar",
+    GetAllSeries: () => [
+      {
+        GetChartType: () => {
+          throw Error("broken native parent getter");
+        },
+      },
+    ],
+    GetHyperlink: () => null,
+  };
+  for (const method of [
+    "GetPosX",
+    "GetPosY",
+    "GetWidth",
+    "GetHeight",
+    "GetRotation",
+    "GetFlipH",
+    "GetFlipV",
+  ])
+    drawing[method] = () => 0;
+  slides[0].Slide.cSld.spTree = [shape];
+  slides[0].GetAllDrawings = () => [drawing];
+  const result = await observeOnlyOfficeCandidate(frame);
+  assert.equal(result.extended.slides[0].drawings[0].series[0].chartType, 42);
+  assert.equal(result.unavailable.length, 0);
 });
