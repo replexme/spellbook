@@ -5243,3 +5243,16 @@ test("native whole-text replacement may add plain paragraphs without importing e
   for (const [name, bytes] of Object.entries(original))
     if (name !== part) assert.deepEqual(saved[name], bytes, name);
 });
+
+test("declared media replacement keeps native relationships when only referenced bytes change", async () => {
+  const source=new Uint8Array(await readFile(new URL("../../eval/public/downloads/lo-transition-media.pptx",import.meta.url)));
+  const original=unzipSync(source),baseline={...original};
+  const rels="ppt/slides/_rels/slide1.xml.rels",authored="ppt/media/image1.jpeg",native="ppt/media/replacement.jpeg";
+  baseline[native]=baseline[authored];delete baseline[authored];
+  baseline[rels]=strToU8(strFromU8(baseline[rels]).replace("image1.jpeg","replacement.jpeg"));
+  const edited={...baseline,[native]:baseline[native].slice()};edited[native][100]^=1;
+  const merged=unzipSync(preserveOriginalPptxParts(source,zipSync(baseline),zipSync(edited),["replace_image"],[{op:"replace_image",elementId:"0/0"}]).bytes);
+  assert.match(strFromU8(merged[rels]),/replacement\.jpeg/u);
+  assert.deepEqual(merged[native],edited[native]);
+  assert.deepEqual(merged["ppt/media/image2.jpeg"],original["ppt/media/image2.jpeg"]);
+});

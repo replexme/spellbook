@@ -4292,6 +4292,23 @@ export function preserveOriginalPptxParts(
   const presentationPartsPatch = semanticMasterThemePatch
     ? null
     : mergePresentationParts(original, noEdit, edited);
+  // A replacement may keep the converter's relationship XML and filename
+  // while changing the referenced media bytes. Those relationships belong
+  // to the authored edit too; retaining the original author's different
+  // filename would reconnect the previous audio/image.
+  const replacedMediaRelationships = new Set();
+  for (const target of sourceTargets ?? []) {
+    if (!sourceOperations.includes(target.op) || !["replace_media","replace_image"].includes(target.op)) continue;
+    const slideIndex=Number(target.elementId?.split("/")[0]);
+    const slidePart=orderedSlidePaths(original)[slideIndex],related=slidePart&&relationshipsPath(slidePart);
+    if(!related||!noEdit[related]||!edited[related])continue;
+    const relationships=relationshipElements(parseXml(edited,related));
+    if(relationships.some(relationship=>{
+      if(relationship.getAttribute("TargetMode")==="External")return false;
+      const dependency=resolvePart(slidePart,relationship.getAttribute("Target"));
+      return classifyNativePackagePart(dependency)==="media_parts"&&noEdit[dependency]&&edited[dependency]&&!samePartBytes(noEdit[dependency],edited[dependency]);
+    }))replacedMediaRelationships.add(related);
+  }
   const paths = new Set(
     topologyPatch
       ? []
@@ -4306,7 +4323,7 @@ export function preserveOriginalPptxParts(
     // No current native command edits package core properties. Impress
     // updates modified time, lastModifiedBy and revision as a save side
     // effect, not as part of the requested slide/content mutation.
-    const engineChanged = !sameEngineExportPart(
+    const engineChanged = replacedMediaRelationships.has(part) || !sameEngineExportPart(
       part,
       noEdit[part],
       edited[part],
@@ -4437,6 +4454,7 @@ export function preserveOriginalPptxParts(
       !authoredDirectShape
     ) {
       if (
+        !replacedMediaRelationships.has(related) &&
         samePartBytes(noEdit[related], edited[related]) &&
         !samePartBytes(original[related], noEdit[related]) &&
         !referencedRelationshipsStillMatch(
