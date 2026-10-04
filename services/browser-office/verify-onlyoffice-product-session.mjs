@@ -282,6 +282,13 @@ async function save(page) {
 }
 async function pixels(frame) {
   return frame.evaluate(async () => {
+    // Compare document rendering in the same view state. Native selection
+    // handles are transient UI, not saved document content.
+    const editor = window.Asc.editor;
+    const model = editor.WordControl.m_oLogicDocument;
+    model.Slides[model.CurPage]?.graphicObjects.resetSelection();
+    model.Document_UpdateSelectionState();
+    model.RedrawCurSlide();
     const canvas = document.getElementById("id_viewer");
     if (!canvas?.width) throw Error("canvas_missing");
     let previous = null,
