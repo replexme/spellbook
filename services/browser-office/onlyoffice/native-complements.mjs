@@ -243,6 +243,13 @@ export function bootstrapOnlyOfficeNativeComplements(install) {
       get() {
         if (!loader) return loader;
         function BootstrapLoader(...args) {
+          // The SDK also constructs loaders while registering its API classes.
+          // Keep the hook through those early constructors; run/text/comment
+          // classes must exist before installing, but still before file import.
+          if (!window.AscCommonWord?.CTextPr || !window.AscWord?.Run ||
+              !common.CBinaryFileWriter || !window.Asc?.CAscSlideTransition ||
+              !window.AscCommonSlide?.CPresentation || !window.AscCommonSlide?.fLoadComments)
+            return Reflect.construct(loader,args);
           Object.defineProperty(common, "BinaryPPTYLoader", {configurable:true, enumerable:true, writable:true, value:loader});
           install();
           return Reflect.construct(common.BinaryPPTYLoader, args);
