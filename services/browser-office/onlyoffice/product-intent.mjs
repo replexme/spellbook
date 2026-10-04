@@ -43,6 +43,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "replace_text",
   "set_table_cell",
   "set_table_row_height",
+  "set_table_column_width",
   ...Object.keys(formatting),
 ]);
 const rgb = (color) => ({
@@ -254,8 +255,27 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
     }
     if (
       original.kind === "table" &&
+      group.some((c) => c.op === "set_table_column_width")
+    ) {
+      const columns = oldDrawing.tableLayout.columnWidths;
+      for (const c of group.filter((c) => c.op === "set_table_column_width"))
+        columns[c.index] = c.width;
+      const width = columns.reduce((sum, column) => sum + column, 0);
+      geometry.width = width;
+      oldDrawing.tableLayout.authoredFrame.extX = width;
+      oldDrawing.tableLayout.computedWidth = width;
+      for (const [i, row] of oldDrawing.tableLayout.rowHeights.entries())
+        row.computedHeight =
+          newDrawing.tableLayout.rowHeights[i].computedHeight;
+    }
+    if (
+      original.kind === "table" &&
       group.some((c) =>
-        ["set_table_cell", "set_table_row_height"].includes(c.op),
+        [
+          "set_table_cell",
+          "set_table_row_height",
+          "set_table_column_width",
+        ].includes(c.op),
       ) &&
       !group.some((c) => c.op === "resize")
     ) {

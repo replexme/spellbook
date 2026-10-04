@@ -249,6 +249,10 @@ export async function observeOnlyOfficeCandidate(frame) {
           const frame = d.Drawing.spPr?.xfrm;
           state.tableLayout = {
             computedHeight: Math.round((bounds.Bottom - bounds.Top) * 100),
+            computedWidth: Math.round((bounds.Right - bounds.Left) * 100),
+            columnWidths: d.Table.TableGrid.map((width) =>
+              Math.round(width * 100),
+            ),
             authoredFrame: Object.fromEntries(
               ["offX", "offY", "extX", "extY"].map((key) => [
                 key,

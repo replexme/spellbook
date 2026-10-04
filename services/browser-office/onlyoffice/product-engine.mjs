@@ -302,7 +302,11 @@ export function createOnlyOfficeProductEngine({
                 );
             }
             if (
-              ["set_table_cell", "set_table_row_height"].includes(command.op) &&
+              [
+                "set_table_cell",
+                "set_table_row_height",
+                "set_table_column_width",
+              ].includes(command.op) &&
               shape.graphicObject?.Content?.some((row) =>
                 row.Content.some(
                   (cell) => cell.Get_GridSpan() !== 1 || cell.GetVMerge() !== 1,
@@ -310,6 +314,20 @@ export function createOnlyOfficeProductEngine({
               )
             )
               throw Error("onlyoffice_product_merged_table_target_unavailable");
+            if (command.op === "set_table_column_width") {
+              const table = shape.graphicObject;
+              if (
+                !Number.isSafeInteger(command.index) ||
+                command.index < 0 ||
+                !table?.TableGrid?.[command.index] ||
+                !Number.isSafeInteger(command.width) ||
+                command.width < 420 ||
+                command.width > 55880 ||
+                typeof table.SetColumnWidth !== "function" ||
+                typeof shape.spPr?.xfrm?.setExtX !== "function"
+              )
+                throw Error("onlyoffice_product_table_column_width_invalid");
+            }
             if (command.op === "set_table_row_height") {
               const row = shape.graphicObject?.Content?.[command.index];
               if (
@@ -964,6 +982,26 @@ export function createOnlyOfficeProductEngine({
                   window.AscFormat.LOCKS_MASKS.noResize,
                   command.lockSize,
                 );
+              return true;
+            }
+            case "set_table_column_width": {
+              const table = d.Table;
+              const selection = table.Selection,
+                cell = table.CurCell,
+                applyToAll = table.ApplyToAll;
+              table.Selection = { ...selection, Use: false };
+              table.CurCell = table.Content[0].Content[command.index];
+              table.ApplyToAll = false;
+              try {
+                table.SetColumnWidth(command.width / 100);
+                d.Drawing.spPr.xfrm.setExtX(
+                  table.TableGrid.reduce((sum, width) => sum + width, 0),
+                );
+              } finally {
+                table.Selection = selection;
+                table.CurCell = cell;
+                table.ApplyToAll = applyToAll;
+              }
               return true;
             }
             case "set_table_row_height": {

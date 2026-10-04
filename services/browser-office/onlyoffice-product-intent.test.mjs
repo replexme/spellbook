@@ -1352,3 +1352,38 @@ test("row height admits only requested outer size while preserving other rows an
     /unrequested_change/,
   );
 });
+
+test("column sizing changes its authored grid and frame without losing other column widths", () => {
+  const before = document();
+  before.slides[0].elements[0].kind = "table";
+  before.slides[0].elements[0].width = 500;
+  before.slides[0].onlyoffice.drawings[0].tableLayout = {
+    computedHeight: 300,
+    computedWidth: 500,
+    columnWidths: [200, 300],
+    authoredFrame: { extX: 500, extY: 300 },
+    rowHeights: [{ value: 300, rule: 0, computedHeight: 300 }],
+  };
+  const after = structuredClone(before);
+  after.slides[0].elements[0].width = 1000;
+  const changed = after.slides[0].onlyoffice.drawings[0].tableLayout;
+  changed.columnWidths[0] = 700;
+  changed.computedWidth = changed.authoredFrame.extX = 1000;
+  const commands = [
+    { op: "set_table_column_width", elementId: "0/0", index: 0, width: 700 },
+  ];
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, commands),
+  );
+  changed.columnWidths[1] = 301;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+  changed.columnWidths[1] = 300;
+  changed.authoredFrame.extY = 301;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+});

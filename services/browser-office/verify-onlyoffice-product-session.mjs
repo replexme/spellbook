@@ -751,9 +751,11 @@ const engine = createOnlyOfficeProductEngine({
       );
       lastInspection = observation;
       if (
-        ["set_table_cell", "set_table_row_height"].includes(
-          flags("--operation", "move"),
-        )
+        [
+          "set_table_cell",
+          "set_table_row_height",
+          "set_table_column_width",
+        ].includes(flags("--operation", "move"))
       )
         inspectedTableDetails = await tableDetails(opened.frame);
       return observation;
@@ -775,9 +777,11 @@ const engine = createOnlyOfficeProductEngine({
     if (commands) {
       lastCommandObservation = lastObserved;
       if (
-        ["set_table_cell", "set_table_row_height"].includes(
-          flags("--operation", "move"),
-        )
+        [
+          "set_table_cell",
+          "set_table_row_height",
+          "set_table_column_width",
+        ].includes(flags("--operation", "move"))
       )
         commandTableDetails = await tableDetails(mainFrame);
       assert.equal(
@@ -997,7 +1001,11 @@ try {
     const target =
       selectedElementIndex !== null
         ? before.slides[selectedSlideIndex].elements[selectedElementIndex]
-        : ["set_table_cell", "set_table_row_height"].includes(operation)
+        : [
+              "set_table_cell",
+              "set_table_row_height",
+              "set_table_column_width",
+            ].includes(operation)
           ? before.slides[selectedSlideIndex].elements.find(
               (element) => element.kind === "table",
             )
@@ -1042,6 +1050,7 @@ try {
       font_color: { color: 0xff0000 },
       replace_text: { text: flags("--text", "Verified product text") },
       set_table_row_height: { index: 0, height: 2000 },
+      set_table_column_width: { index: 0, width: 5000 },
       set_table_cell: {
         row: 0,
         column: 0,
