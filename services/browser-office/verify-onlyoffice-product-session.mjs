@@ -843,6 +843,41 @@ try {
 } catch (error) {
   report.status = "failed";
   report.error = error.stack;
+  if (mainFrame)
+    report.unwrappedNativeObjects = await mainFrame
+      .evaluate(() => {
+        const model = window.Asc.editor.WordControl.m_oLogicDocument;
+        const objects = [];
+        const names = Object.fromEntries(
+          Object.entries(window.AscDFH)
+            .filter(([key]) => key.startsWith("historyitem_type_"))
+            .map(([key, value]) => [value, key]),
+        );
+        const visit = (object, path) => {
+          if (!window.AscBuilder.GetApiDrawing(object))
+            objects.push({
+              path,
+              type: names[object.getObjectType?.()] ?? object.getObjectType?.(),
+              keys: Object.keys(object)
+                .filter((k) => !["parent", "group"].includes(k))
+                .slice(0, 70),
+              isShape: !!object.isShape?.(),
+              isImage: !!object.isImage?.(),
+              isChart: !!object.isChart?.(),
+              isTable: !!object.isTable?.(),
+            });
+          object.spTree?.forEach((child, index) =>
+            visit(child, `${path}/${index}`),
+          );
+        };
+        model.Slides.forEach((slide, index) =>
+          slide.cSld.spTree.forEach((object, shape) =>
+            visit(object, `${index}/${shape}`),
+          ),
+        );
+        return objects;
+      })
+      .catch(() => null);
   if (mainPage && !mainPage.isClosed()) {
     const diagnostic = await mainPage
       .evaluate(() => {
