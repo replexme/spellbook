@@ -179,7 +179,12 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
       "document.slides[" + slideIndex + "].elements[" + index + "]",
     );
     if (bounds)
-      throw Error("onlyoffice_product_intent_mismatch:" + bounds.path);
+      throw Error(
+        "onlyoffice_product_intent_mismatch:" +
+          bounds.path +
+          ":" +
+          JSON.stringify(bounds),
+      );
     for (const key of ["x", "y", "width", "height"]) {
       delete original[key];
       delete actual[key];

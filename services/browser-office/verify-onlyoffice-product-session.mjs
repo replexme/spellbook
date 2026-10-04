@@ -871,8 +871,12 @@ try {
     strikethrough: { strikethrough: true },
     font_family: { family: "Arial" },
     font_color: { color: 0xff0000 },
-    replace_text: { text: "Verified product text" },
-    set_table_cell: { row: 0, column: 0, text: "검증된 표 셀" },
+    replace_text: { text: flags("--text", "Verified product text") },
+    set_table_cell: {
+      row: 0,
+      column: 0,
+      text: flags("--text", "검증된 표 셀"),
+    },
     fill_color: { color: 0xffe600 },
     fill_opacity: { opacity: 37.123 },
     line_opacity: { opacity: 37.123 },
@@ -912,7 +916,7 @@ try {
     set_speaker_notes: {
       slideIndex: selectedSlideIndex,
       elementId: null,
-      text: "검증된 발표자 노트\nSecond paragraph",
+      text: flags("--text", "검증된 발표자 노트\nSecond paragraph"),
     },
     set_background: {
       slideIndex: selectedSlideIndex,

@@ -3710,6 +3710,70 @@ export function mergeNumericWorkbookDelta(
     ? zipSync(result, { level: 6, mtime: deterministicZipModifiedAt })
     : null;
 }
+// A no-op export can materialize empty notes and their relationships. When
+// notes text is subsequently authored, its unchanged incoming relationship is
+// nevertheless required. Promote only the changed, authorized notes page;
+// never import every empty notes page from the engine's no-op export.
+function connectChangedNewNotes(original, noEdit, edited, merged, operations, targets, humanEdit, budget) {
+  if (!humanEdit && !operations.includes("set_speaker_notes")) return [];
+  const patched = [];
+  const slides = orderedSlidePaths(original);
+  const permitted = humanEdit ? slides : (targets ?? []).filter((t) => t.op === "set_speaker_notes").map((t) => slides[t.slideIndex]);
+  const allowedSlides = new Set(permitted);
+  if (!humanEdit)
+    for (const slide of slides) {
+      if (allowedSlides.has(slide) || !edited[relationshipsPath(slide)]) continue;
+      for (const {target} of relationshipsOfType(edited, slide, "notesSlide"))
+        if (!original[target] && merged[target]) {
+          delete merged[target];
+          delete merged[relationshipsPath(target)];
+          patched.push(target);
+        }
+    }
+  const append = (source, kind, target) => {
+    const path = relationshipsPath(source);
+    const document = merged[path] ? parseXml(merged, path) : new DOMParser().parseFromString(`<Relationships xmlns="${packageRelationshipNamespace}"/>`, "application/xml");
+    if (relationshipElements(document).some((r) => r.getAttribute("Type").endsWith("/" + kind) && resolvePart(source, r.getAttribute("Target")) === target)) return null;
+    const id = nextRelationshipId(document);
+    const relationship = document.createElementNS(packageRelationshipNamespace, "Relationship");
+    relationship.setAttribute("Id", id);
+    relationship.setAttribute("Type", `${relationshipAttributeNamespace}/${kind}`);
+    relationship.setAttribute("Target", relativePart(source, target));
+    document.documentElement.appendChild(relationship);
+    merged[path] = serializeXml(document);
+    patched.push(path);
+    return id;
+  };
+  for (const slide of new Set(permitted)) {
+    if (!slide || !edited[relationshipsPath(slide)]) continue;
+    const notes = relationshipsOfType(edited, slide, "notesSlide");
+    if (notes.length !== 1) throw new Error(`Native snapshot cannot identify notes for ${slide}.`);
+    const part = notes[0].target;
+    if (original[part] || !merged[part] || sameEngineExportPart(part, noEdit[part], edited[part])) continue;
+    if (!budget.allowPartCreationOrDeletion || !budget.allowedCategories.has("slide_relationships") || !budget.allowedCategories.has("notes_relationships"))
+      throw new Error("Native snapshot cannot connect new notes outside its change budget.");
+    append(slide, "notesSlide", part);
+    const related = relationshipsPath(part);
+    if (!edited[related]) throw new Error(`Native snapshot is missing new notes relationships for ${part}.`);
+    merged[related] = edited[related];
+    patched.push(related);
+    const masters = relationshipsOfType(edited, part, "notesMaster");
+    if (masters.length !== 1) throw new Error(`Native snapshot cannot identify notes master for ${part}.`);
+    const master = masters[0].target;
+    const existing = merged[presentationRelationshipsPath] ? relationshipsOfType(merged, presentationPath, "notesMaster") : [];
+    if (!existing.some((r) => r.target === master)) {
+      if (!budget.allowedCategories.has("presentation_relationships") || !budget.allowedCategories.has("presentation"))
+        throw new Error("Native snapshot cannot connect notes master outside its change budget.");
+      const id = append(presentationPath, "notesMaster", master);
+      const presentation = parseXml(merged, presentationPath);
+      registerNotesMaster(presentation, id);
+      merged[presentationPath] = serializeXml(presentation);
+      patched.push(presentationPath);
+    }
+  }
+  return patched;
+}
+
 // Office can rewrite unrelated package parts even when no edit was made.
 // Compare two exports from that same engine, then apply only their actual
 // difference to the user's original package. Reopening the result and proving
@@ -4024,6 +4088,7 @@ export function preserveOriginalPptxParts(
       suppressedNoopParts.push(part);
     if (engineChanged && !withinBudget) suppressedOutOfBudgetParts.push(part);
   }
+  semanticPatchedParts.push(...connectChangedNewNotes(original, noEdit, edited, merged, sourceOperations, sourceTargets, humanEdit, budget));
   // These repairs depend on the complete merged package: a restored
   // transition sound needs its media part, and every kept part needs a
   // declared content type.
