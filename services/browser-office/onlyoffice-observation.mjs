@@ -108,6 +108,105 @@ export async function observeOnlyOfficeCandidate(frame) {
       };
       const p = window.AscBuilder?.Slide?.Api?.GetPresentation?.();
       if (!p) return { unavailable: ["presentation-api"], state: null };
+      const paragraphs = (doc, at) => {
+        const properties = (pr) => {
+          const value = {};
+          for (const key of [
+            "GetBold",
+            "GetItalic",
+            "GetUnderline",
+            "GetStrikeout",
+            "GetFontSize",
+            "GetVertAlign",
+            "GetSpacing",
+            "GetCaps",
+            "GetSmallCaps",
+            "GetDoubleStrikeout",
+            "GetLanguage",
+          ])
+            value[key] =
+              read(pr, key, at + ".text") ??
+              (key === "GetDoubleStrikeout" ? false : null);
+          value.fonts = ["ascii", "eastAsia", "hAnsi", "cs"].map(
+            (slot) => read(pr, "GetFontFamily", at + ".text", slot) ?? null,
+          );
+          // GetSpacing rounds to a whole twip and hides lost PPTX hundredths.
+          value.characterSpacing =
+            typeof pr.TextPr?.Spacing === "number"
+              ? Math.round((pr.TextPr.Spacing * 7200) / 25.4) / 100
+              : null;
+          const nativeColor = pr.TextPr?.Unifill?.fill?.color?.color;
+          const color = read(pr, "GetColor", at + ".text");
+          // The pinned Word builder's GetColor reads CRGBColor.r/g/b, but
+          // the drawing model stores RGBA.R/G/B. Those missing fields are
+          // coerced to black. Read the authored RGB from the native fill.
+          value.color =
+            nativeColor instanceof window.AscFormat.CRGBColor
+              ? {
+                  rgb: {
+                    r: nativeColor.RGBA.R,
+                    g: nativeColor.RGBA.G,
+                    b: nativeColor.RGBA.B,
+                  },
+                  theme: false,
+                  auto: false,
+                }
+              : color
+                ? {
+                    rgb: color.GetRGB(),
+                    theme: color.IsThemeColor(),
+                    auto: color.IsAutoColor(),
+                  }
+                : null;
+          return value;
+        };
+        return doc.GetAllParagraphs().map((paragraph, index) => {
+          const runs = [];
+          const visit = (element) => {
+            if (typeof element?.GetTextPr === "function") {
+              const field =
+                typeof element.Run?.FieldType === "string"
+                  ? {
+                      type: element.Run.FieldType,
+                      guid: element.Run.Guid ?? null,
+                    }
+                  : null;
+              const text = field
+                ? `<field:${field.type}>`
+                : (element.GetText?.({ Numbering: false }) ?? "");
+              if (text && text !== "\r" && text !== "\n") {
+                const style = properties(element.GetTextPr());
+                const last = runs.at(-1);
+                if (
+                  last &&
+                  !field &&
+                  !last.field &&
+                  JSON.stringify(last.style) === JSON.stringify(style)
+                )
+                  last.text += text;
+                else runs.push({ text, style, ...(field ? { field } : {}) });
+              }
+            } else if (typeof element?.GetElementsCount === "function") {
+              for (let i = 0; i < element.GetElementsCount(); i++)
+                visit(element.GetElement(i));
+            }
+          };
+          for (let i = 0; i < paragraph.GetElementsCount(); i++)
+            visit(paragraph.GetElement(i));
+          const alignment = read(
+            paragraph.GetParaPr?.(),
+            "GetJc",
+            at + ".paragraph" + index,
+          );
+          return {
+            alignment: alignment === "both" ? "justify" : (alignment ?? null),
+            text: runs.some((run) => run.field)
+              ? runs.map((run) => run.text).join("") + "\r\n"
+              : paragraph.GetText({ Numbering: false }),
+            runs,
+          };
+        });
+      };
       const drawing = (d, at) => {
         if (!d) {
           unavailable.push(at + ":no-public-wrapper");
@@ -132,108 +231,7 @@ export async function observeOnlyOfficeCandidate(frame) {
         // Observe actual character properties; plain text alone cannot distinguish
         // a successful formatting edit from a setter that silently did nothing.
         if (content) {
-          const properties = (pr) => {
-            const value = {};
-            for (const key of [
-              "GetBold",
-              "GetItalic",
-              "GetUnderline",
-              "GetStrikeout",
-              "GetFontSize",
-              "GetVertAlign",
-              "GetSpacing",
-              "GetCaps",
-              "GetSmallCaps",
-              "GetDoubleStrikeout",
-              "GetLanguage",
-            ])
-              value[key] =
-                read(pr, key, at + ".text") ??
-                (key === "GetDoubleStrikeout" ? false : null);
-            value.fonts = ["ascii", "eastAsia", "hAnsi", "cs"].map(
-              (slot) => read(pr, "GetFontFamily", at + ".text", slot) ?? null,
-            );
-            // GetSpacing rounds to a whole twip and hides lost PPTX hundredths.
-            value.characterSpacing =
-              typeof pr.TextPr?.Spacing === "number"
-                ? Math.round((pr.TextPr.Spacing * 7200) / 25.4) / 100
-                : null;
-            const nativeColor = pr.TextPr?.Unifill?.fill?.color?.color;
-            const color = read(pr, "GetColor", at + ".text");
-            // The pinned Word builder's GetColor reads CRGBColor.r/g/b, but
-            // the drawing model stores RGBA.R/G/B. Those missing fields are
-            // coerced to black. Read the authored RGB from the native fill.
-            value.color =
-              nativeColor instanceof window.AscFormat.CRGBColor
-                ? {
-                    rgb: {
-                      r: nativeColor.RGBA.R,
-                      g: nativeColor.RGBA.G,
-                      b: nativeColor.RGBA.B,
-                    },
-                    theme: false,
-                    auto: false,
-                  }
-                : color
-                  ? {
-                      rgb: color.GetRGB(),
-                      theme: color.IsThemeColor(),
-                      auto: color.IsAutoColor(),
-                    }
-                  : null;
-            return value;
-          };
-          state.paragraphs = d
-            .GetDocContent()
-            .GetAllParagraphs()
-            .map((paragraph, index) => {
-              const runs = [];
-              const visit = (element) => {
-                if (typeof element?.GetTextPr === "function") {
-                  const field =
-                    typeof element.Run?.FieldType === "string"
-                      ? {
-                          type: element.Run.FieldType,
-                          guid: element.Run.Guid ?? null,
-                        }
-                      : null;
-                  const text = field
-                    ? `<field:${field.type}>`
-                    : (element.GetText?.({ Numbering: false }) ?? "");
-                  if (text && text !== "\r" && text !== "\n") {
-                    const style = properties(element.GetTextPr());
-                    const last = runs.at(-1);
-                    if (
-                      last &&
-                      !field &&
-                      !last.field &&
-                      JSON.stringify(last.style) === JSON.stringify(style)
-                    )
-                      last.text += text;
-                    else
-                      runs.push({ text, style, ...(field ? { field } : {}) });
-                  }
-                } else if (typeof element?.GetElementsCount === "function") {
-                  for (let i = 0; i < element.GetElementsCount(); i++)
-                    visit(element.GetElement(i));
-                }
-              };
-              for (let i = 0; i < paragraph.GetElementsCount(); i++)
-                visit(paragraph.GetElement(i));
-              const alignment = read(
-                paragraph.GetParaPr?.(),
-                "GetJc",
-                at + ".paragraph" + index,
-              );
-              return {
-                alignment:
-                  alignment === "both" ? "justify" : (alignment ?? null),
-                text: runs.some((run) => run.field)
-                  ? runs.map((run) => run.text).join("") + "\r\n"
-                  : paragraph.GetText({ Numbering: false }),
-                runs,
-              };
-            });
+          state.paragraphs = paragraphs(d.GetDocContent(), at);
           if (state.paragraphs.some((p) => p.runs.some((r) => r.field))) {
             state.hasDynamicFields = true;
             state.text = state.paragraphs.map((p) => p.text).join("");
@@ -244,6 +242,15 @@ export async function observeOnlyOfficeCandidate(frame) {
           state.tableCells = d.Table.Content.map((row) =>
             row.Content.map(
               (cell) => cell.Content?.GetText?.({ Numbering: false }) ?? null,
+            ),
+          );
+        if (d.Table?.Content)
+          state.tableParagraphs = d.Table.Content.map((row, r) =>
+            row.Content.map((cell, c) =>
+              paragraphs(
+                new window.AscBuilder.ApiTableCell(cell).GetContent(),
+                at + ".cell" + r + "/" + c,
+              ),
             ),
           );
         if (type === "chart") {

@@ -889,3 +889,61 @@ test("speaker notes replace text while preserving run style and all slide conten
     /unrequested_change/,
   );
 });
+
+test("table text change preserves fonts, fill and neighboring cells", () => {
+  const before = document();
+  before.slides[0].elements[0].kind = "table";
+  const drawing = before.slides[0].onlyoffice.drawings[0];
+  drawing.tableCells = [["old\r\n", "neighbor\r\n"]];
+  const style = { GetFontSize: 24, GetBold: true };
+  drawing.tableParagraphs = [
+    [
+      [{ alignment: "left", text: "old\r\n", runs: [{ text: "old", style }] }],
+      [
+        {
+          alignment: "left",
+          text: "neighbor\r\n",
+          runs: [{ text: "neighbor", style }],
+        },
+      ],
+    ],
+  ];
+  before.slides[0].narrow.table = [
+    {
+      rows: 1,
+      cells: [
+        [
+          { text: "old\r\n", fill: { R: 255, G: 255, B: 0 } },
+          { text: "neighbor\r\n", fill: null },
+        ],
+      ],
+    },
+  ];
+  const after = structuredClone(before);
+  const d = after.slides[0].onlyoffice.drawings[0];
+  d.tableCells[0][0] = "final\r\n";
+  d.tableParagraphs[0][0][0].text = "final\r\n";
+  d.tableParagraphs[0][0][0].runs[0].text = "final";
+  after.slides[0].narrow.table[0].cells[0][0].text = "final\r\n";
+  const commands = ["first", "final"].map((text) => ({
+    op: "set_table_cell",
+    elementId: "0/0",
+    row: 0,
+    column: 0,
+    text,
+  }));
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, commands),
+  );
+  d.tableParagraphs[0][0][0].runs[0].style.GetFontSize = 28;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /table_cell_style_lost/,
+  );
+  d.tableParagraphs[0][0][0].runs[0].style.GetFontSize = 24;
+  after.slides[0].narrow.table[0].cells[0][0].fill.R = 10;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+});

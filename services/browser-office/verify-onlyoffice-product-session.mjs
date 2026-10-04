@@ -828,22 +828,26 @@ try {
   const target =
     selectedElementIndex !== null
       ? before.slides[selectedSlideIndex].elements[selectedElementIndex]
-      : operation === "crop_image"
+      : operation === "set_table_cell"
         ? before.slides[selectedSlideIndex].elements.find(
-            (element) => element.kind === "image",
+            (element) => element.kind === "table",
           )
-        : [
-              "resize",
-              "fill_color",
-              "fill_opacity",
-              "line_opacity",
-              "line_color",
-              "line_width",
-              "set_line_style",
-              "flip",
-            ].includes(operation)
-          ? targets.at(-1)
-          : targets[0];
+        : operation === "crop_image"
+          ? before.slides[selectedSlideIndex].elements.find(
+              (element) => element.kind === "image",
+            )
+          : [
+                "resize",
+                "fill_color",
+                "fill_opacity",
+                "line_opacity",
+                "line_color",
+                "line_width",
+                "set_line_style",
+                "flip",
+              ].includes(operation)
+            ? targets.at(-1)
+            : targets[0];
   assert(target);
   const command = Object.fromEntries(
     Object.keys(capabilities.toolInputSchema.properties).map((key) => [
@@ -868,6 +872,7 @@ try {
     font_family: { family: "Arial" },
     font_color: { color: 0xff0000 },
     replace_text: { text: "Verified product text" },
+    set_table_cell: { row: 0, column: 0, text: "검증된 표 셀" },
     fill_color: { color: 0xffe600 },
     fill_opacity: { opacity: 37.123 },
     line_opacity: { opacity: 37.123 },

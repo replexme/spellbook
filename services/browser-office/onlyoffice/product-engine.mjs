@@ -235,6 +235,36 @@ export function createOnlyOfficeProductEngine({
               shape = m.Slides[slide]?.cSld.spTree[index];
             if (!shape || slide < 0 || index < 0)
               throw Error("onlyoffice_product_target_missing");
+            if (command.op === "set_table_cell") {
+              const cell =
+                shape.graphicObject?.Content?.[command.row]?.Content?.[
+                  command.column
+                ];
+              if (
+                !Number.isSafeInteger(command.row) ||
+                command.row < 0 ||
+                !Number.isSafeInteger(command.column) ||
+                command.column < 0 ||
+                !cell?.Content
+              )
+                throw Error("onlyoffice_product_table_cell_target_missing");
+              if (
+                typeof command.text !== "string" ||
+                command.text.length > 100000
+              )
+                throw Error("onlyoffice_product_argument_invalid:cell_text");
+              if (
+                shape.graphicObject.Content.some((row) =>
+                  row.Content.some(
+                    (cell) =>
+                      cell.Get_GridSpan() !== 1 || cell.GetVMerge() !== 1,
+                  ),
+                )
+              )
+                throw Error(
+                  "onlyoffice_product_merged_table_target_unavailable",
+                );
+            }
             if (command.op === "set_alt_text") {
               const properties = shape.getCNvProps?.();
               if (
@@ -532,11 +562,22 @@ export function createOnlyOfficeProductEngine({
               first?.GetElement(0)?.GetTextPr?.() ?? first?.GetTextPr();
             const paragraphProperties = first?.GetParaPr();
             c.RemoveAllElements();
-            const paragraph = c.GetElement(0);
-            if (properties) paragraph.SetTextPr(properties);
-            if (paragraphProperties)
-              paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
-            return paragraph.AddText(text);
+            // AddText writes a run: embedded LF is not a document paragraph.
+            // Materialize each canonical line as a real native paragraph.
+            for (const [index, line] of text
+              .replace(/\r\n/g, "\n")
+              .split("\n")
+              .entries()) {
+              const paragraph =
+                index === 0 ? c.GetElement(0) : api.CreateParagraph();
+              if (properties) paragraph.SetTextPr(properties);
+              if (paragraphProperties)
+                paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
+              paragraph.AddText(line);
+              if (index && !c.Push(paragraph))
+                throw Error("onlyoffice_product_native_rejected");
+            }
+            return true;
           };
           if (
             [
@@ -746,6 +787,11 @@ export function createOnlyOfficeProductEngine({
                   command.lockSize,
                 );
               return true;
+            }
+            case "set_table_cell": {
+              const cell = d.GetRow(command.row)?.GetCell(command.column);
+              if (!cell) throw Error("onlyoffice_product_live_binding_changed");
+              return replaceContent(cell.GetContent(), command.text);
             }
             case "replace_text":
               return replaceContent(content(), command.text);

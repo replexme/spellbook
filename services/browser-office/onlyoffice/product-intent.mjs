@@ -39,6 +39,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "set_speaker_notes",
   "delete_element",
   "replace_text",
+  "set_table_cell",
   ...Object.keys(formatting),
 ]);
 const rgb = (color) => ({
@@ -341,6 +342,48 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
           delete newStyle.line.fillStyle;
           delete oldStyle.line.color;
           delete newStyle.line.color;
+        }
+      } else if (op === "set_table_cell") {
+        const cells = new Map(
+          group
+            .filter((c) => c.op === "set_table_cell")
+            .map((c) => [c.row + "/" + c.column, c]),
+        );
+        for (const value of cells.values()) {
+          const { row, column } = value;
+          const text = newDrawing.tableCells?.[row]?.[column];
+          if (
+            text?.replace(/\r\n/g, "\n").replace(/\n$/, "") !==
+            value.text.replace(/\r\n/g, "\n")
+          )
+            throw Error("onlyoffice_product_intent_mismatch:table_cell_text");
+          const oldParagraphs = oldDrawing.tableParagraphs[row][column];
+          const newParagraphs = newDrawing.tableParagraphs[row][column];
+          const style = oldParagraphs.flatMap((p) => p.runs)[0]?.style;
+          if (
+            style &&
+            newParagraphs
+              .flatMap((p) => p.runs)
+              .some((r) => JSON.stringify(r.style) !== JSON.stringify(style))
+          )
+            throw Error(
+              "onlyoffice_product_intent_mismatch:table_cell_style_lost",
+            );
+          const alignment = oldParagraphs[0]?.alignment;
+          if (
+            alignment != null &&
+            newParagraphs.some((p) => p.alignment !== alignment)
+          )
+            throw Error(
+              "onlyoffice_product_intent_mismatch:table_cell_paragraph_style_lost",
+            );
+          oldDrawing.tableCells[row][column] = text;
+          oldDrawing.tableParagraphs[row][column] =
+            structuredClone(newParagraphs);
+          const tableIndex = a.elements
+            .slice(0, index)
+            .filter((e) => e.kind === "table").length;
+          a.narrow.table[tableIndex].cells[row][column].text = text;
         }
       } else if (op === "replace_text") {
         if (
