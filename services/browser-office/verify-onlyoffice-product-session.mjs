@@ -454,9 +454,15 @@ try {
   const before = await session.open(input);
   report.stages.push("original-open-and-file-admission");
   report.rendering = { before: await pixels(mainFrame) };
-  const target = before.slides[0].elements.find(
+  const operation = flags("--operation", "move");
+  const targets = before.slides[0].elements.filter(
     (x) => x.kind === "shape" && Number.isFinite(x.x),
   );
+  const target = ["resize", "fill_color", "line_color", "flip"].includes(
+    operation,
+  )
+    ? targets.at(-1)
+    : targets[0];
   assert(target);
   const command = Object.fromEntries(
     Object.keys(capabilities.toolInputSchema.properties).map((key) => [
@@ -464,7 +470,6 @@ try {
       null,
     ]),
   );
-  const operation = flags("--operation", "move");
   report.operation = operation;
   Object.assign(command, {
     op: operation,
@@ -658,7 +663,7 @@ try {
   });
   assert.equal(persisted, null);
   report.stages.push("acknowledged-exact-file-save");
-  report.status = "product-session-first-command-verified";
+  report.status = "product-session-command-verified";
 } catch (error) {
   report.status = "failed";
   report.error = error.stack;

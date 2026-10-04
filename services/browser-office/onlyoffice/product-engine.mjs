@@ -332,16 +332,24 @@ export function createOnlyOfficeProductEngine({
             return content()
               .GetAllParagraphs()
               .forEach((p) => p.SetStrikeout(command.strikethrough));
-          case "font_color":
-            return content()
-              .GetAllParagraphs()
-              .forEach((p) =>
-                p.SetColor(
-                  (command.color >>> 16) & 255,
-                  (command.color >>> 8) & 255,
-                  command.color & 255,
-                ),
-              );
+          case "font_color": {
+            // Presentation export uses the native run fill, whereas the shared
+            // paragraph RGB setter can update only the Word-style Color field.
+            // Keep the change in the provider's own history-aware setters.
+            const setColor = (run) => {
+              if (typeof run?.Set_Unifill === "function") {
+                run.Set_Unifill(fill().UniFill);
+                run.Set_Color?.(undefined);
+                run.Set_TextFill?.(undefined);
+              }
+              run.Content?.forEach(setColor);
+            };
+            for (const paragraph of content().GetAllParagraphs()) {
+              setColor(paragraph.Paragraph.TextPr);
+              paragraph.Paragraph.Content.forEach(setColor);
+            }
+            return true;
+          }
           default:
             throw Error(
               "onlyoffice_product_operation_unavailable:" + command.op,
