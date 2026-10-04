@@ -293,7 +293,12 @@ export async function observeOnlyOfficeCandidate(frame) {
     if (!Array.isArray(slides) || !slides.length)
       throw new Error("candidate_slide_observation_unavailable");
     const color = (f) => {
-      const c = f?.fill?.color?.RGBA;
+      const native = f?.fill?.color;
+      const c =
+        typeof window.AscFormat?.CRGBColor === "function" &&
+        native?.color instanceof window.AscFormat.CRGBColor
+          ? native.color.RGBA
+          : native?.RGBA;
       return c ? { R: c.R, G: c.G, B: c.B, A: c.A } : null;
     };
     return slides.map((s) => {

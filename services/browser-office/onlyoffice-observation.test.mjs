@@ -154,3 +154,39 @@ test("text color observation uses native RGB when the pinned getter incorrectly 
   );
   assert.deepEqual(Array.from(result.unavailable), []);
 });
+
+test("drawing RGB reads authored native channels while theme colors retain their resolved channels", async () => {
+  const { frame, slides, window } = candidate();
+  class CRGBColor {
+    RGBA = { R: 255, G: 230, B: 0, A: 255 };
+  }
+  window.AscFormat = { CRGBColor };
+  const fill = {
+    fill: {
+      color: { color: new CRGBColor(), RGBA: { R: 0, G: 0, B: 0, A: 255 } },
+    },
+  };
+  slides[0].Slide.cSld.Bg = { bgPr: { Fill: fill } };
+  slides[1].Slide.cSld.Bg = {
+    bgPr: {
+      Fill: {
+        fill: {
+          color: { color: { id: 1 }, RGBA: { R: 17, G: 61, B: 103, A: 255 } },
+        },
+      },
+    },
+  };
+  const state = await observeOnlyOfficeCandidate(frame);
+  assert.deepEqual(JSON.parse(JSON.stringify(state.narrow[0].background)), {
+    R: 255,
+    G: 230,
+    B: 0,
+    A: 255,
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(state.narrow[1].background)), {
+    R: 17,
+    G: 61,
+    B: 103,
+    A: 255,
+  });
+});

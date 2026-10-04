@@ -625,13 +625,20 @@ try {
     assert.equal(afterTarget.text.trim(), command.text);
   for (const element of before.slides[0].elements.filter(
     (e) => e.elementId !== target.elementId,
-  ))
+  )) {
+    const expected = structuredClone(element);
+    if (operation === "delete_element") {
+      const index = Number(element.elementId.split("/")[1]);
+      const removedIndex = Number(target.elementId.split("/")[1]);
+      expected.elementId = `0/${index > removedIndex ? index - 1 : index}`;
+    }
     assert.deepEqual(
       applied.observation.slides[0].elements.find(
-        (e) => e.elementId === element.elementId,
+        (e) => e.elementId === expected.elementId,
       ),
-      element,
+      expected,
     );
+  }
 
   await fs.writeFile(
     path.join(output, "edited.pptx"),

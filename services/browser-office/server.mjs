@@ -83,6 +83,13 @@ export function buildRoutes(
       ),
     ],
     [
+      "/harness/product-recovery-history.mjs",
+      route(
+        path.join(root, "product-recovery-history.mjs"),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
       "/harness/opfs-journal.mjs",
       route(
         path.join(root, "opfs-journal.mjs"),

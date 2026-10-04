@@ -29,6 +29,7 @@ test("browser Office routes preserve isolation, asset identity and encodings", (
   assert.ok(routes.has("/harness/opfs-journal.mjs"));
   assert.ok(routes.has("/harness/save-transaction.mjs"));
   assert.ok(routes.has("/harness/product-history.mjs"));
+  assert.ok(routes.has("/harness/product-recovery-history.mjs"));
   assert.ok(routes.has("/harness/product-persistence.mjs"));
   assert.ok(routes.has("/harness/product-artifact.mjs"));
   assert.ok(routes.has("/harness/persistence-evidence.mjs"));
@@ -261,4 +262,23 @@ test("product persistence shared imports resolve in browser and exported site", 
     for (const [, child] of dependency.matchAll(/from\s+"([^"]+)"/gu))
       assert.ok(routes.has(new URL(child, url).pathname));
   }
+});
+
+test("every transitive module dependency of the shared journal has a served route", () => {
+  const routes = buildRoutes();
+  const seen = new Set();
+  function visit(url) {
+    if (seen.has(url)) return;
+    seen.add(url);
+    const route = routes.get(url);
+    assert.ok(route, `Missing shared module route: ${url}`);
+    const text = readFileSync(route.file, "utf8");
+    for (const match of text.matchAll(
+      /(?:from|import)\s*["'](\.[^"']+)["']/gu,
+    )) {
+      const dependency = new URL(match[1], `http://127.0.0.1${url}`).pathname;
+      visit(dependency);
+    }
+  }
+  visit("/harness/opfs-journal.mjs");
 });

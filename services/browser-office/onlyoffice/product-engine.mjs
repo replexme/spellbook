@@ -328,7 +328,18 @@ export function createOnlyOfficeProductEngine({
           case "strikethrough":
             return content()
               .GetAllParagraphs()
-              .forEach((p) => p.SetStrikeout(command.strikethrough));
+              .forEach((p) => {
+                p.Paragraph.SetApplyToAll(true);
+                try {
+                  p.Paragraph.Add(
+                    new window.AscCommonWord.ParaTextPr({
+                      Strikeout: command.strikethrough,
+                    }),
+                  );
+                } finally {
+                  p.Paragraph.SetApplyToAll(false);
+                }
+              });
           case "font_color": {
             // Presentation export uses the native run fill, whereas the shared
             // paragraph RGB setter can update only the Word-style Color field.
