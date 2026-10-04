@@ -165,7 +165,7 @@ export function createOnlyOfficeProductEngine({
     observe: async () => observeOnlyOfficeProduct(await getFrame()),
     preflight: async (commands) => {
       const frame = await getFrame();
-      return frame.evaluate(
+      const prepared = await frame.evaluate(
         ({ commands, supported }) => {
           const m = window.Asc.editor.WordControl.m_oLogicDocument;
           return commands.map((command) => {
@@ -533,6 +533,28 @@ export function createOnlyOfficeProductEngine({
           supported: onlyOfficeProductOperations,
         },
       );
+      const text = commands
+        .filter((c) =>
+          ["replace_text", "set_speaker_notes", "set_table_cell"].includes(
+            c.op,
+          ),
+        )
+        .map((c) => c.text)
+        .join("\n");
+      if (text)
+        await frame.evaluate(
+          (text) =>
+            new Promise((resolve) => {
+              const picker = window.AscFonts?.FontPickerByCharacter;
+              if (typeof picker?.checkText !== "function")
+                throw Error("onlyoffice_product_character_fonts_unavailable");
+              // Match normal native text entry: prepare script fallback fonts before
+              // authored changes, rather than measuring with a temporary fallback.
+              picker.checkText(text, window.Asc.editor, resolve);
+            }),
+          text,
+        );
+      return prepared;
     },
     begin: async () => {
       const frame = await getFrame();
