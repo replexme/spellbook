@@ -88,7 +88,14 @@ if (documentTool) {
 async function inspectFormat(bytes) {
   if (!documentTool) return;
   const digest = hash(bytes);
-  if (formatInspections.has(digest)) return;
+  const prior = formatInspections.get(digest);
+  if (prior) {
+    if (prior.newErrors.length)
+      throw Error(
+        "product_format_new_errors:" + JSON.stringify(prior.newErrors),
+      );
+    return;
+  }
   const file = path.join(output, "format-readback", digest + ".pptx");
   await fs.writeFile(file, bytes);
   let text;
