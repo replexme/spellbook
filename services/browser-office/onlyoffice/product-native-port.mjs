@@ -34,6 +34,8 @@ export function installOnlyOfficeProductPort({
   const invoke = async ({ method, payload }) => {
     if (disposed) throw Error("onlyoffice_product_port_closed");
     switch (method) {
+      case "changeToken":
+        return engine.changeToken();
       case "observe":
         return engine.observe();
       case "preflight":

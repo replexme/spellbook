@@ -133,6 +133,31 @@ export function createOnlyOfficeProductEngine({
     open,
     inspect,
     verifyIntent: verifyOnlyOfficeProductIntent,
+    // Private live-session evidence only. It is not a persisted semantic hash.
+    // Empty points, selection and save indices do not represent authored edits.
+    changeToken: async () =>
+      (await getFrame()).evaluate(() => {
+        const history = window.AscCommon.History;
+        if (
+          !history ||
+          !Array.isArray(history.Points) ||
+          !Number.isSafeInteger(history.Index)
+        )
+          throw Error("onlyoffice_product_change_token_unavailable");
+        let count = 0,
+          last = null;
+        for (const point of history.Points.slice(0, history.Index + 1))
+          for (const item of point.Items) {
+            if (
+              !Number.isSafeInteger(item.Binary?.Pos) ||
+              !Number.isSafeInteger(item.Binary?.Len)
+            )
+              throw Error("onlyoffice_product_change_token_unavailable");
+            count++;
+            last = item.Binary;
+          }
+        return JSON.stringify([count, last?.Pos ?? null, last?.Len ?? null]);
+      }),
     observe: async () => observeOnlyOfficeProduct(await getFrame()),
     preflight: async (commands) => {
       const frame = await getFrame();

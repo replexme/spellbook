@@ -34,7 +34,12 @@ function mergeRuns(runs) {
   const result = [];
   for (const run of runs) {
     const last = result.at(-1);
-    if (last && JSON.stringify(last.style) === JSON.stringify(run.style))
+    if (
+      last &&
+      !last.field &&
+      !run.field &&
+      JSON.stringify(last.style) === JSON.stringify(run.style)
+    )
       last.text += run.text;
     else result.push(structuredClone(run));
   }

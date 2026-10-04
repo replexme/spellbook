@@ -210,3 +210,54 @@ test("native setters unlock only synchronously and restore the UI lock on succes
     globalThis.window = previousWindow;
   }
 });
+
+test("formatting preserves dynamic field identity even next to an identical plain-text style", () => {
+  const before = document();
+  const runs = before.slides[0].onlyoffice.drawings[0].paragraphs[0].runs;
+  runs.push({
+    ...structuredClone(runs[0]),
+    text: "<field:slidenum>",
+    field: { type: "slidenum", guid: "authored-field" },
+  });
+  const after = structuredClone(before);
+  for (const run of after.slides[0].onlyoffice.drawings[0].paragraphs[0].runs)
+    run.style.GetBold = true;
+  const command = { op: "bold", elementId: "0/0", bold: true };
+  verifyOnlyOfficeProductIntent(before, after, [command]);
+  after.slides[0].onlyoffice.drawings[0].paragraphs[0].runs[1].field.guid =
+    "replaced-field";
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+});
+
+test("private native change evidence tracks authored history, excluding selection, empty points and save state", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  const old = globalThis.window;
+  const history = { Index: -1, Points: [], SavedIndex: null };
+  globalThis.window = { AscCommon: { History: history } };
+  const engine = createOnlyOfficeProductEngine({
+    getFrame: async () => ({ evaluate: async (fn) => fn() }),
+  });
+  try {
+    const base = await engine.changeToken();
+    history.Index = 0;
+    history.Points.push({ State: { cursor: 10 }, Items: [] });
+    history.SavedIndex = 0;
+    assert.equal(await engine.changeToken(), base);
+    history.Points[0].Items.push({ Binary: { Pos: 25, Len: 8 } });
+    assert.notEqual(await engine.changeToken(), base);
+    history.Index = -1;
+    assert.equal(await engine.changeToken(), base); // Undo retains future Redo bytes.
+    history.Index = 0;
+    history.Points[0].Items.push({ Binary: { Pos: 40, Len: 8 } });
+    assert.notEqual(await engine.changeToken(), "[1,25,8]");
+    history.Points[0].Items.push({});
+    await assert.rejects(engine.changeToken(), /change_token_unavailable/);
+  } finally {
+    globalThis.window = old;
+  }
+});

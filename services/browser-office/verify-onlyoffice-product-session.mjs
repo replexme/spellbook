@@ -527,6 +527,7 @@ const engine = createOnlyOfficeProductEngine({
 // command handlers or supplies JavaScript for a model-requested mutation.
 for (const method of [
   "observe",
+  "changeToken",
   "preflight",
   "begin",
   "apply",

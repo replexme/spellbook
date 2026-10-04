@@ -402,3 +402,49 @@ test("a ignored setter cannot report a successful no-op for a different requeste
   assert.equal(s.record(), null);
   assert.equal(s.session.status().undo, 0);
 });
+
+test("unobserved native edits cannot save an older file, execute AI or alter recovery", async () => {
+  const s = setup();
+  let token = "native-base";
+  s.engine.changeToken = async () => token;
+  await s.session.open(s.bytes(1));
+  token = "unobserved-property-change";
+  let persisted = false;
+  await assert.rejects(s.session.observe(), /product_unobserved_native_edit/);
+  await assert.rejects(
+    s.session.save(async () => {
+      persisted = true;
+    }),
+    /product_unobserved_native_edit/,
+  );
+  await assert.rejects(apply(s, 2), /product_unobserved_native_edit/);
+  assert.equal(persisted, false);
+  assert.deepEqual(s.calls, []);
+  assert.equal(s.record(), null);
+  token = "native-base"; // The person undoes the unsupported native edit.
+  assert.equal((await s.session.observe()).revision, "r1");
+  await apply(s, 2);
+  assert.equal((await s.session.observe()).revision, "r2");
+});
+
+test("owned native transactions and restored artifact history refresh private change evidence", async () => {
+  const s = setup();
+  let token = 0;
+  s.engine.changeToken = async () => String(token);
+  for (const name of ["open", "finish", "undo", "redo"]) {
+    const original = s.engine[name];
+    s.engine[name] = async (...args) => {
+      await original(...args);
+      token++;
+    };
+  }
+  await s.session.open(s.bytes(1));
+  await apply(s, 2);
+  assert.equal((await s.session.observe()).revision, "r2");
+  await s.session.undo();
+  assert.equal((await s.session.observe()).revision, "r1");
+  await s.session.redo();
+  assert.equal((await s.session.observe()).revision, "r2");
+  await s.session.recover();
+  assert.equal((await s.session.observe()).revision, "r2");
+});

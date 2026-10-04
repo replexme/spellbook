@@ -71,6 +71,7 @@ export async function connectOnlyOfficeProductPort({
     });
   return {
     observe: () => call("observe"),
+    changeToken: () => call("changeToken"),
     preflight: (commands) => call("preflight", commands),
     begin: () => call("begin"),
     apply: (command) => call("apply", command),

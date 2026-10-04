@@ -47,7 +47,9 @@ export function createProductSession({
     undo = [],
     redo = [],
     failed = false,
-    savedDigest = null;
+    savedDigest = null,
+    acceptedNativeToken = null,
+    lastObservedNativeToken = null;
   let queue = Promise.resolve();
   const serial = (fn) => {
     const task = queue.then(fn);
@@ -58,7 +60,11 @@ export function createProductSession({
     if (!current || failed) throw Error("product_session_not_ready");
   };
   const observe = async () => {
+    const priorToken = await readNativeToken();
     const value = await engine.observe();
+    const token = await readNativeToken();
+    if (priorToken !== token) throw Error("product_document_changed");
+    lastObservedNativeToken = token;
     if (!value?.revision || !value.slides?.length)
       throw Error("product_observation_incomplete");
     return structuredClone(value);
@@ -106,10 +112,24 @@ export function createProductSession({
   const invalidateNativeHistory = () => {
     for (const entry of [...undo, ...redo]) entry.native = false;
   };
+  const readNativeToken = async () => {
+    if (!engine.changeToken) return null;
+    const token = await engine.changeToken();
+    if (typeof token !== "string" || !token)
+      throw Error("product_native_change_token_invalid");
+    return token;
+  };
+  const acceptNativeToken = () => {
+    acceptedNativeToken = lastObservedNativeToken;
+  };
   const manualCheckpoint = async (reason) => {
     ready();
     const live = await observe();
-    if (live.revision === current.observation.revision) return false;
+    if (live.revision === current.observation.revision) {
+      if (acceptedNativeToken !== lastObservedNativeToken)
+        throw Error("product_unobserved_native_edit");
+      return false;
+    }
     // Reuse the shared history matcher when the person presses the native
     // editor's Undo/Redo. A request batch is one native history entry.
     const marker = (entry) =>
@@ -155,6 +175,7 @@ export function createProductSession({
         throw error;
       }
       current = target;
+      acceptNativeToken();
       return true;
     }
 
@@ -211,6 +232,7 @@ export function createProductSession({
       throw error;
     }
     current = accepted;
+    acceptNativeToken();
     return true;
   };
   const liveMatches = async (expected) => {
@@ -257,6 +279,7 @@ export function createProductSession({
         throw error;
       }
       current = target;
+      acceptNativeToken();
       return true;
     } catch (error) {
       // Restore a failed history move; leave the journal and retained histories intact.
@@ -289,6 +312,7 @@ export function createProductSession({
         undo = [];
         redo = [];
         failed = false;
+        acceptNativeToken();
         return structuredClone(observation);
       }),
     observe: () =>
@@ -381,7 +405,9 @@ export function createProductSession({
             }
             throw error;
           }
+          await liveMatches(edited);
           current = accepted;
+          acceptNativeToken();
           return {
             observation: structuredClone(edited),
             artifactReceipt: structuredClone(accepted.receipt),
@@ -577,6 +603,7 @@ export function createProductSession({
         }
         const live = await observe();
         failed = false;
+        acceptNativeToken();
         return structuredClone(live);
       }),
     status: () => ({
