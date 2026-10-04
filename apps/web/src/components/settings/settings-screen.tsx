@@ -12,6 +12,7 @@ import {
 import type { AccountClosureInfo } from "@/lib/account-closure";
 import type { AiConnectorConfig } from "@/lib/ai-connector-config";
 import { serviceLinks } from "@/lib/service-links";
+import { userFacingError } from "@/lib/user-errors";
 import { useAiAccount } from "@/lib/use-ai-account";
 import { AppTop } from "../app-top";
 import { SupportLink } from "../status-screen";
@@ -110,7 +111,10 @@ export function SettingsScreen({
       notify("Google Gemini 2.5가 성공적으로 연결 및 활성화되었습니다!");
     } catch (e: any) {
       setGeminiError(
-        e.message || "Google Gemini API 키를 검증하지 못했습니다.",
+        userFacingError(
+          e?.message,
+          "Google Gemini API 키를 검증하지 못했습니다.",
+        ),
       );
     } finally {
       setGeminiSaving(false);
@@ -130,7 +134,9 @@ export function SettingsScreen({
       setOpenAiKeyInput("");
       notify("OpenAI API가 성공적으로 연결 및 활성화되었습니다!");
     } catch (e: any) {
-      setOpenAiError(e.message || "OpenAI API 키를 검증하지 못했습니다.");
+      setOpenAiError(
+        userFacingError(e?.message, "OpenAI API 키를 검증하지 못했습니다."),
+      );
     } finally {
       setOpenAiSaving(false);
     }
@@ -151,7 +157,9 @@ export function SettingsScreen({
       setAnthropicKeyInput("");
       notify("Anthropic Claude API가 성공적으로 연결 및 활성화되었습니다!");
     } catch (e: any) {
-      setAnthropicError(e.message || "Anthropic API 키를 검증하지 못했습니다.");
+      setAnthropicError(
+        userFacingError(e?.message, "Anthropic API 키를 검증하지 못했습니다."),
+      );
     } finally {
       setAnthropicSaving(false);
     }
@@ -171,7 +179,7 @@ export function SettingsScreen({
       notify("OpenRouter가 성공적으로 연결 및 활성화되었습니다!");
     } catch (e: any) {
       setOpenRouterError(
-        e.message || "OpenRouter API 키를 검증하지 못했습니다.",
+        userFacingError(e?.message, "OpenRouter API 키를 검증하지 못했습니다."),
       );
     } finally {
       setOpenRouterSaving(false);

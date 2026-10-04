@@ -15,6 +15,7 @@ import {
 } from "./native-workspace";
 import { Composer } from "./workspace/composer";
 import { buildConversation } from "./workspace/conversation";
+import { SupportLink } from "./status-screen";
 import { ConversationLog } from "./workspace/conversation-log";
 import { OpeningFailure, OpeningView } from "./workspace/opening";
 import { PhoneSlides } from "./workspace/phone-slides";
@@ -395,6 +396,11 @@ export default function NativeDocument({
           지금 다시 시도
         </Button>
       ) : null}
+      <SupportLink
+        context={{ place: "편집기 열기", documentId, errorCode: failure }}
+      >
+        문제 신고
+      </SupportLink>
     </>
   ) : null;
   const pairsFor = (turn: CardTurn): EvidencePair[] => {
