@@ -946,7 +946,7 @@ export function createOnlyOfficeProductEngine({
               !["horizontal", "vertical"].includes(command.axis)
             )
               throw Error("onlyoffice_product_argument_invalid:axis");
-            return { ...command, nativeId: shape.Id, slideIndex: slide, index };
+            return { ...command, nativeId: shape.Id, slideIndex: slide, nativeShapeIndex: index };
           });
         },
         {

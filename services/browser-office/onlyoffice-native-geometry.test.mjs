@@ -34,3 +34,18 @@ test('multi-object preflight retains the canonical nullable slide index and bind
     }
   } finally {delete globalThis.window;}
 });
+
+test('table preflight retains the requested column index when the table occupies another drawing slot',async()=>{
+  const {createOnlyOfficeProductEngine}=await import('./onlyoffice/product-engine.mjs');
+  const previous=globalThis.window;
+  const cell={Get_GridSpan:()=>1,GetVMerge:()=>1};
+  const table={Id:'table-native',graphicObject:{TableGrid:[30,40,50],Content:[{Content:[cell,cell,cell]}],SetTableGrid(){}},spPr:{xfrm:{setExtX(){}}}};
+  globalThis.window={Asc:{editor:{WordControl:{m_oLogicDocument:{Slides:[{cSld:{spTree:[{}, {},table]}}]}}}},AscBuilder:{GetApiDrawing:()=>({})}};
+  try {
+    const engine=createOnlyOfficeProductEngine({getFrame:async()=>({evaluate:async(fn,value)=>fn(value)})});
+    const command={op:'set_table_column_width',elementId:'0/2',slideIndex:null,index:1,width:4000};
+    const [bound]=await engine.preflight([command]);
+    assert.equal(bound.index,1);assert.equal(bound.nativeShapeIndex,2);assert.equal(bound.nativeId,'table-native');
+    assert.deepEqual(command,{op:'set_table_column_width',elementId:'0/2',slideIndex:null,index:1,width:4000});
+  }finally{globalThis.window=previous;}
+});

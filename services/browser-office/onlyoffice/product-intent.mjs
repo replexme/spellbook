@@ -468,7 +468,7 @@ export function verifyOnlyOfficeProductIntent(before, after, commands, prepared)
         }
         if(oldDrawing.tableCellProperties) {
           const binding = prepared?.find(value => value.op===op && value.elementId===command.elementId);
-          if(!binding?.nativeTableRows || Object.entries(command).some(([key,value])=>JSON.stringify(binding[key])!==JSON.stringify(value)))
+          if(!binding?.nativeTableRows || Object.entries(command).some(([key,value])=>key!=="slideIndex" && JSON.stringify(binding[key])!==JSON.stringify(value)))
             throw Error("onlyoffice_product_table_row_authority_missing");
           for(const row of binding.nativeTableRows.retained) {
             if(!oldDrawing.tableCellProperties[row.index] || row.properties.length!==oldDrawing.tableCellProperties[row.index].length)
