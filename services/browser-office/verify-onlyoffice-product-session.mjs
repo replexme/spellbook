@@ -194,6 +194,9 @@ async function open(bytes, providedContext) {
   const token = hash(bytes);
   documents.set(token, bytes);
   const page = await context.newPage();
+  page.on("crash", () =>
+    report.errors.push("renderer_crashed:" + token.slice(0, 10)),
+  );
   page.on("pageerror", (e) => {
     report.errors.push(e.message);
     console.log("PAGE_ERROR", e.message);
@@ -301,6 +304,12 @@ async function pixels(frame) {
   });
 }
 let persisted = null;
+function stageBinary(bytes) {
+  const owned = Buffer.from(bytes),
+    digest = hash(owned);
+  documents.set(digest, owned);
+  return "/original.pptx?document=" + digest;
+}
 async function journalCall(operation, payload = null) {
   const result = await mainPage.evaluate(
     async ({ operation, payload, identity }) => {
@@ -308,36 +317,45 @@ async function journalCall(operation, payload = null) {
         await import("/repo/browser-office/opfs-journal.mjs")
       ).openBrowserDocumentJournal({ identity });
       if (operation === "save") {
-        payload.baseBytes = window.__productBinaryCodec.decodeBinary(
-          payload.baseBytes,
-        );
-        payload.candidateBytes = window.__productBinaryCodec.decodeBinary(
-          payload.candidateBytes,
-        );
+        const read = async (url) => {
+          const response = await fetch(url, { cache: "no-store" });
+          if (!response.ok) throw Error("journal_transfer_read_failed");
+          return new Uint8Array(await response.arrayBuffer());
+        };
+        payload.baseBytes = await read(payload.baseBytes);
+        payload.candidateBytes = await read(payload.candidateBytes);
         if (payload.historyArtifacts)
-          payload.historyArtifacts = payload.historyArtifacts.map((a) => ({
-            ...a,
-            bytes: window.__productBinaryCodec.decodeBinary(a.bytes),
-          }));
+          for (const artifact of payload.historyArtifacts)
+            artifact.bytes = await read(artifact.bytes);
         return window.__productJournal.save(payload);
       }
       if (operation === "clear") return window.__productJournal.clear();
       const loaded = await window.__productJournal.load();
-      return loaded
-        ? {
-            ...loaded,
-            baseBytes: window.__productBinaryCodec.encodeBinary(
-              loaded.baseBytes,
-            ),
-            candidateBytes: window.__productBinaryCodec.encodeBinary(
-              loaded.candidateBytes,
-            ),
-            historyArtifacts: loaded.historyArtifacts.map((a) => ({
-              ...a,
-              bytes: window.__productBinaryCodec.encodeBinary(a.bytes),
-            })),
-          }
-        : null;
+      if (!loaded) return null;
+      // The journal reads and verifies complete files. Only the diagnostic JSON
+      // bridge is chunked; original/candidate/history duplicates cross it once.
+      const files = new Map();
+      const describe = async (bytes) => {
+        const digest = Array.from(
+          new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+          (n) => n.toString(16).padStart(2, "0"),
+        ).join("");
+        files.set(digest, bytes);
+        return { digest, length: bytes.length };
+      };
+      const result = {
+        ...loaded,
+        baseBytes: await describe(loaded.baseBytes),
+        candidateBytes: await describe(loaded.candidateBytes),
+        historyArtifacts: [],
+      };
+      for (const artifact of loaded.historyArtifacts)
+        result.historyArtifacts.push({
+          ...artifact,
+          bytes: await describe(artifact.bytes),
+        });
+      window.__productJournalLoadedBytes = files;
+      return result;
     },
     {
       operation,
@@ -346,24 +364,58 @@ async function journalCall(operation, payload = null) {
     },
   );
   if (operation === "load" && result) {
-    result.baseBytes = Buffer.from(result.baseBytes, "base64");
-    result.candidateBytes = Buffer.from(result.candidateBytes, "base64");
-    result.historyArtifacts = result.historyArtifacts.map((a) => ({
-      ...a,
-      bytes: Buffer.from(a.bytes, "base64"),
-    }));
+    const files = new Map();
+    const read = async ({ digest, length }) => {
+      if (files.has(digest)) return files.get(digest);
+      assert(
+        Number.isSafeInteger(length) &&
+          length > 0 &&
+          length <= 64 * 1024 * 1024,
+      );
+      const bytes = Buffer.alloc(length);
+      for (let offset = 0; offset < length; offset += 4 * 1024 * 1024) {
+        const size = Math.min(4 * 1024 * 1024, length - offset);
+        const encoded = await mainPage.evaluate(
+          ({ digest, offset, size }) => {
+            const bytes = window.__productJournalLoadedBytes.get(digest);
+            if (!bytes) throw Error("journal_transfer_file_missing");
+            return window.__productBinaryCodec.encodeBinary(
+              bytes.subarray(offset, offset + size),
+            );
+          },
+          { digest, offset, size },
+        );
+        const chunk = Buffer.from(encoded, "base64");
+        assert.equal(chunk.length, size);
+        chunk.copy(bytes, offset);
+      }
+      assert.equal(hash(bytes), digest);
+      files.set(digest, bytes);
+      return bytes;
+    };
+    try {
+      result.baseBytes = await read(result.baseBytes);
+      result.candidateBytes = await read(result.candidateBytes);
+      for (const artifact of result.historyArtifacts)
+        artifact.bytes = await read(artifact.bytes);
+    } finally {
+      await mainPage.evaluate(() => {
+        window.__productJournalLoadedBytes = null;
+      });
+    }
   }
   return result;
 }
+
 const journal = {
   save: async (record) => {
     const metadata = await journalCall("save", {
       ...record,
-      baseBytes: Buffer.from(record.baseBytes).toString("base64"),
-      candidateBytes: Buffer.from(record.candidateBytes).toString("base64"),
+      baseBytes: stageBinary(record.baseBytes),
+      candidateBytes: stageBinary(record.candidateBytes),
       historyArtifacts: record.historyArtifacts?.map((a) => ({
         ...a,
-        bytes: Buffer.from(a.bytes).toString("base64"),
+        bytes: stageBinary(a.bytes),
       })),
     });
     persisted = await journalCall("load");
