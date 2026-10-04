@@ -317,7 +317,12 @@ async function pixels(frame) {
       previous = digest;
     }
     throw Error("canvas_not_stable");
-  });
+  }, origin + "/repo/browser-office/binary-codec.mjs");
+  const bytes = Buffer.from(result.base64, "base64");
+  delete result.base64;
+  pixelStates.set(result.sha256, bytes);
+  await fs.writeFile(path.join(output, result.sha256 + ".rgba"), bytes);
+  return result;
 }
 let persisted = null;
 function stageBinary(bytes) {
