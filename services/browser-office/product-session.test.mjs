@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createProductSession } from "./product-session.mjs";
 
-function setup() {
+function setup(engineOptions = {}) {
   let value = 1,
     prepared = false,
     transaction = null,
@@ -95,6 +95,7 @@ function setup() {
       stored = null;
     },
   };
+  Object.assign(engine, engineOptions);
   const session = createProductSession({
     engine,
     journal,
@@ -230,6 +231,15 @@ test("recovery reads back the exact retained package and rejects replaced bytes"
   assert.equal((await s.session.recover()).revision, "r2");
   s.record().candidateBytes[2] = 8;
   await assert.rejects(s.session.recover(), /recovery|evidence/);
+});
+
+test("the coordinator uses the engine persistence projection for recovery evidence", async () => {
+  let theme = "original";
+  const s = setup({ persistenceState: (state) => ({ ...state, theme }) });
+  await s.session.open(s.bytes(1));
+  await apply(s, 2);
+  theme = "changed-inspector-contract";
+  await assert.rejects(s.session.recover(), /recovery_evidence_mismatch/);
 });
 test("requests serialize and cannot both apply from one observed revision", async () => {
   const s = setup();

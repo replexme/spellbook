@@ -40,6 +40,7 @@ export function createProductSession({
     throw new TypeError("Product contracts and recovery journal are required");
   const artifacts = createProductArtifactAuthority({
     inspect: (bytes) => engine.inspect(bytes),
+    persistenceState: engine.persistenceState,
   });
   let current = null,
     base = null,

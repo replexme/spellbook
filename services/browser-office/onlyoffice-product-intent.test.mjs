@@ -127,9 +127,8 @@ test("replacement and explicit formatting in one request have their combined int
 });
 
 test("native adapter retains the artifact rebinding port used after Undo and Redo", async () => {
-  const { createOnlyOfficeProductEngine } = await import(
-    "./onlyoffice/product-engine.mjs"
-  );
+  const { createOnlyOfficeProductEngine, onlyOfficePersistenceState } =
+    await import("./onlyoffice/product-engine.mjs");
   let bound;
   const engine = createOnlyOfficeProductEngine({
     bindArtifact: async (bytes) => {
@@ -139,6 +138,7 @@ test("native adapter retains the artifact rebinding port used after Undo and Red
   const bytes = Uint8Array.of(1, 2, 3);
   await engine.bindArtifact(bytes);
   assert.equal(bound, bytes);
+  assert.equal(engine.persistenceState, onlyOfficePersistenceState);
 });
 
 test("native setters unlock only synchronously and restore the UI lock on success and failure", async () => {

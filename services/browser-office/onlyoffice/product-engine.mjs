@@ -100,15 +100,15 @@ export async function observeOnlyOfficeProduct(frame) {
     ).join(""),
   };
 }
+export function onlyOfficePersistenceState(value) {
+  const copy = structuredClone(value);
+  delete copy.revision;
+  return copy;
+}
 export function verifyOnlyOfficeProductObservation(expected, actual) {
-  const strip = (value) => {
-    const copy = structuredClone(value);
-    delete copy.revision;
-    return copy;
-  };
   const difference = firstDocumentStateDifference(
-    strip(expected),
-    strip(actual),
+    onlyOfficePersistenceState(expected),
+    onlyOfficePersistenceState(actual),
     "document",
   );
   if (difference)
@@ -132,6 +132,7 @@ export function createOnlyOfficeProductEngine({
   return {
     open,
     inspect,
+    persistenceState: onlyOfficePersistenceState,
     verifyIntent: verifyOnlyOfficeProductIntent,
     // Private live-session evidence only. It is not a persisted semantic hash.
     // Empty points, selection and save indices do not represent authored edits.
