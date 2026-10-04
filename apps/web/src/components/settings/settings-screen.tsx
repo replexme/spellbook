@@ -13,6 +13,8 @@ import type { AiConnectorConfig } from "@/lib/ai-connector-config";
 import { useAiAccount } from "@/lib/use-ai-account";
 import { AppTop } from "../app-top";
 import { ConnectSteps } from "../workspace/connect-steps";
+import type { AccountStorage } from "@/lib/storage-usage";
+import { StorageSection } from "./storage-section";
 
 const connectedDay = new Intl.DateTimeFormat("ko-KR", {
   month: "long",
@@ -43,9 +45,11 @@ function formatReset(resetAt: number | null | undefined) {
 export function SettingsScreen({
   email,
   aiConnector,
+  storage,
 }: {
   email: string;
   aiConnector: AiConnectorConfig;
+  storage?: AccountStorage | null;
 }) {
   const ai = useAiAccount(aiConnector);
 
@@ -196,6 +200,7 @@ export function SettingsScreen({
         <div className="settings">
           <nav className="settings-nav" aria-label="설정">
             <a href="#ai">AI 연결 및 공급자</a>
+            {storage ? <a href="#storage">보관 공간</a> : null}
             <a href="#account">계정</a>
           </nav>
           <div className="settings-body">
@@ -930,6 +935,7 @@ export function SettingsScreen({
               </div>
             </section>
 
+            {storage ? <StorageSection storage={storage} /> : null}
             <section
               id="account"
               className="settings-section"

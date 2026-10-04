@@ -5,7 +5,19 @@ import { db, ensureSchema } from "./db";
 import { HttpError } from "./http";
 import type { Session } from "./models";
 import { publicAppBaseUrl } from "./runtime-urls";
-import { accountPrefix, deleteObject, getObject, putObject } from "./storage";
+import {
+  accountPrefix,
+  deleteObject,
+  directReadUrl,
+  directWriteTarget,
+  getObject,
+  moveObject,
+  objectDigest,
+  putObject,
+} from "./storage";
+import { signClaims, verifiedClaims } from "./signed-claims";
+import { incomingObjectName } from "./incoming-objects";
+import { assertStorageAvailable } from "./storage-usage";
 import { dispatchNativeSave, stageNativeSave } from "./native-save-stage";
 import {
   aiConnectorConfig,
@@ -187,7 +199,183 @@ export async function saveBrowserDocument(
     data[1] !== 0x4b
   )
     throw new HttpError(400, "invalid_document_package");
-  const digest = createHash("sha256").update(data).digest("hex");
+  return acceptBrowserSave(session, documentId, expectedRevision, {
+    versionId: randomUUID(),
+    digest: createHash("sha256").update(data).digest("hex"),
+    bytes: data.length,
+    store: (object) =>
+      putObject(object, data, currentPresentationFormat.mimeTypes[0]!),
+    discard: async () => undefined,
+  });
+}
+
+/**
+ * The editor's file, as a short-lived link to read it straight from
+ * storage. url is null when the store has none; the page then reads
+ * GET .../contents, which passes the file through the app.
+ */
+export async function browserDocumentSource(
+  session: Session,
+  documentId: string,
+): Promise<{
+  revision: string;
+  bytes: number | null;
+  url: string | null;
+}> {
+  await ensureSchema();
+  const [row] = await db()`
+    select d.file_name,s.working_version_id,s.working_sha256,v.document_object,v.document_bytes
+    from spellbook_native_sessions s
+    join spellbook_documents d on d.id=s.document_id and d.account_id=s.account_id
+    join spellbook_versions v on v.id=s.working_version_id and v.status='ready'
+    where s.document_id=${documentId} and s.account_id=${session.accountId}
+      and s.editor_mode='browser' and s.status='active' and s.expires_at > now()
+  `;
+  if (!row) throw new HttpError(409, "browser_session_not_active");
+  return {
+    revision: browserRevision(row.working_version_id, row.working_sha256),
+    bytes: row.document_bytes === null ? null : Number(row.document_bytes),
+    url: await directReadUrl(row.document_object, {
+      fileName: row.file_name,
+      contentType: currentPresentationFormat.mimeTypes[0]!,
+    }),
+  };
+}
+
+const BROWSER_SAVE_TOKEN_DOMAIN = "spellbook-browser-save-v1";
+const BROWSER_SAVE_TOKEN_SECONDS = 10 * 60;
+
+interface BrowserSaveClaims {
+  version: 1;
+  accountId: string;
+  documentId: string;
+  versionId: string;
+  expectedRevision: string;
+  size: number;
+  expiresAt: number;
+}
+
+/**
+ * Starts a save that goes from the browser straight to storage, so a large
+ * file never passes through the app. Returns direct: false when the store
+ * cannot take one; the page then PUTs .../contents.
+ */
+export async function startBrowserSave(
+  session: Session,
+  documentId: string,
+  request: Request,
+): Promise<
+  | { direct: false }
+  | {
+      direct: true;
+      url: string;
+      headers: Record<string, string>;
+      token: string;
+    }
+> {
+  await ensureSchema();
+  requireBrowserOrigin(request);
+  const expectedRevision = request.headers.get("if-match") ?? "";
+  if (!expectedRevision) throw new HttpError(428, "browser_revision_required");
+  const body = (await request.json().catch(() => ({}))) as { size?: unknown };
+  const size = typeof body.size === "number" ? body.size : 0;
+  if (!Number.isSafeInteger(size) || size <= 0)
+    throw new HttpError(400, "invalid_document_package");
+  if (size > currentPresentationFormat.maxBytes)
+    throw new HttpError(413, "document_too_large");
+  const current = await activeBrowserSession(session, documentId);
+  if (
+    browserRevision(current.working_version_id, current.working_sha256) !==
+    expectedRevision
+  )
+    throw new HttpError(412, "browser_revision_changed");
+  const versionId = randomUUID();
+  const target = await directWriteTarget(
+    incomingObjectName(savedObjects(session, documentId, versionId).object),
+    currentPresentationFormat.mimeTypes[0]!,
+    currentPresentationFormat.maxBytes,
+  );
+  if (!target) return { direct: false };
+  const claims: BrowserSaveClaims = {
+    version: 1,
+    accountId: session.accountId,
+    documentId,
+    versionId,
+    expectedRevision,
+    size,
+    expiresAt: Date.now() + BROWSER_SAVE_TOKEN_SECONDS * 1000,
+  };
+  return {
+    direct: true,
+    url: target.url,
+    headers: target.headers,
+    token: signClaims(BROWSER_SAVE_TOKEN_DOMAIN, claims),
+  };
+}
+
+/**
+ * Checks the file the browser stored and saves it with the same checks as
+ * a PUT: the session revision, size, package signature and a SHA-256 read
+ * from storage itself, never from the browser.
+ */
+export async function completeBrowserSave(
+  session: Session,
+  documentId: string,
+  request: Request,
+): Promise<{ revision: string; unchanged: boolean }> {
+  await ensureSchema();
+  requireBrowserOrigin(request);
+  const body = (await request.json().catch(() => ({}))) as {
+    token?: unknown;
+  };
+  const claims =
+    typeof body.token === "string"
+      ? (verifiedClaims(
+          BROWSER_SAVE_TOKEN_DOMAIN,
+          body.token,
+        ) as BrowserSaveClaims | null)
+      : null;
+  if (
+    !claims ||
+    claims.version !== 1 ||
+    claims.accountId !== session.accountId ||
+    claims.documentId !== documentId ||
+    !Number.isSafeInteger(claims.expiresAt) ||
+    claims.expiresAt <= Date.now()
+  )
+    throw new HttpError(400, "invalid_browser_save");
+  const incoming = incomingObjectName(
+    savedObjects(session, documentId, claims.versionId).object,
+  );
+  const stored = await objectDigest(incoming, 2);
+  if (!stored) throw new HttpError(409, "upload_not_found");
+  if (
+    stored.size !== claims.size ||
+    stored.size > currentPresentationFormat.maxBytes ||
+    stored.head[0] !== 0x50 ||
+    stored.head[1] !== 0x4b
+  ) {
+    await deleteObject(incoming).catch(() => undefined);
+    throw new HttpError(400, "invalid_document_package");
+  }
+  return acceptBrowserSave(session, documentId, claims.expectedRevision, {
+    versionId: claims.versionId,
+    digest: stored.sha256,
+    bytes: stored.size,
+    store: (object) => moveObject(incoming, object),
+    discard: () => deleteObject(incoming),
+  });
+}
+
+function savedObjects(session: Session, documentId: string, versionId: string) {
+  const prefix = accountPrefix(session.accountId, documentId);
+  return {
+    object: `${prefix}/versions/${versionId}/document.pptx`,
+    outputPrefix: `${prefix}/versions/${versionId}/render`,
+  };
+}
+
+async function activeBrowserSession(session: Session, documentId: string) {
   const [current] = await db()`
     select s.id,s.working_version_id,s.working_sha256,s.status,s.wopi_lock,
       current.document_object as preservation_object
@@ -202,6 +390,26 @@ export async function saveBrowserDocument(
     throw new HttpError(409, "office_editor_save_required");
   if (current.status !== "active")
     throw new HttpError(409, "document_processing");
+  return current;
+}
+
+/** One saved file, wherever its bytes came from, becomes a checked version. */
+async function acceptBrowserSave(
+  session: Session,
+  documentId: string,
+  expectedRevision: string,
+  file: {
+    versionId: string;
+    digest: string;
+    bytes: number;
+    /** Puts the bytes at the version's object name. */
+    store: (object: string) => Promise<void>;
+    /** Drops bytes that turned out not to be needed. */
+    discard: () => Promise<void>;
+  },
+): Promise<{ revision: string; unchanged: boolean }> {
+  const { digest } = file;
+  const current = await activeBrowserSession(session, documentId);
   const currentRevision = browserRevision(
     current.working_version_id,
     current.working_sha256,
@@ -231,15 +439,21 @@ export async function saveBrowserDocument(
         where id=${current.id}
       `;
     });
+    await file.discard().catch(() => undefined);
     return { revision: currentRevision, unchanged: true };
   }
 
-  const versionId = randomUUID();
+  // An unchanged save always succeeds; a new version must fit the plan.
+  try {
+    await assertStorageAvailable(session, { addingBytes: file.bytes });
+  } catch (error) {
+    await file.discard().catch(() => undefined);
+    throw error;
+  }
+  const versionId = file.versionId;
   const jobId = randomUUID();
-  const prefix = accountPrefix(session.accountId, documentId);
-  const object = `${prefix}/versions/${versionId}/document.pptx`;
-  const outputPrefix = `${prefix}/versions/${versionId}/render`;
-  await putObject(object, data, currentPresentationFormat.mimeTypes[0]!);
+  const { object, outputPrefix } = savedObjects(session, documentId, versionId);
+  await file.store(object);
   let payload: Record<string, unknown>;
   try {
     await db().begin(async (sql) => {
@@ -267,7 +481,7 @@ export async function saveBrowserDocument(
         digest,
         preservationObject: current.preservation_object,
         saveRevision: locked.save_revision,
-        bytes: data.length,
+        bytes: file.bytes,
       });
     });
   } catch (error) {

@@ -89,6 +89,8 @@ export async function deleteDocument(session: Session, documentId: string) {
     delete from spellbook_documents
     where id=${documentId} and account_id=${session.accountId}
   `;
+  // The whole folder is gone; pending removals inside it are done too.
+  await db()`delete from spellbook_storage_deletions where document_id=${documentId}`;
   return { deleted: true };
 }
 
