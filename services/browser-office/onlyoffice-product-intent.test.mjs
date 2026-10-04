@@ -894,6 +894,11 @@ test("table text change preserves fonts, fill and neighboring cells", () => {
   const before = document();
   before.slides[0].elements[0].kind = "table";
   const drawing = before.slides[0].onlyoffice.drawings[0];
+  drawing.tableLayout = {
+    computedHeight: 300,
+    authoredFrame: { extY: 300 },
+    rowHeights: [{ value: 300, rule: 1 }],
+  };
   drawing.tableCells = [["old\r\n", "neighbor\r\n"]];
   const style = { GetFontSize: 24, GetBold: true };
   drawing.tableParagraphs = [
@@ -945,5 +950,56 @@ test("table text change preserves fonts, fill and neighboring cells", () => {
   assert.throws(
     () => verifyOnlyOfficeProductIntent(before, after, commands),
     /unrequested_change/,
+  );
+});
+
+test("table text reflow may change calculated height while authored heights and frame stay strict", () => {
+  const before = document();
+  before.slides[0].elements[0].kind = "table";
+  const d = before.slides[0].onlyoffice.drawings[0];
+  d.tableCells = [["old\r\n"]];
+  d.tableParagraphs = [
+    [
+      [
+        {
+          alignment: "left",
+          text: "old\r\n",
+          runs: [{ text: "old", style: { GetFontSize: 24 } }],
+        },
+      ],
+    ],
+  ];
+  d.tableLayout = {
+    computedHeight: 300,
+    authoredFrame: { extY: 300 },
+    rowHeights: [{ value: 300, rule: 1 }],
+  };
+  before.slides[0].narrow.table = [
+    { rows: 1, cells: [[{ text: "old\r\n", fill: null }]] },
+  ];
+  const after = structuredClone(before);
+  const changed = after.slides[0].onlyoffice.drawings[0];
+  changed.tableCells[0][0] = "new\r\n";
+  changed.tableParagraphs[0][0][0].text = "new\r\n";
+  changed.tableParagraphs[0][0][0].runs[0].text = "new";
+  after.slides[0].narrow.table[0].cells[0][0].text = "new\r\n";
+  after.slides[0].elements[0].height = 400;
+  changed.tableLayout.computedHeight = 400;
+  const commands = [
+    { op: "set_table_cell", elementId: "0/0", row: 0, column: 0, text: "new" },
+  ];
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, commands),
+  );
+  changed.tableLayout.rowHeights[0].value = 400;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+  changed.tableLayout.rowHeights[0].value = 300;
+  changed.tableLayout.computedHeight = 350;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /table_layout_height/,
   );
 });

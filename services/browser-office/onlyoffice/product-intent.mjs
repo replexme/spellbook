@@ -173,6 +173,23 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         geometry.height = command.height;
       }
     }
+    if (
+      original.kind === "table" &&
+      group.some((c) => c.op === "set_table_cell") &&
+      !group.some((c) => c.op === "resize")
+    ) {
+      // A native table grows to its content's page bounds. Row-height rules
+      // and the authored frame remain strict below; only calculated height
+      // can follow the requested text reflow.
+      if (
+        !newDrawing.tableLayout ||
+        actual.height !== newDrawing.tableLayout.computedHeight
+      )
+        throw Error("onlyoffice_product_intent_mismatch:table_layout_height");
+      geometry.height = actual.height;
+      oldDrawing.tableLayout.computedHeight =
+        newDrawing.tableLayout.computedHeight;
+    }
     const bounds = quantizedOutlineDifference(
       geometry,
       actual,

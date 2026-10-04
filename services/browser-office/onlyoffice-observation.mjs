@@ -244,6 +244,25 @@ export async function observeOnlyOfficeCandidate(frame) {
               (cell) => cell.Content?.GetText?.({ Numbering: false }) ?? null,
             ),
           );
+        if (d.Table?.Content) {
+          const bounds = d.Table.Get_PageBounds(0);
+          const frame = d.Drawing.spPr?.xfrm;
+          state.tableLayout = {
+            computedHeight: Math.round((bounds.Bottom - bounds.Top) * 100),
+            authoredFrame: Object.fromEntries(
+              ["offX", "offY", "extX", "extY"].map((key) => [
+                key,
+                typeof frame?.[key] === "number"
+                  ? Math.round(frame[key] * 100)
+                  : null,
+              ]),
+            ),
+            rowHeights: d.Table.Content.map((row) => ({
+              value: Math.round(row.Get_Height().Value * 100),
+              rule: row.Get_Height().HRule,
+            })),
+          };
+        }
         if (d.Table?.Content)
           state.tableParagraphs = d.Table.Content.map((row, r) =>
             row.Content.map((cell, c) =>
