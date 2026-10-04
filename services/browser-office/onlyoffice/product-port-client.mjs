@@ -70,6 +70,9 @@ export async function connectOnlyOfficeProductPort({
       }
     });
   return {
+    registerChartWorkbook: (workbook) => call("registerChartWorkbook", workbook),
+    registerAsset: (asset) => call("registerAsset", asset),
+    assetReceipt: (assetId) => call("assetReceipt", assetId),
     observe: () => call("observe"),
     changeToken: () => call("changeToken"),
     approveNativeChanges: (token) => call("approveNativeChanges", token),

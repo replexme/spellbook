@@ -20,6 +20,10 @@ import {
   finishCandidateTransaction,
 } from "./candidate-transaction.mjs";
 import { firstDocumentStateDifference } from "../../office-session-spike/document-state-evidence.mjs";
+import { onlyOfficeDocumentFillCatalog } from "./document-fill-catalog.mjs";
+import { onlyOfficeExtendedOperations, executeOnlyOfficeExtendedCommand } from "./extended-commands.mjs";
+import { installOnlyOfficeNativeComplements } from "./native-complements.mjs";
+import { slideDateFieldType } from "../slide-date-format.mjs";
 
 // Commands use the canonical product registry. Native bindings stay private to
 // the live session and are rechecked after the entire request's preflight.
@@ -52,7 +56,7 @@ export async function observeOnlyOfficeProduct(frame) {
       ),
     };
   };
-  const drawing = (value) => {
+  const drawing = (value, keepGeometry = false) => {
     const {
       GetPosX,
       GetPosY,
@@ -65,7 +69,8 @@ export async function observeOnlyOfficeProduct(frame) {
     // SDK can round one unit downward; expose millidegrees consistently.
     if (typeof authored.GetRotation === "number")
       authored.GetRotation = Math.round(authored.GetRotation * 1000) / 1000;
-    if (groupChildren) authored.groupChildren = groupChildren.map(drawing);
+    if (keepGeometry) authored.geometryBounds={x:Math.round(GetPosX*100),y:Math.round(GetPosY*100),width:Math.round(GetWidth*100),height:Math.round(GetHeight*100)};
+    if (groupChildren) authored.groupChildren = groupChildren.map(child=>drawing(child,keepGeometry));
     return authored;
   };
   const slides = projection.common.slides.map((slide, slideIndex) => ({
@@ -83,7 +88,7 @@ export async function observeOnlyOfficeProduct(frame) {
     ),
     onlyoffice: {
       ...projection.extended.slides[slideIndex],
-      drawings: projection.extended.slides[slideIndex].drawings.map(drawing),
+      drawings: projection.extended.slides[slideIndex].drawings.map(value=>drawing(value)),
     },
     narrow: projection.narrow[slideIndex],
   }));
@@ -91,16 +96,17 @@ export async function observeOnlyOfficeProduct(frame) {
     slides,
     masters: projection.extended.masters.map((master) => ({
       ...master,
-      drawings: master.drawings.map(drawing),
+      drawings: master.drawings.map(value=>drawing(value,true)),
       layouts: master.layouts.map((layout) => ({
         ...layout,
-        drawings: layout.drawings.map(drawing),
+        drawings: layout.drawings.map(value=>drawing(value,true)),
       })),
     })),
     sections: projection.extended.sections,
     width: projection.extended.width * 100,
     height: projection.extended.height * 100,
   };
+  state.styleCatalog=onlyOfficeDocumentFillCatalog(state);
   return {
     ...state,
     revision: Array.from(
@@ -237,7 +243,7 @@ export function finalizeOnlyOfficeNativeGeometry() {
   return true;
 }
 
-export const onlyOfficeProductOperations = onlyOfficeIntentOperations;
+export const onlyOfficeProductOperations = Object.freeze([...onlyOfficeIntentOperations,...onlyOfficeExtendedOperations]);
 
 export function createOnlyOfficeProductEngine({
   getFrame,
@@ -245,6 +251,8 @@ export function createOnlyOfficeProductEngine({
   inspect,
   snapshot,
   bindArtifact,
+  resolveAsset,
+  resolveWorkbook,
 }) {
   let topologyPending = false;
   return {
@@ -263,8 +271,10 @@ export function createOnlyOfficeProductEngine({
     prepareManualCheckpoint: async () =>
       (await getFrame()).evaluate(finalizeOnlyOfficeNativeGeometry),
     observe: async () => observeOnlyOfficeProduct(await getFrame()),
-    preflight: async (commands) => {
+    preflight: async (commands, before) => {
       const frame = await getFrame();
+      if(commands.some(command=>onlyOfficeExtendedOperations.includes(command.op)))
+        await frame.evaluate(installOnlyOfficeNativeComplements);
       if (
         commands.some((c) =>
           ["set_sections", "delete_slide", "duplicate_slide"].includes(c.op),
@@ -285,7 +295,39 @@ export function createOnlyOfficeProductEngine({
         if (info.sections || commands.some((c) => c.op === "set_sections"))
           await frame.evaluate(ensureOnlyOfficeSectionHistory);
       }
-      const prepared = await frame.evaluate(
+      const originalCommands=commands,extended=new Map();
+      for(const [index,command] of commands.entries()){
+        if(!onlyOfficeExtendedOperations.includes(command.op))continue;
+        let bound={...command};
+        if(command.op==="set_table_cell_format"&&command.tableCellFormat?.characterSpacing!=null)
+          bound.nativeSpacingTwips=onlyOfficeCharacterSpacingTwips(command.tableCellFormat.characterSpacing);
+        if(["insert_image","replace_image","insert_media","replace_media"].includes(command.op)){
+          if(typeof resolveAsset!=="function")throw Error("onlyoffice_product_asset_authority_required");
+          bound.nativeAsset=await resolveAsset(command.assetId);
+        }
+        if(command.op==="set_chart_data"){
+          if(typeof resolveWorkbook!=="function")throw Error("onlyoffice_product_chart_workbook_authority_required");
+          const workbook=await resolveWorkbook(command);
+          if(!(workbook.bytes instanceof Uint8Array)||!workbook.bytes.length||workbook.bytes.length>25_000_000)
+            throw Error("onlyoffice_product_chart_workbook_transport_invalid");
+          let binary="";for(let offset=0;offset<workbook.bytes.length;offset+=8192)binary+=String.fromCharCode(...workbook.bytes.subarray(offset,offset+8192));
+          bound.nativeWorkbookEncoded={base64:btoa(binary),byteLength:workbook.bytes.length};bound.nativeWorkbookReceipt=workbook.receipt;
+        }
+        if(command.op==="set_slide_metadata"&&command.slideMetadata?.dateTimeFormat!=null)
+          bound.nativeDateFieldType=slideDateFieldType(command.slideMetadata.dateTimeFormat);
+        bound=await frame.evaluate(executeOnlyOfficeExtendedCommand,{command:bound,phase:"preflight",batchSize:commands.length});
+        if(bound.nativeFillSource){
+          const state=before??await observeOnlyOfficeProduct(frame);
+          const [si,...path]=bound.nativeFillSource.split("/").map(Number);let drawings=state.slides[si].onlyoffice.drawings,drawing;
+          for(const i of path){drawing=drawings[i];drawings=drawing.groupChildren;}
+          if(!drawing?.fill)throw Error("onlyoffice_product_fill_catalog_observation_missing");
+          if(commands.slice(0,index).some(c=>c.elementId===bound.nativeFillSource))throw Error("onlyoffice_product_fill_catalog_batch_dependency");
+          bound.nativeFillDescriptor=structuredClone(drawing.fill);
+        }
+        extended.set(index,bound);
+      }
+      commands=commands.filter(command=>!onlyOfficeExtendedOperations.includes(command.op));
+      const basePrepared = await frame.evaluate(
         ({ commands, supported }) => {
           const m = window.Asc.editor.WordControl.m_oLogicDocument;
           return commands.map((command) => {
@@ -889,21 +931,25 @@ export function createOnlyOfficeProductEngine({
                     }
                   : command,
           ),
-          supported: onlyOfficeProductOperations,
+          supported: onlyOfficeIntentOperations,
         },
       );
-      const text = commands
-        .filter((c) =>
-          ["replace_text", "set_speaker_notes", "set_table_cell"].includes(
-            c.op,
-          ),
-        )
-        .map((c) => c.text)
-        .join("\n");
-      if (text)
+      let baseIndex=0;
+      const prepared=originalCommands.map((_,index)=>extended.get(index)??basePrepared[baseIndex++]);
+      const text=originalCommands.flatMap(command=>[
+        command.text,command.smartartNode?.text,command.chartFormat?.title,
+        command.slideMetadata?.footerText,command.slideMetadata?.dateTimeText,
+        command.paragraphList?.bulletCharacter,...(command.cells?.flat()??[]),
+        ...(command.rowDescriptions??[]),...(command.columnDescriptions??[]),
+      ]).filter(value=>typeof value==="string").join("\n");
+      const families=originalCommands.flatMap(command=>[
+        command.family,command.tableCellFormat?.fontFamily,
+        ...["majorLatin","majorAsian","majorComplex","minorLatin","minorAsian","minorComplex"].map(key=>command.theme?.[key]),
+      ]).filter(value=>typeof value==="string"&&value);
+      if (text||families.length)
         await frame.evaluate(
-          (text) =>
-            new Promise((resolve) => {
+          ({text,families}) =>
+            new Promise((resolve,reject) => {
               const picker = window.AscFonts?.FontPickerByCharacter;
               const loader = window.AscCommon?.g_font_loader;
               if (
@@ -916,6 +962,7 @@ export function createOnlyOfficeProductEngine({
               // Load the registered fallback faces independently of that cache;
               // do not change the document's authored font family.
               const fonts = new Set();
+              families.forEach(name=>{if(window.AscFonts.g_map_font_index[name]!==undefined)fonts.add(name);});
               for (const character of text) {
                 const name = picker.getFontBySymbol(character.codePointAt(0));
                 if (
@@ -924,10 +971,13 @@ export function createOnlyOfficeProductEngine({
                 )
                   fonts.add(name);
               }
-              if (fonts.size) loader.LoadFonts([...fonts], resolve);
+              if (fonts.size){
+                const timer=setTimeout(()=>reject(Error("onlyoffice_product_font_load_timeout")),30000);
+                loader.LoadFonts([...fonts],()=>{clearTimeout(timer);resolve();});
+              }
               else resolve();
             }),
-          text,
+          {text,families},
         );
       return prepared;
     },
@@ -959,7 +1009,9 @@ export function createOnlyOfficeProductEngine({
     },
     apply: async (command) => {
       const frame = await getFrame();
-      const result = await frame.evaluate((command) => {
+      const result = onlyOfficeExtendedOperations.includes(command.op)
+        ? await frame.evaluate(executeOnlyOfficeExtendedCommand,{command,phase:"apply",batchSize:1})
+        : await frame.evaluate((command) => {
         const editor = window.Asc.editor;
         if (!editor.isGroupActions())
           throw Error("onlyoffice_product_transaction_required");
@@ -1654,14 +1706,17 @@ export function createOnlyOfficeProductEngine({
         "move_slide",
         "delete_slide",
         "duplicate_slide",
+        "insert_slide",
+        "set_slide_layout",
+        "set_slide_size",
+        "set_master_theme",
       ].includes(command.op);
       await frame.evaluate(
         ({ nativeId, op }) => {
           const h = window.AscCommon.History,
             m = window.Asc.editor.WordControl.m_oLogicDocument;
-          const target = m.Slides.flatMap((s) => s.cSld.spTree).find(
-            (x) => x.Id === nativeId,
-          );
+          const find=shapes=>{for(const shape of shapes){if(shape.Id===nativeId)return shape;const child=find(shape.spTree??[]);if(child)return child;}return null;};
+          const target=find(m.Slides.flatMap(slide=>slide.cSld.spTree));
           target?.getDocContent?.()?.Recalc_AllParagraphs_CompiledPr?.();
           if (target?.isTable?.()) {
             for (const row of target.graphicObject.Content)
@@ -1671,7 +1726,7 @@ export function createOnlyOfficeProductEngine({
           }
           target?.recalcText?.();
           target?.recalculate?.();
-          if (["move_slide", "delete_slide", "duplicate_slide"].includes(op)) {
+          if (["move_slide", "delete_slide", "duplicate_slide","insert_slide"].includes(op)) {
             m.updateSlideIndexes?.();
           }
           m.Recalculate(h.Get_RecalcData(null, h.getGroupChanges()));
@@ -1680,6 +1735,7 @@ export function createOnlyOfficeProductEngine({
         },
         { nativeId: command.nativeId, op: command.op },
       );
+      await frame.evaluate(finalizeOnlyOfficeNativeGeometry);
       return true;
     },
     snapshot,

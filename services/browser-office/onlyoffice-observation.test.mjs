@@ -123,6 +123,7 @@ test("text color observation uses native RGB when the pinned getter incorrectly 
   });
   const run = { GetText: () => "red", GetTextPr: () => textPr };
   const paragraph = {
+    Paragraph: {Pr:{}},
     GetParaPr: () => ({ GetJc: () => "left" }),
     GetElementsCount: () => 1,
     GetElement: () => run,
@@ -255,6 +256,7 @@ test("dynamic field definitions are stable across rendered cache changes and rem
       ),
   };
   const paragraph = {
+    Paragraph: {Pr:{}},
     GetParaPr: () => ({ GetJc: () => "left" }),
     GetElementsCount: () => 1,
     GetElement: () => run,
@@ -382,7 +384,7 @@ test("chart series type is read from its containing native chart instead of a br
   const drawing = {
     Drawing: shape,
     Chart: {
-      chart: { plotArea: { charts: [chart] } },
+      chart: { plotArea: { charts: [chart], axId: [] } },
       getAllSeries: () => [series],
     },
     GetClassType: () => "chart",

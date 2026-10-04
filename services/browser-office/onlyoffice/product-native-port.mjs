@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import { createOnlyOfficeProductEngine } from "./product-engine.mjs";
+import { registerOnlyOfficeDocumentAsset, readOnlyOfficeDocumentAsset } from "./product-resources.mjs";
+import { registerOnlyOfficeChartWorkbook, readOnlyOfficeChartWorkbook } from "./chart-workbook-resources.mjs";
 
 // Installed by the trusted product host in the pinned presentation frame.
 // The model never receives this private port or executable JavaScript authority.
@@ -26,6 +28,8 @@ export function installOnlyOfficeProductPort({
     open: unavailable,
     inspect: unavailable,
     snapshot: unavailable,
+    resolveAsset: readOnlyOfficeDocumentAsset,
+    resolveWorkbook: readOnlyOfficeChartWorkbook,
   });
   let port,
     disposed = false,
@@ -34,6 +38,14 @@ export function installOnlyOfficeProductPort({
   const invoke = async ({ method, payload }) => {
     if (disposed) throw Error("onlyoffice_product_port_closed");
     switch (method) {
+      case "registerChartWorkbook":
+        if (transactions.size) throw Error("onlyoffice_product_transaction_busy");
+        return registerOnlyOfficeChartWorkbook(payload);
+      case "registerAsset":
+        if (transactions.size) throw Error("onlyoffice_product_transaction_busy");
+        return registerOnlyOfficeDocumentAsset(payload);
+      case "assetReceipt":
+        return readOnlyOfficeDocumentAsset(payload);
       case "changeToken":
         return engine.changeToken();
       case "approveNativeChanges":

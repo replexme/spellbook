@@ -20,6 +20,7 @@ export function createProductSession({
   validateCommand,
   operationContracts,
   verifyObservation = assertArtifactMatchesObservation,
+  prepareResources = async () => {},
 }) {
   for (const name of [
     "open",
@@ -349,6 +350,10 @@ export function createProductSession({
           )
             throw Error("product_command_contract_invalid");
         }
+        // Resources come from the admitted document and the trusted host. The
+        // canonical AI request never acquires byte/URL authority. Stage all
+        // resources before opening history, then recheck the live revision.
+        await prepareResources({bytes:current.bytes.slice(),observation:structuredClone(before),commands:structuredClone(input.commands)});
         // Bind every target and validate every operation before creating native history.
         const prepared = await engine.preflight(input.commands, before);
         await liveMatches(before);
@@ -357,7 +362,7 @@ export function createProductSession({
         try {
           for (const command of prepared) await engine.apply(command);
           const edited = await observe();
-          await engine.verifyIntent(before, edited, input.commands);
+          await engine.verifyIntent(before, edited, input.commands, prepared);
           if (edited.revision === before.revision) {
             await engine.finish(token, false);
             await liveMatches(before);
@@ -367,6 +372,7 @@ export function createProductSession({
             before,
             edited,
             commands: input.commands,
+            prepared,
             authorize: (bytes) => admit(bytes, edited),
           });
           const accepted = await admit(bytes, edited);
@@ -554,6 +560,8 @@ export function createProductSession({
               )
             )
               throw Error("product_recovery_command_invalid");
+            await prepareResources({bytes:previous.bytes.slice(),observation:structuredClone(previous.observation),commands:structuredClone(group)});
+            await liveMatches(previous.observation);
             const prepared = await engine.preflight(
               group,
               previous.observation,
@@ -562,11 +570,12 @@ export function createProductSession({
             try {
               for (const command of prepared) await engine.apply(command);
               const edited = await observe();
-              await engine.verifyIntent(previous.observation, edited, group);
+              await engine.verifyIntent(previous.observation, edited, group, prepared);
               const bytes = await engine.snapshot({
                 before: previous.observation,
                 edited,
                 commands: group,
+                prepared,
                 authorize: (bytes) => admit(bytes, edited),
               });
               const after = await admit(bytes, edited);

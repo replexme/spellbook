@@ -728,8 +728,7 @@ function preserveUnaffectedSlideShapes(
     targetIndexes !== null
       ? !targetIndexes.has(index)
       : targetNames !== null &&
-        Boolean(identity(source)?.name) &&
-        !targetNames.has(identity(source).name);
+        !targetNames.has(identity(source)?.name??"");
   const replacements = [];
   // Every author shape matched to its engine counterpart, replaced or not;
   // the ids of both saves are mapped through these pairs.
@@ -1592,8 +1591,9 @@ export function remapPartRelationshipIds(
 // install through native history together with the cache mutation.
 export function prepareChartSeriesWorkbookMutation(
   input,
-  { slideIndex, shapeName, seriesIndex, values },
+  { slideIndex, shapeName, seriesIndex, seriesPosition, values, allowNoop = false },
 ) {
+  const preserveValues=values==null&&allowNoop;
   if (
     !(input instanceof Uint8Array) ||
     input.byteLength > maximumInputBytes ||
@@ -1601,12 +1601,9 @@ export function prepareChartSeriesWorkbookMutation(
     slideIndex < 0 ||
     typeof shapeName !== "string" ||
     !shapeName ||
-    !Number.isInteger(seriesIndex) ||
-    seriesIndex < 0 ||
-    !Array.isArray(values) ||
-    !values.length ||
-    values.length > maximumEntries ||
-    Array.from(values).some((value) => !Number.isFinite(value))
+    (seriesPosition==null?(!Number.isInteger(seriesIndex)||seriesIndex<0):(!Number.isInteger(seriesPosition)||seriesPosition<0))||
+    !preserveValues&&(!Array.isArray(values)||!values.length||values.length>maximumEntries||
+      Array.from(values).some((value)=>value!==null&&!Number.isFinite(value)))
   )
     throw new Error("Invalid bounded chart data mutation.");
   inspectZipPackage(input);
@@ -1650,23 +1647,26 @@ export function prepareChartSeriesWorkbookMutation(
     "chart",
   );
   const chart = parseXml(entries, chartPart);
-  const series = [
+  const allSeries = [
     ...chart.getElementsByTagNameNS(chartNamespace, "ser"),
-  ].filter(
+  ];
+  const series=seriesPosition==null?allSeries.filter(
     (node) =>
       optionalDirectXmlChild(node, chartNamespace, "idx")?.getAttribute(
         "val",
       ) === String(seriesIndex),
-  );
+  ):(allSeries[seriesPosition]?[allSeries[seriesPosition]]:[]);
   if (series.length !== 1) throw new Error("Chart series is not unique.");
+  const valueContainer=optionalDirectXmlChild(series[0],chartNamespace,"val")??optionalDirectXmlChild(series[0],chartNamespace,"yVal");
+  if(!valueContainer)throw Error("Chart series has no owned numeric value range.");
   const reference = directXmlChild(
-    directXmlChild(series[0], chartNamespace, "val"),
+    valueContainer,
     chartNamespace,
     "numRef",
   );
   const formula = directXmlChild(reference, chartNamespace, "f").textContent;
   const range =
-    /^(?:'((?:[^']|'')+)'|([^!'\[\]]+))!\$?([A-Z]+)\$?([1-9]\d*):\$?([A-Z]+)\$?([1-9]\d*)$/u.exec(
+    /^(?:'((?:[^']|'')+)'|([^!'\[\]]+))!\$?([A-Z]+)\$?([1-9]\d*)(?::\$?([A-Z]+)\$?([1-9]\d*))?$/u.exec(
       formula,
     );
   if (!range)
@@ -1680,9 +1680,13 @@ export function prepareChartSeriesWorkbookMutation(
   const [c1, r1, c2, r2] = [
     column(range[3]),
     Number(range[4]),
-    column(range[5]),
-    Number(range[6]),
+    column(range[5]??range[3]),
+    Number(range[6]??range[4]),
   ];
+  const rangeLength=(c2-c1+1)*(r2-r1+1);
+  if(!Number.isSafeInteger(rangeLength)||rangeLength<1||rangeLength>maximumEntries)
+    throw Error("Chart data range exceeds the adapter limit.");
+  if(preserveValues)values=Array(rangeLength).fill(null);
   if (
     c1 > 16384 ||
     c2 > 16384 ||
@@ -1697,9 +1701,9 @@ export function prepareChartSeriesWorkbookMutation(
   const cache = directXmlChild(reference, chartNamespace, "numCache");
   const points = [...cache.getElementsByTagNameNS(chartNamespace, "pt")];
   if (
-    points.length !== values.length ||
+    Number(directXmlChild(cache,chartNamespace,"ptCount").getAttribute("val"))!==values.length||
     new Set(points.map((point) => point.getAttribute("idx"))).size !==
-      values.length
+      points.length||points.some(point=>!/^\d+$/u.test(point.getAttribute("idx"))||Number(point.getAttribute("idx"))>=values.length)
   )
     throw new Error(
       "Chart data cache must cover the complete requested range.",
@@ -1710,10 +1714,12 @@ export function prepareChartSeriesWorkbookMutation(
     );
     const text =
       point && directXmlChild(point, chartNamespace, "v").textContent;
+    if (!point||text?.trim()==="")return null;
     if (!text?.trim() || !Number.isFinite(Number(text)))
       throw new Error("Chart data cache value is not numeric.");
     return Number(text);
   });
+  if(preserveValues)values=previousValues.slice();
   const external = [
     ...chart.getElementsByTagNameNS(chartNamespace, "externalData"),
   ];
@@ -1777,8 +1783,10 @@ export function prepareChartSeriesWorkbookMutation(
     return text;
   };
   const changedCells = [];
+  const ownedCells = [];
   for (const [index, value] of values.entries()) {
     const address = `${columnName(c1 + (r1 === r2 ? index : 0))}${r1 + (c1 === c2 ? index : 0)}`;
+    ownedCells.push(address);
     const matches = cells.filter((cell) => cell.getAttribute("r") === address);
     if (
       matches.length !== 1 ||
@@ -1788,23 +1796,27 @@ export function prepareChartSeriesWorkbookMutation(
       throw new Error(
         "Chart target cell must be one authored numeric constant.",
       );
-    const node = directXmlChild(matches[0], spreadsheetNamespace, "v"),
-      previous = Number(node.textContent);
+    const node = optionalDirectXmlChild(matches[0], spreadsheetNamespace, "v"),
+      previous = node?.textContent.trim()?Number(node.textContent):null;
     if (
-      !node.textContent.trim() ||
-      !Number.isFinite(previous) ||
-      Math.abs(previous - previousValues[index]) >
+      previous!==null&&!Number.isFinite(previous)||
+      (previous===null)!==(previousValues[index]===null)||
+      previous!==null&&Math.abs(previous - previousValues[index]) >
         1e-12 * Math.max(1, Math.abs(previous), Math.abs(previousValues[index]))
     )
       throw new Error(
         "Chart cache and authored workbook disagree before mutation.",
       );
     if (value !== previousValues[index]) {
-      node.textContent = String(value);
+      if(value===null){if(node)matches[0].removeChild(node);}
+      else {
+        const valueNode=node??worksheet.createElementNS(spreadsheetNamespace,"v");valueNode.textContent=String(value);
+        if(!node)matches[0].appendChild(valueNode);
+      }
       changedCells.push({ address, previous, value });
     }
   }
-  if (!changedCells.length)
+  if (!changedCells.length && !allowNoop)
     throw new Error("Chart data mutation changed no cell.");
   workbook[worksheetPart] = serializeXml(worksheet);
   const bytes = zipSync(workbook, {
@@ -1816,10 +1828,90 @@ export function prepareChartSeriesWorkbookMutation(
     chartPart,
     workbookPart,
     worksheetPart,
+    sheetName,
     previousValues,
     values,
     changedCells,
+    ownedCells,
   };
+}
+
+// Prepare the entire canonical data matrix and its labels against the owned
+// workbook. This extends the same single-series authority; it never invents a
+// spreadsheet from chart caches or replaces unrelated workbook parts.
+export function prepareChartWorkbookMutation(input, request) {
+  const {slideIndex, shapeName, rowDescriptions, columnDescriptions} = request;
+  let {data}=request;
+  if(data==null){
+    if(rowDescriptions==null&&columnDescriptions==null)throw Error("Chart data request changes no data or labels.");
+    const first=prepareChartSeriesWorkbookMutation(input,{slideIndex,shapeName,seriesPosition:0,allowNoop:true});
+    const chart=parseXml(unzipSync(input),first.chartPart),series=[...chart.getElementsByTagNameNS(chartNamespace,"ser")];
+    const columns=series.map((_,seriesPosition)=>prepareChartSeriesWorkbookMutation(input,{slideIndex,shapeName,seriesPosition,allowNoop:true}).values);
+    if(columns.some(values=>values.length!==columns[0].length))throw Error("Chart series do not share one row count.");
+    data=columns[0].map((_,row)=>columns.map(values=>values[row]));
+  }
+  if (!Array.isArray(data) || !data.length || !Array.isArray(data[0]) || !data[0].length ||
+      data.some(row => !Array.isArray(row) || row.length !== data[0].length || row.some(value => value!==null&&!Number.isFinite(value))) ||
+      (rowDescriptions != null && (rowDescriptions.length !== data.length || rowDescriptions.some(text => typeof text !== "string"))) ||
+      (columnDescriptions != null && (columnDescriptions.length !== data[0].length || columnDescriptions.some(text => typeof text !== "string"))))
+    throw Error("Chart matrix and label dimensions differ.");
+  let source = input, prepared;
+  const changedCells = [], ownedNumericCells = new Set();
+  for (let seriesIndex=0;seriesIndex<data[0].length;seriesIndex++) {
+    prepared = prepareChartSeriesWorkbookMutation(source, {slideIndex,shapeName,seriesPosition:seriesIndex,values:data.map(row=>row[seriesIndex]),allowNoop:true});
+    changedCells.push(...prepared.changedCells);
+    for (const address of prepared.ownedCells) {
+      if (ownedNumericCells.has(address)) throw Error("Chart series overlap in their owned numeric cells.");
+      ownedNumericCells.add(address);
+    }
+    const entries = unzipSync(source); entries[prepared.workbookPart] = prepared.bytes;
+    source = zipSync(entries, {level:6,mtime:deterministicZipModifiedAt});
+  }
+  const sourceEntries=unzipSync(source), chart=parseXml(sourceEntries,prepared.chartPart);
+  const series=[...chart.getElementsByTagNameNS(chartNamespace,"ser")];
+  if (series.length!==data[0].length) throw Error("Chart matrix does not cover every authored series.");
+  const workbook=unzipSync(prepared.bytes), worksheet=parseXml(workbook,prepared.worksheetPart);
+  const namespace=worksheet.documentElement.namespaceURI;
+  const cells=[...worksheet.getElementsByTagNameNS(namespace,"c")];
+  const labelWrites=new Map();
+  const writeLabels=(reference,values) => {
+    if (!values) return;
+    if (!reference) throw Error("Requested chart labels have no owned worksheet reference.");
+    const formula=directXmlChild(reference,chartNamespace,"f").textContent;
+    const range=/^(?:'((?:[^']|'')+)'|([^!'\[\]]+))!\$?([A-Z]+)\$?([1-9]\d*)(?::\$?([A-Z]+)\$?([1-9]\d*))?$/u.exec(formula);
+    if (!range || (range[1]?.replaceAll("''", "'")??range[2])!==prepared.sheetName)
+      throw Error("Chart labels require one owned worksheet range.");
+    const col=text=>[...text].reduce((n,ch)=>n*26+ch.charCodeAt(0)-64,0);
+    const c1=col(range[3]),r1=Number(range[4]),c2=col(range[5]??range[3]),r2=Number(range[6]??range[4]);
+    if ((c1!==c2&&r1!==r2) || c2<c1 || r2<r1 || (c2-c1+1)*(r2-r1+1)!==values.length)
+      throw Error("Chart label range and values differ.");
+    const columnName=n=>{let text="";for(;n;n=Math.floor((n-1)/26))text=String.fromCharCode(65+(n-1)%26)+text;return text;};
+    values.forEach((text,index)=>{
+      const address=columnName(c1+(r1===r2?index:0))+(r1+(c1===c2?index:0));
+      if(labelWrites.has(address)&&labelWrites.get(address)!==text)throw Error("Chart labels overlap with different requested values.");
+      labelWrites.set(address,text);
+    });
+  };
+  for (const [index,item] of series.entries()) {
+    const category=optionalDirectXmlChild(item,chartNamespace,"cat");
+    if(rowDescriptions)writeLabels(category&&optionalDirectXmlChild(category,chartNamespace,"strRef"),rowDescriptions);
+    const name=optionalDirectXmlChild(item,chartNamespace,"tx");
+    if(columnDescriptions)writeLabels(name&&optionalDirectXmlChild(name,chartNamespace,"strRef"),[columnDescriptions[index]]);
+  }
+  for (const [address,text] of labelWrites) {
+    if (ownedNumericCells.has(address)) throw Error("Chart labels overlap with an owned numeric value.");
+    const matches=cells.filter(cell=>cell.getAttribute("r")===address);
+    if(matches.length!==1 || optionalDirectXmlChild(matches[0],namespace,"f"))throw Error("Chart label target must be one owned constant cell.");
+    const cell=matches[0];cell.setAttribute("t","inlineStr");
+    for(const child of [...cell.childNodes])if(child.nodeType===1&&["v","is"].includes(child.localName))cell.removeChild(child);
+    const inline=worksheet.createElementNS(namespace,"is"),value=worksheet.createElementNS(namespace,"t");
+    if(/^\s|\s$/u.test(text))value.setAttribute("xml:space","preserve");
+    value.textContent=text;inline.appendChild(value);cell.appendChild(inline);
+  }
+  workbook[prepared.worksheetPart]=serializeXml(worksheet);
+  return {...prepared,bytes:zipSync(workbook,{level:6,mtime:deterministicZipModifiedAt}),
+    originalWorkbookBytes:unzipSync(input)[prepared.workbookPart],changedCells,
+    labelWrites:[...labelWrites].map(([address,text])=>({address,text}))};
 }
 
 // A SmartArt drawing part is PowerPoint's cached rendering of the diagram
@@ -2592,10 +2684,19 @@ function mergeDirectSlideTopology(
       const kind = relationship.getAttribute("Type").split("/").at(-1);
       let mapped = copied.get(target);
       if (!mapped && kind === "slideLayout") {
+        if (Number.isSafeInteger(intent?.sourceLayoutSlideIndex)) {
+          const index=intent.sourceLayoutSlideIndex;
+          const nativeLayouts=relationshipsOfType(edited,retainedNativeSlides[index],"slideLayout");
+          const authoredLayouts=relationshipsOfType(original,orderedSlidePaths(original)[index],"slideLayout");
+          if(nativeLayouts.length!==1||authoredLayouts.length!==1||nativeLayouts[0].target!==target)
+            throw new Error("Native insertion changed its declared source layout.");
+          mapped=authoredLayouts[0].target;
+        }
         // Export can renumber layouts and create a new layout with an old
         // name but a different type. Use the edited identity, never the old
         // path or a name-only fallback. A genuinely new layout gets its own
         // copy of the proven authored master, leaving existing designs intact.
+        if (!mapped) {
         const identity = slideLayoutIdentity(edited, target);
         const owner = authoredMasterForLayout(target);
         const candidates = Object.keys(original).filter(part => /^ppt\/slideLayouts\/slideLayout[^/]+\.xml$/u.test(part))
@@ -2605,6 +2706,7 @@ function mergeDirectSlideTopology(
               relationshipsOfType(original, part, "slideMaster").some(master => master.target === owner);
           });
         if (candidates.length === 1) mapped = candidates[0];
+        }
       } else if (!mapped && kind === "slideMaster" && /^ppt\/slideLayouts\//u.test(source)) {
         mapped = cloneMasterForLayout(authoredMasterForLayout(source), destination);
       } else if (!mapped && kind === "notesMaster") {
@@ -3017,6 +3119,7 @@ function remapAuthoredRelationships(
   noEdit,
   sourceOperations,
   humanEdit = false,
+  sourceTargets = null,
 ) {
   const sourcePart = part.replace(/\/_rels\/([^/]+)\.rels$/u, "/$1");
   const document = parseXml({ [part]: bytes }, part);
@@ -3054,7 +3157,11 @@ function remapAuthoredRelationships(
     // A hyperlink or media edit can rewrite the slide's .rels without
     // changing its layout. Keep the author's exact original target instead
     // of guessing among same-named LibreOffice-normalized layouts.
+    const sourceSlideIndex=orderedSlidePaths(original).indexOf(sourcePart);
+    const declaration=sourceTargets?.find(target=>target.op==="set_slide_layout"&&target.slideIndex===sourceSlideIndex);
+    const ownedLayout=declaration?authoredMasterLayout(original,declaration):null;
     const remapped =
+      ownedLayout ? relativePart(sourcePart,ownedLayout.layout) :
       originalLayout.length === 1
         ? relativePart(sourcePart, originalLayout[0].target)
         : remapSlideLayoutTarget(sourcePart, target, original, noEdit);
@@ -3395,7 +3502,25 @@ function setRelationshipTarget(entries, sourcePart, type, target) {
   entries[relsPath] = serializeXml(document);
 }
 
-function mergeMasterThemeIntoOriginal(original, noEdit, edited) {
+// A selected master/layout is an ordered package relationship, not a unique
+// display name. Bind it before the edit; same-named layouts remain distinct.
+function authoredMasterLayout(entries,target) {
+  const presentation=parseXml(entries,presentationPath);
+  const relations=new Map(relationshipsOfType(entries,presentationPath,"slideMaster").map(item=>[item.id,item.target]));
+  const masters=[...presentation.getElementsByTagNameNS(presentationNamespace,"sldMasterId")].map(node=>relations.get(node.getAttributeNS(relationshipAttributeNamespace,"id")));
+  if(masters.length!==target.sourceMasterCount||!Number.isSafeInteger(target.masterIndex)||!masters[target.masterIndex])
+    throw Error("Native snapshot source master binding differs from admission.");
+  const master=masters[target.masterIndex],document=parseXml(entries,master);
+  const layoutRelations=new Map(relationshipsOfType(entries,master,"slideLayout").map(item=>[item.id,item.target]));
+  const layouts=[...document.getElementsByTagNameNS(presentationNamespace,"sldLayoutId")].map(node=>layoutRelations.get(node.getAttributeNS(relationshipAttributeNamespace,"id")));
+  if(layouts.length!==target.sourceLayoutCount||layouts.some(part=>!part))
+    throw Error("Native snapshot source layout binding differs from admission.");
+  if(target.op==="set_slide_layout"&&(!Number.isSafeInteger(target.layout)||!layouts[target.layout]))
+    throw Error("Native snapshot selected source layout is missing.");
+  return {master,layouts,layout:layouts[target.layout]??null};
+}
+
+function mergeMasterThemeIntoOriginal(original, noEdit, edited, sourceTarget = null) {
   const themeParts = Object.keys(edited).filter(
     (part) =>
       /^ppt\/theme\/theme[^/]+\.xml$/u.test(part) &&
@@ -3422,7 +3547,8 @@ function mergeMasterThemeIntoOriginal(original, noEdit, edited) {
   const originalLayouts = Object.keys(original).filter((part) =>
     /^ppt\/slideLayouts\/slideLayout[^/]+\.xml$/u.test(part),
   );
-  const selected = new Set(
+  const owned=sourceTarget?authoredMasterLayout(original,sourceTarget):null;
+  const selected = owned ? new Set(owned.layouts) : new Set(
     sourceLayouts.map((source) => {
       const identity = slideLayoutIdentity(noEdit, source);
       const matches = originalLayouts.filter((part) => {
@@ -3648,6 +3774,7 @@ export function mergeNumericWorkbookDelta(
   originalBytes,
   baselineBytes,
   editedBytes,
+  labelIntent = null,
 ) {
   if (
     ![originalBytes, baselineBytes, editedBytes].every(
@@ -3725,8 +3852,31 @@ export function mergeNumericWorkbookDelta(
   const numericEqual = (left, right) =>
     Math.abs(left - right) <=
     1e-12 * Math.max(1, Math.abs(left), Math.abs(right));
+  const strings = (entries) => {
+    if (!entries["xl/sharedStrings.xml"]) return [];
+    const document=parseXml(entries,"xl/sharedStrings.xml");
+    return [...document.getElementsByTagNameNS(document.documentElement.namespaceURI,"si")]
+      .map(item=>[...item.getElementsByTagNameNS(item.namespaceURI,"t")].map(text=>text.textContent).join(""));
+  };
+  const stringTables=[original,baseline,edited].map(strings);
+  const textValue=(cell,index)=>{
+    if(!cell||optionalDirectXmlChild(cell,cell.namespaceURI,"f"))return null;
+    const type=cell.getAttribute("t");
+    if(type==="s"){
+      const value=optionalDirectXmlChild(cell,cell.namespaceURI,"v")?.textContent;
+      return /^\d+$/u.test(value??"")?stringTables[index][Number(value)]??null:null;
+    }
+    if(type!=="inlineStr")return null;
+    const inline=optionalDirectXmlChild(cell,cell.namespaceURI,"is");
+    return inline?[...inline.getElementsByTagNameNS(cell.namespaceURI,"t")].map(text=>text.textContent).join(""):null;
+  };
+  const hasLabels=labelIntent?.writes?.size>0;
   for (const part of names) {
-    if (samePartBytes(baseline[part], edited[part])) continue;
+    const sheetPart=/^xl\/worksheets\/[^/]+\.xml$/u.test(part);
+    // A shared-string value can change while a worksheet's index stays the
+    // same. Inspect every worksheet when admitting explicit label writes.
+    if (samePartBytes(baseline[part], edited[part])&&!(hasLabels&&sheetPart)) continue;
+    if(hasLabels&&part==="xl/sharedStrings.xml")continue;
     // These properties describe the save, not chart data. All other metadata
     // and every unknown package payload must match the two native exports.
     if (part === "docProps/core.xml") {
@@ -3785,9 +3935,32 @@ export function mergeNumericWorkbookDelta(
     for (const [address, priorCell] of maps[1]) {
       const nextCell = maps[2].get(address);
       if (!nextCell) return null;
-      if (samePartBytes(serializeXml(priorCell), serializeXml(nextCell)))
-        continue;
       const authoredCell = maps[0].get(address);
+      const texts=[authoredCell,priorCell,nextCell].map(textValue);
+      const labelChanged=texts[1]!==texts[2];
+      const sameCell=samePartBytes(serializeXml(priorCell),serializeXml(nextCell));
+      if(sameCell&&!labelChanged)continue;
+      if(texts.every(text=>typeof text==="string")){
+        if(texts[0]!==texts[1])return null;
+        if(labelChanged&&(!hasLabels||owner!==labelIntent.sheetName||labelIntent.writes.get(address)!==texts[2]))return null;
+        // Compare all non-value properties, and retain the author's cell
+        // attributes/styles. The only admitted delta is the requested text.
+        const stripped=[priorCell,nextCell].map(cell=>{
+          const clone=cell.cloneNode(true);clone.removeAttribute("t");
+          for(const child of [...clone.childNodes])if(child.nodeType===1&&["v","is"].includes(child.localName))clone.removeChild(child);
+          return serializeXml(clone);
+        });
+        if(!samePartBytes(...stripped))return null;
+        if(labelChanged){
+          authoredCell.setAttribute("t","inlineStr");
+          for(const child of [...authoredCell.childNodes])if(child.nodeType===1&&["v","is"].includes(child.localName))authoredCell.removeChild(child);
+          const inline=source.createElementNS(authoredCell.namespaceURI,"is"),text=source.createElementNS(authoredCell.namespaceURI,"t");
+          if(/^\s|\s$/u.test(texts[2]))text.setAttribute("xml:space","preserve");
+          text.textContent=texts[2];inline.appendChild(text);authoredCell.appendChild(inline);worksheetChanges++;
+        }
+        nextCell.parentNode.replaceChild(priorCell.cloneNode(true),nextCell);
+        continue;
+      }
       const numeric = (cell) => {
         if (
           !cell ||
@@ -3795,29 +3968,35 @@ export function mergeNumericWorkbookDelta(
           optionalDirectXmlChild(cell, cell.namespaceURI, "f")
         )
           return null;
-        const value = optionalDirectXmlChild(cell, cell.namespaceURI, "v");
-        return value?.textContent.trim() &&
-          Number.isFinite(Number(value.textContent))
-          ? value
-          : null;
+        const node=optionalDirectXmlChild(cell,cell.namespaceURI,"v");
+        const value=node?.textContent.trim()?Number(node.textContent):null;
+        return value===null||Number.isFinite(value)?{node,value}:null;
       };
       const values = [authoredCell, priorCell, nextCell].map(numeric);
       if (
         values.some((value) => !value) ||
-        !numericEqual(
-          Number(values[0].textContent),
-          Number(values[1].textContent),
-        )
+        (values[0].value===null)!==(values[1].value===null)||
+        values[0].value!==null&&!numericEqual(values[0].value,values[1].value)
       )
         return null;
-      const nextValue = Number(values[2].textContent);
-      values[2].textContent = values[1].textContent;
-      if (!samePartBytes(serializeXml(priorCell), serializeXml(nextCell)))
+      const nextValue=values[2].value;
+      const stripValue=cell=>{
+        const clone=cell.cloneNode(true),value=optionalDirectXmlChild(clone,clone.namespaceURI,"v");
+        if(value)clone.removeChild(value);return serializeXml(clone);
+      };
+      if (!samePartBytes(stripValue(priorCell),stripValue(nextCell)))
         return null;
-      if (!numericEqual(Number(values[1].textContent), nextValue)) {
-        values[0].textContent = String(nextValue);
+      const valueChanged=(values[1].value===null)!==(nextValue===null)||nextValue!==null&&!numericEqual(values[1].value,nextValue);
+      if(valueChanged){
+        if(labelIntent&&(!labelIntent.values?.has(address)||owner!==labelIntent.sheetName||labelIntent.values.get(address)!==nextValue))return null;
+        if(nextValue===null){if(values[0].node)authoredCell.removeChild(values[0].node);}
+        else {
+          const valueNode=values[0].node??source.createElementNS(authoredCell.namespaceURI,"v");valueNode.textContent=String(nextValue);
+          if(!values[0].node)authoredCell.appendChild(valueNode);
+        }
         worksheetChanges++;
       }
+      nextCell.parentNode.replaceChild(priorCell.cloneNode(true),nextCell);
     }
     if (!samePartBytes(serializeXml(before), serializeXml(after))) return null;
     if (worksheetChanges) {
@@ -3965,6 +4144,25 @@ export function preserveOriginalPptxParts(
     return {bytes,report:{changedParts:change.changedParts,semanticPatchedParts:change.changedParts,suppressedNoopParts:[],suppressedOutOfBudgetParts:[],authoredShapeScopes:null,topologyAligned:false,topologyImportedDesign:null,topology:null,topologyExistingContentChanges:[]}};
   }
 
+  if (sourceOperations.includes("insert_slide")) {
+    if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== "insert_slide")
+      throw new Error("Native slide insertion requires one declared position.");
+    const sourceIndex = sourceTargets[0].slideIndex;
+    if (!Number.isSafeInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= orderedSlidePaths(original).length)
+      throw new Error("Native insertion position is outside the authored deck.");
+    const intent = [{op:"native_slide_topology",slideIndex:sourceIndex+1,...(sourceTargets[0].masterIndex==null ? {sourceLayoutSlideIndex:sourceIndex} : {})}];
+    const topology = directSlideTopologyPaths(original,noEdit,rawEdited,intent);
+    if (topology?.kind !== "insert" || topology.index !== sourceIndex+1)
+      throw new Error("Native insertion does not retain declared slide ownership.");
+    const aligned = renameEnginePackageParts(alignEngineSlideParts(original,rawEdited,topology.paths),workbookRenames);
+    const designProof = {};
+    const entries = mergeDirectSlideTopology(originalBytes,original,noEdit,aligned,topology,intent,designProof);
+    const bytes = zipSync(entries,{level:6,mtime:deterministicZipModifiedAt});
+    inspectOoxmlDocument(bytes);
+    const changed = changedPackageParts(original,entries);
+    return {bytes,report:{changedParts:changed,semanticPatchedParts:changed,suppressedNoopParts:[],suppressedOutOfBudgetParts:[],authoredShapeScopes:null,topologyAligned:true,topologyImportedDesign:Object.keys(designProof).length?designProof:null,topology:{kind:"insert",index:sourceIndex+1},topologyExistingContentChanges:[]}};
+  }
+
   if (sourceOperations.includes("duplicate_slide")) {
     if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== "duplicate_slide")
       throw new Error("Native slide duplication requires one declared source.");
@@ -4055,6 +4253,20 @@ export function preserveOriginalPptxParts(
         topologyImportedDesign,
       )
     : null;
+  const workbookLabelIntents=new Map();
+  for(const target of sourceTargets??[]){
+    if(target.op!=="set_chart_data"||!sourceOperations.includes(target.op))continue;
+    const prepared=prepareChartWorkbookMutation(originalBytes,{
+      ...target,shapeName:target.name,
+    });
+    const previous=workbookLabelIntents.get(prepared.workbookPart);
+    if(previous&&previous.sheetName!==prepared.sheetName)
+      throw Error("Chart label requests do not share one owned worksheet.");
+    const intent=previous??{sheetName:prepared.sheetName,writes:new Map(),values:new Map()};
+    for(const {address,value} of prepared.changedCells)intent.values.set(address,value);
+    for(const {address,text} of prepared.labelWrites)intent.writes.set(address,text);
+    workbookLabelIntents.set(prepared.workbookPart,intent);
+  }
   const merged = topologyPatch ?? {};
   const editedSlides = [];
   const semanticPatchedParts = topologyPatch
@@ -4064,7 +4276,7 @@ export function preserveOriginalPptxParts(
   const suppressedOutOfBudgetParts = [];
   const semanticMasterThemePatch =
     sourceOperations.length === 1 && sourceOperations[0] === "set_master_theme"
-      ? mergeMasterThemeIntoOriginal(original, noEdit, edited)
+      ? mergeMasterThemeIntoOriginal(original, noEdit, edited, sourceTargets?.find(target=>target.op==="set_master_theme")??null)
       : null;
   const presentationPartsPatch = semanticMasterThemePatch
     ? null
@@ -4196,7 +4408,7 @@ export function preserveOriginalPptxParts(
         ? mergeExtendedProperties(original[part], noEdit[part], edited[part])
         : null;
     const semanticWorkbookPatch = authoredChange && /^ppt\/embeddings\/[^/]+\.xlsx$/u.test(part)
-      ? mergeNumericWorkbookDelta(original[part], noEdit[part], edited[part])
+      ? mergeNumericWorkbookDelta(original[part], noEdit[part], edited[part],workbookLabelIntents.get(part))
       : null;
     const authoredDirectShape = semanticShapePatch && targetIndexesBySlide?.has(part) &&
       sourceOperations.every(operation => directShapeIndexOperations.includes(operation));
@@ -4253,6 +4465,7 @@ export function preserveOriginalPptxParts(
                       noEdit,
                       sourceOperations,
                       humanEdit,
+                      sourceTargets,
                     )
                   : undefined
                 : (relationshipRemap ??

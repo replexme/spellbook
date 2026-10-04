@@ -150,6 +150,11 @@ export function slideShapeTargets(operations, targets) {
     }
     if (!scopes.has(target.slideIndex))
       scopes.set(target.slideIndex, new Set());
+    if (target.op === "set_slide_metadata" && target.shapeNames != null) {
+      if (!Array.isArray(target.shapeNames) || target.shapeNames.some(name=>typeof name!=="string"||!name)) return null;
+      for(const name of target.shapeNames)scopes.get(target.slideIndex)?.add(name);
+      continue;
+    }
     if (scope === "no_shape") continue;
     // Direct edits can bind an unnamed authored object by its observed
     // top-level index. Other operations still need their named shape scope.

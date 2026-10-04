@@ -6,6 +6,10 @@ import {
 import { normalizedSections } from "../slide-sections.mjs";
 import { onlyOfficeCropObservation } from "./crop.mjs";
 import { onlyOfficeLineStylePatch } from "./line-style.mjs";
+import { onlyOfficeExtendedOperations } from "./extended-commands.mjs";
+import { simulateOnlyOfficeExtendedIntent } from "./extended-intent.mjs";
+import { rebaseOnlyOfficeIntentIdentities } from "./intent-identities.mjs";
+import { onlyOfficeDocumentFillCatalog } from "./document-fill-catalog.mjs";
 
 const formatting = {
   font_size: "GetFontSize",
@@ -78,7 +82,7 @@ function mergeRuns(runs) {
 }
 // Saved-file readback proves persistence, not that a setter did what was
 // requested. This independent semantic gate runs before the save callback.
-export function verifyOnlyOfficeProductIntent(before, after, commands) {
+export function verifyOnlyOfficeProductIntent(before, after, commands, prepared) {
   const left = structuredClone(before),
     right = structuredClone(after);
   delete left.revision;
@@ -147,15 +151,18 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
     observed.onlyoffice.drawings = restore(observed.onlyoffice.drawings);
     observed.narrow.drawingStyle = restore(observed.narrow.drawingStyle);
     observed.narrow.wordArt = restore(observed.narrow.wordArt);
-    const renumber = (elements, prefix) =>
-      elements.forEach((e, i) => {
-        e.elementId = prefix + "/" + i;
-        renumber(e.elements, e.elementId);
-      });
-    renumber(observed.elements, String(slideIndex));
+    rebaseOnlyOfficeIntentIdentities(observed,slideIndex);
   }
   const grouped = new Map();
-  for (const command of commands) {
+  for (const [commandIndex, command] of commands.entries()) {
+    if (onlyOfficeExtendedOperations.includes(command.op)) {
+      const binding=prepared?.[commandIndex];
+      if (!binding || Object.entries(command).some(([key,value])=>
+        JSON.stringify(binding[key])!==JSON.stringify(value)))
+        throw Error("onlyoffice_product_intent_preflight_authority_missing");
+      simulateOnlyOfficeExtendedIntent(left,right,[binding],prepared.slice(commandIndex));
+      continue;
+    }
     if (!onlyOfficeIntentOperations.includes(command.op))
       throw Error("onlyoffice_product_intent_unavailable:" + command.op);
     if (command.op === "set_sections") {
@@ -218,14 +225,8 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         left.slides.splice(command.targetSlideIndex, 0, moved);
       else if (command.op === "delete_slide" && (!moved || !left.slides.length))
         throw Error("onlyoffice_product_intent_slide_delete_invalid");
-      const renumber = (elements, prefix) =>
-        elements.forEach((element, index) => {
-          element.elementId = prefix + "/" + index;
-          renumber(element.elements, element.elementId);
-        });
       left.slides.forEach((slide, index) => {
-        slide.slideIndex = index;
-        renumber(slide.elements, String(index));
+        rebaseOnlyOfficeIntentIdentities(slide,index);
       });
       continue;
     }
@@ -305,12 +306,7 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
           a.elements.slice(0, index).filter((e) => e.kind === "table").length,
           1,
         );
-      const renumber = (elements, prefix) =>
-        elements.forEach((element, i) => {
-          element.elementId = prefix + "/" + i;
-          renumber(element.elements, element.elementId);
-        });
-      renumber(a.elements, String(slideIndex));
+      rebaseOnlyOfficeIntentIdentities(a,slideIndex);
       continue;
     }
     if (!actual) throw Error("onlyoffice_product_intent_target_missing");
@@ -451,6 +447,7 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         const arrays = [
           [oldDrawing.tableCells, newDrawing.tableCells],
           [oldDrawing.tableParagraphs, newDrawing.tableParagraphs],
+          ...(oldDrawing.tableCellProperties ? [[oldDrawing.tableCellProperties,newDrawing.tableCellProperties]] : []),
           [
             oldDrawing.tableLayout.rowHeights,
             newDrawing.tableLayout.rowHeights,
@@ -491,6 +488,7 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
       } else if (
         ["insert_table_columns", "delete_table_columns"].includes(op)
       ) {
+        const gridStarts=oldDrawing.tableCellProperties?.map(row=>row[0]?.column??0);
         const expected =
           oldDrawing.tableCells[0].length +
           (op === "insert_table_columns" ? command.count : -command.count);
@@ -507,6 +505,7 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         for (const [oldRows, newRows] of [
           [oldDrawing.tableCells, newDrawing.tableCells],
           [oldDrawing.tableParagraphs, newDrawing.tableParagraphs],
+          ...(oldDrawing.tableCellProperties ? [[oldDrawing.tableCellProperties,newDrawing.tableCellProperties]] : []),
           [oldTable.cells, newTable.cells],
         ])
           for (const [r, row] of oldRows.entries()) {
@@ -528,6 +527,9 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
                 ),
               );
           }
+        if(oldDrawing.tableCellProperties)for(const [r,row] of oldDrawing.tableCellProperties.entries()){
+          let column=gridStarts[r];for(const cell of row){cell.column=column;column+=cell.gridSpan;}
+        }
         if (
           op === "insert_table_columns" &&
           newDrawing.tableCells.some((row) =>
@@ -687,6 +689,8 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         )
           throw Error("onlyoffice_product_intent_mismatch:" + op);
         oldFill.opacity = newFill.opacity;
+        if (op === "fill_opacity" && oldDrawing.fill)
+          oldDrawing.fill.opacity = Math.round(command.opacity * 1000) / 1000;
       } else if (op === "fill_color" || op === "line_color") {
         const oldColor =
             op === "fill_color" ? oldStyle.fill : oldStyle.line?.color,
@@ -700,6 +704,14 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         )
           throw Error("onlyoffice_product_intent_mismatch:" + op);
         if (op === "fill_color") {
+          if (newDrawing.fill?.type !== 3 || !newDrawing.fill.color ||
+              newDrawing.fill.color.rgb?.R !== desired.r ||
+              newDrawing.fill.color.rgb?.G !== desired.g ||
+              newDrawing.fill.color.rgb?.B !== desired.b)
+            throw Error("onlyoffice_product_intent_mismatch:solid_fill");
+          // The requested solid fill replaces the complete previous fill.
+          // RGB and native fill kind were checked independently above.
+          oldDrawing.fill = structuredClone(newDrawing.fill);
           delete oldStyle.fillStyle;
           delete newStyle.fillStyle;
           delete oldStyle.fill;
@@ -779,6 +791,7 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
       }
     }
   }
+  if(Object.hasOwn(left,"styleCatalog"))left.styleCatalog=onlyOfficeDocumentFillCatalog(left);
   const difference = firstDocumentStateDifference(left, right, "document");
   if (difference)
     throw Error("onlyoffice_product_unrequested_change:" + difference.path);

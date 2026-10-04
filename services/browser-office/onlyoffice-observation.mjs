@@ -113,6 +113,53 @@ export async function observeOnlyOfficeCandidate(frame) {
         TableCellSeparator: "\r\n",
         TableRowSeparator: "\r\n",
       };
+      const scalarProperties = (object, keys) => object
+        ? Object.fromEntries(keys.map(key => [key, object[key] ?? null])) : null;
+      const fillProperties = (object) => {
+        if (!object?.fill) return null;
+        const fill = object.fill, type = fill.type;
+        const alpha = object.transparent != null ? object.transparent * 100 / 255 : (fill.color?.Mods?.Mods?.find(mod=>mod.name==="alpha")?.val??100000)/1000;
+        const authoredColor=nativeColor(fill.color);
+        if(authoredColor)authoredColor.modifiers=authoredColor.modifiers.filter(mod=>mod.name!=="alpha");
+        return {
+          type, opacity: alpha == null ? null : Math.round(alpha * 1000) / 1000,
+          color: authoredColor,
+          gradient: fill.colors ? {
+            stops: fill.colors.map(stop => ({position:stop.pos, color:nativeColor(stop.color)})),
+            linear: scalarProperties(fill.lin, ["angle", "scale"]),
+            path: fill.path ? {...scalarProperties(fill.path, ["path"]),rect:scalarProperties(fill.path.rect,["l","t","r","b"])} : null,
+            rotateWithShape: fill.rotateWithShape ?? null,
+          } : null,
+          pattern: fill.ftype != null ? {type:fill.ftype, foreground:nativeColor(fill.fgClr),background:nativeColor(fill.bgClr)} : null,
+        };
+      };
+      const effectDag = object => {
+        if (!object?.EffectDag) return null;
+        if (typeof object.EffectDag.Write_ToBinary !== "function" || typeof window.AscCommon.CMemory !== "function")
+          throw Error("onlyoffice_product_effect_dag_observation_unavailable");
+        const memory = new window.AscCommon.CMemory();
+        object.EffectDag.Write_ToBinary(memory);
+        if (memory.GetCurPosition() > 1000000) throw Error("onlyoffice_product_effect_dag_observation_limit");
+        return memory.GetBase64Memory2(0,memory.GetCurPosition());
+      };
+      const effectsProperties = (object) => {
+        const list = object?.EffectLst;
+        if (!list) return null;
+        return {
+          outerShadow: list.outerShdw ? {
+            ...scalarProperties(list.outerShdw, ["blurRad", "dist", "dir", "sx", "sy", "kx", "ky", "algn", "rotWithShape"]),
+            color: nativeColor(list.outerShdw.color),
+          } : null,
+          glow: list.glow ? {radius: list.glow.rad ?? null, color: nativeColor(list.glow.color)} : null,
+          softEdge: list.softEdge?.rad ?? null,
+          // Preserve effects that these commands do not own as well.
+          blur: scalarProperties(list.blur, ["rad", "grow"]),
+          reflection: scalarProperties(list.reflection, ["blurRad", "stA", "stPos", "endA", "endPos", "dist", "dir", "fadeDir", "sx", "sy", "kx", "ky", "algn", "rotWithShape"]),
+          innerShadow: list.innerShdw ? {...scalarProperties(list.innerShdw, ["blurRad", "dist", "dir"]), color: nativeColor(list.innerShdw.color)} : null,
+          presetShadow: list.prstShdw ? {...scalarProperties(list.prstShdw,["prst","dir","dist"]),color:nativeColor(list.prstShdw.color)} : null,
+          fillOverlay: list.fillOverlay ? {blend:list.fillOverlay.blend,fill:fillProperties(list.fillOverlay.fill)} : null,
+        };
+      };
       const paragraphs = (doc, at, textOptions = { Numbering: false }) => {
         const properties = (pr) => {
           const value = {};
@@ -163,6 +210,8 @@ export async function observeOnlyOfficeCandidate(frame) {
                     auto: color.IsAutoColor(),
                   }
                 : null;
+          value.effects = effectsProperties(pr.TextPr?.spellbookEffects);
+          value.effectDag = effectDag(pr.TextPr?.spellbookEffects);
           return value;
         };
         return doc.GetAllParagraphs().map((paragraph, index) => {
@@ -209,6 +258,13 @@ export async function observeOnlyOfficeCandidate(frame) {
               ? runs.map((run) => run.text).join("") + "\r\n"
               : paragraph.GetText(textOptions),
             runs,
+            format: {
+              indent: scalarProperties(paragraph.Paragraph.Pr?.Ind, ["Left", "Right", "FirstLine"]),
+              spacing: scalarProperties(paragraph.Paragraph.Pr?.Spacing, ["Before", "After", "Line", "LineRule"]),
+              bidi: paragraph.Paragraph.Pr?.Bidi ?? null,
+              level: paragraph.Paragraph.Pr?.Lvl ?? null,
+              list: scalarProperties(paragraph.Paragraph.Pr?.Bullet?.bulletType, ["type", "Char", "AutoNumType", "startAt"]),
+            },
           };
         });
       };
@@ -230,6 +286,50 @@ export async function observeOnlyOfficeCandidate(frame) {
         }
         for (const k of ["GetRotation", "GetFlipH", "GetFlipV"])
           state[k] = read(d, k, at);
+        const native = d.Drawing;
+        state.diagramPointIds = native.getSmartArtPointContent?.()?.map(item=>item.point?.modelId).filter(Boolean) ?? null;
+        state.placeholder = native.isPlaceholder?.() ? {
+          type:native.getPlaceholderType(),index:native.getPlaceholderIndex(),
+          kind:({[window.AscFormat.phType_ftr]:"footer",[window.AscFormat.phType_dt]:"dateTime",[window.AscFormat.phType_sldNum]:"pageNumber",[window.AscFormat.phType_hdr]:"header"})[native.getPlaceholderType()]??"other",
+        } : null;
+        state.geometry = native.spPr?.geometry ? {
+          preset: native.spPr.geometry.preset ?? null,
+          adjustments: {...native.spPr.geometry.avLst},
+          paths: native.spPr.geometry.preset ? null : native.spPr.geometry.pathLst.map(path => ({
+            ...scalarProperties(path,["stroke","fill","pathW","pathH","extrusionOk"]),
+            commands: path.ArrPathCommandInfo.map(command => ({...command})),
+          })),
+        } : null;
+        state.fill = fillProperties(native.spPr?.Fill);
+        state.bodyProperties = native.txBody?.bodyPr ? {
+          ...scalarProperties(native.txBody.bodyPr, ["lIns", "rIns", "tIns", "bIns", "wrap", "horzOverflow", "vertOverflow", "vert", "anchor", "anchorCtr", "numCol", "spcCol", "rtlCol", "rot", "upright"]),
+          textFit: scalarProperties(native.txBody.bodyPr.textFit, ["type", "fontScale", "lnSpcReduction"]),
+          warp: native.txBody.bodyPr.prstTxWarp?.preset ?? null,
+        } : null;
+        state.effects = effectsProperties(native.spPr?.effectProps);
+        state.effectDag = effectDag(native.spPr?.effectProps);
+        if (type === "connector") {
+          const connections = native.nvSpPr?.nvUniSpPr;
+          const canonicalId = (id) => {
+            let found = null;
+            const model = window.Asc.editor.WordControl.m_oLogicDocument;
+            const visit = (objects, prefix) => objects.forEach((object, index) => {
+              const path = prefix + "/" + index;
+              if (object.Id === id) found = path;
+              if (object.spTree) visit(object.spTree, path);
+            });
+            model.Slides.forEach((slide, index) => visit(slide.cSld.spTree, String(index)));
+            return found;
+          };
+          state.connector = {
+            preset: native.spPr?.geometry?.preset ?? null,
+            startElementId: canonicalId(connections?.stCnxId), endElementId: canonicalId(connections?.endCnxId),
+            startGluePoint: connections?.stCnxIdx ?? null, endGluePoint: connections?.endCnxIdx ?? null,
+          };
+        }
+        if(native.blipFill)state.imagePath = window.AscCommon.g_oDocumentUrls.getImageLocal(native.blipFill.RasterImageId) ?? native.blipFill.RasterImageId;
+        const media = native.nvPicPr?.nvPr?.unimedia;
+        state.media = media ? scalarProperties(media, ["type", "media"]) : null;
         // Public GetContent creates a missing text body; use the existing content only.
         const content = type === "table" ? null : d.Drawing?.getDocContent?.();
         state.text = content?.GetText?.({ Numbering: false }) ?? null;
@@ -250,6 +350,18 @@ export async function observeOnlyOfficeCandidate(frame) {
             ),
           );
         if (d.Table?.Content) {
+          state.tableCellProperties = d.Table.Content.map(row => row.Content.map(cell => {
+            const margins=cell.GetMargins(), borders=cell.GetBorders();
+            return {
+              gridSpan:cell.GetGridSpan(), verticalMerge:cell.GetVMerge(),
+              column:row.GetCellInfo(cell.Index).StartGridCol,
+              fill:fillProperties(cell.Get_CompiledPr(false).Shd?.Unifill),
+              margins:Object.fromEntries(["Left","Right","Top","Bottom"].map(side => [side,margins[side]?.W??null])),
+              borders:Object.fromEntries(["Left","Right","Top","Bottom"].map(side => [side,borders[side] ? {
+                size:borders[side].Size??null,value:borders[side].Value??null,fill:fillProperties(borders[side].Unifill),
+              } : null])),
+            };
+          }));
           const bounds = d.Table.Get_PageBounds(0);
           const frame = d.Drawing.spPr?.xfrm;
           state.tableLayout = {
@@ -289,6 +401,19 @@ export async function observeOnlyOfficeCandidate(frame) {
             ),
           );
         if (type === "chart") {
+          const nativeChart = d.Chart.chart;
+          const labels = nativeChart.plotArea.charts[0]?.dLbls;
+          state.chartFormat = {
+            title: nativeChart.title?.tx?.rich?.content?.GetText?.({Numbering:false}) ?? null,
+            legend: nativeChart.legend ? {position: nativeChart.legend.legendPos ?? null} : null,
+            axes: nativeChart.plotArea.axId.map(axis => ({type:axis.getObjectType(),kind:axis.getObjectType()===window.AscDFH.historyitem_type_CatAx?"category":axis.getObjectType()===window.AscDFH.historyitem_type_ValAx?"value":"other", deleted:axis.bDelete ?? null,
+              authored:{...scalarProperties(axis,["axPos","majorTickMark","minorTickMark","tickLblPos","crosses","crossesAt"]),
+                scaling:scalarProperties(axis.scaling,["logBase","orientation","max","min"]),
+                numFmt:scalarProperties(axis.numFmt,["formatCode","sourceLinked"]),
+                title:axis.title?.tx?.rich?.content?.GetText?.({Numbering:false})??null}})),
+            dataLabels: scalarProperties(labels, ["showSerName", "showCatName", "showVal", "showPercent"]),
+            seriesColors: d.Chart.getAllSeries().map(series => nativeColor(series.spPr?.Fill?.fill?.color)),
+          };
           state.chartType = read(d, "GetChartType", at);
           const nativeSeries = d.Chart?.getAllSeries?.();
           if (!Array.isArray(nativeSeries))
@@ -305,13 +430,17 @@ export async function observeOnlyOfficeCandidate(frame) {
                   : owner?.getObjectType?.();
               if (chartType === undefined)
                 unavailable.push(at + `.series${index}.native-type:missing`);
-              return { chartType: chartType ?? null };
+              return { chartType: chartType ?? null,
+                trendlines:(series.trendlines??[]).map(line=>scalarProperties(line,["backward","dispEq","dispRSqr","forward","intercept","name","order","period","trendlineType"])),
+                errorBars:(series.errBars??[]).map(bars=>scalarProperties(bars,["errBarType","errDir","errValType","noEndCap","val"])),
+              };
             }) ?? null;
           // Version-pinned SDK readback supplements the narrower public series getters.
-          const cache = (c) =>
+          const cache = (c, numericValues = true) =>
             c
               ? {
                   formula: c.f ?? null,
+                  count:(c.numCache??c.strCache??c).getPtCount?.()??(c.numCache??c.strCache??c).ptCount??null,
                   points: (
                     c.numCache?.pts ??
                     c.strCache?.pts ??
@@ -319,8 +448,9 @@ export async function observeOnlyOfficeCandidate(frame) {
                     []
                   ).map((p) => ({
                     idx: p.idx,
+                    formatCode:p.formatCode??null,
                     val:
-                      typeof p.val === "string" &&
+                      numericValues && typeof p.val === "string" &&
                       /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/u.test(
                         p.val,
                       )
@@ -332,12 +462,14 @@ export async function observeOnlyOfficeCandidate(frame) {
           state.cachedSeries =
             d.Chart?.getAllSeries?.()?.map((s) => ({
               idx: s.idx,
+              name: s.tx?.strRef ? cache(s.tx.strRef, false) : s.tx?.v ?? null,
               val: cache(s.val?.numRef ?? s.val?.numLit),
               cat: cache(
                 s.cat?.strRef ??
                   s.cat?.numRef ??
                   s.cat?.strLit ??
                   s.cat?.numLit,
+                !(s.cat?.strRef || s.cat?.strLit),
               ),
               xVal: cache(s.xVal?.numRef ?? s.xVal?.numLit),
               yVal: cache(s.yVal?.numRef ?? s.yVal?.numLit),
@@ -405,6 +537,7 @@ export async function observeOnlyOfficeCandidate(frame) {
           scheme = theme?.themeElements;
         return {
           name: master.cSld?.name ?? null,
+          headerFooter: scalarProperties(master.hf,["dt","ftr","hdr","sldNum"]),
           background: background(master),
           drawings: master.cSld.spTree.map((x, i) =>
             drawing(wrap(x), `master${index}.drawing${i}`),
@@ -425,6 +558,7 @@ export async function observeOnlyOfficeCandidate(frame) {
             : null,
           layouts: (master.sldLayoutLst ?? []).map((layout, i) => ({
             name: layout.cSld?.name ?? null,
+            headerFooter: scalarProperties(layout.hf,["dt","ftr","hdr","sldNum"]),
             type: layout.type,
             background: background(layout),
             drawings: layout.cSld.spTree.map((x, j) =>
@@ -452,6 +586,17 @@ export async function observeOnlyOfficeCandidate(frame) {
               name: s.Slide.cSld.name ?? "",
               background: background(s.Slide),
             };
+            state.backgroundObjectsVisible = s.Slide.showMasterSp ?? null;
+            state.layoutBinding = s.Slide.Layout?.Master && Array.isArray(model.slideMasters) && Array.isArray(s.Slide.Layout.Master.sldLayoutLst) ? {
+              masterIndex:model.slideMasters.indexOf(s.Slide.Layout.Master),
+              layoutIndex:s.Slide.Layout.Master.sldLayoutLst.indexOf(s.Slide.Layout),
+            } : null;
+            state.comments = (s.Slide.slideComments?.comments ?? []).map(comment => ({
+              text:comment.Data.m_sText, author:comment.Data.m_sUserName,
+              x: Math.round(comment.x * 100), y: Math.round(comment.y * 100),
+              time:comment.Data.m_sTime, initials:comment.spellbookInitials??comment.Data.m_sUserName.split(" ").filter(Boolean).map(word=>word.slice(0,1)).join(""), solved:comment.Data.m_bSolved ?? false,
+              replies:(comment.Data.m_aReplies ?? []).map(reply => ({text:reply.m_sText,author:reply.m_sUserName,time:reply.m_sTime,initials:reply.spellbookInitials??reply.m_sUserName.split(" ").filter(Boolean).map(word=>word.slice(0,1)).join("")})),
+            }));
             // Notes getters can create a missing body; inspect existing notes without writes.
             const noteBody = s.Slide?.notes?.getBodyShape?.();
             state.notes =
@@ -493,6 +638,15 @@ export async function observeOnlyOfficeCandidate(frame) {
                     "GetTriggerType",
                   ])
                     v[k] = read(e, k, at + ".effect" + j);
+                  v.targetElementId = (() => {
+                    const native=e.GetShape()?.Drawing;
+                    let found=null;
+                    const visit=(objects,prefix)=>objects.forEach((object,index)=>{const id=prefix+"/"+index;if(object===native)found=id;if(object.spTree)visit(object.spTree,id);});
+                    model.Slides.forEach((slide,index)=>visit(slide.cSld.spTree,String(index)));
+                    return found;
+                  })();
+                  v.preset = scalarProperties(e.Effect?.cTn,["presetClass","presetID","presetSubtype"]);
+                  v.timeProperties = scalarProperties(e.Effect?.cTn,["accel","afterEffect","autoRev","bldLvl","decel","display","evtFilter","fill","grpId","masterRel","nodePh","nodeType","repeatCount","repeatDur","restart","spd","syncBehavior","tmFilter"]);
                   return v;
                 });
             }

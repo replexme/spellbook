@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createProductSession } from "./product-session.mjs";
 
-function setup(engineOptions = {}) {
+function setup(engineOptions = {}, sessionOptions = {}) {
   let value = 1,
     prepared = false,
     transaction = null,
@@ -101,6 +101,7 @@ function setup(engineOptions = {}) {
     journal,
     operationContracts: { set: {}, reject: {} },
     validateCommand: (c) => Number.isSafeInteger(c.value),
+    ...sessionOptions,
   });
   return {
     session,
@@ -120,6 +121,37 @@ const apply = (s, value, extra = {}) =>
     expectedRevision: "r" + (value - 1),
     commands: [{ op: "set", value, ...extra }],
   });
+
+test("resource authority failure precedes native preflight and history", async () => {
+  const s=setup({}, {prepareResources:async()=>{throw Error("asset_owner_mismatch");}});
+  await s.session.open(s.bytes(1));
+  await assert.rejects(apply(s,2),/asset_owner_mismatch/);
+  assert.deepEqual(s.calls,[]);
+  assert.equal((await s.session.observe()).revision,"r1");
+  assert.equal(s.record(),null);
+});
+
+test("resource preparation receives copies of admitted bytes and requests", async () => {
+  const s=setup({}, {prepareResources:async({bytes,observation,commands})=>{
+    bytes[2]=9;observation.revision="foreign";commands[0].value=9;
+  }});
+  await s.session.open(s.bytes(1));
+  assert.equal((await apply(s,2)).observation.revision,"r2");
+  assert.equal(s.record().candidateBytes[2],2);
+});
+
+test("a human edit during asynchronous resource preparation prevents AI history", async () => {
+  let release,started;
+  const ready=new Promise(resolve=>{started=resolve;});
+  const wait=new Promise(resolve=>{release=resolve;});
+  const s=setup({}, {prepareResources:async()=>{started();await wait;}});
+  await s.session.open(s.bytes(1));
+  const pending=apply(s,2);
+  await ready;s.change(7);release();
+  await assert.rejects(pending,/document_changed/);
+  assert(!s.calls.includes("begin"));
+  assert.equal(s.record(),null);
+});
 
 test("full batch preflight rejects its last target before any native edit/history", async () => {
   const s = setup();

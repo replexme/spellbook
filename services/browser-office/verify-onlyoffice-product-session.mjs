@@ -15,7 +15,11 @@ import {
   inspectOoxmlDocument,
   preserveOriginalPptxParts,
 } from "./ooxml-worker-source.mjs";
+import { onlyOfficeExtendedCommandCase } from "./onlyoffice/product-command-cases.mjs";
+import { createOnlyOfficeResourcePreparation } from "./onlyoffice/product-resource-preparation.mjs";
+import { onlyOfficeSourceTargets } from "./onlyoffice/source-targets.mjs";
 import { createOnlyOfficeComparisonHost } from "./onlyoffice/comparison-host.mjs";
+import { addOnlyOfficeProductBootstrap, addOnlyOfficeProductResourceHost } from "./onlyoffice/product-runtime-addon.mjs";
 import {
   createOnlyOfficeProductEngine,
   observeOnlyOfficeProduct,
@@ -33,6 +37,11 @@ const flags = (name, fallback) => {
   const i = process.argv.indexOf(name);
   return i < 0 ? fallback : process.argv[i + 1];
 };
+const commandFile = flags("--command-json", null);
+const suppliedCommand = commandFile ? JSON.parse(await fs.readFile(path.resolve(commandFile), "utf8")) : null;
+const requestedOperation = suppliedCommand?.op ?? flags("--operation", "move");
+const resourceFile = flags("--resources-json", null);
+const suppliedResources = resourceFile ? JSON.parse(await fs.readFile(path.resolve(resourceFile), "utf8")) : {};
 const selectedSlideIndex = Number(flags("--slide-index", "0"));
 assert(
   Number.isSafeInteger(selectedSlideIndex) && selectedSlideIndex >= 0,
@@ -193,8 +202,16 @@ const candidateServer = createServer(async (req, res) => {
     if (!file.startsWith(path.join(candidate, "dist") + path.sep))
       throw Error("invalid_path");
     const bytes = await fs.readFile(file);
+    let served=bytes;
+    if(name === "web-apps/apps/presentationeditor/main/index.html")served=Buffer.from(addOnlyOfficeProductBootstrap(bytes.toString("utf8")));
+    if(name === "assets/officeHost-C2hljZhH.js")served=Buffer.from(addOnlyOfficeProductResourceHost(bytes.toString("utf8")));
+    if(served!==bytes){
+      report.runtimeAddons??=[];
+      const entry={path:name,retainedSha256:hash(bytes),servedSha256:hash(served)};
+      if(!report.runtimeAddons.some(item=>item.path===name))report.runtimeAddons.push(entry);
+    }
     res.writeHead(200, { "content-type": contentType(file) });
-    res.end(bytes);
+    res.end(served);
   } catch {
     res.writeHead(404);
     res.end();
@@ -801,7 +818,7 @@ const engine = createOnlyOfficeProductEngine({
           "insert_table_columns",
           "delete_table_rows",
           "delete_table_columns",
-        ].includes(flags("--operation", "move"))
+        ].includes(requestedOperation)
       )
         inspectedTableDetails = await tableDetails(opened.frame);
       return observation;
@@ -819,7 +836,7 @@ const engine = createOnlyOfficeProductEngine({
     );
     await captureStableOnlyOfficeBaseline(mainPage, save);
   },
-  snapshot: async ({ before, commands, authorize }) => {
+  snapshot: async ({ before, commands, prepared, authorize }) => {
     if (commands) {
       lastCommandObservation = lastObserved;
       if (
@@ -831,7 +848,7 @@ const engine = createOnlyOfficeProductEngine({
           "insert_table_columns",
           "delete_table_rows",
           "delete_table_columns",
-        ].includes(flags("--operation", "move"))
+        ].includes(requestedOperation)
       )
         commandTableDetails = await tableDetails(mainFrame);
       assert.equal(
@@ -845,50 +862,7 @@ const engine = createOnlyOfficeProductEngine({
     }
     await mainPage.evaluate((intent) => (window.__comparisonIntent = intent), {
       sourceOperations: commands?.map((c) => c.op) ?? null,
-      sourceTargets:
-        commands?.map((c) => {
-          if (
-            [
-              "rename_slide",
-              "move_slide",
-              "delete_slide",
-              "duplicate_slide",
-              "set_sections",
-              "set_slide_hidden",
-              "set_background",
-              "set_speaker_notes",
-            ].includes(c.op)
-          )
-            return {
-              op: c.op,
-              slideIndex: c.slideIndex,
-              ...(c.op === "set_sections" ? { sections: c.sections } : {}),
-              ...(c.op === "move_slide"
-                ? { targetSlideIndex: c.targetSlideIndex }
-                : {}),
-            };
-          if (c.op === "set_reading_order")
-            return {
-              op: c.op,
-              slideIndex: Number(c.elementIds[0].split("/")[0]),
-            };
-          const [slideIndex, shapeIndex] = c.elementId.split("/").map(Number);
-          return {
-            op: c.op,
-            slideIndex,
-            shapeIndex,
-            ...([
-              "insert_table_rows",
-              "delete_table_rows",
-              "insert_table_columns",
-              "delete_table_columns",
-            ].includes(c.op)
-              ? { index: c.index, count: c.count }
-              : {}),
-            name:
-              before.slides[slideIndex].elements[shapeIndex].objectName ?? "",
-          };
-        }) ?? null,
+      sourceTargets: onlyOfficeSourceTargets(before, commands, prepared),
     });
     pendingAuthorization = authorize;
     try {
@@ -955,7 +929,7 @@ for (const method of [
     if (method === "observe") lastObserved = result;
     return result;
   };
-if (flags("--operation", "move") === "font_color") {
+if (requestedOperation === "font_color") {
   const applyNative = engine.apply;
   engine.apply = async (command) => {
     const value = await applyNative(command);
@@ -985,9 +959,9 @@ if (flags("--operation", "move") === "font_color") {
   };
 }
 const nativeVerifyIntent = engine.verifyIntent;
-engine.verifyIntent = (before, after, commands) => {
+engine.verifyIntent = (before, after, commands, prepared) => {
   lastCommandObservation = structuredClone(after);
-  return nativeVerifyIntent(before, after, commands);
+  return nativeVerifyIntent(before, after, commands, prepared);
 };
 const nativeBegin = engine.begin,
   nativeFinish = engine.finish;
@@ -1015,8 +989,30 @@ engine.finish = async (token, commit) => {
   );
 };
 report.nativeTransport = "origin-and-session-bound-message-port";
+const resourcePort = {
+  registerAsset: async (asset) => mainPage.evaluate(async (payload) => {
+    const decode = (value) => window.__productBinaryCodec.decodeBinary(value);
+    return window.__productNativePort.registerAsset({...payload, bytes: decode(payload.bytes),
+      ...(payload.posterBytes ? {posterBytes: decode(payload.posterBytes)} : {})});
+  }, {...asset, bytes: Buffer.from(asset.bytes).toString("base64"),
+      ...(asset.posterBytes ? {posterBytes: Buffer.from(asset.posterBytes).toString("base64")} : {})}),
+  registerChartWorkbook: async (workbook) => mainPage.evaluate(async (payload) =>
+    window.__productNativePort.registerChartWorkbook({...payload,
+      bytes: window.__productBinaryCodec.decodeBinary(payload.bytes)}),
+    {...workbook, bytes: Buffer.from(workbook.bytes).toString("base64")}),
+};
+const prepareResources = createOnlyOfficeResourcePreparation({
+  port: resourcePort,
+  loadAsset: async (assetId) => {
+    const asset = suppliedResources[assetId];
+    assert(asset && asset.assetId === assetId, "Owned fixture asset missing");
+    return {...asset, bytes: new Uint8Array(await fs.readFile(path.resolve(asset.path))),
+      ...(asset.posterPath ? {posterBytes: new Uint8Array(await fs.readFile(path.resolve(asset.posterPath)))} : {})};
+  },
+});
 const session = createProductSession({
   engine,
+  prepareResources,
   journal,
   validateCommand: validate,
   operationContracts: capabilities.mutationModel.operations,
@@ -1113,7 +1109,8 @@ try {
     );
     report.status = "native-file-observation-verified";
   } else {
-    const operation = flags("--operation", "move");
+    const operation = requestedOperation;
+    const extendedCase = suppliedCommand ?? onlyOfficeExtendedCommandCase({operation,observation:before,schema:capabilities.toolInputSchema,slideIndex:selectedSlideIndex,assets:{image:flags("--image-asset-id",null),media:flags("--media-asset-id",null)}});
     const targets = before.slides[selectedSlideIndex].elements.filter(
       (x) => x.kind === "shape" && Number.isFinite(x.x),
     );
@@ -1147,7 +1144,7 @@ try {
                   "flip",
                 ].includes(operation)
               ? targets.at(-1)
-              : targets[0];
+              : targets[0] ?? before.slides[selectedSlideIndex].elements.find(element => Number.isFinite(element.x) && Number.isFinite(element.y));
     assert(target);
     const command = Object.fromEntries(
       Object.keys(capabilities.toolInputSchema.properties).map((key) => [
@@ -1263,7 +1260,9 @@ try {
         color: 0x27b575,
       },
     };
-    Object.assign(command, args[operation]);
+    Object.assign(command, extendedCase ?? args[operation]);
+    assert.equal(command.op, operation);
+    report.command = structuredClone(command);
     let finalExpected;
     const manualFlow = process.argv.includes("--manual-flow");
     phaseStarted = performance.now();
@@ -1284,10 +1283,10 @@ try {
         Number(target.elementId.split("/")[1])
       ];
     const drawing =
-      applied.observation.slides[selectedSlideIndex].onlyoffice.drawings[
+      applied.observation.slides[selectedSlideIndex]?.onlyoffice.drawings[
         Number(target.elementId.split("/")[1])
       ];
-    const styles = drawing.paragraphs?.flatMap((p) =>
+    const styles = drawing?.paragraphs?.flatMap((p) =>
       p.runs.map((r) => r.style),
     );
     const property = {
@@ -1328,7 +1327,7 @@ try {
         afterTarget.text.replace(/\r\n/g, "\n").replace(/\n$/, ""),
         command.text.replace(/\r\n/g, "\n"),
       );
-    for (const element of before.slides[selectedSlideIndex].elements.filter(
+    if (!extendedCase) for (const element of before.slides[selectedSlideIndex].elements.filter(
       (e) => operation !== "delete_slide" && e.elementId !== target.elementId,
     )) {
       const expected = structuredClone(element);
@@ -1383,7 +1382,7 @@ try {
     report.rendering.edited = await pixels(mainFrame);
     report.editedTableDetails = await tableDetails(mainFrame);
     if (
-      ![
+      !extendedCase && ![
         "duplicate_slide",
         "set_sections",
         "set_shape_name",
@@ -1416,7 +1415,7 @@ try {
       throw Error("injected_after_native_change");
     };
     const rollbackCommand = {
-      ...command,
+      ...Object.fromEntries(Object.keys(capabilities.toolInputSchema.properties).map(key => [key, null])),
       op: "move",
       x: target.x + 1000,
       y: target.y,
@@ -1459,9 +1458,9 @@ try {
     await assert.rejects(
       session.apply({
         expectedRevision: before.revision,
-        commands: [rollbackCommand, { ...command, op: "set_slide_size" }],
+        commands: [rollbackCommand, { ...rollbackCommand, elementId: "999999/999999" }],
       }),
-      /operation_unavailable/,
+      /target_missing/,
     );
     assert.equal(beginCount, 0);
     engine.begin = originalBegin;
