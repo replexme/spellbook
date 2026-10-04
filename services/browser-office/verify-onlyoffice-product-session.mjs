@@ -949,423 +949,439 @@ try {
     );
   }
   report.rendering = { before: await pixels(mainFrame) };
-  const operation = flags("--operation", "move");
-  const targets = before.slides[selectedSlideIndex].elements.filter(
-    (x) => x.kind === "shape" && Number.isFinite(x.x),
-  );
-  const target =
-    selectedElementIndex !== null
-      ? before.slides[selectedSlideIndex].elements[selectedElementIndex]
-      : operation === "set_table_cell"
-        ? before.slides[selectedSlideIndex].elements.find(
-            (element) => element.kind === "table",
-          )
-        : operation === "crop_image"
+  if (process.argv.includes("--observe-only")) {
+    await fs.writeFile(
+      path.join(output, "observation.json"),
+      JSON.stringify(before, null, 2),
+    );
+    await fs.writeFile(
+      path.join(output, "table-details.json"),
+      JSON.stringify(await tableDetails(mainFrame), null, 2),
+    );
+    report.status = "native-file-observation-verified";
+  } else {
+    const operation = flags("--operation", "move");
+    const targets = before.slides[selectedSlideIndex].elements.filter(
+      (x) => x.kind === "shape" && Number.isFinite(x.x),
+    );
+    const target =
+      selectedElementIndex !== null
+        ? before.slides[selectedSlideIndex].elements[selectedElementIndex]
+        : operation === "set_table_cell"
           ? before.slides[selectedSlideIndex].elements.find(
-              (element) => element.kind === "image",
+              (element) => element.kind === "table",
             )
-          : [
-                "resize",
-                "fill_color",
-                "fill_opacity",
-                "line_opacity",
-                "line_color",
-                "line_width",
-                "set_line_style",
-                "flip",
-              ].includes(operation)
-            ? targets.at(-1)
-            : targets[0];
-  assert(target);
-  const command = Object.fromEntries(
-    Object.keys(capabilities.toolInputSchema.properties).map((key) => [
-      key,
-      null,
-    ]),
-  );
-  report.operation = operation;
-  report.selectedSlideIndex = selectedSlideIndex;
-  Object.assign(command, {
-    op: operation,
-    elementId: target.elementId,
-    x: target.x + 500,
-    y: target.y,
-  });
-  const args = {
-    font_size: { size: 32 },
-    bold: { bold: true },
-    italic: { italic: true },
-    underline: { underline: true },
-    strikethrough: { strikethrough: true },
-    font_family: { family: "Arial" },
-    font_color: { color: 0xff0000 },
-    replace_text: { text: flags("--text", "Verified product text") },
-    set_table_cell: {
-      row: 0,
-      column: 0,
-      text: flags("--text", "검증된 표 셀"),
-    },
-    fill_color: { color: 0xffe600 },
-    fill_opacity: { opacity: 37.123 },
-    line_opacity: { opacity: 37.123 },
-    resize: { width: target.width + 500, height: target.height + 500 },
-    rotate: { degrees: 15 },
-    flip: { axis: "horizontal" },
-    set_shape_name: { name: "Verified title" },
-    set_alt_text: {
-      title: "Verified accessible title",
-      description: "Verified accessible description",
-    },
-    crop_image: { left: 0.15, top: 0.1, right: 0.08, bottom: 0.06 },
-    line_color: { color: 0xff0000 },
-    line_width: { size: 4 },
-    set_line_style: {
-      lineStyle: {
-        dash: "lgDashDot",
-        startArrow: { type: "triangle", width: "med", length: "lg" },
-        endArrow: { type: "oval", width: "sm", length: "med" },
+          : operation === "crop_image"
+            ? before.slides[selectedSlideIndex].elements.find(
+                (element) => element.kind === "image",
+              )
+            : [
+                  "resize",
+                  "fill_color",
+                  "fill_opacity",
+                  "line_opacity",
+                  "line_color",
+                  "line_width",
+                  "set_line_style",
+                  "flip",
+                ].includes(operation)
+              ? targets.at(-1)
+              : targets[0];
+    assert(target);
+    const command = Object.fromEntries(
+      Object.keys(capabilities.toolInputSchema.properties).map((key) => [
+        key,
+        null,
+      ]),
+    );
+    report.operation = operation;
+    report.selectedSlideIndex = selectedSlideIndex;
+    Object.assign(command, {
+      op: operation,
+      elementId: target.elementId,
+      x: target.x + 500,
+      y: target.y,
+    });
+    const args = {
+      font_size: { size: 32 },
+      bold: { bold: true },
+      italic: { italic: true },
+      underline: { underline: true },
+      strikethrough: { strikethrough: true },
+      font_family: { family: "Arial" },
+      font_color: { color: 0xff0000 },
+      replace_text: { text: flags("--text", "Verified product text") },
+      set_table_cell: {
+        row: 0,
+        column: 0,
+        text: flags("--text", "검증된 표 셀"),
       },
-    },
-    paragraph_alignment: { alignment: "right" },
-    set_character_spacing: { spacing: 2 },
-    set_script_position: { script: "superscript" },
-    set_text_language: { languageTag: "ko-KR" },
-    set_object_lock: { lockPosition: true, lockSize: true },
-    rename_slide: {
-      slideIndex: selectedSlideIndex,
-      elementId: null,
-      name: "Verified slide",
-    },
-    set_slide_hidden: {
-      slideIndex: selectedSlideIndex,
-      elementId: null,
-      hidden: true,
-    },
-    set_speaker_notes: {
-      slideIndex: selectedSlideIndex,
-      elementId: null,
-      text: flags("--text", "검증된 발표자 노트\nSecond paragraph"),
-    },
-    set_background: {
-      slideIndex: selectedSlideIndex,
-      elementId: null,
-      color: 0x27b575,
-    },
-  };
-  Object.assign(command, args[operation]);
-  let finalExpected;
-  const manualFlow = process.argv.includes("--manual-flow");
-  phaseStarted = performance.now();
-  const applied = await session.apply({
-    expectedRevision: before.revision,
-    commands: [command],
-  });
-  report.timings.commandWithFileAdmissionAndJournalMs =
-    performance.now() - phaseStarted;
-  report.stages.push("canonical-command-live-apply-file-reopen-journal");
-  await fs.writeFile(
-    path.join(output, "observations.json"),
-    JSON.stringify({ before, edited: applied.observation }, null, 2),
-  );
-  assert.notEqual(applied.observation.revision, before.revision);
-  const afterTarget =
-    applied.observation.slides[selectedSlideIndex].elements[
-      Number(target.elementId.split("/")[1])
-    ];
-  const drawing =
-    applied.observation.slides[selectedSlideIndex].onlyoffice.drawings[
-      Number(target.elementId.split("/")[1])
-    ];
-  const styles = drawing.paragraphs?.flatMap((p) => p.runs.map((r) => r.style));
-  const property = {
-    bold: "GetBold",
-    italic: "GetItalic",
-    underline: "GetUnderline",
-    strikethrough: "GetStrikeout",
-  }[operation];
-  if (property) {
-    assert(styles?.length);
-    assert(styles.every((s) => s[property] === command[operation]));
-  }
-  if (operation === "font_color") {
-    assert(styles?.length);
-    assert(
-      styles.every(
-        (s) =>
-          s.color?.rgb.r === ((command.color >>> 16) & 255) &&
-          s.color.rgb.g === ((command.color >>> 8) & 255) &&
-          s.color.rgb.b === (command.color & 255),
-      ),
-    );
-  }
-  if (operation === "font_size") {
-    assert(styles?.length);
-    assert(styles.every((s) => s.GetFontSize === command.size * 2));
-  }
-  if (operation === "font_family") {
-    assert(styles?.length);
-    assert(styles.every((s) => s.fonts.every((f) => f === command.family)));
-  }
-  if (operation === "move") {
-    assert(Math.abs(afterTarget.x - command.x) < 0.01);
-    assert(Math.abs(afterTarget.y - command.y) < 0.01);
-  }
-  if (operation === "replace_text")
-    assert.equal(afterTarget.text.trim(), command.text);
-  for (const element of before.slides[selectedSlideIndex].elements.filter(
-    (e) => e.elementId !== target.elementId,
-  )) {
-    const expected = structuredClone(element);
-    if (operation === "delete_element") {
-      const index = Number(element.elementId.split("/")[1]);
-      const removedIndex = Number(target.elementId.split("/")[1]);
-      expected.elementId = `${selectedSlideIndex}/${index > removedIndex ? index - 1 : index}`;
-    }
-    assert.deepEqual(
-      applied.observation.slides[selectedSlideIndex].elements.find(
-        (e) => e.elementId === expected.elementId,
-      ),
-      expected,
-    );
-  }
-
-  await fs.writeFile(
-    path.join(output, "edited.pptx"),
-    persisted.candidateBytes,
-  );
-  report.rendering.edited = await pixels(mainFrame);
-  if (
-    ![
-      "set_shape_name",
-      "set_alt_text",
-      "set_text_language",
-      "set_object_lock",
-      "font_family",
-      "flip",
-      "rename_slide",
-      "set_slide_hidden",
-      "set_speaker_notes",
-    ].includes(operation)
-  )
-    assert.notEqual(
-      report.rendering.edited.sha256,
-      report.rendering.before.sha256,
-    );
-  if (operation === "set_alt_text")
-    assertSameCanvas(report.rendering.edited, report.rendering.before);
-  await mainPage.screenshot({ path: path.join(output, "edited.png") });
-  await session.undo();
-  report.rendering.undo = await pixels(mainFrame);
-  assertSameCanvas(report.rendering.undo, report.rendering.before);
-  report.stages.push("undo-exact-approved-package");
-  const originalApply = engine.apply;
-  engine.apply = async (command) => {
-    await originalApply(command);
-    throw Error("injected_after_native_change");
-  };
-  const rollbackCommand = {
-    ...command,
-    op: "move",
-    x: target.x + 1000,
-    y: target.y,
-    elementId: target.elementId,
-    slideIndex: null,
-  };
-  await assert.rejects(
-    session.apply({
-      expectedRevision: before.revision,
-      commands: [rollbackCommand],
-    }),
-    /injected_after_native_change/,
-  );
-  engine.apply = originalApply;
-  assertSameCanvas(await pixels(mainFrame), report.rendering.before);
-  assert.equal(session.status().redo, 1);
-  report.stages.push("native-failure-rollback-retains-old-redo");
-  const saveJournal = journal.save;
-  journal.save = async () => {
-    throw Error("injected_journal_disk_full");
-  };
-  await assert.rejects(
-    session.apply({
-      expectedRevision: before.revision,
-      commands: [rollbackCommand],
-    }),
-    /injected_journal_disk_full/,
-  );
-  journal.save = saveJournal;
-  assert.equal(session.status().ready, true);
-  assert.equal(session.status().redo, 1);
-  assertSameCanvas(await pixels(mainFrame), report.rendering.before);
-  report.stages.push("journal-failure-restores-native-and-source-baselines");
-  let beginCount = 0;
-  const originalBegin = engine.begin;
-  engine.begin = async () => {
-    beginCount++;
-    return originalBegin();
-  };
-  await assert.rejects(
-    session.apply({
-      expectedRevision: before.revision,
-      commands: [rollbackCommand, { ...command, op: "set_sections" }],
-    }),
-    /operation_unavailable/,
-  );
-  assert.equal(beginCount, 0);
-  engine.begin = originalBegin;
-  assertSameCanvas(await pixels(mainFrame), report.rendering.before);
-  report.stages.push("whole-batch-preflight-before-native-history");
-  await session.redo();
-  report.rendering.redo = await pixels(mainFrame);
-  assertSameCanvas(report.rendering.redo, report.rendering.edited);
-  report.stages.push("redo-exact-approved-package");
-  finalExpected = applied.observation;
-  if (manualFlow) {
-    const textIndex = finalExpected.slides[
-      selectedSlideIndex
-    ].elements.findIndex(
-      (element) => typeof element.text === "string" && element.text.length,
-    );
-    const manualIndex =
-      textIndex >= 0 ? textIndex : Number(target.elementId.split("/")[1]);
-    const manualBefore =
-      finalExpected.slides[selectedSlideIndex].elements[manualIndex];
-    assert(manualBefore, "Manual edit needs an existing native object");
-    // Select only; typing or image movement comes through real browser keys.
-    await mainFrame.evaluate(
-      ({ index, text, slideIndex }) => {
-        const a = window.Asc.editor,
-          m = a.WordControl.m_oLogicDocument,
-          c = m.Slides[slideIndex].graphicObjects;
-        a.WordControl.GoToPage(slideIndex);
-        c.resetSelection();
-        c.selectObject(m.Slides[slideIndex].cSld.spTree[index], slideIndex);
-        m.Document_UpdateSelectionState();
-        if (text) {
-          c.startEditTextCurrentShape();
-          a.WordControl.m_oDrawingDocument.TargetStart();
-        }
+      fill_color: { color: 0xffe600 },
+      fill_opacity: { opacity: 37.123 },
+      line_opacity: { opacity: 37.123 },
+      resize: { width: target.width + 500, height: target.height + 500 },
+      rotate: { degrees: 15 },
+      flip: { axis: "horizontal" },
+      set_shape_name: { name: "Verified title" },
+      set_alt_text: {
+        title: "Verified accessible title",
+        description: "Verified accessible description",
       },
-      {
-        index: manualIndex,
-        text: textIndex >= 0,
+      crop_image: { left: 0.15, top: 0.1, right: 0.08, bottom: 0.06 },
+      line_color: { color: 0xff0000 },
+      line_width: { size: 4 },
+      set_line_style: {
+        lineStyle: {
+          dash: "lgDashDot",
+          startArrow: { type: "triangle", width: "med", length: "lg" },
+          endArrow: { type: "oval", width: "sm", length: "med" },
+        },
+      },
+      paragraph_alignment: { alignment: "right" },
+      set_character_spacing: { spacing: 2 },
+      set_script_position: { script: "superscript" },
+      set_text_language: { languageTag: "ko-KR" },
+      set_object_lock: { lockPosition: true, lockSize: true },
+      rename_slide: {
         slideIndex: selectedSlideIndex,
+        elementId: null,
+        name: "Verified slide",
       },
-    );
-    const area = mainFrame.locator("#area_id");
-    if (await area.count()) await area.focus();
-    if (textIndex >= 0) {
-      await mainPage.keyboard.press("End");
-      await mainPage.keyboard.insertText(" HUMAN_VERIFIED");
-    } else await mainPage.keyboard.press("ArrowRight");
-    await mainPage.keyboard.press("Escape");
+      set_slide_hidden: {
+        slideIndex: selectedSlideIndex,
+        elementId: null,
+        hidden: true,
+      },
+      set_speaker_notes: {
+        slideIndex: selectedSlideIndex,
+        elementId: null,
+        text: flags("--text", "검증된 발표자 노트\nSecond paragraph"),
+      },
+      set_background: {
+        slideIndex: selectedSlideIndex,
+        elementId: null,
+        color: 0x27b575,
+      },
+    };
+    Object.assign(command, args[operation]);
+    let finalExpected;
+    const manualFlow = process.argv.includes("--manual-flow");
     phaseStarted = performance.now();
-    finalExpected = await session.observe();
-    report.timings.humanCheckpointWithFileAdmissionAndJournalMs =
+    const applied = await session.apply({
+      expectedRevision: before.revision,
+      commands: [command],
+    });
+    report.timings.commandWithFileAdmissionAndJournalMs =
       performance.now() - phaseStarted;
-    if (textIndex >= 0)
-      assert(
-        finalExpected.slides[selectedSlideIndex].elements[
-          manualIndex
-        ].text.includes("HUMAN_VERIFIED"),
-      );
-    else
-      assert(
-        finalExpected.slides[selectedSlideIndex].elements[manualIndex].x >
-          manualBefore.x,
-      );
-    assert.equal(session.status().undo, 2);
-    // Use the editor's own buttons, independent of the product history API.
-    const manualRevision = finalExpected.revision;
-    report.nativeHistoryControls = await mainFrame
-      .locator("[aria-label*='Undo'],[title*='Undo']")
-      .evaluateAll((elements) =>
-        elements.map((e) => ({
-          tag: e.tagName,
-          id: e.id,
-          label: e.getAttribute("aria-label"),
-          title: e.getAttribute("title"),
-          visible: !!e.getClientRects().length,
-          display: getComputedStyle(e).display,
-          disabled: e.disabled,
-        })),
-      );
-    await mainFrame.getByRole("button", { name: /^Undo/ }).click();
-    const nativeUndo = await session.observe();
-    assert.equal(nativeUndo.revision, applied.observation.revision);
-    assert.equal(session.status().redo, 1);
-    await mainFrame.getByRole("button", { name: /^Redo/ }).click();
-    finalExpected = await session.observe();
-    assert.equal(finalExpected.revision, manualRevision);
-    assert.equal(session.status().redo, 0);
-    report.stages.push("native-editor-buttons-reconcile-with-product-history");
-    report.rendering.manual = await pixels(mainFrame);
-    assert.notDeepEqual(report.rendering.manual, report.rendering.edited);
-    await mainPage.screenshot({ path: path.join(output, "manual.png") });
-    report.stages.push(
-      "real-keyboard-human-edit-admitted-with-earlier-ai-history",
+    report.stages.push("canonical-command-live-apply-file-reopen-journal");
+    await fs.writeFile(
+      path.join(output, "observations.json"),
+      JSON.stringify({ before, edited: applied.observation }, null, 2),
     );
-  }
-  await assert.rejects(
-    session.apply({ expectedRevision: before.revision, commands: [command] }),
-    /stale/,
-  );
-  report.stages.push("stale-command-refused");
-  phaseStarted = performance.now();
-  const recovered = await session.recover();
-  report.timings.recoveryWithExactFileAndHistoryMs =
-    performance.now() - phaseStarted;
-  verifyOnlyOfficeProductObservation(finalExpected, recovered);
-  report.stages.push("recovery-exact-file-readback");
-  const recoveryPixels = manualFlow
-    ? report.rendering.manual
-    : report.rendering.edited;
-  assert.equal(session.status().undo, manualFlow ? 2 : 1);
-  await session.undo();
-  assertSameCanvas(
-    await pixels(mainFrame),
-    manualFlow ? report.rendering.edited : report.rendering.before,
-  );
-  await session.recover();
-  assert.equal(session.status().redo, 1);
-  await session.redo();
-  assertSameCanvas(await pixels(mainFrame), recoveryPixels);
-  if (manualFlow) {
+    assert.notEqual(applied.observation.revision, before.revision);
+    const afterTarget =
+      applied.observation.slides[selectedSlideIndex].elements[
+        Number(target.elementId.split("/")[1])
+      ];
+    const drawing =
+      applied.observation.slides[selectedSlideIndex].onlyoffice.drawings[
+        Number(target.elementId.split("/")[1])
+      ];
+    const styles = drawing.paragraphs?.flatMap((p) =>
+      p.runs.map((r) => r.style),
+    );
+    const property = {
+      bold: "GetBold",
+      italic: "GetItalic",
+      underline: "GetUnderline",
+      strikethrough: "GetStrikeout",
+    }[operation];
+    if (property) {
+      assert(styles?.length);
+      assert(styles.every((s) => s[property] === command[operation]));
+    }
+    if (operation === "font_color") {
+      assert(styles?.length);
+      assert(
+        styles.every(
+          (s) =>
+            s.color?.rgb.r === ((command.color >>> 16) & 255) &&
+            s.color.rgb.g === ((command.color >>> 8) & 255) &&
+            s.color.rgb.b === (command.color & 255),
+        ),
+      );
+    }
+    if (operation === "font_size") {
+      assert(styles?.length);
+      assert(styles.every((s) => s.GetFontSize === command.size * 2));
+    }
+    if (operation === "font_family") {
+      assert(styles?.length);
+      assert(styles.every((s) => s.fonts.every((f) => f === command.family)));
+    }
+    if (operation === "move") {
+      assert(Math.abs(afterTarget.x - command.x) < 0.01);
+      assert(Math.abs(afterTarget.y - command.y) < 0.01);
+    }
+    if (operation === "replace_text")
+      assert.equal(afterTarget.text.trim(), command.text);
+    for (const element of before.slides[selectedSlideIndex].elements.filter(
+      (e) => e.elementId !== target.elementId,
+    )) {
+      const expected = structuredClone(element);
+      if (operation === "delete_element") {
+        const index = Number(element.elementId.split("/")[1]);
+        const removedIndex = Number(target.elementId.split("/")[1]);
+        expected.elementId = `${selectedSlideIndex}/${index > removedIndex ? index - 1 : index}`;
+      }
+      assert.deepEqual(
+        applied.observation.slides[selectedSlideIndex].elements.find(
+          (e) => e.elementId === expected.elementId,
+        ),
+        expected,
+      );
+    }
+
+    await fs.writeFile(
+      path.join(output, "edited.pptx"),
+      persisted.candidateBytes,
+    );
+    report.rendering.edited = await pixels(mainFrame);
+    if (
+      ![
+        "set_shape_name",
+        "set_alt_text",
+        "set_text_language",
+        "set_object_lock",
+        "font_family",
+        "flip",
+        "rename_slide",
+        "set_slide_hidden",
+        "set_speaker_notes",
+      ].includes(operation)
+    )
+      assert.notEqual(
+        report.rendering.edited.sha256,
+        report.rendering.before.sha256,
+      );
+    if (operation === "set_alt_text")
+      assertSameCanvas(report.rendering.edited, report.rendering.before);
+    await mainPage.screenshot({ path: path.join(output, "edited.png") });
     await session.undo();
-    await session.undo();
+    report.rendering.undo = await pixels(mainFrame);
+    assertSameCanvas(report.rendering.undo, report.rendering.before);
+    report.stages.push("undo-exact-approved-package");
+    const originalApply = engine.apply;
+    engine.apply = async (command) => {
+      await originalApply(command);
+      throw Error("injected_after_native_change");
+    };
+    const rollbackCommand = {
+      ...command,
+      op: "move",
+      x: target.x + 1000,
+      y: target.y,
+      elementId: target.elementId,
+      slideIndex: null,
+    };
+    await assert.rejects(
+      session.apply({
+        expectedRevision: before.revision,
+        commands: [rollbackCommand],
+      }),
+      /injected_after_native_change/,
+    );
+    engine.apply = originalApply;
     assertSameCanvas(await pixels(mainFrame), report.rendering.before);
-    await session.redo();
-    await session.redo();
-    assertSameCanvas(await pixels(mainFrame), recoveryPixels);
-    report.stages.push(
-      "recovered-mixed-human-and-ai-history-keeps-exact-files",
+    assert.equal(session.status().redo, 1);
+    report.stages.push("native-failure-rollback-retains-old-redo");
+    const saveJournal = journal.save;
+    journal.save = async () => {
+      throw Error("injected_journal_disk_full");
+    };
+    await assert.rejects(
+      session.apply({
+        expectedRevision: before.revision,
+        commands: [rollbackCommand],
+      }),
+      /injected_journal_disk_full/,
     );
-  } else report.stages.push("recovered-native-undo-and-redo-branch");
-  report.rendering.recovered = await pixels(mainFrame);
-  assertSameCanvas(report.rendering.recovered, recoveryPixels);
-  await mainPage.screenshot({ path: path.join(output, "recovered.png") });
-  await assert.rejects(
-    session.save(async () => ({ candidateSha256: "wrong" })),
-    /acknowledgement/,
-  );
-  assert(persisted);
-  report.stages.push("wrong-save-ack-keeps-recovery");
-  phaseStarted = performance.now();
-  report.saved = await session.save(async (bytes, receipt) => {
-    await fs.writeFile(path.join(output, "saved.pptx"), bytes);
-    return { candidateSha256: hash(bytes) };
-  });
-  report.timings.acknowledgedFileSaveMs = performance.now() - phaseStarted;
-  assert.equal(persisted, null);
-  report.stages.push("acknowledged-exact-file-save");
-  if (manualFlow) {
+    journal.save = saveJournal;
+    assert.equal(session.status().ready, true);
+    assert.equal(session.status().redo, 1);
+    assertSameCanvas(await pixels(mainFrame), report.rendering.before);
+    report.stages.push("journal-failure-restores-native-and-source-baselines");
+    let beginCount = 0;
+    const originalBegin = engine.begin;
+    engine.begin = async () => {
+      beginCount++;
+      return originalBegin();
+    };
+    await assert.rejects(
+      session.apply({
+        expectedRevision: before.revision,
+        commands: [rollbackCommand, { ...command, op: "set_sections" }],
+      }),
+      /operation_unavailable/,
+    );
+    assert.equal(beginCount, 0);
+    engine.begin = originalBegin;
+    assertSameCanvas(await pixels(mainFrame), report.rendering.before);
+    report.stages.push("whole-batch-preflight-before-native-history");
+    await session.redo();
+    report.rendering.redo = await pixels(mainFrame);
+    assertSameCanvas(report.rendering.redo, report.rendering.edited);
+    report.stages.push("redo-exact-approved-package");
+    finalExpected = applied.observation;
+    if (manualFlow) {
+      const textIndex = finalExpected.slides[
+        selectedSlideIndex
+      ].elements.findIndex(
+        (element) => typeof element.text === "string" && element.text.length,
+      );
+      const manualIndex =
+        textIndex >= 0 ? textIndex : Number(target.elementId.split("/")[1]);
+      const manualBefore =
+        finalExpected.slides[selectedSlideIndex].elements[manualIndex];
+      assert(manualBefore, "Manual edit needs an existing native object");
+      // Select only; typing or image movement comes through real browser keys.
+      await mainFrame.evaluate(
+        ({ index, text, slideIndex }) => {
+          const a = window.Asc.editor,
+            m = a.WordControl.m_oLogicDocument,
+            c = m.Slides[slideIndex].graphicObjects;
+          a.WordControl.GoToPage(slideIndex);
+          c.resetSelection();
+          c.selectObject(m.Slides[slideIndex].cSld.spTree[index], slideIndex);
+          m.Document_UpdateSelectionState();
+          if (text) {
+            c.startEditTextCurrentShape();
+            a.WordControl.m_oDrawingDocument.TargetStart();
+          }
+        },
+        {
+          index: manualIndex,
+          text: textIndex >= 0,
+          slideIndex: selectedSlideIndex,
+        },
+      );
+      const area = mainFrame.locator("#area_id");
+      if (await area.count()) await area.focus();
+      if (textIndex >= 0) {
+        await mainPage.keyboard.press("End");
+        await mainPage.keyboard.insertText(" HUMAN_VERIFIED");
+      } else await mainPage.keyboard.press("ArrowRight");
+      await mainPage.keyboard.press("Escape");
+      phaseStarted = performance.now();
+      finalExpected = await session.observe();
+      report.timings.humanCheckpointWithFileAdmissionAndJournalMs =
+        performance.now() - phaseStarted;
+      if (textIndex >= 0)
+        assert(
+          finalExpected.slides[selectedSlideIndex].elements[
+            manualIndex
+          ].text.includes("HUMAN_VERIFIED"),
+        );
+      else
+        assert(
+          finalExpected.slides[selectedSlideIndex].elements[manualIndex].x >
+            manualBefore.x,
+        );
+      assert.equal(session.status().undo, 2);
+      // Use the editor's own buttons, independent of the product history API.
+      const manualRevision = finalExpected.revision;
+      report.nativeHistoryControls = await mainFrame
+        .locator("[aria-label*='Undo'],[title*='Undo']")
+        .evaluateAll((elements) =>
+          elements.map((e) => ({
+            tag: e.tagName,
+            id: e.id,
+            label: e.getAttribute("aria-label"),
+            title: e.getAttribute("title"),
+            visible: !!e.getClientRects().length,
+            display: getComputedStyle(e).display,
+            disabled: e.disabled,
+          })),
+        );
+      await mainFrame.getByRole("button", { name: /^Undo/ }).click();
+      const nativeUndo = await session.observe();
+      assert.equal(nativeUndo.revision, applied.observation.revision);
+      assert.equal(session.status().redo, 1);
+      await mainFrame.getByRole("button", { name: /^Redo/ }).click();
+      finalExpected = await session.observe();
+      assert.equal(finalExpected.revision, manualRevision);
+      assert.equal(session.status().redo, 0);
+      report.stages.push(
+        "native-editor-buttons-reconcile-with-product-history",
+      );
+      report.rendering.manual = await pixels(mainFrame);
+      assert.notDeepEqual(report.rendering.manual, report.rendering.edited);
+      await mainPage.screenshot({ path: path.join(output, "manual.png") });
+      report.stages.push(
+        "real-keyboard-human-edit-admitted-with-earlier-ai-history",
+      );
+    }
+    await assert.rejects(
+      session.apply({ expectedRevision: before.revision, commands: [command] }),
+      /stale/,
+    );
+    report.stages.push("stale-command-refused");
+    phaseStarted = performance.now();
+    const recovered = await session.recover();
+    report.timings.recoveryWithExactFileAndHistoryMs =
+      performance.now() - phaseStarted;
+    verifyOnlyOfficeProductObservation(finalExpected, recovered);
+    report.stages.push("recovery-exact-file-readback");
+    const recoveryPixels = manualFlow
+      ? report.rendering.manual
+      : report.rendering.edited;
+    assert.equal(session.status().undo, manualFlow ? 2 : 1);
     await session.undo();
-    assertSameCanvas(await pixels(mainFrame), report.rendering.edited);
+    assertSameCanvas(
+      await pixels(mainFrame),
+      manualFlow ? report.rendering.edited : report.rendering.before,
+    );
+    await session.recover();
+    assert.equal(session.status().redo, 1);
     await session.redo();
     assertSameCanvas(await pixels(mainFrame), recoveryPixels);
-    report.stages.push("acknowledged-save-keeps-earlier-undo-and-redo");
+    if (manualFlow) {
+      await session.undo();
+      await session.undo();
+      assertSameCanvas(await pixels(mainFrame), report.rendering.before);
+      await session.redo();
+      await session.redo();
+      assertSameCanvas(await pixels(mainFrame), recoveryPixels);
+      report.stages.push(
+        "recovered-mixed-human-and-ai-history-keeps-exact-files",
+      );
+    } else report.stages.push("recovered-native-undo-and-redo-branch");
+    report.rendering.recovered = await pixels(mainFrame);
+    assertSameCanvas(report.rendering.recovered, recoveryPixels);
+    await mainPage.screenshot({ path: path.join(output, "recovered.png") });
+    await assert.rejects(
+      session.save(async () => ({ candidateSha256: "wrong" })),
+      /acknowledgement/,
+    );
+    assert(persisted);
+    report.stages.push("wrong-save-ack-keeps-recovery");
+    phaseStarted = performance.now();
+    report.saved = await session.save(async (bytes, receipt) => {
+      await fs.writeFile(path.join(output, "saved.pptx"), bytes);
+      return { candidateSha256: hash(bytes) };
+    });
+    report.timings.acknowledgedFileSaveMs = performance.now() - phaseStarted;
+    assert.equal(persisted, null);
+    report.stages.push("acknowledged-exact-file-save");
+    if (manualFlow) {
+      await session.undo();
+      assertSameCanvas(await pixels(mainFrame), report.rendering.edited);
+      await session.redo();
+      assertSameCanvas(await pixels(mainFrame), recoveryPixels);
+      report.stages.push("acknowledged-save-keeps-earlier-undo-and-redo");
+    }
+    report.status = "product-session-command-verified";
   }
-  report.status = "product-session-command-verified";
 } catch (error) {
   report.status = "failed";
   report.error = error.stack;
