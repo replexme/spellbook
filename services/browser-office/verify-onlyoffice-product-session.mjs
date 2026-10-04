@@ -756,6 +756,25 @@ try {
       /product_unobserved_native_edit/,
     );
     assert.equal(written, false);
+    const ignoredCommand = Object.fromEntries(
+      Object.keys(capabilities.toolInputSchema.properties).map((key) => [
+        key,
+        null,
+      ]),
+    );
+    Object.assign(ignoredCommand, {
+      op: "move",
+      elementId: "0/0",
+      x: before.slides[0].elements[0].x + 500,
+      y: before.slides[0].elements[0].y,
+    });
+    await assert.rejects(
+      session.apply({
+        expectedRevision: before.revision,
+        commands: [ignoredCommand],
+      }),
+      /product_unobserved_native_edit/,
+    );
     assert.equal(await journal.load(), null);
     await engine.undo();
     assert.equal(await engine.changeToken(), originalToken);
