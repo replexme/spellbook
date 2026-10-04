@@ -816,8 +816,25 @@ function preserveUnaffectedSlideShapes(
     pairs.map((pair) => [pair.editedId, pair.sourceId]),
   );
   for (const pair of pairs) {
-    const { source, baseline, editedShape, index } = pair;
-    if (hasRelationshipReference(source)) continue;
+    let { source, baseline } = pair;
+    const { editedShape, index } = pair;
+    const rowRequests = geometrySources?.targets?.filter(target =>
+      ["insert_table_rows", "delete_table_rows"].includes(target.op) &&
+      Number.isSafeInteger(target.index) && Number.isSafeInteger(target.count) &&
+      target.shapeIndex === index);
+    if (hasRelationshipReference(source)) {
+      if (!rowRequests?.length) continue;
+      // Merge authored and both native rows in one relationship ID space.
+      // The package-level remapper then retains the authored .rels as usual.
+      const related = relationshipsPath(part);
+      const entries = geometrySources.entries;
+      const aligned = [source, baseline].map((node, i) => remapPartRelationshipIds(
+        part, serializeXml(node), entries[2][related], entries[i][related],
+        [entries[2], entries[i]]));
+      if (aligned.some(bytes => !bytes))
+        throw new Error("Native table rows cannot preserve authored relationships in " + part);
+      [source, baseline] = aligned.map(bytes => parseXml({ [part]: bytes }, part).documentElement);
+    }
     if (
       additiveOnly ||
       untargeted(source, index) ||
@@ -833,10 +850,6 @@ function preserveUnaffectedSlideShapes(
       continue;
     }
     // Preserve authored properties wherever the two native exports agree.
-    const rowRequests = geometrySources?.targets?.filter(target =>
-      ["insert_table_rows", "delete_table_rows"].includes(target.op) &&
-      Number.isSafeInteger(target.index) && Number.isSafeInteger(target.count) &&
-      target.shapeIndex === index);
     const merged = rowRequests?.length
       ? mergeNativeTableRows(documents[2], source, baseline, editedShape, rowRequests)
       : mergeElementThreeWay(documents[2], source, baseline, editedShape);

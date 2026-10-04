@@ -127,3 +127,98 @@ for (const op of ["insert_table_rows", "delete_table_rows"])
     for (const [name, bytes] of Object.entries(original))
       if (name !== part) assert.deepEqual(saved[name], bytes, name);
   });
+
+for (const op of ["insert_table_rows", "delete_table_rows"])
+  test(`native ${op} preserves hyperlinks and original style through relationship renumbering`, async () => {
+    const { original, baseline, part } = await fixture();
+    const rel =
+      "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    const rels = "ppt/slides/_rels/slide1.xml.rels";
+    const hyperlink = (id) => `<a:hlinkClick xmlns:r="${rel}" r:id="${id}"/>`;
+    original[part] = strToU8(
+      strFromU8(original[part]).replace(
+        /<a:rPr sz="1800"\/>/g,
+        `<a:rPr sz="1800">${hyperlink("rIdAuthor")}</a:rPr>`,
+      ),
+    );
+    baseline[part] = strToU8(
+      strFromU8(baseline[part]).replace(
+        /<a:rPr sz="1800"\/>/g,
+        `<a:rPr sz="1800">${hyperlink("rIdNative")}</a:rPr>`,
+      ),
+    );
+    const link = (id) =>
+      `<Relationship Id="${id}" Type="${rel}/hyperlink" Target="https://example.com/authored-row" TargetMode="External"/>`;
+    original[rels] = strToU8(
+      strFromU8(original[rels]).replace(
+        "</Relationships>",
+        link("rIdAuthor") + "</Relationships>",
+      ),
+    );
+    baseline[rels] = strToU8(
+      strFromU8(original[rels]).replace("rIdAuthor", "rIdNative"),
+    );
+    const doc = new DOMParser().parseFromString(
+      strFromU8(baseline[part]),
+      "text/xml",
+    );
+    const rows = [...doc.getElementsByTagNameNS(a, "tr")];
+    if (op === "delete_table_rows") rows[1].parentNode.removeChild(rows[1]);
+    else {
+      const newRow = new DOMParser().parseFromString(
+        `<root xmlns:a="${a}">${row("")}</root>`,
+        "text/xml",
+      ).documentElement.firstChild;
+      rows[1].parentNode.insertBefore(doc.importNode(newRow, true), rows[1]);
+    }
+    const edited = {
+      ...baseline,
+      [part]: strToU8(new XMLSerializer().serializeToString(doc)),
+    };
+    const saved = unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(original),
+        zipSync(baseline),
+        zipSync(edited),
+        [op],
+        [
+          {
+            op,
+            slideIndex: 0,
+            shapeIndex: 0,
+            name: "Table",
+            index: 1,
+            count: 1,
+          },
+        ],
+      ).bytes,
+    );
+    const result = new DOMParser().parseFromString(
+      strFromU8(saved[part]),
+      "text/xml",
+    );
+    const remaining = [...result.getElementsByTagNameNS(a, "tr")];
+    assert.equal(
+      remaining[0]
+        .getElementsByTagNameNS(a, "hlinkClick")[0]
+        .getAttributeNS(rel, "id"),
+      "rIdAuthor",
+    );
+    assert.equal(
+      remaining[0].getElementsByTagNameNS(a, "prstDash")[0].getAttribute("val"),
+      "sysDash",
+    );
+    assert.deepEqual(saved[rels], original[rels]);
+    if (op === "insert_table_rows") {
+      assert.equal(
+        remaining[1].getElementsByTagNameNS(a, "hlinkClick").length,
+        0,
+      );
+      assert.equal(
+        remaining[2]
+          .getElementsByTagNameNS(a, "hlinkClick")[0]
+          .getAttributeNS(rel, "id"),
+        "rIdAuthor",
+      );
+    }
+  });
