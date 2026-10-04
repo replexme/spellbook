@@ -5,13 +5,16 @@
  */
 export function reportSaveFailure(documentId: string, stage: string): void {
   try {
-    void fetch(`/api/documents/${encodeURIComponent(documentId)}/save-failures`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ stage }),
-      keepalive: true,
-      cache: "no-store",
-    }).catch(() => undefined);
+    void fetch(
+      `/api/documents/${encodeURIComponent(documentId)}/save-failures`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stage }),
+        keepalive: true,
+        cache: "no-store",
+      },
+    ).catch(() => undefined);
   } catch {
     // Reporting must never affect editing.
   }

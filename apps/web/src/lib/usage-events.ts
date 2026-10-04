@@ -11,7 +11,6 @@ import { USAGE_EVENT_TYPES } from "./usage-events-schema";
  * with the account (see the managed account deletion adapter).
  */
 
-
 export type UsageEvent =
   | { type: "visit" }
   | { type: "upload"; documentId: string }
@@ -20,8 +19,7 @@ export type UsageEvent =
   | { type: "save_rejected"; documentId: string; reason: string }
   | { type: "save_failed_client"; documentId: string; stage: string };
 
-const UUID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODE = /^[a-z][a-z0-9_]{0,79}$/;
 
 /** Only short reason codes are stored; free text becomes "other". */

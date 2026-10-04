@@ -8,8 +8,7 @@ export const metadata: Metadata = {
   robots: { index: false },
 };
 
-const UUID =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODE = /^[a-z][a-z0-9_]{1,79}$/;
 
 /** Where a failed download lands instead of a raw JSON error. */
@@ -21,7 +20,8 @@ export default async function DownloadErrorPage({
   const params = await searchParams;
   const documentId =
     params.document && UUID.test(params.document) ? params.document : null;
-  const reason = params.reason && CODE.test(params.reason) ? params.reason : null;
+  const reason =
+    params.reason && CODE.test(params.reason) ? params.reason : null;
   const reference =
     params.ref && /^[0-9A-F]{8}$/.test(params.ref) ? params.ref : null;
   const loginNeeded = reason === "login_required";

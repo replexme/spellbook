@@ -4,10 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { isolatedPostgresTestUrl } from "./postgres-test-schema";
 import { closeDb, db, ensureSchema } from "./db";
-import {
-  deleteAccountUsageEvents,
-  recordUsageEvent,
-} from "./usage-events";
+import { deleteAccountUsageEvents, recordUsageEvent } from "./usage-events";
 
 const enabled = process.env.SPELLBOOK_VERSION_INTEGRATION === "1";
 const testSchema = `spellbook_usage_${randomUUID().replaceAll("-", "")}`;
@@ -113,8 +110,16 @@ describe.skipIf(!enabled)("usage events", () => {
     await sql`insert into spellbook_native_sessions (id, document_id, account_id, working_version_id, status, expires_at)
       values (${sessionId}, ${documentId}, ${account}, ${versionId}, 'active', now() + interval '1 hour')`;
     const outcomes = [
-      ["completed", { provider: "gemini_api", model: "m", effort: "low" }, null],
-      ["failed", { provider: "anthropic_api", model: "m", effort: "low" }, "ai_rate_limited"],
+      [
+        "completed",
+        { provider: "gemini_api", model: "m", effort: "low" },
+        null,
+      ],
+      [
+        "failed",
+        { provider: "anthropic_api", model: "m", effort: "low" },
+        "ai_rate_limited",
+      ],
       ["failed", null, "모델이 응답하지 않았어요."],
       ["cancelled", null, null],
     ] as const;
@@ -137,10 +142,34 @@ describe.skipIf(!enabled)("usage events", () => {
       where account_id=${account} and event_type='ai_turn' order by id
     `;
     expect(rows.map((row) => row.detail)).toEqual([
-      { outcome: "completed", provider: "gemini_api", model: "m", changed: false, reason: null },
-      { outcome: "failed", provider: "anthropic_api", model: "m", changed: false, reason: "ai_rate_limited" },
-      { outcome: "failed", provider: "default", model: "", changed: false, reason: "other" },
-      { outcome: "cancelled", provider: "default", model: "", changed: false, reason: null },
+      {
+        outcome: "completed",
+        provider: "gemini_api",
+        model: "m",
+        changed: false,
+        reason: null,
+      },
+      {
+        outcome: "failed",
+        provider: "anthropic_api",
+        model: "m",
+        changed: false,
+        reason: "ai_rate_limited",
+      },
+      {
+        outcome: "failed",
+        provider: "default",
+        model: "",
+        changed: false,
+        reason: "other",
+      },
+      {
+        outcome: "cancelled",
+        provider: "default",
+        model: "",
+        changed: false,
+        reason: null,
+      },
     ]);
     expect(JSON.stringify(rows)).not.toContain("secret request");
     await sql`delete from spellbook_usage_events where account_id=${account}`;
@@ -163,19 +192,38 @@ describe.skipIf(!enabled)("usage events", () => {
     await event("b", "visit", "2026-10-04");
     const bDoc = doc();
     await event("b", "save_accepted", "2026-10-01", bDoc, { unchanged: false });
-    await event("b", "save_rejected", "2026-10-01", bDoc, { reason: "browser_revision_changed" });
-    await event("b", "save_failed_client", "2026-10-01", bDoc, { stage: "browser" });
+    await event("b", "save_rejected", "2026-10-01", bDoc, {
+      reason: "browser_revision_changed",
+    });
+    await event("b", "save_failed_client", "2026-10-01", bDoc, {
+      stage: "browser",
+    });
     // c: first seen before the period; not a new account.
     await event("c", "visit", "2026-09-20");
     await event("c", "visit", "2026-10-03");
     // d: new on 10-05; day 7 has not happened yet.
     await event("d", "visit", "2026-10-05");
-    await event("d", "save_accepted", "2026-10-09", doc(), { unchanged: false });
+    await event("d", "save_accepted", "2026-10-09", doc(), {
+      unchanged: false,
+    });
     await event("d", "first_edit", "2026-10-09");
-    await event("a", "ai_turn", "2026-10-01", aDoc, { outcome: "completed", provider: "codex" });
-    await event("a", "ai_turn", "2026-10-01", aDoc, { outcome: "failed", provider: "codex", reason: "ai_rate_limited" });
-    await event("b", "ai_turn", "2026-10-01", bDoc, { outcome: "cancelled", provider: "codex" });
-    await event("b", "ai_turn", "2026-10-01", bDoc, { outcome: "completed", provider: "gemini_api" });
+    await event("a", "ai_turn", "2026-10-01", aDoc, {
+      outcome: "completed",
+      provider: "codex",
+    });
+    await event("a", "ai_turn", "2026-10-01", aDoc, {
+      outcome: "failed",
+      provider: "codex",
+      reason: "ai_rate_limited",
+    });
+    await event("b", "ai_turn", "2026-10-01", bDoc, {
+      outcome: "cancelled",
+      provider: "codex",
+    });
+    await event("b", "ai_turn", "2026-10-01", bDoc, {
+      outcome: "completed",
+      provider: "gemini_api",
+    });
 
     const result = await metrics("2026-10-01", "2026-10-10", "2026-10-10");
     expect(result.dailyActive).toEqual([

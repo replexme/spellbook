@@ -21,7 +21,9 @@ describe("route errors", () => {
   });
 
   it("never returns raw exception text to the browser", async () => {
-    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const logged = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     const response = routeError(
       new Error('relation "spellbook_documents" does not exist'),
     );

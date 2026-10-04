@@ -37,8 +37,5 @@ export function routeError(error: unknown): Response {
   // the server log keeps the detail under the same reference.
   const errorId = randomUUID().slice(0, 8).toUpperCase();
   console.error(`unexpected_error ${errorId}`, error);
-  return Response.json(
-    { error: "unexpected_error", errorId },
-    { status: 500 },
-  );
+  return Response.json({ error: "unexpected_error", errorId }, { status: 500 });
 }

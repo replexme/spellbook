@@ -33,7 +33,8 @@ const messages: Record<string, string> = {
   document_graph_not_ready: `편집기가 파일을 아직 읽고 있어요. ${TRY_AGAIN}`,
   document_too_large:
     "파일이 너무 커서 저장하지 못했어요. 큰 그림이나 동영상을 줄여 주세요.",
-  file_too_large: "파일이 너무 커요. 큰 그림이나 동영상을 줄인 뒤 가져와 주세요.",
+  file_too_large:
+    "파일이 너무 커요. 큰 그림이나 동영상을 줄인 뒤 가져와 주세요.",
   empty_file: "빈 파일이에요. PowerPoint에서 다시 저장해 주세요.",
   unsupported_format: "PowerPoint 파일(.pptx)만 가져올 수 있어요.",
   invalid_document_package:
@@ -47,7 +48,8 @@ const messages: Record<string, string> = {
     "저장 공간이 부족해 작업을 안전하게 중단했어요. 기존 파일은 그대로 있어요. 공간을 확보한 뒤 다시 시도해 주세요.",
 
   // Editor and saving
-  office_editor_starting: "편집기를 준비하고 있어요. 처음 열 때는 1분쯤 걸려요.",
+  office_editor_starting:
+    "편집기를 준비하고 있어요. 처음 열 때는 1분쯤 걸려요.",
   browser_office_not_configured: `브라우저 편집기가 아직 설정되지 않았어요. ${SAFE}`,
   format_editor_not_available: "이 형식은 아직 편집기로 열 수 없어요.",
   browser_session_not_active: `편집 연결이 끊겼어요. ${RELOAD}`,
@@ -64,10 +66,12 @@ const messages: Record<string, string> = {
   browser_document_validation_failed:
     "저장한 파일을 확인하는 중에 문제가 생겼어요. 편집 내용을 확인하고 다시 저장해 주세요.",
   office_editor_save_required: "먼저 지금 편집 내용을 저장해 주세요.",
-  document_save_in_progress: "저장하는 중이에요. 저장이 끝나면 다시 시도해 주세요.",
+  document_save_in_progress:
+    "저장하는 중이에요. 저장이 끝나면 다시 시도해 주세요.",
   native_save_validation_in_progress:
     "저장한 내용을 확인하는 중이에요. 확인이 끝나면 다시 시도해 주세요.",
-  document_changed: "다른 곳에서 파일이 바뀌었어요. 새로 고친 뒤 다시 시도해 주세요.",
+  document_changed:
+    "다른 곳에서 파일이 바뀌었어요. 새로 고친 뒤 다시 시도해 주세요.",
   invalid_browser_origin: `편집기 연결을 확인하지 못했어요. ${RELOAD}`,
   editor_timeout: `편집기가 응답하지 않아요. ${RELOAD}`,
   editor_not_connected: `편집기에 아직 연결되지 않았어요. ${TRY_AGAIN}`,
@@ -94,23 +98,32 @@ const messages: Record<string, string> = {
   ai_subscription_busy:
     "연결한 AI 계정이 이전 요청을 아직 처리하고 있어요. 잠시 뒤 다시 요청해 주세요.",
   native_ai_unavailable: `AI 서버에 연결하지 못했어요. ${TRY_AGAIN} 직접 편집은 계속할 수 있어요.`,
-  native_turn_already_running: "AI가 이전 요청을 처리하고 있어요. 끝난 뒤 다시 요청해 주세요.",
+  native_turn_already_running:
+    "AI가 이전 요청을 처리하고 있어요. 끝난 뒤 다시 요청해 주세요.",
   no_active_native_turn: "진행 중인 AI 작업이 없어요.",
   no_active_turn: "진행 중인 AI 작업이 없어요.",
-  invalid_native_request: "요청 내용이 비어 있거나 너무 길어요. 2,000자 안으로 적어 주세요.",
+  invalid_native_request:
+    "요청 내용이 비어 있거나 너무 길어요. 2,000자 안으로 적어 주세요.",
   native_request_too_large: "요청 내용이 너무 길어요.",
-  selected_model_unavailable: "고른 AI 모델을 지금 쓸 수 없어요. 다른 모델을 골라 주세요.",
+  selected_model_unavailable:
+    "고른 AI 모델을 지금 쓸 수 없어요. 다른 모델을 골라 주세요.",
   model_not_selected: "사용할 AI 모델을 골라 주세요.",
   models_unavailable: `AI 모델 목록을 불러오지 못했어요. ${TRY_AGAIN}`,
-  models_empty: "쓸 수 있는 AI 모델이 없어요. 설정에서 AI 연결을 확인해 주세요.",
+  models_empty:
+    "쓸 수 있는 AI 모델이 없어요. 설정에서 AI 연결을 확인해 주세요.",
   ai_edit_permission_required: "AI가 고칠 수 있는 범위를 먼저 골라 주세요.",
   outside_edit_permission: "허락한 범위 밖은 AI가 고칠 수 없어요.",
-  ai_turn_timed_out: "AI가 제한 시간 안에 끝내지 못했어요. 요청을 나눠서 다시 부탁해 주세요.",
-  claude_login_expired: "Claude 로그인 시간이 지났어요. 로그인을 다시 시작해 주세요.",
-  claude_login_code_invalid: "Claude 로그인 코드가 맞지 않아요. 코드를 다시 복사해 붙여 넣어 주세요.",
-  local_connector_unavailable: "이 컴퓨터의 연결 앱을 찾지 못했어요. 연결 앱이 켜져 있는지 확인해 주세요.",
+  ai_turn_timed_out:
+    "AI가 제한 시간 안에 끝내지 못했어요. 요청을 나눠서 다시 부탁해 주세요.",
+  claude_login_expired:
+    "Claude 로그인 시간이 지났어요. 로그인을 다시 시작해 주세요.",
+  claude_login_code_invalid:
+    "Claude 로그인 코드가 맞지 않아요. 코드를 다시 복사해 붙여 넣어 주세요.",
+  local_connector_unavailable:
+    "이 컴퓨터의 연결 앱을 찾지 못했어요. 연결 앱이 켜져 있는지 확인해 주세요.",
   local_connector_not_paired: "연결 앱이 아직 이 브라우저와 연결되지 않았어요.",
-  local_connector_popup_blocked: "팝업이 막혔어요. 이 사이트의 팝업을 허용한 뒤 다시 시도해 주세요.",
+  local_connector_popup_blocked:
+    "팝업이 막혔어요. 이 사이트의 팝업을 허용한 뒤 다시 시도해 주세요.",
   local_pairing_timed_out: "연결 앱 연결 시간이 지났어요. 다시 시도해 주세요.",
 
   // Network

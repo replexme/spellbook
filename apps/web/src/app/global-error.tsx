@@ -42,8 +42,8 @@ export default function GlobalError({
           }
         >
           <p>
-            예상하지 못한 문제가 생겼어요. 저장된 파일은 그대로 있어요. 잠시
-            뒤 다시 시도해 주세요.
+            예상하지 못한 문제가 생겼어요. 저장된 파일은 그대로 있어요. 잠시 뒤
+            다시 시도해 주세요.
           </p>
         </StatusScreen>
       </body>

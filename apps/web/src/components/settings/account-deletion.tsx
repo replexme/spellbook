@@ -80,7 +80,9 @@ export function AccountDeletion({ info }: { info: AccountClosureInfo }) {
       </Button>
       <Dialog
         open={open}
-        title={state.kind === "accepted" ? "삭제를 요청했어요" : "계정을 삭제할까요?"}
+        title={
+          state.kind === "accepted" ? "삭제를 요청했어요" : "계정을 삭제할까요?"
+        }
         onClose={close}
         dismissible={state.kind !== "sending"}
         footer={
@@ -136,7 +138,8 @@ export function AccountDeletion({ info }: { info: AccountClosureInfo }) {
               </p>
             ))}
             <p className="dialog-note">
-              필요한 파일은 먼저 내려받아 두세요. 삭제한 뒤에는 되돌릴 수 없어요.
+              필요한 파일은 먼저 내려받아 두세요. 삭제한 뒤에는 되돌릴 수
+              없어요.
             </p>
             <TextField
               label={`확인을 위해 ‘${ACCOUNT_CLOSURE_CONFIRMATION}’를 입력해 주세요`}

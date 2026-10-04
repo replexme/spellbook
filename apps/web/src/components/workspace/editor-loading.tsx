@@ -38,8 +38,7 @@ export function EditorOpening({
     );
     return () => clearInterval(timer);
   }, [restoring]);
-  if (restoring)
-    return <OpeningView message="이전 버전을 불러오고 있어요" />;
+  if (restoring) return <OpeningView message="이전 버전을 불러오고 있어요" />;
   return (
     <OpeningView
       preview={preview}
@@ -51,9 +50,7 @@ export function EditorOpening({
             <Button
               size="sm"
               icon="refresh"
-              onClick={() =>
-                onRetry ? onRetry() : window.location.reload()
-              }
+              onClick={() => (onRetry ? onRetry() : window.location.reload())}
             >
               다시 시도
             </Button>

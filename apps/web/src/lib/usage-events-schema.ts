@@ -66,4 +66,3 @@ export async function runUsageEventMigrations(sql: Sql): Promise<void> {
       ) execute function spellbook_record_ai_turn_usage();
   `);
 }
-

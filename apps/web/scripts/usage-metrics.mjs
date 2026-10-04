@@ -17,7 +17,9 @@ const [from, to = seoulToday] = process.argv
   .slice(2)
   .filter((value) => !value.startsWith("--"));
 if (!from || !DATE.test(from) || !DATE.test(to)) {
-  console.error("usage: node scripts/usage-metrics.mjs <from YYYY-MM-DD> [to YYYY-MM-DD]");
+  console.error(
+    "usage: node scripts/usage-metrics.mjs <from YYYY-MM-DD> [to YYYY-MM-DD]",
+  );
   process.exit(2);
 }
 
@@ -35,11 +37,20 @@ const sql = url
     });
 
 const ratio = (part, whole) =>
-  whole ? `${part} / ${whole} (${((part / whole) * 100).toFixed(1)}%)` : `${part} / 0`;
+  whole
+    ? `${part} / ${whole} (${((part / whole) * 100).toFixed(1)}%)`
+    : `${part} / 0`;
 
 try {
-  const text = readFileSync(new URL("./usage-metrics.sql", import.meta.url), "utf8");
-  const [row] = await sql.unsafe(text, [from, to, seoulToday < to ? seoulToday : to]);
+  const text = readFileSync(
+    new URL("./usage-metrics.sql", import.meta.url),
+    "utf8",
+  );
+  const [row] = await sql.unsafe(text, [
+    from,
+    to,
+    seoulToday < to ? seoulToday : to,
+  ]);
   const m = row.metrics;
   const lines = [
     `기간 ${from} ~ ${to}`,
