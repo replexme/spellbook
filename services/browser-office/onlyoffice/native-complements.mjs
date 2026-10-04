@@ -247,6 +247,7 @@ export function installOnlyOfficeNativeComplements() {
     const fields=["fillStyle","strokeStyle","lineWidth","lineCap","lineJoin","miterLimit","font","textAlign","textBaseline","direction","globalAlpha","globalCompositeOperation","imageSmoothingEnabled"];
     for(const field of fields)target[field]=ctx[field];
     target.shadowColor="transparent";target.shadowBlur=0;target.shadowOffsetX=0;target.shadowOffsetY=0;
+    const startX=state.X;
     let result;graphics.m_oContext=target;
     try{result=draw();}finally{graphics.m_oContext=ctx;}
     const color=shadow.color?.color?.RGBA,alpha=(shadow.color?.Mods?.Mods?.find(mod=>mod.name==="alpha")?.val??100000)/100000;
@@ -257,7 +258,19 @@ export function installOnlyOfficeNativeComplements() {
       ctx.shadowColor=`rgba(${color?.R??0},${color?.G??0},${color?.B??0},${alpha})`;
       ctx.shadowOffsetX=(shadow.dist??38100)/36000*Math.cos(angle)*scale;
       ctx.shadowOffsetY=(shadow.dist??38100)/36000*Math.sin(angle)*scale;
-      ctx.shadowBlur=(shadow.blurRad??0)/36000*scale;ctx.drawImage(mask,0,0);
+      ctx.shadowBlur=(shadow.blurRad??0)/36000*scale;
+      const full=graphics.m_oFullTransform,pr=run.Get_CompiledPr(false);
+      const em=Math.max(pr?.FontSize??0,pr?.FontSizeCS??0)*25.4/72;
+      const baseline=state.calcY-state.yOffset;
+      if(Number.isFinite(startX)&&Number.isFinite(state.X)&&Number.isFinite(baseline)&&em>0&&typeof full?.TransformPointX==="function"&&typeof full.TransformPointY==="function"){
+        // Gaussian compositing a whole slide for every glyph is needlessly
+        // expensive. Retain a generous four-em ink margin in native text
+        // coordinates and transform all corners, including rotated text.
+        const corners=[[startX-4*em,baseline-4*em],[state.X+4*em,baseline-4*em],[startX-4*em,baseline+4*em],[state.X+4*em,baseline+4*em]];
+        const xs=corners.map(([x,y])=>full.TransformPointX(x,y)),ys=corners.map(([x,y])=>full.TransformPointY(x,y));
+        const left=Math.max(0,Math.floor(Math.min(...xs))),top=Math.max(0,Math.floor(Math.min(...ys))),right=Math.min(mask.width,Math.ceil(Math.max(...xs))),bottom=Math.min(mask.height,Math.ceil(Math.max(...ys)));
+        if(right>left&&bottom>top)ctx.drawImage(mask,left,top,right-left,bottom-top,left,top,right-left,bottom-top);
+      }else ctx.drawImage(mask,0,0);
     }finally{ctx.restore();}
     for(const field of fields)ctx[field]=target[field];
     ctx.setTransform(target.getTransform());return result;

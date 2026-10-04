@@ -508,7 +508,7 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
     // The native layout also updates untracked font-fit caches. Generate into
     // an owned drawing and record its replacement in native history so a
     // rejected edit and Undo restore the original drawing exactly.
-    const drawing=f.ExecuteNoHistory(()=>source.getDrawing().copy(),null,[]);
+    const drawing=f.ExecuteNoHistory(()=>source.getDrawing().copy(),null,[],true);
     source.removeFromSpTreeByPos(0);source.addToSpTree(0,drawing);source.setDrawing(drawing);
     source.setDataModel(data);source.smartArtTree=null;source.checkDataModel();source.generateDrawingPart();
     const rebound=new Map(),remaining=new Set(oldLeaves.keys());
@@ -558,7 +558,7 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
         source.recalcFitFontSize();source.recalculate();
       }else{mutateDiagramTopology();source.recalculate();}
       return value;
-    },null,[]);
+    },null,[],true);
     owner.removeFromSpTreeByPos(index);
     if(previous.group)owner.addToSpTree(index,next);else owner.addToSpTreeToPos(index,next);
     const remap=id=>{need(!diagramRemoved.has(id),"diagram_referenced_shape_removed");return diagramRebindings.get(id)??id;};
