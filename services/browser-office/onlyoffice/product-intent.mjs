@@ -371,7 +371,9 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
                 row.length !== oldDrawing.tableCells[0].length ||
                 row.some(
                   (text) =>
-                    text.replace(/\r\n/g, "\n").replace(/\n$/, "") !== "",
+                    // Native cell GetText includes the terminal cell (tab) or row
+                    // (CRLF) delimiter even when no authored characters exist.
+                    !["", "\t", "\r\n", "\n"].includes(text),
                 ),
             )
         )
