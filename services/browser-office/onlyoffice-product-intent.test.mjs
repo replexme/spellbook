@@ -140,3 +140,73 @@ test("native adapter retains the artifact rebinding port used after Undo and Red
   await engine.bindArtifact(bytes);
   assert.equal(bound, bytes);
 });
+
+test("native setters unlock only synchronously and restore the UI lock on success and failure", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  const previousWindow = globalThis.window;
+  let locked = true,
+    fail = false,
+    grouped = true;
+  const drawing = {
+    Drawing: { Id: "native-1" },
+    SetPosition() {
+      assert.equal(locked, false);
+      if (fail) throw Error("native_setter_failed");
+      return this;
+    },
+  };
+  const model = {
+    Slides: [{ cSld: { spTree: [{ Id: "native-1" }] } }],
+    Recalculate() {},
+    RedrawCurSlide() {},
+    Document_UpdateInterfaceState() {},
+  };
+  const editor = {
+    isGroupActions: () => grouped,
+    executeGroupActionsStart() {
+      locked = false;
+    },
+    executeGroupActionsEnd() {
+      locked = true;
+    },
+    WordControl: { m_oLogicDocument: model, Thumbnails: { SelectPage() {} } },
+  };
+  globalThis.window = {
+    Asc: { editor },
+    AscBuilder: {
+      Slide: {
+        Api: {
+          GetPresentation: () => ({
+            GetSlideByIndex: () => ({ GetAllDrawings: () => [drawing] }),
+            CreateNewHistoryPoint() {},
+          }),
+        },
+      },
+    },
+    AscCommon: { History: { Get_RecalcData() {}, getGroupChanges() {} } },
+  };
+  try {
+    const engine = createOnlyOfficeProductEngine({
+      getFrame: async () => ({ evaluate: async (fn, payload) => fn(payload) }),
+    });
+    const command = {
+      op: "move",
+      nativeId: "native-1",
+      slideIndex: 0,
+      x: 100,
+      y: 200,
+    };
+    assert.equal(await engine.apply(command), true);
+    assert.equal(locked, true);
+    fail = true;
+    await assert.rejects(engine.apply(command), /native_setter_failed/);
+    assert.equal(locked, true);
+    grouped = false;
+    await assert.rejects(engine.apply(command), /transaction_required/);
+    assert.equal(locked, true);
+  } finally {
+    globalThis.window = previousWindow;
+  }
+});

@@ -235,133 +235,148 @@ export function createOnlyOfficeProductEngine({
     },
     begin: async () => {
       const frame = await getFrame();
-      return { frame, checkpoint: await beginCandidateTransaction(frame) };
+      const checkpoint = await beginCandidateTransaction(frame);
+      // SDK group mutations temporarily unlock its UI. Keep it locked across
+      // asynchronous observation, file admission and journal writes.
+      await frame.evaluate(() => window.Asc.editor.executeGroupActionsEnd());
+      return { frame, checkpoint };
     },
     finish: async (token, commit) =>
       finishCandidateTransaction(token.frame, token.checkpoint, commit),
     apply: async (command) => {
       const frame = await getFrame();
       const result = await frame.evaluate((command) => {
-        const api = window.AscBuilder.Slide.Api,
-          p = api.GetPresentation(),
-          slide = p.GetSlideByIndex(command.slideIndex);
-        const d = slide
-          .GetAllDrawings()
-          .find((d) => d.Drawing?.Id === command.nativeId);
-        if (!d) throw Error("onlyoffice_product_live_binding_changed");
-        window.Asc.editor.WordControl.Thumbnails.SelectPage(command.slideIndex);
-        p.CreateNewHistoryPoint();
-        const color = () =>
-          api.CreateRGBColor(
-            (command.color >>> 16) & 255,
-            (command.color >>> 8) & 255,
-            command.color & 255,
+        const editor = window.Asc.editor;
+        if (!editor.isGroupActions())
+          throw Error("onlyoffice_product_transaction_required");
+        editor.executeGroupActionsStart();
+        try {
+          const api = window.AscBuilder.Slide.Api,
+            p = api.GetPresentation(),
+            slide = p.GetSlideByIndex(command.slideIndex);
+          const d = slide
+            .GetAllDrawings()
+            .find((d) => d.Drawing?.Id === command.nativeId);
+          if (!d) throw Error("onlyoffice_product_live_binding_changed");
+          window.Asc.editor.WordControl.Thumbnails.SelectPage(
+            command.slideIndex,
           );
-        const fill = () => api.CreateSolidFill(color());
-        const content = () => {
-          const c = d.GetDocContent();
-          if (!c) throw Error("onlyoffice_product_text_unavailable");
-          return c;
-        };
-        switch (command.op) {
-          case "move":
-            return d.SetPosition(command.x * 360, command.y * 360);
-          case "resize":
-            return d.SetSize(command.width * 360, command.height * 360);
-          case "rotate":
-            return d.SetRotation(command.degrees);
-          case "flip":
-            if (command.axis === "horizontal") return d.SetFlipH(!d.GetFlipH());
-            if (command.axis === "vertical") return d.SetFlipV(!d.GetFlipV());
-            throw Error("onlyoffice_product_flip_axis_invalid");
-          case "set_shape_name":
-            return d.SetName(command.name);
-          case "fill_color":
-            return d.SetFill(fill());
-          case "line_color": {
-            const stroke = api.CreateStroke(
-              d.Drawing.spPr?.ln?.w ?? 36000,
-              fill(),
+          p.CreateNewHistoryPoint();
+          const color = () =>
+            api.CreateRGBColor(
+              (command.color >>> 16) & 255,
+              (command.color >>> 8) & 255,
+              command.color & 255,
             );
-            const original = d.Drawing.spPr?.ln;
-            if (original) {
-              stroke.Ln = original.createDuplicate();
-              stroke.Ln.setFill(fill().UniFill);
-            }
-            return d.SetOutLine(stroke);
-          }
-          case "delete_element":
-            return d.Delete();
-          case "replace_text": {
-            const c = content(),
-              first = c.GetAllParagraphs()[0];
-            const properties =
-              first?.GetElement(0)?.GetTextPr?.() ?? first?.GetTextPr();
-            const paragraphProperties = first?.GetParaPr();
-            c.RemoveAllElements();
-            const paragraph = c.GetElement(0);
-            if (properties) paragraph.SetTextPr(properties);
-            if (paragraphProperties)
-              paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
-            return paragraph.AddText(command.text);
-          }
-          case "font_size":
-            return content()
-              .GetAllParagraphs()
-              .forEach((p) => p.SetFontSize(command.size * 2));
-          case "font_family":
-            return content()
-              .GetAllParagraphs()
-              .forEach((p) => p.SetFontFamily(command.family));
-          case "bold":
-            return content()
-              .GetAllParagraphs()
-              .forEach((p) => p.SetBold(command.bold));
-          case "italic":
-            return content()
-              .GetAllParagraphs()
-              .forEach((p) => p.SetItalic(command.italic));
-          case "underline":
-            return content()
-              .GetAllParagraphs()
-              .forEach((p) => p.SetUnderline(command.underline));
-          case "strikethrough":
-            return content()
-              .GetAllParagraphs()
-              .forEach((p) => {
-                p.Paragraph.SetApplyToAll(true);
-                try {
-                  p.Paragraph.Add(
-                    new window.AscCommonWord.ParaTextPr({
-                      Strikeout: command.strikethrough,
-                    }),
-                  );
-                } finally {
-                  p.Paragraph.SetApplyToAll(false);
-                }
-              });
-          case "font_color": {
-            // Presentation export uses the native run fill, whereas the shared
-            // paragraph RGB setter can update only the Word-style Color field.
-            // Keep the change in the provider's own history-aware setters.
-            const setColor = (run) => {
-              if (typeof run?.Set_Unifill === "function") {
-                run.Set_Unifill(fill().UniFill);
-                run.Set_Color?.(undefined);
-                run.Set_TextFill?.(undefined);
+          const fill = () => api.CreateSolidFill(color());
+          const content = () => {
+            const c = d.GetDocContent();
+            if (!c) throw Error("onlyoffice_product_text_unavailable");
+            return c;
+          };
+          switch (command.op) {
+            case "move":
+              return d.SetPosition(command.x * 360, command.y * 360);
+            case "resize":
+              return d.SetSize(command.width * 360, command.height * 360);
+            case "rotate":
+              return d.SetRotation(command.degrees);
+            case "flip":
+              if (command.axis === "horizontal")
+                return d.SetFlipH(!d.GetFlipH());
+              if (command.axis === "vertical") return d.SetFlipV(!d.GetFlipV());
+              throw Error("onlyoffice_product_flip_axis_invalid");
+            case "set_shape_name":
+              return d.SetName(command.name);
+            case "fill_color":
+              return d.SetFill(fill());
+            case "line_color": {
+              const stroke = api.CreateStroke(
+                d.Drawing.spPr?.ln?.w ?? 36000,
+                fill(),
+              );
+              const original = d.Drawing.spPr?.ln;
+              if (original) {
+                stroke.Ln = original.createDuplicate();
+                stroke.Ln.setFill(fill().UniFill);
               }
-              run.Content?.forEach(setColor);
-            };
-            for (const paragraph of content().GetAllParagraphs()) {
-              setColor(paragraph.Paragraph.TextPr);
-              paragraph.Paragraph.Content.forEach(setColor);
+              return d.SetOutLine(stroke);
             }
-            return true;
+            case "delete_element":
+              return d.Delete();
+            case "replace_text": {
+              const c = content(),
+                first = c.GetAllParagraphs()[0];
+              const properties =
+                first?.GetElement(0)?.GetTextPr?.() ?? first?.GetTextPr();
+              const paragraphProperties = first?.GetParaPr();
+              c.RemoveAllElements();
+              const paragraph = c.GetElement(0);
+              if (properties) paragraph.SetTextPr(properties);
+              if (paragraphProperties)
+                paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
+              return paragraph.AddText(command.text);
+            }
+            case "font_size":
+              return content()
+                .GetAllParagraphs()
+                .forEach((p) => p.SetFontSize(command.size * 2));
+            case "font_family":
+              return content()
+                .GetAllParagraphs()
+                .forEach((p) => p.SetFontFamily(command.family));
+            case "bold":
+              return content()
+                .GetAllParagraphs()
+                .forEach((p) => p.SetBold(command.bold));
+            case "italic":
+              return content()
+                .GetAllParagraphs()
+                .forEach((p) => p.SetItalic(command.italic));
+            case "underline":
+              return content()
+                .GetAllParagraphs()
+                .forEach((p) => p.SetUnderline(command.underline));
+            case "strikethrough":
+              return content()
+                .GetAllParagraphs()
+                .forEach((p) => {
+                  p.Paragraph.SetApplyToAll(true);
+                  try {
+                    p.Paragraph.Add(
+                      new window.AscCommonWord.ParaTextPr({
+                        Strikeout: command.strikethrough,
+                      }),
+                    );
+                  } finally {
+                    p.Paragraph.SetApplyToAll(false);
+                  }
+                });
+            case "font_color": {
+              // Presentation export uses the native run fill, whereas the shared
+              // paragraph RGB setter can update only the Word-style Color field.
+              // Keep the change in the provider's own history-aware setters.
+              const setColor = (run) => {
+                if (typeof run?.Set_Unifill === "function") {
+                  run.Set_Unifill(fill().UniFill);
+                  run.Set_Color?.(undefined);
+                  run.Set_TextFill?.(undefined);
+                }
+                run.Content?.forEach(setColor);
+              };
+              for (const paragraph of content().GetAllParagraphs()) {
+                setColor(paragraph.Paragraph.TextPr);
+                paragraph.Paragraph.Content.forEach(setColor);
+              }
+              return true;
+            }
+            default:
+              throw Error(
+                "onlyoffice_product_operation_unavailable:" + command.op,
+              );
           }
-          default:
-            throw Error(
-              "onlyoffice_product_operation_unavailable:" + command.op,
-            );
+        } finally {
+          editor.executeGroupActionsEnd();
         }
       }, command);
       if (result === false) throw Error("onlyoffice_product_native_rejected");

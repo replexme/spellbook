@@ -418,6 +418,16 @@ const engine = createOnlyOfficeProductEngine({
     await captureStableOnlyOfficeBaseline(mainPage, save);
   },
   snapshot: async ({ before, commands, authorize }) => {
+    if (commands) {
+      assert.equal(
+        await mainFrame.evaluate(() =>
+          window.AscCommon.CollaborativeEditing.Get_GlobalLock(),
+        ),
+        true,
+        "Human input must be locked throughout async AI file admission",
+      );
+      report.asyncNativeMutationLockVerified = true;
+    }
     await mainPage.evaluate((intent) => (window.__comparisonIntent = intent), {
       sourceOperations: commands?.map((c) => c.op) ?? null,
       sourceTargets:

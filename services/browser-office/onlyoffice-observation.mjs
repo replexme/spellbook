@@ -113,7 +113,9 @@ async function extendedFeatures(frame) {
             "GetSmallCaps",
             "GetDoubleStrikeout",
           ])
-            value[key] = read(pr, key, at + ".text") ?? null;
+            value[key] =
+              read(pr, key, at + ".text") ??
+              (key === "GetDoubleStrikeout" ? false : null);
           value.fonts = ["ascii", "eastAsia", "hAnsi", "cs"].map(
             (slot) => read(pr, "GetFontFamily", at + ".text", slot) ?? null,
           );
