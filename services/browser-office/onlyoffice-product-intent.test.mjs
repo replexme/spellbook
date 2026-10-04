@@ -1597,6 +1597,7 @@ test("column insertion repairs precision-only grid drift through a reversible na
   const width = 1016000 / 36000;
   const table = {
     TableGrid: [width, width],
+    Content: [],
     SetTableGrid(grid) {
       if (
         this.TableGrid.some(

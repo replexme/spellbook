@@ -1135,6 +1135,18 @@ export function createOnlyOfficeProductEngine({
                 for (let i = 0; i < command.count; i++)
                   d.RemoveColumn(d.GetRow(0).GetCell(command.index));
               }
+              // PPTX cell widths are derived from its grid. Native topology also
+              // copies subtracted running totals into each preferred width; reset
+              // those derived values through cell history so live layout matches
+              // the same cells reconstructed from the approved PPTX grid.
+              for (const row of d.Table.Content)
+                for (const [index, cell] of row.Content.entries()) {
+                  const preferred = cell.Get_W();
+                  if (preferred.Type === 1 && preferred.W !== grid[index]) {
+                    preferred.W = grid[index];
+                    cell.Set_W(preferred);
+                  }
+                }
               // Native column topology rebuilds running sums; keep exact authored
               // widths for retained columns through its own history grid setter.
               d.Table.SetTableGrid(grid);
