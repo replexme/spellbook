@@ -107,10 +107,13 @@ export default function NativeDocument({
   documentId,
   launchMode,
   aiConnector,
+  showAds = false,
 }: {
   documentId: string;
   launchMode: "wopi" | "browser";
   aiConnector: AiConnectorConfig;
+  /** The account's plan shows the managed service's ad strip. */
+  showAds?: boolean;
 }) {
   const [launch, setLaunch] = useState<NativeLaunch | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -357,6 +360,7 @@ export default function NativeDocument({
         initialQueued={queued}
         onReload={retry}
         onUnsupported={refuseBrowser}
+        showAds={showAds}
       />
     );
   const reason =

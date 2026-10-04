@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 
+import { accountPlan } from "@/lib/account-plan";
 import { currentSession } from "@/lib/auth";
 import NativeDocument from "@/components/native-document";
 import { aiConnectorConfig } from "@/lib/ai-connector-config";
@@ -12,7 +13,9 @@ export default async function DocumentPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  if (!(await currentSession())) redirect("/auth/login");
+  const session = await currentSession();
+  if (!session) redirect("/auth/login");
+  const plan = await accountPlan(session);
   const { id } = await params;
   if (configuredEditorMode() === "browser")
     redirect(`/browser-documents/${encodeURIComponent(id)}`);
@@ -21,6 +24,7 @@ export default async function DocumentPage({
       documentId={id}
       launchMode="wopi"
       aiConnector={aiConnectorConfig()}
+      showAds={plan.showsAds}
     />
   );
 }

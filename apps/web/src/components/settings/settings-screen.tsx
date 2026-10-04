@@ -13,6 +13,7 @@ import type { AiConnectorConfig } from "@/lib/ai-connector-config";
 import { useAiAccount } from "@/lib/use-ai-account";
 import { AppTop } from "../app-top";
 import { ConnectSteps } from "../workspace/connect-steps";
+import { PlanSection, planSectionEnabled } from "./plan-section";
 
 const connectedDay = new Intl.DateTimeFormat("ko-KR", {
   month: "long",
@@ -196,6 +197,7 @@ export function SettingsScreen({
         <div className="settings">
           <nav className="settings-nav" aria-label="설정">
             <a href="#ai">AI 연결 및 공급자</a>
+            {planSectionEnabled ? <a href="#plan">요금제</a> : null}
             <a href="#account">계정</a>
           </nav>
           <div className="settings-body">
@@ -929,6 +931,8 @@ export function SettingsScreen({
                 </div>
               </div>
             </section>
+
+            {planSectionEnabled ? <PlanSection /> : null}
 
             <section
               id="account"
