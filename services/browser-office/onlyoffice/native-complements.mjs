@@ -116,7 +116,7 @@ export function installOnlyOfficeNativeComplements() {
     const restoreData=d.drawingsChangesMap[d.historyitem_SmartArtDataModel];
     if(typeof restoreData!=="function")throw Error("onlyoffice_product_diagram_history_unavailable");
     d.drawingsChangesMap[d.historyitem_SmartArtDataModel]=(shape,value)=>{
-      restoreData(shape,value);shape.smartArtTree=null;shape.recalcSmartArtConnections();
+      restoreData(shape,value);shape.smartArtTree=null;shape.recalcSmartArtConnections();shape.recalcFitFontSize();
     };
   }
   const type = d.historyitem_type_ParaRun | 65002;
@@ -132,6 +132,26 @@ export function installOnlyOfficeNativeComplements() {
     run.Paragraph?.Recalc_CompiledPr?.();
     run.Paragraph?.Refresh_RecalcData2?.(0, 0);
   };
+  // The native style cache hashes only standard text properties. Include the
+  // owned extension in this cache key, without changing native binary codecs.
+  const cache=window.AscWord.g_textPrCache;
+  if(cache){
+    const nativeKey=cache.getKey;
+    if(typeof nativeKey!=="function"||typeof common.CMemory!=="function")throw Error("onlyoffice_product_text_effect_cache_unavailable");
+    cache.getKey=function(pr){
+      const base=nativeKey.call(this,pr);if(!pr.spellbookEffects)return base;
+      const memory=new common.CMemory();memory.Init(1000);pr.spellbookEffects.Write_ToBinary(memory);
+      return base+":"+memory.sha256();
+    };
+  }
+  if(Number.isSafeInteger(d.historyitem_PointT)){
+    const restoreText=d.drawingsChangesMap[d.historyitem_PointT];
+    if(typeof restoreText!=="function")throw Error("onlyoffice_product_diagram_text_history_unavailable");
+    d.drawingsChangesMap[d.historyitem_PointT]=(point,value)=>{
+      restoreText(point,value);let owner=point.parent;const seen=new Set();
+      while(owner&&!seen.has(owner)){seen.add(owner);if(typeof owner.recalcFitFontSize==="function"){owner.recalcFitFontSize();break;}owner=owner.parent;}
+    };
+  }
   const copy = word.CTextPr.prototype.Copy, merge = word.CTextPr.prototype.Merge;
   const setFromObject = word.CTextPr.prototype.Set_FromObject;
   word.CTextPr.prototype.Set_FromObject = function(value, ...args) {

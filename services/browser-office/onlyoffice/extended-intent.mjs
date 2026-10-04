@@ -8,6 +8,21 @@ const same = (expected, actual, path) => {
   const difference = firstDocumentStateDifference(expected, actual, path);
   if (difference) throw Error("onlyoffice_product_intent_mismatch:" + difference.path);
 };
+// SmartArt's native layout derives font fitting and default padding. Keep
+// authored font overrides and explicit semantic-node insets exact; admit only
+// these derived values from the separately reopened native layout.
+function diagramTextDerivations(before,after,points){
+  const owners=(before.diagramPointIds??[]).map(id=>points.find(point=>point.id===id)).filter(Boolean);
+  if(!owners.length)return;
+  for(const inset of ["lIns","rIns","tIns","bIns"])
+    if(owners.every(point=>point.textBodyInsets?.[inset]==null)&&before.bodyProperties&&after.bodyProperties)
+      before.bodyProperties[inset]=after.bodyProperties[inset];
+  if(owners.some(point=>point.customText===true))return;
+  before.paragraphs?.forEach((para,pi)=>para.runs.forEach((run,ri)=>{
+    const actual=after.paragraphs?.[pi]?.runs?.[ri]?.style;
+    if(actual&&Number.isFinite(actual.GetFontSize)&&actual.GetFontSize>0)run.style.GetFontSize=actual.GetFontSize;
+  }));
+}
 const color = rgb => ({type:1,id:null,rgb:{R:(rgb>>>16)&255,G:(rgb>>>8)&255,B:rgb&255,A:255},modifiers:[]});
 const emptyEffects = () => ({outerShadow:null,glow:null,softEdge:null,blur:null,reflection:null,innerShadow:null,presetShadow:null,fillOverlay:null});
 const shadow = (command, original) => {
@@ -394,7 +409,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
         need(added.length===1&&added[0].type===0&&typeof added[0].id==="string"&&added[0].id.length>=32,"diagram_added_node_identity");
         addedId=added[0].id;
         const text=q.text.replace(/\r\n/g,"\n").split("\n").map(line=>line+"\r\n").join("");
-        diagram.points.push({id:addedId,type:0,text});
+        diagram.points.push({...copy(point),id:addedId,type:0,text});
         diagram.connections.push({src:c.nativeDiagramParent,dest:addedId,type:0,srcOrd:c.nativeDiagramOrder,destOrd:diagram.connections.find(edge=>edge.dest===point.id)?.destOrd??0});
       }else{
         need((point.text??"").replace(/\r?\n$/,"")===q.expectedText&&!diagram.connections.some(edge=>edge.src===point.id),"diagram_delete_node_binding");
@@ -416,7 +431,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
         const sourceId=node.id===addedId?point.id:node.id,previous=beforeLeaves.filter(leaf=>leaf.drawing.diagramPointIds.includes(sourceId)&&leaf.drawing.paragraphs?.some(para=>para.runs.length));
         need(previous.length===1,"diagram_prior_node_binding");
         if(node.id!==addedId){
-          const before=previous[0],after=rendered[0];
+          const before=previous[0],after=rendered[0];diagramTextDerivations(before.drawing,after.drawing,diagram.points);
           for(const key of ["objectName","kind"])same(before.element[key],after.element[key],"diagram_retained_node_"+key);
           for(const key of ["hidden","ownName","title","description","locks","textWarp","crop"])same(before.element.onlyoffice[key],after.element.onlyoffice[key],"diagram_retained_node_"+key);
           for(const key of ["fill","effects","bodyProperties","hyperlink","GetFlipH","GetFlipV"])same(before.drawing[key],after.drawing[key],"diagram_retained_node_"+key);
@@ -425,8 +440,8 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
         // existing text's family, paint and emphasis in its semantic node.
         const priorStyles=previous[0].drawing.paragraphs.flatMap(para=>para.runs.map(run=>run.style));
         rendered[0].drawing.paragraphs.forEach(para=>para.runs.forEach(run=>{
-          const style=copy(run.style);delete style.GetFontSize;
-          need(priorStyles.some(previous=>{const wanted=copy(previous);delete wanted.GetFontSize;return !firstDocumentStateDifference(wanted,style,"diagram.node.style");}),"diagram_retained_node_style");
+          const style=copy(run.style);if(node.customText!==true)delete style.GetFontSize;
+          need(priorStyles.some(previous=>{const wanted=copy(previous);if(node.customText!==true)delete wanted.GetFontSize;return !firstDocumentStateDifference(wanted,style,"diagram.node.style");}),"diagram_retained_node_style");
         }));
         if(node.id!==addedId)retainedIdentities.set(rendered[0].element.elementId,previous[0].element.elementId);
       }
@@ -448,6 +463,8 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
       const leaf=leaves[0],observedLeaves=[];
       const read=(elements,drawings)=>elements.forEach((element,i)=>{const drawing=drawings[i];if(drawing.diagramPointIds?.includes(point.id))observedLeaves.push({element,drawing});if(element.elements?.length)read(element.elements,drawing.groupChildren??[]);});
       read(b.element.elements,observed.groupChildren??[]);need(observedLeaves.length===1,"diagram_node_binding");
+      const derive=(before,after)=>{diagramTextDerivations(before,after,diagram.points);before.groupChildren?.forEach((child,index)=>derive(child,after.groupChildren[index]));};
+      derive(old,observed);
       const styles=leaf.drawing.paragraphs?.flatMap(para=>para.runs.map(run=>run.style))??[];need(styles.length,"diagram_node_text_style");
       const wanted=q.text.replace(/\r\n/g,"\n").split("\n");
       const actualParagraphs=observedLeaves[0].drawing.paragraphs;need(actualParagraphs?.length===wanted.length,"diagram_node_paragraphs");

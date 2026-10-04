@@ -15,11 +15,16 @@ test("decoded run effects survive the native text-property import copy",()=>{
   class Transition{parseXmlParameters(){}fillXmlParams(){}}
   class Writer{constructor(){this.records=[];this.WriteRunProperties=pr=>{this.written=pr;};this.WriteRecord1=(type,value,write)=>{this.records.push({type,value});write(value);};this.WriteEffectLst=value=>{this.effects=value;};}}
   class Loader{}
-  globalThis.window={Asc:{CAscSlideTransition:Transition,c_oAscSlideTransitionParams:{}},AscCommon:{CBinaryFileWriter:Writer,BinaryPPTYLoader:Loader,CComment:Comment,CCommentData:CommentData},AscCommonWord:{CTextPr:TextPr},AscWord:{Run},AscCommonSlide:{CPresentation:Presentation,fLoadComments(){}},AscFormat:{CEffectProperties:class {}},AscDFH:{historyitem_type_Presentation:65536,historyitem_type_Comment:131072,historyitem_type_ParaRun:196608,changesFactory:{},drawingsChangesMap:{},drawingContentChanges:{},drawingsConstructorsMap:{}}};
-  const effect=value=>({value,createDuplicate(){return effect(this.value);}});
+  class Memory{Init(){}WriteLong(value){this.value=value;}sha256(){return String(this.value);}}
+  globalThis.window={Asc:{CAscSlideTransition:Transition,c_oAscSlideTransitionParams:{}},AscCommon:{CMemory:Memory,CBinaryFileWriter:Writer,BinaryPPTYLoader:Loader,CComment:Comment,CCommentData:CommentData},AscCommonWord:{CTextPr:TextPr},AscWord:{Run,g_textPrCache:{getKey:pr=>pr.font??"default"}},AscCommonSlide:{CPresentation:Presentation,fLoadComments(){}},AscFormat:{CEffectProperties:class {}},AscDFH:{historyitem_type_Presentation:65536,historyitem_type_Comment:131072,historyitem_type_ParaRun:196608,changesFactory:{},drawingsChangesMap:{},drawingContentChanges:{},drawingsConstructorsMap:{}}};
+  const effect=value=>({value,Write_ToBinary(memory){memory.WriteLong(this.value);},createDuplicate(){return effect(this.value);}});
   try{
     installOnlyOfficeNativeComplements();
     const decoded={font:"Arial",spellbookEffects:effect(75)};
+    const cache=window.AscWord.g_textPrCache;
+    assert.notEqual(cache.getKey(decoded),cache.getKey({font:"Arial"}));
+    assert.notEqual(cache.getKey(decoded),cache.getKey({font:"Arial",spellbookEffects:effect(76)}));
+    assert.equal(cache.getKey(decoded),cache.getKey({font:"Arial",spellbookEffects:effect(75)}));
     const imported=new TextPr();imported.Set_FromObject(decoded);
     assert.equal(imported.spellbookEffects.value,75);assert.notEqual(imported.spellbookEffects,decoded.spellbookEffects);
     decoded.spellbookEffects.value=100;assert.equal(imported.spellbookEffects.value,75);

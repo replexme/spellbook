@@ -1958,3 +1958,24 @@ test("deleting the only slide of a section removes that section and retains the 
     /unrequested_change/,
   );
 });
+
+test("diagram text fitting preserves authored font and inset overrides",()=>{
+  const before=document(),slide=before.slides[0],leaf=structuredClone(slide.elements[0]),drawing=structuredClone(slide.onlyoffice.drawings[0]);
+  leaf.elementId="0/0/0";drawing.diagramPointIds=["node1"];drawing.bodyProperties={lIns:.5,rIns:.5,tIns:.5,bIns:.5,wrap:0};
+  const point={id:"node1",type:0,text:"old\r\n",customText:false,textBodyInsets:{lIns:null,rIns:null,tIns:null,bIns:null}};
+  slide.elements[0]={...slide.elements[0],kind:"group",text:"",onlyoffice:{text:"",diagram:{points:[point],connections:[]}},elements:[leaf]};
+  slide.onlyoffice.drawings[0]={text:"",groupChildren:[drawing]};
+  const after=structuredClone(before),group=after.slides[0].elements[0],actual=after.slides[0].onlyoffice.drawings[0].groupChildren[0];
+  group.onlyoffice.diagram.points[0].text="new\r\n";group.elements[0].text="new\r\n";group.elements[0].onlyoffice.text="new\r\n";
+  actual.text="new\r\n";actual.paragraphs[0].text="new\r\n";actual.paragraphs[0].runs[0].text="new";actual.paragraphs[0].runs[0].style.GetFontSize=60;actual.bodyProperties.lIns=.75;
+  const command={op:"set_smartart_node",elementId:"0/0",smartartNode:{expectedText:"old",occurrence:0,text:"new"}};
+  assert.doesNotThrow(()=>verifyOnlyOfficeProductIntent(before,after,[command],[command]));
+  const authored=structuredClone(before),authoredAfter=structuredClone(after);
+  authored.slides[0].elements[0].onlyoffice.diagram.points[0].customText=true;
+  authoredAfter.slides[0].elements[0].onlyoffice.diagram.points[0].customText=true;
+  assert.throws(()=>verifyOnlyOfficeProductIntent(authored,authoredAfter,[command],[command]),/diagram_node_style/);
+  const inset=structuredClone(before),insetAfter=structuredClone(after);
+  inset.slides[0].elements[0].onlyoffice.diagram.points[0].textBodyInsets.lIns=.5;
+  insetAfter.slides[0].elements[0].onlyoffice.diagram.points[0].textBodyInsets.lIns=.5;
+  assert.throws(()=>verifyOnlyOfficeProductIntent(inset,insetAfter,[command],[command]),/bodyProperties.lIns/);
+});

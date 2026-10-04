@@ -73,6 +73,8 @@ export async function observeOnlyOfficeCandidate(frame) {
                 .map((p) => ({
                   id: p.modelId,
                   type: p.type,
+                  customText:p.prSet?.custT??null,
+                  textBodyInsets:Object.fromEntries(["lIns","rIns","tIns","bIns"].map(key=>[key,Number.isFinite(p.t?.bodyPr?.[key])?Math.round(p.t.bodyPr[key]*36000)/36000:null])),
                   text: p.t?.content?.GetText?.({ Numbering: false }) ?? null,
                 })),
               connections: x

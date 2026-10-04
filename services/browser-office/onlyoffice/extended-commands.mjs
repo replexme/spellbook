@@ -40,6 +40,8 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
   const finite = (n, min = -100000, max = 100000) => Number.isFinite(n) && n >= min && n <= max;
   const rgb = (n) => api.CreateRGBColor((n >>> 16) & 255, (n >>> 8) & 255, n & 255);
   const solid = (n) => api.CreateSolidFill(rgb(n));
+  // Trusted converter worker stages owned files under this fixed directory.
+  const mediaNativePath=asset=>"/working/media/"+asset.fileName;
   const wrap = (shape) => window.AscBuilder.GetApiDrawing(shape) ??
     (shape?.getObjectType?.() === window.AscDFH.historyitem_type_Cnx ? new window.AscBuilder.ApiShape(shape) :
       shape?.getObjectType?.() === window.AscDFH.historyitem_type_SmartArtDrawing ? new window.AscBuilder.ApiGroup(shape) : null);
@@ -507,7 +509,12 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
     source.setDataModel(data);source.smartArtTree=null;source.checkDataModel();source.generateDrawingPart();
     const rebound=new Map(),remaining=new Set(oldLeaves.keys());
     visit(source,shape=>{
-      const key=nodeKey(shape),prior=oldLeaves.get(key);if(!prior)return;
+      let key=nodeKey(shape),prior=oldLeaves.get(key);
+      if(!prior&&shape.getDocContent?.()?.GetText?.({Numbering:false})?.trim()){
+        const ids=JSON.parse(key??"[[]]")[0],matches=[...oldLeaves].filter(([oldKey,oldShape])=>JSON.stringify(JSON.parse(oldKey)[0])===JSON.stringify(ids)&&oldShape.getDocContent?.()?.GetText?.({Numbering:false})?.trim());
+        need(matches.length<=1,"diagram_shape_binding_ambiguous");if(matches.length){[key,prior]=matches[0];}
+      }
+      if(!prior)return;
       need(remaining.delete(key),"diagram_shape_binding_ambiguous");rebound.set(prior.Id,shape.Id);
       if(prior.nvSpPr)shape.setNvSpPr(prior.nvSpPr.createDuplicate());
       if(prior.spPr&&shape.spPr){
@@ -522,11 +529,14 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
     // Preserve references to retained semantic nodes while the native layout
     // regenerates leaf objects. Removing a node may remove its own targets;
     // no other node's connector or animation target can silently disappear.
-    need([...remaining].every(key=>c.op==="delete_smartart_node"&&JSON.parse(key)[0].includes(target.modelId)),"diagram_retained_shape_missing");
+    need([...remaining].every(key=>!oldLeaves.get(key).getDocContent?.()?.GetText?.({Numbering:false})?.trim()||c.op==="delete_smartart_node"&&JSON.parse(key)[0].includes(target.modelId)),"diagram_retained_shape_missing:"+JSON.stringify([...remaining]));
     const rebind=shape=>{
       const pr=shape.nvSpPr?.nvUniSpPr;
-      if(pr&&(rebound.has(pr.stCnxId)||rebound.has(pr.endCnxId))){
+      if(pr){
+        for(const id of [pr.stCnxId,pr.endCnxId])if(id&&[...oldLeaves.values()].some(item=>item.Id===id))need(rebound.has(id),"diagram_referenced_shape_removed");
+        if(rebound.has(pr.stCnxId)||rebound.has(pr.endCnxId)){
         const next=pr.copy();if(rebound.has(next.stCnxId))next.stCnxId=rebound.get(next.stCnxId);if(rebound.has(next.endCnxId))next.endCnxId=rebound.get(next.endCnxId);shape.nvSpPr.setUniSpPr(next);
+        }
       }
       shape.spTree?.forEach(rebind);
     };slide.Slide.cSld.spTree.forEach(rebind);
@@ -806,11 +816,10 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
         effect.Timing.buildTree(seqs.filter(seq => seq.length > 1));
         return true;
       }
-      case "insert_image": case "insert_media": { const a=c.nativeAsset; let image; if(c.op==="insert_image") image=api.CreateImage(a.url,c.width*360,c.height*360); else { const shape=slide.Slide.graphicObjects.createImage(a.posterUrl,0,0,c.width/100,c.height/100,a.kind==="video"?a.url:null,a.kind==="audio"?a.url:null); const media=shape.nvPicPr.nvPr.unimedia.createDuplicate(); media.media=a.fileName; shape.nvPicPr.nvPr.setUniMedia(media); image=new window.AscBuilder.ApiImage(shape); } return add(image); }
+      case "insert_image": case "insert_media": { const a=c.nativeAsset; let image; if(c.op==="insert_image") image=api.CreateImage(a.url,c.width*360,c.height*360); else { const shape=slide.Slide.graphicObjects.createImage(a.posterUrl,0,0,c.width/100,c.height/100,a.kind==="video"?a.url:null,a.kind==="audio"?a.url:null); const media=shape.nvPicPr.nvPr.unimedia.createDuplicate(); media.media=mediaNativePath(a); shape.nvPicPr.nvPr.setUniMedia(media); image=new window.AscBuilder.ApiImage(shape); } return add(image); }
       case "replace_image": { const fill=source.blipFill.createDuplicate(); fill.setRasterImageId(c.nativeAsset.url); source.setBlipFill(fill); return true; }
-      case "replace_media": { const fill=source.blipFill.createDuplicate();fill.setRasterImageId(c.nativeAsset.posterUrl);source.setBlipFill(fill);const media=source.nvPicPr.nvPr.unimedia?.createDuplicate()??new f.UniMedia(); media.type=c.nativeAsset.kind==="video"?7:8; media.media=c.nativeAsset.fileName; source.nvPicPr.nvPr.setUniMedia(media); return true; }
-      case "set_smartart_node": { const point=pointTarget(), leaves=[]; const visit=x=>{if(x.getSmartArtPointContent?.()?.some(n=>n.point?.modelId===point.modelId))leaves.push(x);x.spTree?.forEach(visit);};visit(source);need(leaves.length===1,"diagram_text_binding_ambiguous");replace(wrap(leaves[0]).GetContent(),c.smartartNode.text);const body=leaves[0].txBody?.bodyPr;
-        leaves[0].copyTextInfoFromShapeToPoint(body?{Left:body.lIns,Right:body.rIns,Top:body.tIns,Bottom:body.bIns}:undefined);return true; }
+      case "replace_media": { const fill=source.blipFill.createDuplicate();fill.setRasterImageId(c.nativeAsset.posterUrl);source.setBlipFill(fill);const media=source.nvPicPr.nvPr.unimedia?.createDuplicate()??new f.UniMedia(); media.type=c.nativeAsset.kind==="video"?7:8; media.media=mediaNativePath(c.nativeAsset); source.nvPicPr.nvPr.setUniMedia(media); return true; }
+      case "set_smartart_node": { const point=pointTarget(), leaves=[]; const visit=x=>{if(x.getSmartArtPointContent?.()?.some(n=>n.point?.modelId===point.modelId))leaves.push(x);x.spTree?.forEach(visit);};visit(source);need(leaves.length===1,"diagram_text_binding_ambiguous");replace(wrap(leaves[0]).GetContent(),c.smartartNode.text);leaves[0].copyTextInfoFromShapeToPoint();source.recalcFitFontSize();source.recalculate();return true; }
       case "add_smartart_node": case "delete_smartart_node": return mutateDiagramTopology();
       case "add_comment": {
         const data=new window.AscCommon.CCommentData();data.m_sText=c.text;data.m_sUserName=c.author;data.m_sUserId="";data.m_sTime=String(Math.floor(Date.now()/1000)*1000);data.m_sOOTime=data.m_sTime;data.m_sGuid=window.AscCommon.CreateGUID();
