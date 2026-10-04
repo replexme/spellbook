@@ -613,6 +613,42 @@ try {
   report.timings.openWithBaselineAndAdmissionMs =
     performance.now() - phaseStarted;
   report.stages.push("original-open-and-file-admission");
+  if (process.argv.includes("--unobserved-native-probe")) {
+    const originalToken = await engine.changeToken();
+    const token = await engine.begin();
+    await mainFrame.evaluate(() => {
+      const editor = window.Asc.editor;
+      editor.executeGroupActionsStart();
+      try {
+        const model = editor.WordControl.m_oLogicDocument;
+        model.Slides[0].cSld.spTree[0].nvSpPr.cNvPr.setDescr(
+          "unobserved-accessibility-probe",
+        );
+      } finally {
+        editor.executeGroupActionsEnd();
+      }
+    });
+    await engine.finish(token, true);
+    assert.notEqual(await engine.changeToken(), originalToken);
+    // This property has not yet been admitted by the candidate observation.
+    verifyOnlyOfficeProductObservation(before, await engine.observe());
+    await assert.rejects(session.observe(), /product_unobserved_native_edit/);
+    let written = false;
+    await assert.rejects(
+      session.save(async () => {
+        written = true;
+      }),
+      /product_unobserved_native_edit/,
+    );
+    assert.equal(written, false);
+    assert.equal(await journal.load(), null);
+    await engine.undo();
+    assert.equal(await engine.changeToken(), originalToken);
+    verifyOnlyOfficeProductObservation(before, await session.observe());
+    report.stages.push(
+      "unobserved-native-edit-refuses-stale-file-and-recovers-after-native-undo",
+    );
+  }
   report.rendering = { before: await pixels(mainFrame) };
   const operation = flags("--operation", "move");
   const targets = before.slides[0].elements.filter(
