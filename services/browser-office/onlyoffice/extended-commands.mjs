@@ -439,7 +439,7 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
     case "move_animation_effect": need(integer(c.animationIndex, 0, slide.GetTimeLine().GetAllEffects().length - 1), "animation_position_invalid"); binding("MoveTo", effect); break;
     case "insert_image": case "replace_image": case "insert_media": case "replace_media": {
       need(typeof c.assetId === "string" && c.nativeAsset && c.nativeAsset.assetId === c.assetId && typeof c.nativeAsset.url === "string", "asset_authority_required");
-      const state=window[Symbol.for("spellbook.onlyoffice.documentAssets/v1")]; need(state?.model===model,"asset_document_changed"); const receipt=state.receipts.get(c.assetId);
+      const state=window[Symbol.for("spellbook.onlyoffice.documentAssets/v1")]; need(state?.model===model,"asset_document_changed"); const receipt=c.op==="replace_media"?state.replacements?.get(c.assetId+":"+c.elementId):state.receipts.get(c.assetId);
       need(receipt && receipt.sha256===c.nativeAsset.sha256 && receipt.url===c.nativeAsset.url && receipt.fileName===c.nativeAsset.fileName, "asset_authority_required");
       need(c.op.endsWith("image") ? receipt.kind === "image" : ["audio","video"].includes(receipt.kind), "asset_kind_invalid");
       if(c.op.startsWith("replace"))need(source.isImage?.(),"image_target_required");
@@ -806,14 +806,14 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
         effect.Timing.buildTree(seqs.filter(seq => seq.length > 1));
         return true;
       }
-      case "insert_image": case "insert_media": { const a=c.nativeAsset; let image; if(c.op==="insert_image") image=api.CreateImage(a.url,c.width*360,c.height*360); else { const shape=slide.Slide.graphicObjects.createImage(a.posterUrl,0,0,c.width/100,c.height/100,a.kind==="video"?a.url:null,a.kind==="audio"?a.url:null); const media=shape.nvPicPr.nvPr.unimedia.createDuplicate(); media.media=a.url; shape.nvPicPr.nvPr.setUniMedia(media); image=new window.AscBuilder.ApiImage(shape); } return add(image); }
+      case "insert_image": case "insert_media": { const a=c.nativeAsset; let image; if(c.op==="insert_image") image=api.CreateImage(a.url,c.width*360,c.height*360); else { const shape=slide.Slide.graphicObjects.createImage(a.posterUrl,0,0,c.width/100,c.height/100,a.kind==="video"?a.url:null,a.kind==="audio"?a.url:null); const media=shape.nvPicPr.nvPr.unimedia.createDuplicate(); media.media=a.fileName; shape.nvPicPr.nvPr.setUniMedia(media); image=new window.AscBuilder.ApiImage(shape); } return add(image); }
       case "replace_image": { const fill=source.blipFill.createDuplicate(); fill.setRasterImageId(c.nativeAsset.url); source.setBlipFill(fill); return true; }
-      case "replace_media": { const media=source.nvPicPr.nvPr.unimedia?.createDuplicate()??new f.UniMedia(); media.type=c.nativeAsset.kind==="video"?7:8; media.media=c.nativeAsset.url; source.nvPicPr.nvPr.setUniMedia(media); return true; }
+      case "replace_media": { const fill=source.blipFill.createDuplicate();fill.setRasterImageId(c.nativeAsset.posterUrl);source.setBlipFill(fill);const media=source.nvPicPr.nvPr.unimedia?.createDuplicate()??new f.UniMedia(); media.type=c.nativeAsset.kind==="video"?7:8; media.media=c.nativeAsset.fileName; source.nvPicPr.nvPr.setUniMedia(media); return true; }
       case "set_smartart_node": { const point=pointTarget(), leaves=[]; const visit=x=>{if(x.getSmartArtPointContent?.()?.some(n=>n.point?.modelId===point.modelId))leaves.push(x);x.spTree?.forEach(visit);};visit(source);need(leaves.length===1,"diagram_text_binding_ambiguous");replace(wrap(leaves[0]).GetContent(),c.smartartNode.text);const body=leaves[0].txBody?.bodyPr;
         leaves[0].copyTextInfoFromShapeToPoint(body?{Left:body.lIns,Right:body.rIns,Top:body.tIns,Bottom:body.bIns}:undefined);return true; }
       case "add_smartart_node": case "delete_smartart_node": return mutateDiagramTopology();
       case "add_comment": {
-        const data=new window.AscCommon.CCommentData();data.m_sText=c.text;data.m_sUserName=c.author;data.m_sUserId="";data.m_sTime=String(Date.now());data.m_sOOTime=data.m_sTime;data.m_sGuid=window.AscCommon.CreateGUID();
+        const data=new window.AscCommon.CCommentData();data.m_sText=c.text;data.m_sUserName=c.author;data.m_sUserId="";data.m_sTime=String(Math.floor(Date.now()/1000)*1000);data.m_sOOTime=data.m_sTime;data.m_sGuid=window.AscCommon.CreateGUID();
         const comment=new window.AscCommon.CComment(slide.Slide.slideComments,data);comment.setPosition(c.nativeCommentPosition.x,c.nativeCommentPosition.y);
         if(c.initials!=null){const type=window.AscDFH.historyitem_Spellbook_CommentInitials;need(Number.isSafeInteger(type),"comment_initials_history_unavailable");const change=new window.AscDFH.CChangesDrawingsString(comment,type,undefined,c.initials);h.Add(change);change.Redo();}
         slide.Slide.slideComments.addComment(comment);return true;

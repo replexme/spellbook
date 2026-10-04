@@ -7,6 +7,13 @@ export function attachOnlyOfficeResourceHost(editor,convertDocument) {
   window[key]?.dispose();
   const urls=new Set(),staged=new Map(),digests=new Map(),capture=editor.captureNativeSnapshot;
   const bridge={
+    async read(reference){
+      const media=editor.getMedia(),entries=[...Object.entries(media),...[...staged].map(([name,item])=>[name,item.url])];
+      const url=entries.find(([name,value])=>name===reference||name==="media/"+reference||value===reference)?.[1];
+      if(typeof url!=="string"||!url.startsWith("blob:"))throw Error("onlyoffice_product_media_reference_not_owned:"+reference);
+      const response=await fetch(url);if(!response.ok)throw Error("onlyoffice_product_media_read_failed");
+      const bytes=new Uint8Array(await response.arrayBuffer());if(!bytes.length||bytes.length>25_000_000)throw Error("onlyoffice_product_media_size_invalid");return bytes;
+    },
     async fingerprint(reference){
       const media=editor.getMedia(),entries=[...Object.entries(media),...[...staged].map(([name,item])=>[name,item.url])];
       const url=entries.find(([name,value])=>name===reference||name==="media/"+reference||value===reference)?.[1];
@@ -139,24 +146,49 @@ export async function registerOnlyOfficeDocumentAsset(input) {
   const fileName="sba_"+sha256+"."+extension,url=host.register(fileName,bytes,mediaType);
   window.AscCommon.g_oDocumentUrls.addImageUrl(fileName,url);
   const kind=mediaType.split("/")[0];
-  let posterUrl=null,posterPath=null;
+  let posterUrl=null,posterPath=null,posterSha256=null;
   if(kind!=="image"){
     if(input.posterBytes!=null&&!(input.posterBytes instanceof Uint8Array))throw Error("onlyoffice_product_media_poster_invalid");
     const poster=input.posterBytes??await mediaPoster(bytes,mediaType);
     if(!poster.length||poster.length>5_000_000||![137,80,78,71,13,10,26,10].every((n,i)=>poster[i]===n))throw Error("onlyoffice_product_media_poster_invalid");
     const posterDigest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",poster)),n=>n.toString(16).padStart(2,"0")).join("");
-    posterPath="sba_"+posterDigest+".png";posterUrl=host.register(posterPath,poster,"image/png");window.AscCommon.g_oDocumentUrls.addImageUrl(posterPath,posterUrl);
+    posterSha256=posterDigest;posterPath="sba_"+sha256+".png";posterUrl=host.register(posterPath,poster,"image/png");window.AscCommon.g_oDocumentUrls.addImageUrl(posterPath,posterUrl);
   }
   const imageUrl=kind==="image"?url:posterUrl;
   const loader=window.Asc.editor.ImageLoader;
   if(typeof loader?.LoadImagesWithCallback!=="function")throw Error("onlyoffice_product_asset_loader_unavailable");
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error("onlyoffice_product_asset_load_timeout")),30000);loader.LoadImagesWithCallback([imageUrl],()=>{clearTimeout(timer);const image=loader.map_image_index[imageUrl]?.Image;image?.naturalWidth?resolve():reject(Error("onlyoffice_product_asset_image_invalid"));});});
   if(window.Asc.editor.WordControl.m_oLogicDocument!==model)throw Error("onlyoffice_product_asset_document_changed");
-  const receipt={assetId,sha256,mediaType,kind,url,fileName,posterUrl,posterPath};assets.set(assetId,Object.freeze(receipt));return receipt;
+  const receipt={assetId,sha256,mediaType,kind,url,fileName,posterUrl,posterPath,posterSha256};assets.set(assetId,Object.freeze(receipt));return receipt;
 }
 export function readOnlyOfficeDocumentAsset(assetId) {
   const state=window[Symbol.for("spellbook.onlyoffice.documentAssets/v1")];
   if(state?.model!==window.Asc.editor.WordControl.m_oLogicDocument)throw Error("onlyoffice_product_asset_document_changed");
   const receipt=state.receipts.get(assetId);
   if(!receipt)throw Error("onlyoffice_product_asset_authority_required");return receipt;
+}
+
+// Prepare a transport pair from the target's existing poster and the owned new
+// media. Companion filenames must share a basename in the pinned converter.
+export async function prepareOnlyOfficeMediaReplacement({assetId,elementId}) {
+  const state=window[Symbol.for("spellbook.onlyoffice.documentAssets/v1")],model=window.Asc.editor.WordControl.m_oLogicDocument;
+  const receipt=state?.model===model&&state.receipts.get(assetId);if(!receipt)throw Error("onlyoffice_product_asset_authority_required");const [si,...path]=elementId.split("/").map(Number);
+  let shape=model.Slides[si];for(const index of path)shape=(shape.cSld?.spTree??shape.spTree)?.[index];
+  if(!shape?.blipFill?.RasterImageId)throw Error("onlyoffice_product_media_poster_target_missing");
+  const host=window.parent[Symbol.for("spellbook.onlyoffice.resourceHost/v1")];
+  const poster=await host.read(shape.blipFill.RasterImageId);
+  const posterSha256=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",poster)),n=>n.toString(16).padStart(2,"0")).join("");
+  const pairSha=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(receipt.sha256+posterSha256))),n=>n.toString(16).padStart(2,"0")).join("");
+  const posterPath="sba_"+pairSha+".png",fileName="sba_"+pairSha+"."+receipt.fileName.split(".").at(-1);
+  const mediaBytes=await host.read(receipt.url),url=host.register(fileName,mediaBytes,receipt.mediaType),posterUrl=host.register(posterPath,poster,"image/png");
+  window.AscCommon.g_oDocumentUrls.addImageUrl(fileName,url);window.AscCommon.g_oDocumentUrls.addImageUrl(posterPath,posterUrl);
+  await new Promise(resolve=>window.Asc.editor.ImageLoader.LoadImagesWithCallback([posterUrl],resolve));
+  if(window.Asc.editor.WordControl.m_oLogicDocument!==model)throw Error("onlyoffice_product_asset_document_changed");
+  const bound=Object.freeze({...receipt,fileName,url,posterPath,posterUrl,posterSha256});
+  state.replacements??=new Map();state.replacements.set(assetId+":"+elementId,bound);return bound;
+}
+export function readOnlyOfficeMediaReplacement(assetId,elementId){
+  const state=window[Symbol.for("spellbook.onlyoffice.documentAssets/v1")];
+  if(state?.model!==window.Asc.editor.WordControl.m_oLogicDocument)throw Error("onlyoffice_product_asset_document_changed");
+  const receipt=state.replacements?.get(assetId+":"+elementId);if(!receipt)throw Error("onlyoffice_product_media_replacement_authority_required");return receipt;
 }

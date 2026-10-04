@@ -205,7 +205,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
         need(element.height===drawing.tableLayout.computedHeight,"creation_table_height");
       }
       if(c.op==="insert_image"||c.op==="insert_media"){
-        need(c.nativeAsset&&drawing.imagePath===(c.op==="insert_image"?"sha256:"+c.nativeAsset.sha256:"sha256:"+c.nativeAsset.posterPath.slice(4,-4)),"creation_asset");
+        need(c.nativeAsset&&drawing.imagePath===(c.op==="insert_image"?"sha256:"+c.nativeAsset.sha256:"sha256:"+c.nativeAsset.posterSha256),"creation_asset");
         if(c.op==="insert_media")same({type:c.nativeAsset.kind==="video"?7:8,media:"sha256:"+c.nativeAsset.sha256},drawing.media,"creation_media");
       }
       // Newly created default properties have no author-owned predecessor.

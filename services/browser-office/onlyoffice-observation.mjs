@@ -334,6 +334,12 @@ export async function observeOnlyOfficeCandidate(frame) {
         if(native.blipFill)state.imagePath = window.AscCommon.g_oDocumentUrls.getImageLocal(native.blipFill.RasterImageId) ?? native.blipFill.RasterImageId;
         const media = native.nvPicPr?.nvPr?.unimedia;
         state.media = media && (media.type != null || media.media != null) ? scalarProperties(media, ["type", "media"]) : null;
+        if(state.media?.media&&state.imagePath){
+          const extension=state.media.media.split(".").at(-1);
+          const companions=window.AscCommon.g_oDocumentUrls.getImagesWithOtherExtension(state.imagePath).filter(name=>name.endsWith("."+extension));
+          if(companions.length!==1)throw Error("onlyoffice_product_media_companion_not_unique");
+          state.media.media=companions[0];
+        }
         // Public GetContent creates a missing text body; use the existing content only.
         const content = type === "table" ? null : d.Drawing?.getDocContent?.();
         state.text = content?.GetText?.({ Numbering: false }) ?? null;

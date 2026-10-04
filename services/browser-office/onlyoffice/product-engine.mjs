@@ -23,6 +23,7 @@ import { firstDocumentStateDifference } from "../../office-session-spike/documen
 import { onlyOfficeDocumentFillCatalog } from "./document-fill-catalog.mjs";
 import { onlyOfficeExtendedOperations, executeOnlyOfficeExtendedCommand } from "./extended-commands.mjs";
 import { installOnlyOfficeNativeComplements } from "./native-complements.mjs";
+import { prepareOnlyOfficeMediaReplacement } from "./product-resources.mjs";
 import { slideDateFieldType } from "../slide-date-format.mjs";
 import { materializeOnlyOfficeNativeGeometry } from "./native-geometry.mjs";
 
@@ -326,6 +327,7 @@ export function createOnlyOfficeProductEngine({
           if(typeof resolveAsset!=="function")throw Error("onlyoffice_product_asset_authority_required");
           bound.nativeAsset=await resolveAsset(command.assetId);
         }
+        if(command.op==="replace_media")bound.nativeAsset=await frame.evaluate(prepareOnlyOfficeMediaReplacement,{assetId:command.assetId,elementId:command.elementId});
         if(command.op==="set_chart_data"){
           if(typeof resolveWorkbook!=="function")throw Error("onlyoffice_product_chart_workbook_authority_required");
           const workbook=await resolveWorkbook(command);

@@ -59,7 +59,7 @@ export function onlyOfficeExtendedCommandCase({operation, observation, schema, s
     set_slide_transition:{transitionEffect:"wipe-left-to-right",transitionDuration:1.25},
     set_slide_metadata:{slideMetadata:fields("slideMetadata",{backgroundObjectsVisible:false,duration:8,autoAdvance:true})},
     set_animation_timing:{duration:1.5,delay:0.25,start:"after-previous"},add_animation_effect:{presetId:"ooo-entrance-appear",duration:1,delay:0.2,start:"on-click"},
-    replace_animation_effect:{presetId:"ooo-entrance-wipe"},remove_animation_effect:{},move_animation_effect:{animationIndex:1},
+    replace_animation_effect:{presetId:slide.onlyoffice.effects?.[0]?.GetEffectType==="entranceWipe"?"ooo-entrance-fade":"ooo-entrance-wipe"},remove_animation_effect:{},move_animation_effect:{animationIndex:1},
     add_comment:{text:"검증용 댓글",author:"Spellbook verification",initials:"SV",x:1000,y:1000},edit_comment:{commentIndex:0,text:"수정된 검증 댓글",author:null},delete_comment:{commentIndex:0},
     insert_image:{assetId:assets.image},replace_image:{assetId:assets.image},insert_media:{assetId:assets.media},replace_media:{assetId:assets.media},
   };
