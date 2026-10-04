@@ -17,6 +17,9 @@ const messages: Record<string, string> = {
   access_unavailable: `지금은 계정 권한을 확인할 수 없어요. ${TRY_AGAIN}`,
   account_deletion_in_progress:
     "계정 삭제가 진행 중이라 새 작업을 시작할 수 없어요.",
+  auth_unavailable: `지금은 로그인 상태를 확인할 수 없어요. ${TRY_AGAIN}`,
+  account_closure_not_confirmed: "확인 단어를 정확히 입력해 주세요.",
+  account_closure_unavailable: `지금은 계정 삭제를 요청할 수 없어요. ${TRY_AGAIN}`,
 
   // Files
   document_not_found: "파일을 찾을 수 없어요. 삭제됐을 수 있어요.",
@@ -70,6 +73,7 @@ const messages: Record<string, string> = {
   editor_not_connected: `편집기에 아직 연결되지 않았어요. ${TRY_AGAIN}`,
   editor_save_not_received: `편집기에서 저장 결과를 받지 못했어요. ${TRY_AGAIN}`,
   document_load_failed: `파일을 편집기에 불러오지 못했어요. ${RELOAD}`,
+  browser_document_identity_mismatch: `편집기에 불러온 파일이 최신 저장본과 달라요. ${RELOAD}`,
   undo_nothing_changed: "되돌릴 변경이 없어요.",
   undo_not_latest_request: "가장 최근 요청부터 되돌릴 수 있어요.",
   no_previous_version: "되돌아갈 이전 버전이 없어요.",
