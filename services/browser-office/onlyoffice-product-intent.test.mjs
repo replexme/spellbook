@@ -1185,3 +1185,27 @@ test("whole-batch validation finishes before fallback-font loading and waits for
     globalThis.window = old;
   }
 });
+
+
+test("table movement checks the requested authored position and preserves row rules", () => {
+  const before = document();
+  before.slides[0].elements[0].kind = "table";
+  before.slides[0].onlyoffice.drawings[0].tableLayout = {
+    authoredFrame: { offX: 100, offY: 200, extX: 400, extY: 300 },
+    computedHeight: 300,
+    rowHeights: [{ value: 300, rule: 1 }],
+  };
+  const after = structuredClone(before);
+  after.slides[0].elements[0].x = 500;
+  after.slides[0].elements[0].y = 600;
+  const layout = after.slides[0].onlyoffice.drawings[0].tableLayout;
+  layout.authoredFrame.offX = 500;
+  layout.authoredFrame.offY = 600;
+  const commands = [{ op: "move", elementId: "0/0", x: 500, y: 600 }];
+  assert.doesNotThrow(() => verifyOnlyOfficeProductIntent(before, after, commands));
+  layout.authoredFrame.offX = 501;
+  assert.throws(() => verifyOnlyOfficeProductIntent(before, after, commands), /unrequested_change/);
+  layout.authoredFrame.offX = 500;
+  layout.rowHeights[0].value = 400;
+  assert.throws(() => verifyOnlyOfficeProductIntent(before, after, commands), /unrequested_change/);
+});

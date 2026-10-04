@@ -167,6 +167,10 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
       if (command.op === "move") {
         geometry.x = command.x;
         geometry.y = command.y;
+        if (oldDrawing.tableLayout?.authoredFrame) {
+          oldDrawing.tableLayout.authoredFrame.offX = command.x;
+          oldDrawing.tableLayout.authoredFrame.offY = command.y;
+        }
       }
       if (command.op === "resize") {
         geometry.width = command.width;
