@@ -19,6 +19,7 @@ import { SupportLink } from "../status-screen";
 import { ConnectSteps } from "../workspace/connect-steps";
 import type { AccountStorage } from "@/lib/storage-usage";
 import { AccountDeletion } from "./account-deletion";
+import { PlanSection, planSectionEnabled } from "./plan-section";
 import { StorageSection } from "./storage-section";
 
 const connectedDay = new Intl.DateTimeFormat("ko-KR", {
@@ -215,6 +216,7 @@ export function SettingsScreen({
         <div className="settings">
           <nav className="settings-nav" aria-label="설정">
             <a href="#ai">AI 연결 및 공급자</a>
+            {planSectionEnabled ? <a href="#plan">요금제</a> : null}
             {storage ? <a href="#storage">보관 공간</a> : null}
             <a href="#account">계정</a>
           </nav>
@@ -976,7 +978,9 @@ export function SettingsScreen({
               </div>
             </section>
 
+            {planSectionEnabled ? <PlanSection /> : null}
             {storage ? <StorageSection storage={storage} /> : null}
+
             <section
               id="account"
               className="settings-section"

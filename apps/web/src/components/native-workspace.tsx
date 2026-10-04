@@ -197,6 +197,7 @@ export function NativeWorkspace({
   initialQueued = null,
   onReload,
   onUnsupported,
+  showAds = false,
 }: {
   launch: NativeLaunch;
   openingPreview?: string | null;
@@ -209,6 +210,8 @@ export function NativeWorkspace({
   onReload?: () => void;
   /** The browser editor frame found this browser cannot run it. */
   onUnsupported?: () => void;
+  /** The account's plan shows the managed service's ad strip. */
+  showAds?: boolean;
 }) {
   const office = useRef<HTMLIFrameElement>(null),
     form = useRef<HTMLFormElement>(null);
@@ -2219,12 +2222,13 @@ export function NativeWorkspace({
   const phonePreviews = documentSummary?.previews.length
     ? documentSummary.previews
     : openingPreviews;
+  const adStrip = workspaceAdEnabled && showAds;
   const compareUndo = compare?.turn
     ? undoFor(compare.turn, `t:${compare.turn.turnId}`)
     : null;
   return (
     <main
-      className={`ws ${panelOpen ? "has-panel" : ""} ${phone ? "is-phone" : ""} ${workspaceAdEnabled ? "has-ad" : ""}`}
+      className={`ws ${panelOpen ? "has-panel" : ""} ${phone ? "is-phone" : ""} ${adStrip ? "has-ad" : ""}`}
     >
       <WorkspaceTopBar
         fileName={launch.fileName}
@@ -2533,7 +2537,7 @@ export function NativeWorkspace({
         waiting={!download?.busy && saveState.endsWith("중…")}
         onDownload={startDownload}
       />
-      {workspaceAdEnabled ? <WorkspaceAd /> : null}
+      {adStrip ? <WorkspaceAd /> : null}
     </main>
   );
 }
