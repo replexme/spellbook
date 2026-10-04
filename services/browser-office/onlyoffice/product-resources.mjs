@@ -16,7 +16,15 @@ export function attachOnlyOfficeResourceHost(editor,convertDocument) {
         if(result.type!=="cell"||!(result.bin instanceof Uint8Array)||!result.bin.length||result.bin.length>25_000_000||
             String.fromCharCode(...result.bin.subarray(0,5))!=="XLSY;")
           throw Error("onlyoffice_product_workbook_conversion_invalid");
-        return result.bin.slice();
+        // Chart record 16 takes the raw worksheet table, whereas document
+        // conversion returns a length-checked XLSY base64 file envelope.
+        const envelope=new TextDecoder().decode(result.bin);
+        const match=/^XLSY;v2;([1-9]\d*);([A-Za-z0-9+/]*={0,2})$/.exec(envelope);
+        if(!match||Number(match[1])>25_000_000||match[2].length!==4*Math.ceil(Number(match[1])/3))
+          throw Error("onlyoffice_product_workbook_binary_envelope_invalid");
+        const decoded=atob(match[2]);
+        if(decoded.length!==Number(match[1]))throw Error("onlyoffice_product_workbook_binary_length_invalid");
+        return Uint8Array.from(decoded,char=>char.charCodeAt(0));
       }finally{for(const url of Object.values(result.media??{}))URL.revokeObjectURL(url);}
     },
     register(name,bytes,type){

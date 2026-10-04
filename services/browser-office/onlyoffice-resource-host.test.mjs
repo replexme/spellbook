@@ -14,3 +14,18 @@ test("foreign editor-frame byte views register only their owned range",async()=>
     assert.deepEqual(new Uint8Array(await(await fetch(url)).arrayBuffer()),Uint8Array.of(1,2));host.dispose();
   }finally{globalThis.window=prior;}
 });
+
+test("owned workbook conversion strips only the checked native file envelope",async()=>{
+  const prior=globalThis.window;globalThis.window={addEventListener(){}};
+  const editor={getMedia:()=>({}),captureNativeSnapshot(){},getNativeEditorApi:()=>({})};
+  let size=3;
+  try{
+    attachOnlyOfficeResourceHost(editor,async file=>{
+      assert.equal(file.name,"owned-chart.xlsx");assert.deepEqual(new Uint8Array(await file.arrayBuffer()),Uint8Array.of(80,75));
+      return {type:"cell",bin:new TextEncoder().encode(`XLSY;v2;${size};AQID`),media:{}};
+    });
+    const host=window[Symbol.for("spellbook.onlyoffice.resourceHost/v1")];
+    assert.deepEqual(await host.convertWorkbook(Uint8Array.of(80,75)),Uint8Array.of(1,2,3));
+    size=2;await assert.rejects(host.convertWorkbook(Uint8Array.of(80,75)),/binary_length_invalid/);host.dispose();
+  }finally{globalThis.window=prior;}
+});
