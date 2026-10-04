@@ -832,6 +832,8 @@ try {
         : [
               "resize",
               "fill_color",
+              "fill_opacity",
+              "line_opacity",
               "line_color",
               "line_width",
               "set_line_style",
@@ -864,6 +866,8 @@ try {
     font_color: { color: 0xff0000 },
     replace_text: { text: "Verified product text" },
     fill_color: { color: 0xffe600 },
+    fill_opacity: { opacity: 37.123 },
+    line_opacity: { opacity: 37.123 },
     resize: { width: target.width + 500, height: target.height + 500 },
     rotate: { degrees: 15 },
     flip: { axis: "horizontal" },

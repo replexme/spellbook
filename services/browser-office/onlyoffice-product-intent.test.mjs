@@ -772,3 +772,46 @@ test("slide metadata commands verify the requested slide and preserve every draw
     /unrequested_change/,
   );
 });
+
+for (const op of ["fill_opacity", "line_opacity"])
+  test(
+    op + " preserves authored color, modifiers and every other line property",
+    () => {
+      const before = document();
+      const style = before.slides[0].narrow.drawingStyle[0];
+      const fill = {
+        colorType: 3,
+        colorId: 5,
+        modifiers: [{ name: "shade", val: 40000 }],
+        opacity: 100,
+      };
+      style.fillStyle = structuredClone(fill);
+      style.line = {
+        color: { R: 10, G: 20, B: 30, A: 255 },
+        fillStyle: structuredClone(fill),
+        width: 90000,
+        dash: 3,
+      };
+      const after = structuredClone(before);
+      const changed = after.slides[0].narrow.drawingStyle[0];
+      const field =
+        op === "fill_opacity" ? changed.fillStyle : changed.line.fillStyle;
+      field.opacity = 37.123;
+      const commands = [{ op, elementId: "0/0", opacity: 37.123 }];
+      assert.equal(
+        verifyOnlyOfficeProductIntent(before, after, commands),
+        true,
+      );
+      field.colorId = 6;
+      assert.throws(
+        () => verifyOnlyOfficeProductIntent(before, after, commands),
+        /unrequested_change/,
+      );
+      field.colorId = 5;
+      field.opacity = 37.122;
+      assert.throws(
+        () => verifyOnlyOfficeProductIntent(before, after, commands),
+        /intent_mismatch/,
+      );
+    },
+  );

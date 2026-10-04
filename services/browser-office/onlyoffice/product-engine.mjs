@@ -5,6 +5,7 @@ import {
 } from "./product-intent.mjs";
 import { observeOnlyOfficeCandidate } from "../onlyoffice-observation.mjs";
 import { onlyOfficeCharacterSpacingTwips } from "./character-spacing.mjs";
+import { onlyOfficeOpacityNative } from "./opacity.mjs";
 import { onlyOfficeLineStylePatch } from "./line-style.mjs";
 import {
   beginCandidateTransaction,
@@ -275,6 +276,8 @@ export function createOnlyOfficeProductEngine({
               flip: "SetFlipH",
               set_shape_name: "SetName",
               fill_color: "SetFill",
+              fill_opacity: "SetFill",
+              line_opacity: "SetOutLine",
               line_color: "SetOutLine",
               line_width: "SetOutLine",
               set_line_style: "SetOutLine",
@@ -365,6 +368,20 @@ export function createOnlyOfficeProductEngine({
                 nativeLanguageId: language,
               };
             }
+            if (["fill_opacity", "line_opacity"].includes(command.op)) {
+              const fill =
+                command.op === "fill_opacity"
+                  ? shape.spPr?.Fill
+                  : shape.spPr?.ln?.Fill;
+              if (
+                !fill?.fill?.color ||
+                fill.fill.type !== window.Asc.c_oAscFill.FILL_TYPE_SOLID ||
+                typeof fill.createDuplicate !== "function"
+              )
+                throw Error(
+                  "onlyoffice_product_opacity_requires_authored_solid_fill",
+                );
+            }
             if (command.op === "set_line_style") {
               if (!shape.spPr?.ln)
                 throw Error(
@@ -452,14 +469,19 @@ export function createOnlyOfficeProductEngine({
                     command.spacing,
                   ),
                 }
-              : command.op === "set_line_style"
+              : ["fill_opacity", "line_opacity"].includes(command.op)
                 ? {
                     ...command,
-                    nativeLineStyle: onlyOfficeLineStylePatch(
-                      command.lineStyle,
-                    ),
+                    nativeOpacity: onlyOfficeOpacityNative(command.opacity),
                   }
-                : command,
+                : command.op === "set_line_style"
+                  ? {
+                      ...command,
+                      nativeLineStyle: onlyOfficeLineStylePatch(
+                        command.lineStyle,
+                      ),
+                    }
+                  : command,
           ),
           supported: onlyOfficeProductOperations,
         },
@@ -574,6 +596,24 @@ export function createOnlyOfficeProductEngine({
                 stroke.Ln = original.createDuplicate();
                 stroke.Ln.setFill(fill().UniFill);
               }
+              return d.SetOutLine(stroke);
+            }
+            case "fill_opacity": {
+              const original = d.Drawing.spPr.Fill;
+              const changed = original.createDuplicate();
+              changed.transparent = command.nativeOpacity;
+              const wrapper = api.CreateNoFill();
+              wrapper.UniFill = changed;
+              return d.SetFill(wrapper);
+            }
+            case "line_opacity": {
+              const original = d.Drawing.spPr.ln;
+              const stroke = api.CreateStroke(
+                original.w ?? 36000,
+                api.CreateNoFill(),
+              );
+              stroke.Ln = original.createDuplicate();
+              stroke.Ln.Fill.transparent = command.nativeOpacity;
               return d.SetOutLine(stroke);
             }
             case "set_line_style": {

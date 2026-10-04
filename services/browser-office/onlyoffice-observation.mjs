@@ -472,6 +472,26 @@ export async function observeOnlyOfficeCandidate(frame) {
             : native?.RGBA;
         return c ? { R: c.R, G: c.G, B: c.B, A: c.A } : null;
       };
+      // Normalize alpha's storage location: the writer emits a color modifier,
+      // while the live model can hold UniFill.transparent. Other modifiers stay strict.
+      const solidStyle = (fill) => {
+        const c = fill?.fill?.color;
+        if (!c) return null;
+        const mods = c.Mods?.Mods ?? [];
+        const alpha =
+          fill.transparent != null
+            ? (fill.transparent * 100) / 255
+            : (mods.find((m) => m.name === "alpha")?.val ?? 100000) / 1000;
+        return {
+          type: fill.fill.type,
+          colorType: c.color?.type ?? null,
+          colorId: c.color?.id ?? null,
+          modifiers: mods
+            .filter((m) => m.name !== "alpha")
+            .map((m) => ({ name: m.name, val: m.val })),
+          opacity: Math.round(alpha * 1000) / 1000,
+        };
+      };
       return slides.map((s) => {
         const drawings = drawingsFor(s);
         return {
@@ -496,9 +516,11 @@ export async function observeOnlyOfficeCandidate(frame) {
           drawingStyle: drawings.map((d) => ({
             name: d.Drawing?.getOwnName?.() ?? null,
             fill: color(d.Drawing.spPr?.Fill),
+            fillStyle: solidStyle(d.Drawing.spPr?.Fill),
             line: d.Drawing.spPr?.ln
               ? {
                   color: color(d.Drawing.spPr.ln.Fill),
+                  fillStyle: solidStyle(d.Drawing.spPr.ln.Fill),
                   width: d.Drawing.spPr.ln.w ?? null,
                   dash: d.Drawing.spPr.ln.prstDash ?? null,
                   cap: d.Drawing.spPr.ln.cap ?? null,

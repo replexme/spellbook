@@ -27,6 +27,8 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "set_object_lock",
   "crop_image",
   "fill_color",
+  "fill_opacity",
+  "line_opacity",
   "line_color",
   "line_width",
   "set_line_style",
@@ -272,6 +274,18 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
           throw Error("onlyoffice_product_intent_mismatch:line_width");
         delete oldStyle.line.width;
         delete newStyle.line.width;
+      } else if (op === "fill_opacity" || op === "line_opacity") {
+        const oldFill =
+          op === "fill_opacity" ? oldStyle.fillStyle : oldStyle.line?.fillStyle;
+        const newFill =
+          op === "fill_opacity" ? newStyle.fillStyle : newStyle.line?.fillStyle;
+        if (
+          !oldFill ||
+          !newFill ||
+          newFill.opacity !== Math.round(command.opacity * 1000) / 1000
+        )
+          throw Error("onlyoffice_product_intent_mismatch:" + op);
+        oldFill.opacity = newFill.opacity;
       } else if (op === "fill_color" || op === "line_color") {
         const oldColor =
             op === "fill_color" ? oldStyle.fill : oldStyle.line?.color,
@@ -285,10 +299,14 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         )
           throw Error("onlyoffice_product_intent_mismatch:" + op);
         if (op === "fill_color") {
+          delete oldStyle.fillStyle;
+          delete newStyle.fillStyle;
           delete oldStyle.fill;
           delete newStyle.fill;
         } else {
           if (!oldStyle.line) oldStyle.line = structuredClone(newStyle.line);
+          delete oldStyle.line.fillStyle;
+          delete newStyle.line.fillStyle;
           delete oldStyle.line.color;
           delete newStyle.line.color;
         }
