@@ -11,8 +11,9 @@ import {
 } from "./storage-quota";
 
 // Documents never measured yet (stored before measuring existed) are
-// measured a few at a time, so one request never lists a whole account.
-const MEASURE_PER_REQUEST = 3;
+// measured one per request: listing a document with hundreds of versions
+// takes seconds, and this runs inside imports and saves.
+const MEASURE_PER_REQUEST = 1;
 
 /** Measures what one document keeps in storage and records it. */
 export async function measureDocumentStorage(
