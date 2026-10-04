@@ -603,8 +603,15 @@ export function createOnlyOfficeProductEngine({
                 if (paragraphProperties)
                   paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
               }
-              const run = paragraph.AddText(line);
+              // CorrectContent already leaves an empty run. Appending another
+              // run makes that invisible run affect live font metrics, but the
+              // writer drops it. Fill the retained run so live and file agree.
+              const run = paragraph.GetElement(0);
+              if (!run || typeof run.AddText !== "function")
+                throw Error("onlyoffice_product_empty_run_unavailable");
               if (properties && !run.SetTextPr(properties))
+                throw Error("onlyoffice_product_native_rejected");
+              if (!run.AddText(line))
                 throw Error("onlyoffice_product_native_rejected");
               if (index && !c.Push(paragraph))
                 throw Error("onlyoffice_product_native_rejected");
