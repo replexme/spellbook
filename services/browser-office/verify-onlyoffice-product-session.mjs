@@ -307,6 +307,27 @@ async function tableDetails(frame) {
                 spacing: c.ParaPr.Spacing,
                 fontSize: c.TextPr.FontSize,
                 fontSizeCS: c.TextPr.FontSizeCS,
+                hint: c.TextPr.RFonts.Hint,
+                language: c.TextPr.Lang,
+                complexScript: c.TextPr.CS,
+                rtl: c.TextPr.RTL,
+                runs: p.Content.filter((r) => r.Pr).map((r) => {
+                  const cp = r.Get_CompiledPr(false);
+                  return {
+                    raw: {
+                      hint: r.Pr.RFonts.Hint,
+                      language: r.Pr.Lang,
+                      cs: r.Pr.CS,
+                      rtl: r.Pr.RTL,
+                    },
+                    compiled: {
+                      hint: cp.RFonts.Hint,
+                      language: cp.Lang,
+                      cs: cp.CS,
+                      rtl: cp.RTL,
+                    },
+                  };
+                }),
                 fonts: Object.fromEntries(
                   Object.entries(c.TextPr.RFonts)
                     .filter(([key]) =>
