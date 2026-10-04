@@ -24,6 +24,7 @@ import { onlyOfficeDocumentFillCatalog } from "./document-fill-catalog.mjs";
 import { onlyOfficeExtendedOperations, executeOnlyOfficeExtendedCommand } from "./extended-commands.mjs";
 import { installOnlyOfficeNativeComplements } from "./native-complements.mjs";
 import { slideDateFieldType } from "../slide-date-format.mjs";
+import { materializeOnlyOfficeNativeGeometry } from "./native-geometry.mjs";
 
 // Commands use the canonical product registry. Native bindings stay private to
 // the live session and are rechecked after the entire request's preflight.
@@ -1009,6 +1010,7 @@ export function createOnlyOfficeProductEngine({
     },
     apply: async (command) => {
       const frame = await getFrame();
+      await frame.evaluate(materializeOnlyOfficeNativeGeometry,command);
       const result = onlyOfficeExtendedOperations.includes(command.op)
         ? await frame.evaluate(executeOnlyOfficeExtendedCommand,{command,phase:"apply",batchSize:1})
         : await frame.evaluate((command) => {

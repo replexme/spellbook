@@ -72,7 +72,7 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
   } else if (!document && !slideOnly) { targets = [resolve(c.elementId)]; si = targets[0].slideIndex; }
   if (!document) need(integer(si, 0, model.Slides.length - 1), "slide_target_invalid");
   const slide = document ? null : p.GetSlideByIndex(si), source = targets[0]?.shape, d = source && wrap(source);
-  const prepared = {...c, slideIndex: si, nativeId: source?.Id ?? slide?.Slide.Id ?? null,
+  const prepared = {...c, nativeSlideIndex: si, nativeId: source?.Id ?? slide?.Slide.Id ?? null,
     nativeIds: targets.map(t => t.shape.Id), nativeSlideIds: model.Slides.map(s => s.Id)};
   if (phase === "apply") {
     need(editor.isGroupActions(), "transaction_required");

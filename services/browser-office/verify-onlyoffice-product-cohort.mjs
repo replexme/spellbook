@@ -16,15 +16,18 @@ const source = readRepositoryIdentity(sourceRoot);
 if (source.dirty) throw Error("Commit implementation before recording cohort evidence");
 const registryBytes = await fs.readFile(path.join(sourceRoot,"contracts/native-edit-capabilities.json"));
 const operationContracts=JSON.parse(registryBytes).mutationModel.operations;
-const operations = Object.keys(operationContracts).filter(operation=>operationContracts[operation].availability!=="format_excluded");
+const canonicalOperations = Object.keys(operationContracts).filter(operation=>operationContracts[operation].availability!=="format_excluded");
 const excludedOperations=Object.keys(operationContracts).filter(operation=>operationContracts[operation].availability==="format_excluded");
 const manifestBytes = await fs.readFile(path.resolve(manifestPath));
 const manifest = JSON.parse(manifestBytes);
 const entries = manifest.cases;
 if (!Array.isArray(entries) || new Set(entries.map(entry => entry.operation)).size !== entries.length)
   throw Error("Case manifest must contain unique canonical operations");
-const extras = entries.filter(entry => !operations.includes(entry.operation));
+const extras = entries.filter(entry => !canonicalOperations.includes(entry.operation));
 if (extras.length) throw Error("Noncanonical operations in case manifest");
+// Honor the manifest order, retaining explicit missing-case results for every
+// supported operation. This allows common failure paths to run first.
+const operations = [...entries.map(entry=>entry.operation),...canonicalOperations.filter(operation=>!entries.some(entry=>entry.operation===operation))];
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 const output = path.resolve(flag("--output", "artifacts/onlyoffice-product-cohort"));
 await fs.mkdir(output,{recursive:false});

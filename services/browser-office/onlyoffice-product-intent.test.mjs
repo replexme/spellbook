@@ -195,7 +195,7 @@ test("native setters unlock only synchronously and restore the UI lock on succes
     },
   };
   const model = {
-    Slides: [0, 1, 2].map(() => ({ cSld: { spTree: [{ Id: "native-1" }] } })),
+    Slides: [0, 1, 2].map(() => ({ cSld: { spTree: [{ Id: "native-1",spPr:{xfrm:{offX:0,offY:0,extX:10,extY:10}} }] } })),
     Recalculate() {},
     RedrawCurSlide() {},
     Document_UpdateInterfaceState() {},
