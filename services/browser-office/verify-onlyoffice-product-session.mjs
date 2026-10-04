@@ -17,6 +17,7 @@ import {
   repositoryIdentityStable,
 } from "./repository-identity.mjs";
 import { readOfficeDistributionEvidence } from "./distribution-check.mjs";
+import { compareCanvasPixels } from "./canvas-pixel-evidence.mjs";
 import { createProductSession } from "./product-session.mjs";
 import { captureStableOnlyOfficeBaseline } from "./onlyoffice-baseline.mjs";
 const flags = (name, fallback) => {
@@ -323,6 +324,20 @@ async function pixels(frame) {
   pixelStates.set(result.sha256, bytes);
   await fs.writeFile(path.join(output, result.sha256 + ".rgba"), bytes);
   return result;
+}
+function assertSameCanvas(actual, expected) {
+  const evidence = compareCanvasPixels(
+    expected,
+    actual,
+    pixelStates.get(expected.sha256),
+    pixelStates.get(actual.sha256),
+  );
+  report.visualComparisons ??= [];
+  report.visualComparisons.push({
+    before: expected.sha256,
+    after: actual.sha256,
+    ...evidence,
+  });
 }
 let persisted = null;
 function stageBinary(bytes) {
@@ -756,7 +771,7 @@ try {
   await mainPage.screenshot({ path: path.join(output, "edited.png") });
   await session.undo();
   report.rendering.undo = await pixels(mainFrame);
-  assert.deepEqual(report.rendering.undo, report.rendering.before);
+  assertSameCanvas(report.rendering.undo, report.rendering.before);
   report.stages.push("undo-exact-approved-package");
   const originalApply = engine.apply;
   engine.apply = async (command) => {
@@ -777,7 +792,7 @@ try {
     /injected_after_native_change/,
   );
   engine.apply = originalApply;
-  assert.deepEqual(await pixels(mainFrame), report.rendering.before);
+  assertSameCanvas(await pixels(mainFrame), report.rendering.before);
   assert.equal(session.status().redo, 1);
   report.stages.push("native-failure-rollback-retains-old-redo");
   const saveJournal = journal.save;
@@ -794,7 +809,7 @@ try {
   journal.save = saveJournal;
   assert.equal(session.status().ready, true);
   assert.equal(session.status().redo, 1);
-  assert.deepEqual(await pixels(mainFrame), report.rendering.before);
+  assertSameCanvas(await pixels(mainFrame), report.rendering.before);
   report.stages.push("journal-failure-restores-native-and-source-baselines");
   let beginCount = 0;
   const originalBegin = engine.begin;
@@ -811,11 +826,11 @@ try {
   );
   assert.equal(beginCount, 0);
   engine.begin = originalBegin;
-  assert.deepEqual(await pixels(mainFrame), report.rendering.before);
+  assertSameCanvas(await pixels(mainFrame), report.rendering.before);
   report.stages.push("whole-batch-preflight-before-native-history");
   await session.redo();
   report.rendering.redo = await pixels(mainFrame);
-  assert.deepEqual(report.rendering.redo, report.rendering.edited);
+  assertSameCanvas(report.rendering.redo, report.rendering.edited);
   report.stages.push("redo-exact-approved-package");
   finalExpected = applied.observation;
   if (manualFlow) {
@@ -889,27 +904,27 @@ try {
     : report.rendering.edited;
   assert.equal(session.status().undo, manualFlow ? 2 : 1);
   await session.undo();
-  assert.deepEqual(
+  assertSameCanvas(
     await pixels(mainFrame),
     manualFlow ? report.rendering.edited : report.rendering.before,
   );
   await session.recover();
   assert.equal(session.status().redo, 1);
   await session.redo();
-  assert.deepEqual(await pixels(mainFrame), recoveryPixels);
+  assertSameCanvas(await pixels(mainFrame), recoveryPixels);
   if (manualFlow) {
     await session.undo();
     await session.undo();
-    assert.deepEqual(await pixels(mainFrame), report.rendering.before);
+    assertSameCanvas(await pixels(mainFrame), report.rendering.before);
     await session.redo();
     await session.redo();
-    assert.deepEqual(await pixels(mainFrame), recoveryPixels);
+    assertSameCanvas(await pixels(mainFrame), recoveryPixels);
     report.stages.push(
       "recovered-mixed-human-and-ai-history-keeps-exact-files",
     );
   } else report.stages.push("recovered-native-undo-and-redo-branch");
   report.rendering.recovered = await pixels(mainFrame);
-  assert.deepEqual(report.rendering.recovered, recoveryPixels);
+  assertSameCanvas(report.rendering.recovered, recoveryPixels);
   await mainPage.screenshot({ path: path.join(output, "recovered.png") });
   await assert.rejects(
     session.save(async () => ({ candidateSha256: "wrong" })),
@@ -927,9 +942,9 @@ try {
   report.stages.push("acknowledged-exact-file-save");
   if (manualFlow) {
     await session.undo();
-    assert.deepEqual(await pixels(mainFrame), report.rendering.edited);
+    assertSameCanvas(await pixels(mainFrame), report.rendering.edited);
     await session.redo();
-    assert.deepEqual(await pixels(mainFrame), recoveryPixels);
+    assertSameCanvas(await pixels(mainFrame), recoveryPixels);
     report.stages.push("acknowledged-save-keeps-earlier-undo-and-redo");
   }
   report.status = "product-session-command-verified";
