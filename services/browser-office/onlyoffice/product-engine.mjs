@@ -323,7 +323,7 @@ export function createOnlyOfficeProductEngine({
                 !Number.isSafeInteger(command.width) ||
                 command.width < 420 ||
                 command.width > 55880 ||
-                typeof table.SetColumnWidth !== "function" ||
+                typeof table.SetTableGrid !== "function" ||
                 typeof shape.spPr?.xfrm?.setExtX !== "function"
               )
                 throw Error("onlyoffice_product_table_column_width_invalid");
@@ -986,22 +986,25 @@ export function createOnlyOfficeProductEngine({
             }
             case "set_table_column_width": {
               const table = d.Table;
-              const selection = table.Selection,
-                cell = table.CurCell,
-                applyToAll = table.ApplyToAll;
-              table.Selection = { ...selection, Use: false };
-              table.CurCell = table.Content[0].Content[command.index];
-              table.ApplyToAll = false;
-              try {
-                table.SetColumnWidth(command.width / 100);
-                d.Drawing.spPr.xfrm.setExtX(
-                  table.TableGrid.reduce((sum, width) => sum + width, 0),
-                );
-              } finally {
-                table.Selection = selection;
-                table.CurCell = cell;
-                table.ApplyToAll = applyToAll;
+              // SetColumnWidth rebuilds the whole grid from subtracted running
+              // totals, introducing rounding loss in untouched columns. Keep
+              // the authored grid and update only the requested column through
+              // the same native history setter used by that implementation.
+              const grid = table.TableGrid.slice();
+              grid[command.index] = command.width / 100;
+              table.SetTableGrid(grid);
+              for (const row of table.Content) {
+                const cell = row.Content[command.index],
+                  preferred = cell.Get_W();
+                if (preferred.Type === 1 || preferred.Type === 3) {
+                  preferred.Type = 1;
+                  preferred.W = command.width / 100;
+                  cell.Set_W(preferred);
+                }
               }
+              d.Drawing.spPr.xfrm.setExtX(
+                grid.reduce((sum, width) => sum + width, 0),
+              );
               return true;
             }
             case "set_table_row_height": {
