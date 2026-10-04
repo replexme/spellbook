@@ -3,6 +3,8 @@
  * and what to do. Keys are the reason codes the upload route returns.
  */
 
+import { FREE_STORAGE_LIMITS, storageAmount } from "./storage-quota";
+
 export type UploadFailure = { reason: string; fix: string };
 
 const SAVE_AS_PPTX =
@@ -55,6 +57,47 @@ export function uploadFailure(
         reason: "서버에서 슬라이드를 그리지 못했어요.",
         fix: "PowerPoint에서 다시 저장한 뒤 가져와 보세요. 같은 문제가 계속되면 알려 주세요.",
       };
+    case "too_many_slides":
+      return {
+        reason: "슬라이드가 200장보다 많아요.",
+        fix: "PowerPoint에서 슬라이드를 200장 이하로 나눠 저장한 뒤 가져오세요.",
+      };
+    case "expanded_too_large":
+      return {
+        reason: "파일 안의 내용이 너무 커요. 압축을 풀면 250MB를 넘어요.",
+        fix: "큰 동영상이나 그림을 빼거나 줄여서 저장한 뒤 가져오세요.",
+      };
+    case "image_too_large":
+      return {
+        reason: "해상도가 아주 큰 그림이 들어 있어서 열 수 없어요.",
+        fix: "PowerPoint에서 ‘그림 압축’으로 그림 크기를 줄여 저장한 뒤 가져오세요.",
+      };
+    case "render_timeout":
+      return {
+        reason: "슬라이드를 그리는 데 너무 오래 걸려서 멈췄어요.",
+        fix: "다시 확인해 보세요. 계속 안 되면 큰 그림이나 복잡한 도형을 줄여 저장한 뒤 가져오세요.",
+      };
+    case "processing_timeout":
+      return {
+        reason: "파일을 확인하는 데 너무 오래 걸려서 멈췄어요.",
+        fix: "다시 확인해 보세요. 올린 원본은 파일 목록에 남아 있어요.",
+      };
+    case "storage_full":
+      return {
+        reason: `보관 공간을 다 썼어요. 무료 계정은 ${storageAmount(FREE_STORAGE_LIMITS.bytes)}까지 보관할 수 있어요.`,
+        fix: "필요 없는 파일을 내려받은 뒤 삭제하면 공간이 생겨요. 파일 열기와 내려받기는 그대로 돼요.",
+      };
+    case "document_limit_reached":
+      return {
+        reason: `무료 계정은 파일을 ${FREE_STORAGE_LIMITS.documents}개까지 보관할 수 있어요.`,
+        fix: "필요 없는 파일을 내려받은 뒤 삭제하면 다시 가져올 수 있어요.",
+      };
+    case "direct_upload_blocked":
+      return {
+        reason:
+          "이 네트워크에서는 파일 저장소에 바로 보낼 수 없고, 30MB가 넘는 파일은 다른 길로 보낼 수 없어요.",
+        fix: "회사·학교 보안 프로그램이나 VPN을 끄거나 다른 네트워크에서 다시 가져오세요.",
+      };
     case "processing_failed":
     case "document_processing_failed":
       return {
@@ -97,6 +140,15 @@ export function failureShort(code: string | null | undefined): string {
       return "슬라이드 구성이 손상됐어요";
     case "render_failed":
       return "슬라이드를 그리지 못했어요";
+    case "too_many_slides":
+      return "슬라이드가 200장보다 많아요";
+    case "expanded_too_large":
+      return "파일 안의 내용이 너무 커요";
+    case "image_too_large":
+      return "아주 큰 그림이 들어 있어요";
+    case "render_timeout":
+    case "processing_timeout":
+      return "확인이 너무 오래 걸렸어요 · 다시 확인할 수 있어요";
     default:
       return "파일을 읽지 못했어요";
   }
@@ -111,4 +163,19 @@ export function precheckUpload(
   if (file.size <= 0) return "empty_file";
   if (file.size > maxBytes) return "file_too_large";
   return null;
+}
+
+// Failures that may pass on a second check of the same stored file. Others
+// (an encrypted file, too many slides) fail the same way again, so the page
+// offers another file instead.
+const RETRYABLE_FAILURES = new Set([
+  "processing_timeout",
+  "render_timeout",
+  "render_failed",
+  "processing_failed",
+  "document_processing_failed",
+]);
+
+export function retryableFailure(code: string | null | undefined): boolean {
+  return !code || RETRYABLE_FAILURES.has(code);
 }

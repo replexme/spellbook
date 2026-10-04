@@ -9,6 +9,7 @@ import {
   deleteObject,
   directReadUrl,
   directWriteTarget,
+  moveObject,
   objectHead,
   storageNamespace,
   getJsonObject,
@@ -34,7 +35,12 @@ import {
   selectedPreviews,
   validateCommandTargets,
 } from "./edit-scope";
-import { callAiAccount, enqueueWorkerJob, type WorkerTarget } from "./workers";
+import {
+  callAiAccount,
+  enqueueWorkerJob,
+  type WorkerLane,
+  type WorkerTarget,
+} from "./workers";
 import {
   parseModelSettings,
   supportsSettings,
@@ -55,7 +61,19 @@ import {
   type DocumentFormat,
 } from "./document-formats";
 import { internalAppBaseUrl } from "./runtime-urls";
-import { jobRedeliverySeconds } from "./job-delivery";
+import { retryableFailure } from "./upload-reasons";
+import { incomingObjectName } from "./incoming-objects";
+import {
+  assertStorageAvailable,
+  measureDocumentStorage,
+} from "./storage-usage";
+import { maintainDocumentStorage } from "./version-retention";
+import {
+  documentJobRecovery,
+  documentJobRecoveryPolicy,
+  jobRedeliverySeconds,
+  STALE_JOB_FAILURE_CODE,
+} from "./job-delivery";
 
 const Ajv2020Constructor = Ajv2020 as unknown as typeof import("ajv").default;
 const validateEditBatch = new Ajv2020Constructor({
@@ -67,6 +85,7 @@ interface Dispatch {
   target: WorkerTarget;
   path: string;
   payload: Record<string, unknown>;
+  lane?: WorkerLane;
 }
 
 export async function listDocuments(session: Session) {
@@ -113,8 +132,12 @@ function uploadObjects(
   versionId: string,
 ) {
   const prefix = accountPrefix(session.accountId, documentId);
+  const documentObject = `${prefix}/versions/${versionId}/document.pptx`;
   return {
-    documentObject: `${prefix}/versions/${versionId}/document.pptx`,
+    documentObject,
+    // The browser writes here first; a bucket rule removes what is never
+    // completed (INCOMING_SUFFIX), and completion moves it into place.
+    incomingObject: incomingObjectName(documentObject),
     outputPrefix: `${prefix}/versions/${versionId}/render`,
   };
 }
@@ -141,6 +164,7 @@ async function registerUpload(
     jobId,
     target: "document",
     path: "/internal/jobs/scan-render",
+    lane: "upload",
     payload: {
       jobId,
       callbackUrl: callbackUrl(),
@@ -180,6 +204,10 @@ export async function uploadDocument(
 ): Promise<{ id: string }> {
   await ensureSchema();
   const format = uploadFormat(file.name, file.size);
+  await assertStorageAvailable(session, {
+    newDocument: true,
+    addingBytes: file.size,
+  });
   const data = Buffer.from(await file.arrayBuffer());
   const problem = packageProblem(data);
   if (problem) throw new HttpError(400, problem);
@@ -223,11 +251,16 @@ export async function startDirectUpload(
   if (!fileName || fileName.length > 255 || !Number.isSafeInteger(size))
     throw new HttpError(400, "invalid_upload");
   const format = uploadFormat(fileName, size);
+  await ensureSchema();
+  await assertStorageAvailable(session, {
+    newDocument: true,
+    addingBytes: size,
+  });
   const documentId = randomUUID();
   const versionId = randomUUID();
-  const { documentObject } = uploadObjects(session, documentId, versionId);
+  const { incomingObject } = uploadObjects(session, documentId, versionId);
   const target = await directWriteTarget(
-    documentObject,
+    incomingObject,
     format.mimeTypes[0]!,
     format.maxBytes,
   );
@@ -271,12 +304,14 @@ export async function completeDirectUpload(session: Session, token: unknown) {
   `;
   if (existing) return { id: String(existing.id) };
   const format = documentFormat(claims.formatId as DocumentFormat["id"]);
-  const { documentObject } = uploadObjects(
+  const { documentObject, incomingObject } = uploadObjects(
     session,
     claims.documentId,
     claims.versionId,
   );
-  const stored = await objectHead(documentObject, 4);
+  // A retried completion finds the file already moved into place.
+  const incoming = await objectHead(incomingObject, 4);
+  const stored = incoming ?? (await objectHead(documentObject, 4));
   if (!stored) throw new HttpError(409, "upload_not_found");
   const problem =
     stored.size !== claims.size
@@ -285,9 +320,12 @@ export async function completeDirectUpload(session: Session, token: unknown) {
         ? "file_too_large"
         : packageProblem(stored.head);
   if (problem) {
-    await deleteObject(documentObject).catch(() => undefined);
+    await deleteObject(incoming ? incomingObject : documentObject).catch(
+      () => undefined,
+    );
     throw new HttpError(400, problem);
   }
+  if (incoming) await moveObject(incomingObject, documentObject);
   return registerUpload(session, {
     documentId: claims.documentId,
     versionId: claims.versionId,
@@ -312,8 +350,13 @@ export async function documentDetail(
   `;
   const document = documents[0];
   if (!document) throw new HttpError(404, "document_not_found");
-  if (["processing", "editing"].includes(document.status))
+  if (["processing", "editing"].includes(document.status)) {
     await dispatchPendingJobs(documentId).catch(() => undefined);
+    await recoverStaleDocumentJobs({
+      accountId: session.accountId,
+      documentId,
+    });
+  }
   const edits = await db()`
     select e.*, coalesce(v.graph_object, (select rendered.graph_object from spellbook_jobs pj join spellbook_versions rendered on rendered.id = pj.version_id where pj.edit_request_id = e.id and pj.job_type = 'patch_render' and rendered.status = 'ready' order by rendered.created_at desc limit 1)) as candidate_graph_object, v.validation_object as candidate_validation_object,
       input.graph_object as input_graph_object,
@@ -513,6 +556,7 @@ export async function createManualEdit(
         jobId,
         target: "document",
         path: "/internal/jobs/patch-render",
+        lane: "save",
         payload,
       },
       documentId,
@@ -781,6 +825,31 @@ export async function handleWorkerCallback(
       job.document_id,
       job.edit_request_id ?? undefined,
     );
+  if (job.job_type === "scan_render") await maintainAfterScan(job);
+}
+
+/**
+ * After a file check: a save may have pushed old automatic saves past the
+ * kept number, and a new import needs its size measured. Storage upkeep
+ * never fails the check that already succeeded.
+ */
+async function maintainAfterScan(job: Record<string, any>): Promise<void> {
+  try {
+    const [document] =
+      await db()`select account_id from spellbook_documents where id = ${job.document_id}`;
+    if (!document) return;
+    if (job.payload?.nativeSessionId)
+      await maintainDocumentStorage(document.account_id, job.document_id);
+    else await measureDocumentStorage(document.account_id, job.document_id);
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        eventType: "document_storage_maintenance_failed",
+        documentId: job.document_id,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
 }
 
 export async function approveCandidate(
@@ -1099,6 +1168,7 @@ async function completePlan(
         jobId: patchJobId,
         target: "document",
         path: "/internal/jobs/patch-render",
+        lane: "save",
         payload,
       }
     : null;
@@ -1359,6 +1429,7 @@ export async function executeAgentTool(input: {
       jobId: patchJobId,
       target: "document",
       path: "/internal/jobs/patch-render",
+      lane: "save",
       payload,
     },
     edit.document_id,
@@ -1683,6 +1754,7 @@ async function completeReview(
         jobId: patchJobId,
         target: "document",
         path: "/internal/jobs/patch-render",
+        lane: "save",
         payload,
       }
     : null;
@@ -1713,7 +1785,7 @@ function workerErrorCode(callback: WorkerCallback): string | null {
     : null;
 }
 
-async function markJobFailure(
+export async function markJobFailure(
   job: Record<string, any>,
   error: string,
   code: string | null = null,
@@ -1805,8 +1877,10 @@ async function dispatchOrFail(
       dispatch.target,
       dispatch.path,
       dispatch.payload,
+      { lane: dispatch.lane },
     );
-    await db()`update spellbook_jobs set dispatched_at = now(), error = null where id = ${dispatch.jobId}`;
+    await db()`update spellbook_jobs set dispatched_at = now(), error = null,
+      delivery_count = greatest(delivery_count, 1) where id = ${dispatch.jobId}`;
   } catch (error) {
     const message = error instanceof Error ? error.message : "dispatch_failed";
     // Dispatch failure is recoverable, not a failed edit or failed document.
@@ -1816,12 +1890,31 @@ async function dispatchOrFail(
   }
 }
 
+function documentJobRoute(job: Record<string, any>): {
+  path: string;
+  lane: WorkerLane;
+} {
+  if (job.job_type === "patch_render")
+    return { path: "/internal/jobs/patch-render", lane: "save" };
+  return {
+    path: "/internal/jobs/scan-render",
+    lane: job.payload?.nativeSessionId ? "save" : "upload",
+  };
+}
+
 async function dispatchPendingJobs(documentId: string): Promise<void> {
   const retryAfterSeconds = jobRedeliverySeconds();
+  // AI jobs are re-sent on a short lease. A document job is re-sent only if
+  // it never reached its queue: once delivered, it may still be rendering,
+  // and recoverStaleDocumentJobs decides when it is lost.
   const jobs =
     await db()`select * from spellbook_jobs where document_id = ${documentId}
     and status = 'queued'
-    and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second')
+    and (
+      (job_type in ('scan_render','patch_render') and dispatched_at is null)
+      or (job_type not in ('scan_render','patch_render')
+        and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second'))
+    )
     order by created_at limit 4`;
   for (const job of jobs) {
     const isDocument =
@@ -1831,18 +1924,205 @@ async function dispatchPendingJobs(documentId: string): Promise<void> {
         jobId: job.id,
         target: isDocument ? "document" : "ai",
         path: isDocument
-          ? job.job_type === "scan_render"
-            ? "/internal/jobs/scan-render"
-            : "/internal/jobs/patch-render"
+          ? documentJobRoute(job).path
           : job.job_type === "native_turn"
             ? "/internal/jobs/native"
             : "/internal/jobs/edit",
+        lane: isDocument ? documentJobRoute(job).lane : undefined,
         payload: job.payload,
       },
       documentId,
       job.edit_request_id ?? undefined,
     );
   }
+}
+
+// Each browser poll may ask; one check per document per instance is enough.
+const RECOVERY_CHECK_MS = 10_000;
+const recoveryChecks = new Map<string, number>();
+
+/**
+ * Makes sure every unfinished document job either finishes or visibly
+ * fails. A job that never reached its queue, or whose delivery was lost, is
+ * sent again; one that has waited too long fails with a reason code the
+ * page explains and offers a retry for. Called from the requests a waiting
+ * page actually makes (status polls, summaries, the file list).
+ */
+export async function recoverStaleDocumentJobs(scope: {
+  accountId: string;
+  documentId?: string;
+}): Promise<void> {
+  // A page load must never fail because recovery could not run this time.
+  await recoverStaleJobs(scope).catch((error) =>
+    console.error(
+      JSON.stringify({
+        eventType: "document_job_recovery_failed",
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    ),
+  );
+}
+
+async function recoverStaleJobs(scope: {
+  accountId: string;
+  documentId?: string;
+}): Promise<void> {
+  if (
+    scope.documentId !== undefined &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      scope.documentId,
+    )
+  )
+    return;
+  const key = `${scope.accountId}\u0000${scope.documentId ?? ""}`;
+  const now = Date.now();
+  if ((recoveryChecks.get(key) ?? 0) > now) return;
+  if (recoveryChecks.size >= 10_000) recoveryChecks.clear();
+  recoveryChecks.set(key, now + RECOVERY_CHECK_MS);
+  await ensureSchema();
+  const policy = documentJobRecoveryPolicy();
+  const documentId = scope.documentId ?? null;
+  const jobs = await db()`
+    select j.*, now() as db_now from spellbook_jobs j
+    join spellbook_documents d on d.id = j.document_id
+    where d.account_id = ${scope.accountId}
+      and (${documentId}::uuid is null or j.document_id = ${documentId}::uuid)
+      and j.status = 'queued' and j.job_type in ('scan_render','patch_render')
+      and (
+        j.created_at < now() - ${policy.maxAgeSeconds} * interval '1 second'
+        or (j.dispatched_at is null and j.updated_at < now() - ${policy.retrySeconds} * interval '1 second')
+        or j.dispatched_at < now() - ${policy.attemptSeconds} * interval '1 second'
+      )
+    order by j.created_at limit 5`;
+  for (const job of jobs) {
+    const action = documentJobRecovery(
+      {
+        createdAt: new Date(job.created_at),
+        updatedAt: new Date(job.updated_at),
+        dispatchedAt: job.dispatched_at ? new Date(job.dispatched_at) : null,
+        deliveryCount: Number(job.delivery_count ?? 0),
+      },
+      new Date(job.db_now),
+      policy,
+    );
+    if (action === "fail") await failStaleJob(job);
+    else if (action === "redeliver") await redeliverDocumentJob(job);
+  }
+}
+
+async function redeliverDocumentJob(job: Record<string, any>): Promise<void> {
+  // The delivery count is the claim: two pollers cannot both send it again.
+  const [claimed] = await db()`
+    update spellbook_jobs set dispatched_at = now(), delivery_count = delivery_count + 1,
+      error = null, updated_at = now()
+    where id = ${job.id} and status = 'queued' and delivery_count = ${Number(job.delivery_count ?? 0)}
+    returning delivery_count`;
+  if (!claimed) return;
+  const route = documentJobRoute(job);
+  console.warn(
+    JSON.stringify({
+      eventType: "document_job_redelivered",
+      jobId: job.id,
+      jobType: job.job_type,
+      delivery: claimed.delivery_count,
+    }),
+  );
+  try {
+    await enqueueWorkerJob(job.id, "document", route.path, job.payload, {
+      attempt: Number(claimed.delivery_count),
+      lane: route.lane,
+    });
+  } catch (error) {
+    await db()`update spellbook_jobs set dispatched_at = null,
+      error = ${error instanceof Error ? error.message : "dispatch_failed"}, updated_at = now()
+      where id = ${job.id} and status = 'queued' and delivery_count = ${claimed.delivery_count}`;
+  }
+}
+
+async function failStaleJob(job: Record<string, any>): Promise<void> {
+  console.error(
+    JSON.stringify({
+      eventType: "document_job_stale_failed",
+      jobId: job.id,
+      jobType: job.job_type,
+      documentId: job.document_id,
+      deliveries: Number(job.delivery_count ?? 0),
+    }),
+  );
+  if (job.job_type === "scan_render" && job.payload?.nativeSessionId) {
+    await failNativeScan(job, STALE_JOB_FAILURE_CODE);
+    return;
+  }
+  await markJobFailure(
+    job,
+    "처리 시간이 너무 오래 걸려 작업을 멈췄어요.",
+    STALE_JOB_FAILURE_CODE,
+  );
+}
+
+/**
+ * Checks an imported file again after its first check failed for a reason
+ * that may pass on retry. The stored original is reused; nothing is
+ * uploaded again.
+ */
+export async function retryDocumentProcessing(
+  session: Session,
+  documentId: string,
+): Promise<{ id: string }> {
+  await ensureSchema();
+  const jobId = randomUUID();
+  const dispatch = await db().begin(async (transaction) => {
+    const [document] = await transaction`
+      select d.id, d.status, d.failure_code, d.format_id, d.original_version_id, d.current_version_id,
+        v.document_object, v.status as version_status
+      from spellbook_documents d
+      join spellbook_versions v on v.id = d.original_version_id and v.document_id = d.id
+      where d.id = ${documentId} and d.account_id = ${session.accountId}
+      for update of d
+    `;
+    if (!document) throw new HttpError(404, "document_not_found");
+    if (
+      document.status !== "failed" ||
+      document.current_version_id !== document.original_version_id ||
+      document.version_status !== "failed"
+    )
+      throw new HttpError(409, "document_not_retryable");
+    if (!retryableFailure(document.failure_code))
+      throw new HttpError(409, "document_not_retryable");
+    const { outputPrefix } = uploadObjects(
+      session,
+      documentId,
+      document.original_version_id,
+    );
+    // A fresh output folder: the failed attempt's stored result belongs to
+    // the old job and must not answer for this one.
+    const payload = {
+      jobId,
+      callbackUrl: callbackUrl(),
+      storageNamespace: storageNamespace(),
+      formatId: document.format_id,
+      inputObject: document.document_object,
+      outputPrefix: `${outputPrefix}-${jobId}`,
+    };
+    await transaction`update spellbook_versions set status = 'processing' where id = ${document.original_version_id}`;
+    await transaction`update spellbook_documents set status = 'processing', last_error = null, failure_code = null, updated_at = now() where id = ${documentId}`;
+    await transaction`
+      insert into spellbook_jobs (id, job_type, document_id, version_id, status, payload)
+      values (${jobId}, 'scan_render', ${documentId}, ${document.original_version_id}, 'queued', ${transaction.json(jsonValue(payload))})
+    `;
+    await addEvent(transaction, documentId, "document_retry_requested", {
+      versionId: document.original_version_id,
+    });
+    return {
+      jobId,
+      target: "document",
+      path: "/internal/jobs/scan-render",
+      lane: "upload",
+      payload,
+    } satisfies Dispatch;
+  });
+  await dispatchOrFail(dispatch, documentId).catch(() => undefined);
+  return { id: documentId };
 }
 
 function validateSelection(

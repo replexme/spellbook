@@ -100,9 +100,11 @@ export async function dispatchNativeSave(
       "document",
       "/internal/jobs/scan-render",
       payload,
+      { lane: "save" },
     );
-    await db()`update spellbook_jobs set dispatched_at=now() where id=${jobId}`;
+    await db()`update spellbook_jobs set dispatched_at=now(),delivery_count=greatest(delivery_count,1) where id=${jobId}`;
   } catch (error) {
-    await db()`update spellbook_jobs set error=${error instanceof Error ? error.message : "dispatch_failed"} where id=${jobId}`;
+    // Left queued; recoverStaleDocumentJobs sends it again shortly.
+    await db()`update spellbook_jobs set error=${error instanceof Error ? error.message : "dispatch_failed"},updated_at=now() where id=${jobId}`;
   }
 }
