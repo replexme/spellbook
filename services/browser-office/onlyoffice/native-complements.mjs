@@ -231,11 +231,11 @@ export function installOnlyOfficeNativeComplements() {
   // The singleton is used by the SDK's clipboard/native-content paths too.
   if (common.pptx_content_writer) common.pptx_content_writer.BinaryFileWriter = new common.CBinaryFileWriter();
   common.pptx_content_writer?.BinaryFileWriter.Init();
-  const draw = window.AscWord.Run.prototype.Draw_Elements, masks=new WeakMap();
-  window.AscWord.Run.prototype.Draw_Elements = function(state) {
-    const properties=Object.hasOwn(this.Pr??{},"spellbookEffects")?this.Pr.spellbookEffects:this.Get_CompiledPr(false)?.spellbookEffects;
+  const masks=new WeakMap();
+  const drawWithShadow = (run,state,draw) => {
+    const properties=Object.hasOwn(run.Pr??{},"spellbookEffects")?run.Pr.spellbookEffects:run.Get_CompiledPr(false)?.spellbookEffects;
     const shadow=properties?.EffectLst?.outerShdw,graphics=state.Graphics,ctx=graphics?.m_oContext;
-    if(!shadow||!ctx)return draw.call(this,state);
+    if(!shadow||!ctx)return draw();
     // Native glyph textures have their own temporary clip rectangles. Draw
     // the run once into a reusable mask and compose its shadow after those
     // clips have closed, preserving glyph shaping and the native draw state.
@@ -248,7 +248,7 @@ export function installOnlyOfficeNativeComplements() {
     for(const field of fields)target[field]=ctx[field];
     target.shadowColor="transparent";target.shadowBlur=0;target.shadowOffsetX=0;target.shadowOffsetY=0;
     let result;graphics.m_oContext=target;
-    try{result=draw.call(this,state);}finally{graphics.m_oContext=ctx;}
+    try{result=draw();}finally{graphics.m_oContext=ctx;}
     const color=shadow.color?.color?.RGBA,alpha=(shadow.color?.Mods?.Mods?.find(mod=>mod.name==="alpha")?.val??100000)/100000;
     const angle=(shadow.dir??2700000)/60000*Math.PI/180,scale=graphics.m_oCoordTransform?.sx??1;
     ctx.save();
@@ -262,6 +262,17 @@ export function installOnlyOfficeNativeComplements() {
     for(const field of fields)ctx[field]=target[field];
     ctx.setTransform(target.getTransform());return result;
   };
+  // BidiFlow may defer RTL glyphs beyond Run.Draw_Elements. Apply the effect
+  // when the reordered element actually draws, retaining its original run.
+  const contentDraw=window.AscWord.ParagraphContentDrawState?.prototype;
+  if(contentDraw){
+    const native=contentDraw.handleBidiFlow;
+    if(typeof native!=="function")throw Error("onlyoffice_product_content_draw_unavailable");
+    contentDraw.handleBidiFlow=function(data,direction){return drawWithShadow(data[1],this,()=>native.call(this,data,direction));};
+  }else{
+    const native=window.AscWord.Run.prototype.Draw_Elements;
+    window.AscWord.Run.prototype.Draw_Elements=function(state){return drawWithShadow(this,state,()=>native.call(this,state));};
+  }
   window.Asc.c_oAscSlideTransitionParams.Fade_ThroughWhite = white;
   const transition = window.Asc.CAscSlideTransition.prototype;
   const parse = transition.parseXmlParameters, xml = transition.fillXmlParams;

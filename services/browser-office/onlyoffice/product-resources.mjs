@@ -50,7 +50,7 @@ export function attachOnlyOfficeResourceHost(editor,convertDocument) {
       // Copy exactly that bounded range into the host realm before checking it.
       if (ArrayBuffer.isView(bytes) && bytes.BYTES_PER_ELEMENT === 1)
         bytes = new Uint8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength).slice();
-      if(!/^sba_[0-9a-f]{64}\.[a-z0-9]+$/.test(name)||!(bytes instanceof Uint8Array)||!bytes.length||bytes.length>25_000_000)
+      if(!/^(?:display8image_)?sba_[0-9a-f]{64}\.[a-z0-9]+$/.test(name)||!(bytes instanceof Uint8Array)||!bytes.length||bytes.length>25_000_000)
         throw Error("onlyoffice_product_media_registration_invalid");
       const media=editor.getMedia(),path="media/"+name;
       if(staged.has(path))return staged.get(path).url;
@@ -70,8 +70,8 @@ export function attachOnlyOfficeResourceHost(editor,convertDocument) {
       const media=editor.getMedia();
       for(const [path,value] of staged){
         if(value.original)continue;
-        const poster=staged.get(path.replace(/\.[a-z0-9]+$/,".png"));
-        const referenced=used.has(value.url)||used.has(path)||used.has("/working/"+path)||used.has(path.slice(6))||Boolean(poster&&used.has(poster.url));
+        const posterPath=path.replace(/\.[a-z0-9]+$/,".png"),poster=staged.get(posterPath);
+        const referenced=used.has(value.url)||used.has(path)||used.has("/working/"+path)||used.has(path.slice(6))||Boolean(poster&&(used.has(poster.url)||used.has(posterPath)||used.has(posterPath.slice(6))));
         if(referenced)media[path]=value.url;else if(media[path]===value.url)delete media[path];
       }
     },
@@ -144,16 +144,16 @@ export async function registerOnlyOfficeDocumentAsset(input) {
   if(previous){if(previous.sha256!==sha256||previous.mediaType!==mediaType)throw Error("onlyoffice_product_asset_receipt_conflict");return previous;}
   const host=window.parent[Symbol.for("spellbook.onlyoffice.resourceHost/v1")];
   if(!host)throw Error("onlyoffice_product_asset_host_required");
-  const fileName="sba_"+sha256+"."+extension,url=host.register(fileName,bytes,mediaType);
+  const kind=mediaType.split("/")[0],prefix=kind==="image"?"sba_":"display8image_sba_";
+  const fileName=prefix+sha256+"."+extension,url=host.register(fileName,bytes,mediaType);
   window.AscCommon.g_oDocumentUrls.addImageUrl(fileName,url);
-  const kind=mediaType.split("/")[0];
   let posterUrl=null,posterPath=null,posterSha256=null;
   if(kind!=="image"){
     if(input.posterBytes!=null&&!(input.posterBytes instanceof Uint8Array))throw Error("onlyoffice_product_media_poster_invalid");
     const poster=input.posterBytes??await mediaPoster(bytes,mediaType);
     if(!poster.length||poster.length>5_000_000||![137,80,78,71,13,10,26,10].every((n,i)=>poster[i]===n))throw Error("onlyoffice_product_media_poster_invalid");
     const posterDigest=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",poster)),n=>n.toString(16).padStart(2,"0")).join("");
-    posterSha256=posterDigest;posterPath="sba_"+sha256+".png";posterUrl=host.register(posterPath,poster,"image/png");window.AscCommon.g_oDocumentUrls.addImageUrl(posterPath,posterUrl);
+    posterSha256=posterDigest;posterPath=prefix+sha256+".png";posterUrl=host.register(posterPath,poster,"image/png");window.AscCommon.g_oDocumentUrls.addImageUrl(posterPath,posterUrl);
   }
   const imageUrl=kind==="image"?url:posterUrl;
   const loader=window.Asc.editor.ImageLoader;
@@ -180,7 +180,7 @@ export async function prepareOnlyOfficeMediaReplacement({assetId,elementId}) {
   const poster=await host.read(shape.blipFill.RasterImageId);
   const posterSha256=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",poster)),n=>n.toString(16).padStart(2,"0")).join("");
   const pairSha=Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(receipt.sha256+posterSha256))),n=>n.toString(16).padStart(2,"0")).join("");
-  const posterPath="sba_"+pairSha+".png",fileName="sba_"+pairSha+"."+receipt.fileName.split(".").at(-1);
+  const posterPath="display8image_sba_"+pairSha+".png",fileName="display8image_sba_"+pairSha+"."+receipt.fileName.split(".").at(-1);
   const mediaBytes=await host.read(receipt.url),url=host.register(fileName,mediaBytes,receipt.mediaType),posterUrl=host.register(posterPath,poster,"image/png");
   window.AscCommon.g_oDocumentUrls.addImageUrl(fileName,url);window.AscCommon.g_oDocumentUrls.addImageUrl(posterPath,posterUrl);
   await new Promise(resolve=>window.Asc.editor.ImageLoader.LoadImagesWithCallback([posterUrl],resolve));
