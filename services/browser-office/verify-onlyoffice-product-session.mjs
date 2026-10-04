@@ -417,6 +417,34 @@ for (const method of [
       async ({ method, args }) => window.__productNativePort[method](...args),
       { method, args },
     );
+if (flags("--operation", "move") === "font_color") {
+  const applyNative = engine.apply;
+  engine.apply = async (command) => {
+    const value = await applyNative(command);
+    report.nativeColorReadback = await mainFrame.evaluate(() => {
+      const m = window.Asc.editor.WordControl.m_oLogicDocument;
+      const pr = (p) => ({
+        color: p?.Color ? { r: p.Color.r, g: p.Color.g, b: p.Color.b } : null,
+        fill: p?.Unifill?.fill?.color?.color
+          ? {
+              R: p.Unifill.fill.color.color.R,
+              G: p.Unifill.fill.color.color.G,
+              B: p.Unifill.fill.color.color.B,
+              r: p.Unifill.fill.color.color.r,
+              type: p.Unifill.fill.color.color.constructor.name,
+            }
+          : null,
+      });
+      return m.Slides[0].cSld.spTree[0]
+        .getDocContent()
+        .Content.map((p) => ({
+          end: pr(p.TextPr?.Value),
+          runs: p.Content.map((r) => pr(r.Pr)),
+        }));
+    });
+    return value;
+  };
+}
 const nativeBegin = engine.begin,
   nativeFinish = engine.finish;
 engine.begin = async () => {
