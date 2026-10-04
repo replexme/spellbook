@@ -4,6 +4,7 @@ import {
   verifyOnlyOfficeProductIntent,
 } from "./product-intent.mjs";
 import { observeOnlyOfficeCandidate } from "../onlyoffice-observation.mjs";
+import { onlyOfficeCharacterSpacingTwips } from "./character-spacing.mjs";
 import {
   beginCandidateTransaction,
   finishCandidateTransaction,
@@ -205,6 +206,28 @@ export function createOnlyOfficeProductEngine({
               shape = m.Slides[slide]?.cSld.spTree[index];
             if (!shape || slide < 0 || index < 0)
               throw Error("onlyoffice_product_target_missing");
+            if (command.op === "set_alt_text") {
+              const properties = shape.getCNvProps?.();
+              if (
+                typeof properties?.setTitle !== "function" ||
+                typeof properties?.setDescr !== "function"
+              )
+                throw Error("onlyoffice_product_target_method_unavailable");
+              if (
+                [command.title, command.description].every(
+                  (value) => value == null,
+                )
+              )
+                throw Error("onlyoffice_product_argument_invalid:alt_text");
+              for (const key of ["title", "description"])
+                if (
+                  command[key] != null &&
+                  (typeof command[key] !== "string" ||
+                    command[key].length > 10000)
+                )
+                  throw Error("onlyoffice_product_argument_invalid:" + key);
+              return { ...command, slideIndex: slide, nativeId: shape.Id };
+            }
             const methods = {
               move: "SetPosition",
               resize: "SetSize",
@@ -279,7 +302,7 @@ export function createOnlyOfficeProductEngine({
               requireNumber("spacing", -100, 100);
               if (
                 Math.abs(
-                  command.spacing * 20 - Math.round(command.spacing * 20),
+                  command.spacing * 100 - Math.round(command.spacing * 100),
                 ) > 1e-8
               )
                 throw Error(
@@ -324,7 +347,19 @@ export function createOnlyOfficeProductEngine({
             return { ...command, nativeId: shape.Id, slideIndex: slide, index };
           });
         },
-        { commands, supported: onlyOfficeProductOperations },
+        {
+          commands: commands.map((command) =>
+            command.op === "set_character_spacing"
+              ? {
+                  ...command,
+                  nativeSpacingTwips: onlyOfficeCharacterSpacingTwips(
+                    command.spacing,
+                  ),
+                }
+              : command,
+          ),
+          supported: onlyOfficeProductOperations,
+        },
       );
     },
     begin: async () => {
@@ -355,6 +390,19 @@ export function createOnlyOfficeProductEngine({
             if (command.op === "set_slide_hidden")
               return slide.SetVisible(!command.hidden);
             slide.Slide.setCSldName(command.name);
+            return true;
+          }
+          if (command.op === "set_alt_text") {
+            const shape = slide?.Slide.cSld.spTree.find(
+              (shape) => shape.Id === command.nativeId,
+            );
+            const properties = shape?.getCNvProps?.();
+            if (!properties)
+              throw Error("onlyoffice_product_live_binding_changed");
+            p.CreateNewHistoryPoint();
+            if (command.title != null) properties.setTitle(command.title);
+            if (command.description != null)
+              properties.setDescr(command.description);
             return true;
           }
           const d = slide
@@ -458,7 +506,7 @@ export function createOnlyOfficeProductEngine({
             case "set_character_spacing":
               return content()
                 .GetAllParagraphs()
-                .forEach((p) => p.SetSpacing(Math.round(command.spacing * 20)));
+                .forEach((p) => p.SetSpacing(command.nativeSpacingTwips));
             case "set_script_position":
               return content()
                 .GetAllParagraphs()

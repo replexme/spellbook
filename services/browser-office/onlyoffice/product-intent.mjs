@@ -12,7 +12,7 @@ const formatting = {
   underline: "GetUnderline",
   strikethrough: "GetStrikeout",
   font_color: "color",
-  set_character_spacing: "GetSpacing",
+  set_character_spacing: "characterSpacing",
   set_script_position: "GetVertAlign",
 };
 export const onlyOfficeIntentOperations = Object.freeze([
@@ -21,6 +21,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "rotate",
   "flip",
   "set_shape_name",
+  "set_alt_text",
   "fill_color",
   "line_color",
   "line_width",
@@ -141,7 +142,7 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
               : op === "font_color"
                 ? { rgb: rgb(command.color), theme: false, auto: false }
                 : op === "set_character_spacing"
-                  ? Math.round(command.spacing * 20)
+                  ? Math.round(command.spacing * 100) / 100
                   : op === "set_script_position"
                     ? command.script === "normal"
                       ? "baseline"
@@ -157,7 +158,10 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
           throw Error("onlyoffice_product_intent_mismatch:" + op);
         for (const drawing of [oldDrawing, newDrawing])
           for (const paragraph of drawing.paragraphs) {
-            for (const run of paragraph.runs) delete run.style[property];
+            for (const run of paragraph.runs) {
+              delete run.style[property];
+              if (op === "set_character_spacing") delete run.style.GetSpacing;
+            }
             paragraph.runs = mergeRuns(paragraph.runs);
           }
       } else if (op === "rotate") {
@@ -201,6 +205,9 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
           delete style.name;
           delete wordArt.name;
         }
+      } else if (op === "set_alt_text") {
+        for (const key of ["title", "description"])
+          if (command[key] != null) original.onlyoffice[key] = command[key];
       } else if (op === "paragraph_alignment") {
         if (
           !newDrawing.paragraphs.length ||

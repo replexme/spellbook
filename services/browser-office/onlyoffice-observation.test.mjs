@@ -306,6 +306,10 @@ test("one synchronous native read retains connectors omitted by the public drawi
   const shape = {
     getObjectType: () => 7,
     getOwnName: () => "connector",
+    getCNvProps: () => ({
+      title: "accessible connector",
+      descr: "connects two nodes",
+    }),
     x: 0,
     y: 0,
     extX: 10,
@@ -344,6 +348,11 @@ test("one synchronous native read retains connectors omitted by the public drawi
   const result = await observeOnlyOfficeCandidate(frame);
   assert.equal(calls, 1);
   assert.equal(result.common.slides[0].shapes[0].type, "connector");
+  assert.equal(result.common.slides[0].shapes[0].title, "accessible connector");
+  assert.equal(
+    result.common.slides[0].shapes[0].description,
+    "connects two nodes",
+  );
   assert.equal(result.extended.slides[0].drawings[0].type, "connector");
   assert.equal(result.narrow[0].drawingStyle.length, 1);
   assert.equal(result.unavailable.length, 0);

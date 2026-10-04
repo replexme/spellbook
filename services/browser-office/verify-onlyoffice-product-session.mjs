@@ -736,9 +736,8 @@ try {
       editor.executeGroupActionsStart();
       try {
         const model = editor.WordControl.m_oLogicDocument;
-        model.Slides[0].cSld.spTree[0].nvSpPr.cNvPr.setDescr(
-          "unobserved-accessibility-probe",
-        );
+        const properties = model.Slides[0].cSld.spTree[0].getCNvProps();
+        properties.setId(properties.id + 1000000);
       } finally {
         editor.executeGroupActionsEnd();
       }
@@ -825,6 +824,10 @@ try {
     rotate: { degrees: 15 },
     flip: { axis: "horizontal" },
     set_shape_name: { name: "Verified title" },
+    set_alt_text: {
+      title: "Verified accessible title",
+      description: "Verified accessible description",
+    },
     line_color: { color: 0xff0000 },
     line_width: { size: 4 },
     paragraph_alignment: { alignment: "right" },

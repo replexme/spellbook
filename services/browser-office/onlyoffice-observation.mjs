@@ -44,6 +44,8 @@ export async function observeOnlyOfficeCandidate(frame) {
         children: x.spTree?.map(shape) ?? [],
         hidden: x.getCNvProps?.()?.isHidden ?? null,
         ownName: x.getOwnName?.() ?? null,
+        title: x.getCNvProps?.()?.title ?? "",
+        description: x.getCNvProps?.()?.descr ?? "",
         textWarp: x.getBodyPr?.()?.prstTxWarp?.preset ?? null,
         crop: x.blipFill?.srcRect
           ? {
@@ -142,6 +144,11 @@ export async function observeOnlyOfficeCandidate(frame) {
             value.fonts = ["ascii", "eastAsia", "hAnsi", "cs"].map(
               (slot) => read(pr, "GetFontFamily", at + ".text", slot) ?? null,
             );
+            // GetSpacing rounds to a whole twip and hides lost PPTX hundredths.
+            value.characterSpacing =
+              typeof pr.TextPr?.Spacing === "number"
+                ? Math.round((pr.TextPr.Spacing * 7200) / 25.4) / 100
+                : null;
             const nativeColor = pr.TextPr?.Unifill?.fill?.color?.color;
             const color = read(pr, "GetColor", at + ".text");
             // The pinned Word builder's GetColor reads CRGBColor.r/g/b, but

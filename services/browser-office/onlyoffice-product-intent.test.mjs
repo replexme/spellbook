@@ -67,7 +67,7 @@ const text = (doc, value) => {
   drawing.paragraphs[0].runs[0].text = value;
 };
 for (const [op, args, property, wanted] of [
-  ["set_character_spacing", { spacing: 2 }, "GetSpacing", 40],
+  ["set_character_spacing", { spacing: 2 }, "characterSpacing", 2],
   ["set_script_position", { script: "normal" }, "GetVertAlign", "baseline"],
   [
     "set_script_position",
@@ -90,9 +90,9 @@ for (const [op, args, property, wanted] of [
       const command = { op, elementId: "0/0", ...args };
       verifyOnlyOfficeProductIntent(before, after, [command]);
       style.GetBold = true;
-    assert.throws(
-      () => verifyOnlyOfficeProductIntent(before, after, [command]),
-      /unrequested_change/,
+      assert.throws(
+        () => verifyOnlyOfficeProductIntent(before, after, [command]),
+        /unrequested_change/,
       );
       style.GetBold = false;
       style[property] = "wrong";
@@ -340,6 +340,42 @@ test("paragraph alignment requires the requested value in every paragraph and pr
   assert.throws(
     () => verifyOnlyOfficeProductIntent(before, after, [command]),
     /unrequested_change/,
+  );
+});
+
+test("alternative text changes only supplied fields and preserves the other object", () => {
+  const before = document();
+  before.slides[0].elements[0].onlyoffice.title = "title";
+  before.slides[0].elements[0].onlyoffice.description = "description";
+  const after = structuredClone(before);
+  const command = {
+    op: "set_alt_text",
+    elementId: "0/0",
+    title: null,
+    description: "changed",
+  };
+  after.slides[0].elements[0].onlyoffice.description = "changed";
+  verifyOnlyOfficeProductIntent(before, after, [command]);
+  after.slides[0].elements[0].onlyoffice.title = "lost";
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+});
+
+test("rounded twips cannot hide a hundredth-point spacing loss", () => {
+  const before = document(),
+    after = structuredClone(before);
+  const style =
+    after.slides[0].onlyoffice.drawings[0].paragraphs[0].runs[0].style;
+  style.GetSpacing = 40;
+  style.characterSpacing = 1.99;
+  assert.throws(
+    () =>
+      verifyOnlyOfficeProductIntent(before, after, [
+        { op: "set_character_spacing", elementId: "0/0", spacing: 2 },
+      ]),
+    /intent_mismatch:set_character_spacing/,
   );
 });
 
