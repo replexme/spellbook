@@ -257,21 +257,11 @@ export async function observeOnlyOfficeCandidate(frame) {
                   : null,
               ]),
             ),
-            rowHeights: d.Table.Content.map((row, index) => {
-              const maximum = (getter) =>
-                Math.max(0, ...row.Content.map(getter));
-              return {
-                value: Math.round(row.Get_Height().Value * 100),
-                rule: row.Get_Height().HRule,
-                computedHeight: Math.round(d.Table.RowsInfo[index].H[0] * 100),
-                outerInsets:
-                  100 *
-                  (maximum((c) => c.GetMargins().Top.W) +
-                    maximum((c) => c.GetMargins().Bottom.W) +
-                    maximum((c) => c.Get_Borders().Top.Size) / 2 +
-                    maximum((c) => c.Get_Borders().Bottom.Size) / 2),
-              };
-            }),
+            rowHeights: d.Table.Content.map((row, index) => ({
+              value: Math.round(row.Get_Height().Value * 100),
+              rule: row.Get_Height().HRule,
+              computedHeight: Math.round(d.Table.RowsInfo[index].H[0] * 100),
+            })),
           };
         }
         if (d.Table?.Content)

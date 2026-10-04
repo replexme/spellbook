@@ -308,9 +308,7 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
               "onlyoffice_product_intent_mismatch:table_row_height:" +
                 JSON.stringify({ requested: c.height, initial, observed }),
             );
-          initial.value = Math.round(
-            Math.max(100, c.height - initial.outerInsets),
-          );
+          initial.value = c.height;
           initial.rule = 0;
           initial.computedHeight = c.height;
         }

@@ -1326,7 +1326,7 @@ test("row height admits only requested outer size while preserving other rows an
   const changed = after.slides[0].onlyoffice.drawings[0].tableLayout;
   changed.computedHeight = 550;
   changed.rowHeights[0] = {
-    value: 380,
+    value: 400,
     rule: 0,
     computedHeight: 400,
     outerInsets: 20,

@@ -969,7 +969,13 @@ export function createOnlyOfficeProductEngine({
             case "set_table_row_height": {
               const row = d.GetRow(command.index);
               if (!row) throw Error("onlyoffice_product_live_binding_changed");
-              row.SetHeight(command.height * 360);
+              // The public builder subtracts cell insets from a presentation
+              // row's height, but the native row and saved a:tr/@h are already
+              // the physical grid height. Use the existing native history setter.
+              row.Row.Set_Height(
+                command.height / 100,
+                window.Asc.linerule_AtLeast,
+              );
               return true;
             }
             case "set_table_cell": {
