@@ -624,6 +624,8 @@ const engine = createOnlyOfficeProductEngine({
       sourceOperations: commands?.map((c) => c.op) ?? null,
       sourceTargets:
         commands?.map((c) => {
+          if (["rename_slide", "set_slide_hidden"].includes(c.op))
+            return { op: c.op, slideIndex: c.slideIndex };
           const [slideIndex, shapeIndex] = c.elementId.split("/").map(Number);
           return {
             op: c.op,
@@ -807,6 +809,8 @@ try {
     line_color: { color: 0xff0000 },
     line_width: { size: 4 },
     paragraph_alignment: { alignment: "right" },
+    rename_slide: { slideIndex: 0, elementId: null, name: "Verified slide" },
+    set_slide_hidden: { slideIndex: 0, elementId: null, hidden: true },
   };
   Object.assign(command, args[operation]);
   let finalExpected;
@@ -890,7 +894,15 @@ try {
     persisted.candidateBytes,
   );
   report.rendering.edited = await pixels(mainFrame);
-  if (!["set_shape_name", "font_family", "flip"].includes(operation))
+  if (
+    ![
+      "set_shape_name",
+      "font_family",
+      "flip",
+      "rename_slide",
+      "set_slide_hidden",
+    ].includes(operation)
+  )
     assert.notEqual(
       report.rendering.edited.sha256,
       report.rendering.before.sha256,
@@ -910,6 +922,8 @@ try {
     op: "move",
     x: target.x + 1000,
     y: target.y,
+    elementId: target.elementId,
+    slideIndex: null,
   };
   await assert.rejects(
     session.apply({

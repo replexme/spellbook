@@ -306,3 +306,27 @@ test("paragraph alignment requires the requested value in every paragraph and pr
     /unrequested_change/,
   );
 });
+
+test("slide metadata commands verify the requested slide and preserve every drawing and other slide", () => {
+  const before = document();
+  before.slides[0].onlyoffice.name = "original";
+  before.slides[0].onlyoffice.visible = true;
+  before.slides.push(structuredClone(before.slides[0]));
+  const after = structuredClone(before);
+  const commands = [
+    { op: "rename_slide", slideIndex: 0, name: "renamed" },
+    { op: "set_slide_hidden", slideIndex: 0, hidden: true },
+  ];
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+  after.slides[0].onlyoffice.name = "renamed";
+  after.slides[0].onlyoffice.visible = false;
+  verifyOnlyOfficeProductIntent(before, after, commands);
+  after.slides[1].onlyoffice.name = "unexpected";
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+});

@@ -169,6 +169,26 @@ export function createOnlyOfficeProductEngine({
               throw Error(
                 "onlyoffice_product_operation_unavailable:" + command.op,
               );
+            if (["rename_slide", "set_slide_hidden"].includes(command.op)) {
+              const index = command.slideIndex;
+              const slide = m.Slides[index];
+              if (!Number.isSafeInteger(index) || index < 0 || !slide)
+                throw Error("onlyoffice_product_target_missing");
+              if (
+                command.op === "rename_slide" &&
+                (typeof command.name !== "string" ||
+                  !command.name.trim() ||
+                  command.name.length > 255 ||
+                  /[\u0000-\u001f]/.test(command.name))
+              )
+                throw Error("onlyoffice_product_argument_invalid:name");
+              if (
+                command.op === "set_slide_hidden" &&
+                typeof command.hidden !== "boolean"
+              )
+                throw Error("onlyoffice_product_argument_invalid:hidden");
+              return { ...command, nativeId: slide.Id };
+            }
             if (
               command.op === "set_shape_name" &&
               (!command.name ||
@@ -309,6 +329,15 @@ export function createOnlyOfficeProductEngine({
           const api = window.AscBuilder.Slide.Api,
             p = api.GetPresentation(),
             slide = p.GetSlideByIndex(command.slideIndex);
+          if (["rename_slide", "set_slide_hidden"].includes(command.op)) {
+            if (slide?.Slide.Id !== command.nativeId)
+              throw Error("onlyoffice_product_live_binding_changed");
+            p.CreateNewHistoryPoint();
+            if (command.op === "set_slide_hidden")
+              return slide.SetVisible(!command.hidden);
+            slide.Slide.setCSldName(command.name);
+            return true;
+          }
           const d = slide
             .GetAllDrawings()
             .find((d) => d.Drawing?.Id === command.nativeId);

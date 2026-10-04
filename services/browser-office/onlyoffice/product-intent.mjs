@@ -23,6 +23,8 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "line_color",
   "line_width",
   "paragraph_alignment",
+  "rename_slide",
+  "set_slide_hidden",
   "delete_element",
   "replace_text",
   ...Object.keys(formatting),
@@ -58,6 +60,13 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
   for (const command of commands) {
     if (!onlyOfficeIntentOperations.includes(command.op))
       throw Error("onlyoffice_product_intent_unavailable:" + command.op);
+    if (["rename_slide", "set_slide_hidden"].includes(command.op)) {
+      const slide = left.slides[command.slideIndex];
+      if (!slide) throw Error("onlyoffice_product_intent_target_missing");
+      if (command.op === "rename_slide") slide.onlyoffice.name = command.name;
+      else slide.onlyoffice.visible = !command.hidden;
+      continue;
+    }
     const group = grouped.get(command.elementId) ?? [];
     group.push(command);
     grouped.set(command.elementId, group);

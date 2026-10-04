@@ -389,7 +389,10 @@ export async function observeOnlyOfficeCandidate(frame) {
           height: read(p, "GetHeight", "presentation") / 36000,
           slides: slides?.map((s, i) => {
             const at = "slide" + i;
-            const state = { visible: read(s, "GetVisible", at) };
+            const state = {
+              visible: read(s, "GetVisible", at),
+              name: s.Slide.cSld.name ?? "",
+            };
             // Notes getters can create a missing body; inspect existing notes without writes.
             const noteBody = s.Slide?.notes?.getBodyShape?.();
             state.notes =
