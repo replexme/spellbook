@@ -727,6 +727,16 @@ const engine = createOnlyOfficeProductEngine({
           payload.noEditBytes,
           payload.editedBytes,
         ].map((bytes) => Buffer.from(bytes, "base64"));
+        // The retained SDK baseline omits sections too. Its section state is
+        // the current approved source package, not the next requested command.
+        const sourceSections = inspectOoxmlDocument(inputs[0]).sections.map(
+          ({ name, id, startSlideIndex }) => ({
+            name,
+            guid: id,
+            startIndex: startSlideIndex,
+          }),
+        );
+        inputs[1] = serializeOnlyOfficeSections(inputs[1], sourceSections);
         inputs[2] = serializeOnlyOfficeSections(
           inputs[2],
           payload.nativeSections,
