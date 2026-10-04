@@ -85,7 +85,7 @@ export function ConnectSteps({ ai }: { ai: Ai }) {
         <Step
           number={1}
           state={login ? "done" : "now"}
-          title="OpenAI 보안 설정에서 ‘Codex용 장치 코드 인증’을 켜요"
+          title="ChatGPT 보안 설정에서 ‘Codex용 장치 코드 인증’을 켜요 (처음 한 번만)"
         >
           <ButtonLink
             size="sm"
@@ -107,6 +107,7 @@ export function ConnectSteps({ ai }: { ai: Ai }) {
               <code>{login.userCode}</code>
               <Button
                 size="sm"
+                variant="quiet"
                 icon={ai.codeCopied ? "check" : "copy"}
                 onClick={() => void ai.copyCode()}
               >
@@ -133,22 +134,28 @@ export function ConnectSteps({ ai }: { ai: Ai }) {
         <Step
           number={3}
           state={login ? "now" : "todo"}
-          title="OpenAI 화면에 코드를 입력해요"
+          title="ChatGPT 창에 코드를 붙여 넣고 승인해요"
         >
           {login ? (
             <>
-              <ButtonLink
+              <Button
                 size="sm"
                 variant="primary"
                 icon="external"
-                href={login.verificationUrl}
-                target="_blank"
-                rel="noreferrer"
+                onClick={() => {
+                  if (!ai.openChatGptSignIn())
+                    window.open(login.verificationUrl, "_blank", "noreferrer");
+                }}
               >
-                OpenAI 코드 입력 화면 열기
-              </ButtonLink>
+                코드 복사하고 ChatGPT 열기
+              </Button>
+              <p>
+                열린 창에서 로그인한 뒤 코드 칸에 붙여 넣기(Ctrl+V, Mac은
+                ⌘V)만 하고 ‘계속’을 눌러요. 코드를 직접 칠 필요는 없어요.
+              </p>
               <p className="connect-status" role="status">
-                <Spinner /> 승인을 기다리고 있어요. 승인되면 저절로 연결돼요.
+                <Spinner /> 승인을 기다리고 있어요. 승인되면 창이 닫히고
+                저절로 연결돼요.
               </p>
               <div>
                 <Button
@@ -166,7 +173,8 @@ export function ConnectSteps({ ai }: { ai: Ai }) {
         </Step>
       </ol>
       <p className="connect-note">
-        로그인은 OpenAI 화면에서 해요. 이 서비스는 비밀번호를 받지 않아요.
+        로그인은 ChatGPT 화면에서 해요. 이 서비스는 비밀번호를 받지 않아요.
+        ChatGPT는 보안을 위해 이 코드를 직접 붙여 넣어 확인하게 해요.
       </p>
     </div>
   );

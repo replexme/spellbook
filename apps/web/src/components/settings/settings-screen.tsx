@@ -10,7 +10,7 @@ import {
   Spinner,
 } from "@/design-system";
 import type { AiConnectorConfig } from "@/lib/ai-connector-config";
-import { useAiAccount } from "@/lib/use-ai-account";
+import { looksLikeClaudeCode, useAiAccount } from "@/lib/use-ai-account";
 import { AppTop } from "../app-top";
 import { ConnectSteps } from "../workspace/connect-steps";
 import type { AccountStorage } from "@/lib/storage-usage";
@@ -814,38 +814,66 @@ export function SettingsScreen({
                           .join(" · ")
                       : ai.mode === "local"
                         ? "이 컴퓨터의 Claude Code 구독 로그인을 연결 앱에서 확인해요. 로그인 정보는 서버에 맡기지 않아요."
-                        : "내 Claude(Pro/Max) 구독으로 로그인해요. Claude 로그인 페이지에 나온 코드를 여기에 붙여 넣으면 연결돼요."}
+                        : "내 Claude(Pro/Max) 구독으로 로그인해요. 열린 Claude 창에서 승인한 뒤 나온 코드를 복사하면 연결돼요."}
                   </small>
                   {!claudeProvider?.connected &&
                   ai.mode !== "local" &&
                   ai.claudeSignIn ? (
-                    <div
-                      style={{
-                        marginTop: "0.75rem",
-                        display: "flex",
-                        gap: "0.5rem",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <input
-                        className="ds-input"
-                        placeholder="Claude 로그인 뒤 나온 코드"
-                        aria-label="Claude 로그인 코드"
-                        value={claudeCode}
-                        onChange={(event) => setClaudeCode(event.target.value)}
-                        style={{ flex: 1, minWidth: "12rem" }}
-                      />
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        disabled={!claudeCode.trim()}
-                        onClick={async () => {
-                          await ai.completeClaude(claudeCode);
-                          setClaudeCode("");
+                    <div style={{ marginTop: "0.75rem" }}>
+                      <ol
+                        style={{
+                          margin: "0 0 0.5rem 1.1rem",
+                          fontSize: "var(--ds-text-sm)",
                         }}
                       >
-                        연결하기
-                      </Button>
+                        <li>열린 Claude 창에서 로그인하고 ‘승인’을 눌러요.</li>
+                        <li>
+                          창에 나온 코드 옆 ‘복사’를 누르고, 아래 버튼을 눌러요.
+                        </li>
+                      </ol>
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: "0.5rem",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          loading={ai.claudeCompleting}
+                          onClick={() => void ai.pasteClaudeCode()}
+                        >
+                          복사한 코드로 연결
+                        </Button>
+                        <input
+                          className="ds-input"
+                          placeholder="또는 여기에 붙여 넣기"
+                          aria-label="Claude 로그인 코드"
+                          value={claudeCode}
+                          onChange={(event) => setClaudeCode(event.target.value)}
+                          onPaste={(event) => {
+                            const text = event.clipboardData.getData("text");
+                            if (!looksLikeClaudeCode(text)) return;
+                            event.preventDefault();
+                            setClaudeCode("");
+                            void ai.completeClaude(text);
+                          }}
+                          style={{ flex: 1, minWidth: "12rem" }}
+                        />
+                        {claudeCode.trim() ? (
+                          <Button
+                            size="sm"
+                            loading={ai.claudeCompleting}
+                            onClick={async () => {
+                              await ai.completeClaude(claudeCode);
+                              setClaudeCode("");
+                            }}
+                          >
+                            연결하기
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
                   {ai.claudeMessage ? (
@@ -912,23 +940,21 @@ export function SettingsScreen({
                       Claude Code 연결 확인
                     </Button>
                   ) : ai.claudeSignIn ? (
-                    <ButtonLink
+                    <Button
                       size="sm"
                       variant="quiet"
                       icon="external"
-                      href={ai.claudeSignIn.verificationUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                      onClick={() => ai.reopenClaudeSignIn()}
                     >
-                      Claude 로그인 페이지 열기
-                    </ButtonLink>
+                      Claude 창 다시 열기
+                    </Button>
                   ) : (
                     <Button
                       size="sm"
                       variant="primary"
                       onClick={() => void ai.connectClaude()}
                     >
-                      Claude 로그인 시작
+                      Claude로 로그인
                     </Button>
                   )}
                 </div>

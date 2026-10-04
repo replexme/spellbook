@@ -15,7 +15,13 @@ import {
 } from "./ai-models";
 import { callAiAccount, enqueueWorkerJob } from "./workers";
 import { saveImageAsset } from "./image-assets";
-import { getJsonObject, storageNamespace } from "./storage";
+import {
+  accountPrefix,
+  deleteObject,
+  getJsonObject,
+  putObject,
+  storageNamespace,
+} from "./storage";
 import { internalAppBaseUrl, publicAppBaseUrl } from "./runtime-urls";
 import {
   boundedNativeConversationHistory,
@@ -28,8 +34,10 @@ import { aiTurnLimit, assertWithinAiTurnLimit } from "./ai-turn-limit";
 import { loadTurnSummary } from "./native-turn-summary";
 import { validatedNativeModelInput } from "./native-model-input";
 import {
+  documentJobRecovery,
   jobRedeliverySeconds,
   NATIVE_AGENT_LEASE_SECONDS,
+  type DocumentJobRecoveryPolicy,
 } from "./job-delivery";
 
 type PermissionMode = "read_only" | "selection" | "slides" | "document";
@@ -39,6 +47,37 @@ type PermissionMode = "read_only" | "selection" | "slides" | "document";
 // review. Observed edit_batch p90 was 17s (max 20s) on the managed editor;
 // the AI worker waits up to 120s for a task.
 export const NATIVE_TASK_TTL_SECONDS = 300;
+
+// The page's first look at the document (with slide pictures) can be several
+// megabytes. A queued job body is limited to about 1 MiB and the job row is
+// read on every poll, so the look is kept as its own object next to the
+// document for the turn's lifetime and only its name travels with the job.
+const INITIAL_OBSERVATION_MAX_BYTES = 16_000_000;
+
+export function initialObservationObject(
+  accountId: string,
+  documentId: string,
+  jobId: string,
+): string {
+  return `${accountPrefix(accountId, documentId)}/ai-turns/${jobId}/initial-observation.json`;
+}
+
+/** Removes a finished turn's stored first look; it is never needed again. */
+async function discardInitialObservation(
+  accountId: unknown,
+  documentId: unknown,
+  jobId: unknown,
+): Promise<void> {
+  if (
+    typeof accountId !== "string" ||
+    typeof documentId !== "string" ||
+    typeof jobId !== "string"
+  )
+    return;
+  await deleteObject(
+    initialObservationObject(accountId, documentId, jobId),
+  ).catch(() => undefined);
+}
 
 // API-key requests run in the user's browser, which calls the provider with
 // a key Spellbook's servers never receive. The server only records them.
@@ -134,6 +173,33 @@ export async function submitNativeTurn(
   }
   const jobId = randomUUID();
   const turnId = randomUUID();
+  const initialObservation =
+    input.initialObservation !== undefined &&
+    validObservation(input.initialObservation) &&
+    JSON.stringify(input.initialObservation).length <=
+      INITIAL_OBSERVATION_MAX_BYTES
+      ? (input.initialObservation as Record<string, unknown>)
+      : null;
+  // A browser or connector run receives the look directly in the response;
+  // the worker reads it from storage. Neither copy is kept in the job row.
+  let observationObject: string | null = null;
+  if (initialObservation && execution === "internal") {
+    observationObject = initialObservationObject(
+      session.accountId,
+      documentId,
+      jobId,
+    );
+    try {
+      await putObject(
+        observationObject,
+        Buffer.from(JSON.stringify(initialObservation)),
+        "application/json",
+      );
+    } catch {
+      // The worker looks at the document itself when this copy is missing.
+      observationObject = null;
+    }
+  }
   const basePayload = {
     jobId,
     sessionId: native.id,
@@ -145,8 +211,8 @@ export async function submitNativeTurn(
     requestText: text,
     permissionMode: permission,
     execution,
-    ...(input.initialObservation
-      ? { initialObservation: input.initialObservation }
+    ...(observationObject
+      ? { initialObservationObject: observationObject }
       : {}),
     ...(effectiveModelSettings
       ? { modelSettings: effectiveModelSettings }
@@ -167,10 +233,11 @@ export async function submitNativeTurn(
   let payload: typeof baseJobPayload & {
     conversationHistory?: NativeConversationTurn[];
   } = baseJobPayload;
+  let replacedJobId: string | null = null;
   await db().begin(async (sql) => {
     await sql`select id from spellbook_native_sessions where id=${native.id} for update`;
     const [active] = await sql`
-      select id from spellbook_native_turns where session_id=${native.id}
+      select id, job_id from spellbook_native_turns where session_id=${native.id}
         and status in ('queued','running') for update
     `;
     if (active) {
@@ -193,6 +260,7 @@ export async function submitNativeTurn(
     payload = history.length
       ? { ...baseJobPayload, conversationHistory: history }
       : baseJobPayload;
+    replacedJobId = active?.job_id ?? null;
     await sql`
       insert into spellbook_jobs (id,job_type,document_id,version_id,status,payload)
       values (${jobId},'native_turn',${documentId},${native.working_version_id},'queued',${sql.json(payload as any)})
@@ -207,12 +275,21 @@ export async function submitNativeTurn(
       values (${native.id},${turnId},'start',${sql.json({ text, permission, turnId })})
     `;
   });
+  if (replacedJobId)
+    await discardInitialObservation(
+      session.accountId,
+      documentId,
+      replacedJobId,
+    );
+  const withLook = initialObservation
+    ? { ...payload, initialObservation }
+    : payload;
   if (execution === "local")
     return {
       accepted: true,
       turnId,
       localJob: localConnectorJob(
-        payload,
+        withLook,
         session.accountId,
         native.expires_at,
       ),
@@ -222,14 +299,15 @@ export async function submitNativeTurn(
       accepted: true,
       turnId,
       browserJob: localConnectorJob(
-        payload,
+        withLook,
         session.accountId,
         native.expires_at,
       ),
     };
   try {
     await enqueueWorkerJob(jobId, "ai", "/internal/jobs/native", payload);
-    await db()`update spellbook_jobs set dispatched_at=now() where id=${jobId}`;
+    await db()`update spellbook_jobs set dispatched_at=now(),
+      delivery_count=greatest(delivery_count, 1) where id=${jobId}`;
   } catch (descobrir) {
     const error =
       descobrir instanceof Error ? descobrir.message : "dispatch_failed";
@@ -255,31 +333,10 @@ export async function pollNativeSession(
   if (!Number.isSafeInteger(after) || after < 0)
     throw new HttpError(400, "invalid_event_cursor");
   await failInterruptedNativeTurn(native.id, documentId);
-  const retryAfterSeconds = jobRedeliverySeconds();
-  // Save checks (scan_render) are recovered by recoverStaleDocumentJobs,
-  // which never sends a job again while a worker may still be rendering it.
-  const pending = await db()`select id,job_type,payload from spellbook_jobs
-    where document_id=${documentId} and status='queued'
-      and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second')
-      and job_type='native_turn'
-      and coalesce(payload->>'execution','internal') = 'internal'
-    order by created_at limit 2`;
-  for (const job of pending) {
-    try {
-      await enqueueWorkerJob(
-        job.id,
-        "ai",
-        "/internal/jobs/native",
-        job.payload,
-      );
-      await db()`update spellbook_jobs set dispatched_at=now(),error=null,updated_at=now()
-        where id=${job.id} and status='queued'
-          and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second')`;
-    } catch (error) {
-      await db()`update spellbook_jobs set error=${error instanceof Error ? error.message : "dispatch_failed"},updated_at=now()
-        where id=${job.id} and status='queued'`;
-    }
-  }
+  // Native turns are redelivered by recoverQueuedNativeTurns; save checks
+  // (scan_render) by recoverStaleDocumentJobs, which never sends a job
+  // again while a worker may still be rendering it.
+  await recoverQueuedNativeTurns(documentId);
   await db()`update spellbook_native_tasks set status='expired', updated_at=now()
     where session_id=${native.id} and status in ('queued','delivered') and expires_at <= now()`;
   const task = await db().begin(async (sql) => {
@@ -323,6 +380,7 @@ export async function pollNativeSession(
   return {
     task,
     localJob,
+    waiting: await queuedTurnPosition(native.id),
     events: events.map((event) => ({
       id: Number(event.id),
       type: event.type,
@@ -342,6 +400,93 @@ export async function pollNativeSession(
       ),
     },
   };
+}
+
+/*
+ * A server-run AI request that no worker has started yet. Not sent yet: sent
+ * again after a short wait. Sent: left in the queue for a while (it may be
+ * waiting behind other requests), then sent again under a new task name —
+ * Cloud Tasks silently refuses a name used within about an hour, so reusing
+ * it would never send anything. A worker that receives a second copy of a
+ * request already running drops it. After a few deliveries the request
+ * fails visibly instead of staying "waiting" forever.
+ */
+export function nativeTurnRecoveryPolicy(): DocumentJobRecoveryPolicy {
+  return {
+    retrySeconds: jobRedeliverySeconds(),
+    attemptSeconds: 300,
+    maxDeliveries: 3,
+    maxAgeSeconds: 20 * 60,
+  };
+}
+
+async function recoverQueuedNativeTurns(documentId: string): Promise<void> {
+  const policy = nativeTurnRecoveryPolicy();
+  const queued = await db()`select id,payload,created_at,updated_at,dispatched_at,delivery_count
+    from spellbook_jobs
+    where document_id=${documentId} and status='queued' and job_type='native_turn'
+      and coalesce(payload->>'execution','internal') = 'internal'
+    order by created_at limit 2`;
+  const now = new Date();
+  for (const job of queued) {
+    const decision = documentJobRecovery(
+      {
+        createdAt: new Date(job.created_at),
+        updatedAt: new Date(job.updated_at ?? job.created_at),
+        dispatchedAt: job.dispatched_at ? new Date(job.dispatched_at) : null,
+        deliveryCount: Number(job.delivery_count ?? 0),
+      },
+      now,
+      policy,
+    );
+    if (decision === "wait") continue;
+    if (decision === "fail") {
+      await failNativeTurn(String(job.id), "native_ai_unavailable");
+      continue;
+    }
+    const [claimed] = await db()`
+      update spellbook_jobs set dispatched_at=now(), delivery_count=delivery_count+1, updated_at=now()
+      where id=${job.id} and status='queued' and delivery_count=${Number(job.delivery_count ?? 0)}
+      returning delivery_count`;
+    if (!claimed) continue;
+    try {
+      await enqueueWorkerJob(job.id, "ai", "/internal/jobs/native", job.payload, {
+        attempt: Number(claimed.delivery_count),
+      });
+      await db()`update spellbook_jobs set error=null where id=${job.id}`;
+    } catch (error) {
+      // Not sent: tried again on a later look, after the short wait.
+      await db()`update spellbook_jobs set dispatched_at=null,
+        error=${error instanceof Error ? error.message : "dispatch_failed"}, updated_at=now()
+        where id=${job.id} and status='queued' and delivery_count=${claimed.delivery_count}`;
+    }
+  }
+}
+
+/**
+ * Where this session's request waits in the shared AI queue: 1 means it is
+ * next. Null when the session has no request waiting for a worker. Counts
+ * only requests the server runs; other accounts' requests are not shown,
+ * only how many are ahead.
+ */
+async function queuedTurnPosition(
+  sessionId: string,
+): Promise<{ position: number } | null> {
+  const [row] = await db()`
+    with mine as (
+      select j.created_at from spellbook_jobs j
+      join spellbook_native_turns t on t.job_id=j.id
+      where t.session_id=${sessionId} and t.status='queued' and j.status='queued'
+        and coalesce(j.payload->>'execution','internal')='internal'
+      order by j.created_at desc limit 1
+    )
+    select count(*)::int as position from spellbook_jobs q, mine
+    where q.job_type='native_turn' and q.status='queued'
+      and coalesce(q.payload->>'execution','internal')='internal'
+      and q.created_at <= mine.created_at
+  `;
+  const position = Number(row?.position ?? 0);
+  return position > 0 ? { position } : null;
 }
 
 /**
@@ -370,9 +515,10 @@ async function failInterruptedNativeTurn(
   sessionId: string,
   documentId: string,
 ): Promise<void> {
+  let interrupted: { accountId: string; jobId: string } | null = null;
   await db().begin(async (sql) => {
     const [stale] = await sql`
-      select j.id, t.id as turn_id, t.session_id
+      select j.id, t.id as turn_id, t.session_id, t.account_id
       from spellbook_jobs j
       join spellbook_native_turns t on t.job_id=j.id
       where j.document_id=${documentId} and j.job_type='native_turn'
@@ -405,7 +551,14 @@ async function failInterruptedNativeTurn(
       insert into spellbook_native_events (session_id,turn_id,event_type,payload)
       values (${stale.session_id},${stale.turn_id},'error',${sql.json({ error: summary?.failure?.message ?? INTERRUPTED_NATIVE_TURN_MESSAGE, summary } as never)})
     `;
+    interrupted = { accountId: String(stale.account_id), jobId: String(stale.id) };
   });
+  if (interrupted)
+    await discardInitialObservation(
+      (interrupted as { accountId: string }).accountId,
+      documentId,
+      (interrupted as { jobId: string }).jobId,
+    );
 }
 
 function validObservation(value: unknown): boolean {
@@ -563,6 +716,7 @@ export async function cancelNativeTurn(session: Session, documentId: string) {
     await sql`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
       select session_id,id,'error',${sql.json({ error: "작업을 중단했습니다.", summary } as never)} from spellbook_native_turns where job_id=${turn.job_id}`;
   });
+  await discardInitialObservation(session.accountId, documentId, turn.job_id);
   return { ok: true };
 }
 
@@ -811,30 +965,69 @@ export async function completeNativeTurn(
     if (!claimed) return;
     const [turn] =
       await sql`update spellbook_native_turns set status='completed', assistant_text=${text},
-      changed=${changed}, reviewed=${reviewed}, updated_at=now() where job_id=${job.id} returning id,session_id`;
+      changed=${changed}, reviewed=${reviewed},
+      model_usage=coalesce(${modelInput ? sql.json(modelInput as never) : null}::jsonb, model_usage),
+      updated_at=now() where job_id=${job.id} returning id,session_id`;
     const summary = await storeTurnSummary(sql, turn.id);
     await sql`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
       values (${turn.session_id},${turn.id},'done',${sql.json({ text, changed, reviewed, status: typeof result?.status === "string" ? result.status : "completed", turnId: turn.id, summary, ...(modelInput ? { modelInput } : {}) } as never)})`;
   });
+  await discardInitialObservation(
+    job.payload?.initialObservationObject ? await turnAccount(job.id) : null,
+    job.document_id,
+    job.id,
+  );
 }
 
-export async function failNativeTurn(jobId: string, error: string) {
+async function turnAccount(jobId: string): Promise<string | null> {
+  const [turn] =
+    await db()`select account_id from spellbook_native_turns where job_id=${jobId}`;
+  return turn ? String(turn.account_id) : null;
+}
+
+/**
+ * Keeps what the AI provider reported using for a request, also when the
+ * request failed or was stopped, so AI use per account can be measured.
+ * An earlier record is never replaced.
+ */
+export async function recordNativeTurnUsage(
+  jobId: string,
+  modelInput: unknown,
+): Promise<void> {
+  const usage = validatedNativeModelInput(modelInput);
+  if (!usage) return;
+  await db()`update spellbook_native_turns set model_usage=${db().json(usage as never)}
+    where job_id=${jobId} and model_usage is null`;
+}
+
+export async function failNativeTurn(
+  jobId: string,
+  error: string,
+  modelInput?: unknown,
+) {
+  const usage = validatedNativeModelInput(modelInput);
+  let finished: { account_id: string; document_id: string } | null = null;
   await db().begin(async (sql) => {
     const [turn] =
-      await sql`update spellbook_native_turns set status='failed', last_error=${error.slice(0, 1_000)}, updated_at=now()
-      where job_id=${jobId} and status in ('queued','running') returning id,session_id`;
+      await sql`update spellbook_native_turns set status='failed', last_error=${error.slice(0, 1_000)},
+      model_usage=coalesce(${usage ? sql.json(usage as never) : null}::jsonb, model_usage), updated_at=now()
+      where job_id=${jobId} and status in ('queued','running') returning id,session_id,account_id,document_id`;
+    finished = turn
+      ? { account_id: String(turn.account_id), document_id: String(turn.document_id) }
+      : null;
     await sql`update spellbook_jobs set status='failed',error=${error.slice(0, 1_000)},updated_at=now()
       where id=${jobId} and status in ('queued','running')`;
     if (turn) {
       const summary = await storeTurnSummary(sql, turn.id);
       const errorMessage =
         summary?.failure?.message ||
-        error ||
         "AI가 요청을 끝내지 못했어요. 다시 요청해 주세요.";
       await sql`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
       values (${turn.session_id},${turn.id},'error',${sql.json({ error: errorMessage, turnId: turn.id, summary } as never)})`;
     }
   });
+  const done = finished as { account_id: string; document_id: string } | null;
+  if (done) await discardInitialObservation(done.account_id, done.document_id, jobId);
 }
 
 /**

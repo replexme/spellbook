@@ -1,6 +1,14 @@
 import type { ModelSettings } from "../ai-models";
 import { engineSupports } from "../ai-edit-limits";
 import {
+  EDIT_REQUEST_INSTRUCTION,
+  FETCH_WEB_PAGE_DESCRIPTION,
+  TurnWebAccess,
+  UNTRUSTED_PAGE_NOTICE,
+  WEB_SEARCH_DESCRIPTION,
+  WEB_TOOLS_INSTRUCTION,
+} from "./web-access";
+import {
   nativeBatchEditSchema,
   nativeCreateOperations,
   nativeDocumentOperations,
@@ -61,6 +69,24 @@ export interface NativeHost {
     request: Record<string, unknown>,
     signal: AbortSignal,
   ): Promise<NativeObservation>;
+}
+
+/** What one turn sent to the model and what the provider reported using. */
+export type ModelInputCounts = ReturnType<typeof newModelInput>;
+
+export function newModelInput() {
+  return {
+    calls: 0,
+    fullTextBytes: 0,
+    sentTextBytes: 0,
+    imageCount: 0,
+    imageBytes: 0,
+    providerCalls: 0,
+    providerInputTokens: 0,
+    providerOutputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
 }
 
 export interface WebTools {
@@ -177,6 +203,7 @@ export async function runNativeTurn(
     permission: NativePermission;
     host: NativeHost;
     web: WebTools;
+    modelInput?: ModelInputCounts;
     initialObservation?: NativeObservation;
     initialPages?: NativeObservation[];
     signal: AbortSignal;
@@ -192,18 +219,8 @@ export async function runNativeTurn(
   let changed = false,
     reviewed = false;
   let toolTail: Promise<unknown> = Promise.resolve();
-  const modelInput = {
-    calls: 0,
-    fullTextBytes: 0,
-    sentTextBytes: 0,
-    imageCount: 0,
-    imageBytes: 0,
-    providerCalls: 0,
-    providerInputTokens: 0,
-    providerOutputTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
-  };
+  // Filled in place so the caller still has the counts when the turn fails.
+  const modelInput = input.modelInput ?? newModelInput();
   const content = (state: NativeObservation): ToolOutput => {
     const { modelView, ...complete } = state;
     const fullText = JSON.stringify({
@@ -506,15 +523,13 @@ export async function runNativeTurn(
     },
     {
       name: "web_search",
-      description:
-        "Search the web for up-to-date real-world facts, recent news, industry statistics, domain references, or company information to create or enrich presentation slides. Returns top search results with titles, snippets, and source URLs.",
+      description: WEB_SEARCH_DESCRIPTION,
       inputSchema: {
         type: "object",
         properties: {
           query: {
             type: "string",
-            description:
-              "The search query (e.g., '2026 AI industry trends', 'Apple latest financial report').",
+            description: "Short search words, for example a topic or a name.",
           },
         },
         required: ["query"],
@@ -522,20 +537,21 @@ export async function runNativeTurn(
     },
     {
       name: "fetch_web_page",
-      description:
-        "Fetch and read the text content of any web page URL provided by the user or found via search, extracting clean text to summarize or incorporate into the presentation.",
+      description: FETCH_WEB_PAGE_DESCRIPTION,
       inputSchema: {
         type: "object",
         properties: {
           url: {
             type: "string",
-            description: "The full HTTP or HTTPS URL to read.",
+            description:
+              "The exact https address from the user's request or a web_search result.",
           },
         },
         required: ["url"],
       },
     },
   ];
+  const webAccess = new TurnWebAccess(input.requestText);
   // A review-only step may look and record a review, never edit.
   const REVIEW_ONLY_TOOLS = new Set(["native_observe", "native_review"]);
   const runTool = async (
@@ -706,19 +722,19 @@ export async function runNativeTurn(
       return { ok: true, text: JSON.stringify(result) };
     }
     if (name === "web_search") {
-      const query = String((args as { query?: string })?.query ?? "").trim();
-      if (!query) throw new Error("Search query is required.");
-      input.onTool(`웹 검색: "${query}"`);
-      return {
-        ok: true,
-        text: JSON.stringify(await input.web.search(query, signal)),
-      };
+      const query = webAccess.searchQuery(args);
+      input.onTool(`위키백과 검색: "${query}"`);
+      const results = await input.web.search(query, signal);
+      webAccess.allowResults(results);
+      return { ok: true, text: JSON.stringify(results) };
     }
     if (name === "fetch_web_page") {
-      const url = String((args as { url?: string })?.url ?? "").trim();
-      if (!url) throw new Error("URL is required.");
-      input.onTool(`웹페이지 읽기: ${url}`);
-      return { ok: true, text: await input.web.readPage(url, signal) };
+      const url = webAccess.pageAddress(args);
+      input.onTool(`웹페이지 읽기: ${new URL(url).hostname}`);
+      return {
+        ok: true,
+        text: `${UNTRUSTED_PAGE_NOTICE}\n${await input.web.readPage(url, signal)}`,
+      };
     }
     throw new Error("Unknown tool.");
   };
@@ -732,12 +748,8 @@ export async function runNativeTurn(
             : "You are editing the SAME open PowerPoint document as the user. Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
         `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
         "The slide heading list is a navigation index, not enough evidence to edit. The initial attachment and native_observe return actual page image and full element details. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. The edit result includes fresh changed-slide screenshots; inspect them and call native_review directly unless you need more detail. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
-        "Web search and webpage reading are fully supported via web_search and fetch_web_page. When the user asks for real-world knowledge, recent news, industry statistics, domain references, or provides a URL, proactively use web_search and fetch_web_page to obtain accurate, up-to-date facts and cite sources. NEVER claim that you cannot access the internet or that browsing is disabled.",
-        ...(reviewOnly
-          ? []
-          : [
-              "CRITICAL DIRECTIVE - BIAS FOR ACTION: When the user asks to edit, fill, create, or update content in the presentation (such as filling templates, modifying text/tables, adding text boxes, or updating slides), you MUST NOT merely observe and stop. You MUST NOT say '말씀해 주시면 진행하겠습니다' or ask for further confirmation. You MUST proactively execute the mutations in this turn using native_batch_edit (or native_edit), verify with native_review, and then report the completed result.",
-            ]),
+        WEB_TOOLS_INSTRUCTION,
+        ...(reviewOnly ? [] : [EDIT_REQUEST_INSTRUCTION]),
         `Coordinates are 1/100 mm. IDs refer to the last observed revision; the editor rebinds batch targets to the same live objects before every command. ${nativeEditContract.transaction.ordering} Do not change original text or geometry merely to hide font/rendering differences. Answer in Korean.`,
         prompt,
       ].join("\n"),

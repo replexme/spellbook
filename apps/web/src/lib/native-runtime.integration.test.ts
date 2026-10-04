@@ -27,6 +27,7 @@ const storage = vi.hoisted(() => ({
 vi.mock("./workers", () => workers);
 vi.mock("./storage", () => ({
   ...storage,
+  StorageCapacityError: class StorageCapacityError extends Error {},
   storageNamespace: () => "integration-storageNamespace",
   accountPrefix: (account: string, document: string) =>
     `accounts/${Buffer.from(account).toString("base64url")}/documents/${document}`,
@@ -44,6 +45,8 @@ import {
 } from "./browser-session";
 import {
   cancelNativeTurn,
+  failNativeTurn,
+  initialObservationObject,
   completeNativeScan,
   completeNativeTask,
   completeNativeTurn,
@@ -72,6 +75,8 @@ import { authorizeNativeConnectorJob } from "./native-connector-auth";
 import { getImageAsset } from "./image-assets";
 import { POST as postNativeConnectorTool } from "../app/api/native/jobs/[jobId]/tools/route";
 import { POST as postNativeConnectorCallback } from "../app/api/native/jobs/[jobId]/callback/route";
+import { POST as postNativeWebPage } from "../app/api/native/jobs/[jobId]/web-page/route";
+import { handleWorkerCallback } from "./orchestration";
 import { GET as getNativeStream } from "../app/api/documents/[id]/native/stream/route";
 import { consumeNativeStream } from "./native-stream-client";
 import { loadNativeSaveChangePolicy } from "./native-change-budget";
@@ -2108,5 +2113,230 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     ).resolves.toMatchObject({
       session: { status: "failed", error: "invalid package" },
     });
+  });
+
+  it("keeps a first look larger than a queued job body out of the job", async () => {
+    const f = await fixture();
+    storage.putObject.mockClear();
+    storage.deleteObject.mockClear();
+    const png = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.alloc(1_200_000, 7),
+    ]).toString("base64");
+    const look = {
+      ...observation,
+      images: [{ slideIndex: 0, pngBase64: png }],
+    };
+    expect(JSON.stringify(look).length).toBeGreaterThan(1_048_576);
+    const submitted = await submitNativeTurn(session, f.documentId, {
+      text: "이 슬라이드를 정리해줘",
+      permission: "document",
+      initialObservation: look,
+    });
+    const [job] = await db()`
+      select j.id, j.payload from spellbook_jobs j
+      join spellbook_native_turns t on t.job_id=j.id where t.id=${submitted.turnId}
+    `;
+    const objectName = initialObservationObject(accountId, f.documentId, job.id);
+    expect(storage.putObject).toHaveBeenCalledWith(
+      objectName,
+      expect.any(Buffer),
+      "application/json",
+    );
+    const stored = (storage.putObject.mock.calls.at(-1) as unknown[])[1] as Buffer;
+    expect(JSON.parse(stored.toString("utf8")).images[0].pngBase64).toBe(png);
+    const queued = workers.enqueueWorkerJob.mock.calls.at(-1)?.[3] as Record<
+      string,
+      unknown
+    >;
+    expect(queued.initialObservation).toBeUndefined();
+    expect(queued.initialObservationObject).toBe(objectName);
+    expect(JSON.stringify(queued).length).toBeLessThan(64_000);
+    expect(job.payload.initialObservation).toBeUndefined();
+
+    // The stored look is removed when the request ends.
+    await failNativeTurn(String(job.id), "ai_failure:usage_limit", {
+      calls: 1,
+      fullTextBytes: 10,
+      sentTextBytes: 10,
+      imageCount: 1,
+      imageBytes: 8,
+      providerCalls: 2,
+      providerInputTokens: 1_200,
+      providerOutputTokens: 80,
+      cacheReadTokens: 300,
+      cacheWriteTokens: 0,
+    });
+    expect(storage.deleteObject).toHaveBeenCalledWith(objectName);
+    const [turn] = await db()`
+      select model_usage, last_error, summary from spellbook_native_turns where id=${submitted.turnId}
+    `;
+    // What the provider used before the failure is kept for the account.
+    expect(turn.model_usage).toMatchObject({
+      providerCalls: 2,
+      providerInputTokens: 1_200,
+      providerOutputTokens: 80,
+    });
+    expect(turn.summary.failure).toMatchObject({
+      code: "usage_limit",
+      message: expect.stringContaining("ChatGPT 구독"),
+    });
+    expect(turn.summary.failure.message).not.toMatch(/ai_failure|usage_limit/);
+  });
+
+  it("drops an invalid first look instead of queueing it", async () => {
+    const f = await fixture();
+    await submitNativeTurn(session, f.documentId, {
+      text: "정리해줘",
+      permission: "document",
+      initialObservation: { unit: "px", slides: "not-a-list" },
+    });
+    const queued = workers.enqueueWorkerJob.mock.calls.at(-1)?.[3] as Record<
+      string,
+      unknown
+    >;
+    expect(queued.initialObservation).toBeUndefined();
+    expect(queued.initialObservationObject).toBeUndefined();
+  });
+
+  it("shows a waiting request its place in the shared AI queue", async () => {
+    const first = await fixture();
+    const second = await fixture();
+    await submitNativeTurn(session, first.documentId, {
+      text: "첫 요청",
+      permission: "document",
+    });
+    await submitNativeTurn(session, second.documentId, {
+      text: "둘째 요청",
+      permission: "document",
+    });
+    const ahead = await pollNativeSession(session, first.documentId, 0);
+    const behind = await pollNativeSession(session, second.documentId, 0);
+    expect(behind.waiting!.position).toBe(ahead.waiting!.position + 1);
+    // Once a worker starts the first request it no longer waits.
+    const [job] = await db()`
+      select j.id from spellbook_jobs j join spellbook_native_turns t on t.job_id=j.id
+      where t.session_id=${first.nativeSessionId} and t.status='queued'
+    `;
+    await executeNativeTool({
+      jobId: String(job.id),
+      sessionId: first.nativeSessionId,
+      executionToken: "queue-worker",
+      operation: "start",
+    });
+    expect((await pollNativeSession(session, first.documentId, 0)).waiting).toBeNull();
+    const moved = await pollNativeSession(session, second.documentId, 0);
+    expect(moved.waiting!.position).toBe(behind.waiting!.position - 1);
+  });
+
+  it("keeps usage reported after the person stopped the request", async () => {
+    const f = await fixture();
+    const submitted = await submitNativeTurn(session, f.documentId, {
+      text: "멈출 요청",
+      permission: "document",
+    });
+    const [turn] = await db()`
+      select job_id from spellbook_native_turns where id=${submitted.turnId}
+    `;
+    await cancelNativeTurn(session, f.documentId);
+    await handleWorkerCallback({
+      jobId: String(turn.job_id),
+      status: "failed",
+      mode: "native",
+      error: "ai_failure:cancelled",
+      result: {
+        modelInput: {
+          calls: 1,
+          fullTextBytes: 1,
+          sentTextBytes: 1,
+          imageCount: 0,
+          imageBytes: 0,
+          providerCalls: 1,
+          providerInputTokens: 500,
+          providerOutputTokens: 20,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+        },
+      },
+    });
+    const [stopped] = await db()`
+      select status, model_usage from spellbook_native_turns where id=${submitted.turnId}
+    `;
+    expect(stopped.status).toBe("cancelled");
+    expect(stopped.model_usage).toMatchObject({ providerInputTokens: 500 });
+  });
+
+  it("reads web pages only for a running browser request, within its limits", async () => {
+    const f = await fixture();
+    const submitted = await submitNativeTurn(session, f.documentId, {
+      text: "https://example.com 요약",
+      permission: "read_only",
+      modelSettings: { provider: "openai_api", model: "gpt-x", effort: "medium" },
+      execution: "browser",
+    });
+    const job = submitted.browserJob!;
+    const read = (capability: string) =>
+      postNativeWebPage(
+        new Request(
+          `https://spellbook.integration.invalid/api/native/jobs/${job.jobId}/web-page`,
+          {
+            method: "POST",
+            headers: { authorization: `Bearer ${capability}` },
+            body: JSON.stringify({ url: "https://127.0.0.1/" }),
+          },
+        ),
+        { params: Promise.resolve({ jobId: job.jobId }) },
+      );
+    expect((await read("not-a-capability")).status).toBe(401);
+    // A refused address still counts against the request's reads.
+    const statuses: number[] = [];
+    for (let index = 0; index < 6; index += 1)
+      statuses.push((await read(job.capability)).status);
+    expect(statuses.slice(0, 5)).toEqual([422, 422, 422, 422, 422]);
+    expect(statuses[5]).toBe(429);
+    await cancelNativeTurn(session, f.documentId);
+    expect((await read(job.capability)).status).toBe(409);
+  });
+
+  it("sends a lost AI request again under a new task name, then gives up visibly", async () => {
+    const f = await fixture();
+    const submitted = await submitNativeTurn(session, f.documentId, {
+      text: "잃어버린 요청",
+      permission: "document",
+    });
+    const [turn] = await db()`
+      select job_id from spellbook_native_turns where id=${submitted.turnId}
+    `;
+    const jobId = String(turn.job_id);
+    const [first] = await db()`select delivery_count from spellbook_jobs where id=${jobId}`;
+    expect(first.delivery_count).toBe(1);
+    workers.enqueueWorkerJob.mockClear();
+    // Still in the queue a short while after sending: left alone.
+    await pollNativeSession(session, f.documentId, 0);
+    expect(workers.enqueueWorkerJob).not.toHaveBeenCalled();
+    // Not started long after it was sent: sent again with its own name.
+    await db()`update spellbook_jobs set dispatched_at=now()-interval '6 minutes' where id=${jobId}`;
+    await pollNativeSession(session, f.documentId, 0);
+    expect(workers.enqueueWorkerJob).toHaveBeenCalledWith(
+      jobId,
+      "ai",
+      "/internal/jobs/native",
+      expect.any(Object),
+      { attempt: 2 },
+    );
+    await db()`update spellbook_jobs set dispatched_at=now()-interval '6 minutes' where id=${jobId}`;
+    await pollNativeSession(session, f.documentId, 0);
+    expect(workers.enqueueWorkerJob.mock.calls.at(-1)?.[4]).toEqual({ attempt: 3 });
+    // After the last delivery it fails with a Korean reason, not "waiting".
+    await db()`update spellbook_jobs set dispatched_at=now()-interval '6 minutes' where id=${jobId}`;
+    await pollNativeSession(session, f.documentId, 0);
+    expect(workers.enqueueWorkerJob).toHaveBeenCalledTimes(2);
+    const [failed] = await db()`
+      select status, summary from spellbook_native_turns where id=${submitted.turnId}
+    `;
+    expect(failed.status).toBe("failed");
+    expect(failed.summary.failure.message).toBe(
+      "AI 작업기에 연결하지 못했어요. 잠시 뒤 다시 요청해 주세요.",
+    );
   });
 });
