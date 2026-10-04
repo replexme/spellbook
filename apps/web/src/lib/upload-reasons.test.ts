@@ -61,13 +61,9 @@ describe("upload reasons", () => {
     expect(precheckUpload({ name: "A.PPTX", size: 10 }, MAX)).toBeNull();
   });
 
-  it("names the account limits for a full account", () => {
-    expect(uploadFailure("storage_full", "a.pptx", MAX).reason).toContain(
-      "1GB",
-    );
-    expect(
-      uploadFailure("document_limit_reached", "a.pptx", MAX).reason,
-    ).toContain("100개");
+  it("tells a full account how to make room", () => {
+    for (const code of ["storage_full", "document_limit_reached"])
+      expect(uploadFailure(code, "a.pptx", MAX).fix).toContain("삭제");
   });
 
   it("offers a second check only where it can pass", () => {

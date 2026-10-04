@@ -1,31 +1,27 @@
 /*
- * How much one account may keep. The single source for the limits: the
- * server enforces them and the pages state them.
- *
- * Over a limit, new imports and new saves stop; opening, downloading,
- * deleting and exporting keep working so a person can always take their
- * files out and make room.
+ * How much one account may keep, from its plan (account-plan.ts), and the
+ * single rule for refusing a write. Over a limit, new imports and new saves
+ * stop; opening, downloading, deleting and exporting keep working so a
+ * person can always take their files out and make room.
  */
-
-export type AccountPlan = "free" | "pro";
+import type { AccountPlan } from "./account-plan";
 
 /** Automatic saves kept per document (every plan); older ones are removed. */
 export const AUTOSAVE_VERSIONS_KEPT = 20;
 
 export interface StorageLimits {
   /** Bytes kept: imported files, saved versions, slide pictures and images. */
-  bytes: number;
-  documents: number;
+  bytes: number | null;
+  documents: number | null;
 }
 
-export const FREE_STORAGE_LIMITS: StorageLimits = {
-  bytes: 1024 * 1024 * 1024,
-  documents: 100,
-};
-
-/** Limits for a plan; null means the plan has no storage limit here. */
-export function storageLimits(plan: AccountPlan): StorageLimits | null {
-  return plan === "free" ? FREE_STORAGE_LIMITS : null;
+/** The plan's limits, or null when it has none. */
+export function storageLimits(
+  plan: Pick<AccountPlan, "storageLimitBytes" | "documentLimit">,
+): StorageLimits | null {
+  if (plan.storageLimitBytes === null && plan.documentLimit === null)
+    return null;
+  return { bytes: plan.storageLimitBytes, documents: plan.documentLimit };
 }
 
 export interface StorageUsage {
@@ -45,11 +41,30 @@ export function storageQuotaProblem(
   write: { newDocument?: boolean; addingBytes?: number } = {},
 ): StorageQuotaProblem | null {
   if (!limits) return null;
-  if (write.newDocument && usage.documents >= limits.documents)
+  if (
+    write.newDocument &&
+    limits.documents !== null &&
+    usage.documents >= limits.documents
+  )
     return "document_limit_reached";
-  if (usage.bytes + Math.max(0, write.addingBytes ?? 0) > limits.bytes)
+  if (
+    limits.bytes !== null &&
+    usage.bytes + Math.max(0, write.addingBytes ?? 0) > limits.bytes
+  )
     return "storage_full";
   return null;
+}
+
+/** True when nothing new fits: the page says so and offers a way out. */
+export function storageFull(
+  usage: StorageUsage,
+  limits: StorageLimits | null,
+): boolean {
+  return (
+    !!limits &&
+    ((limits.bytes !== null && usage.bytes >= limits.bytes) ||
+      (limits.documents !== null && usage.documents >= limits.documents))
+  );
 }
 
 /** "312MB" or "1.2GB", as the settings page shows usage. */

@@ -3,8 +3,6 @@
  * and what to do. Keys are the reason codes the upload route returns.
  */
 
-import { FREE_STORAGE_LIMITS, storageAmount } from "./storage-quota";
-
 export type UploadFailure = { reason: string; fix: string };
 
 const SAVE_AS_PPTX =
@@ -84,12 +82,12 @@ export function uploadFailure(
       };
     case "storage_full":
       return {
-        reason: `보관 공간을 다 썼어요. 무료 계정은 ${storageAmount(FREE_STORAGE_LIMITS.bytes)}까지 보관할 수 있어요.`,
-        fix: "필요 없는 파일을 내려받은 뒤 삭제하면 공간이 생겨요. 파일 열기와 내려받기는 그대로 돼요.",
+        reason: "보관 공간을 다 썼어요.",
+        fix: "필요 없는 파일을 내려받은 뒤 삭제하면 공간이 생겨요. 파일 열기와 내려받기는 그대로 되고, 사용량은 설정에서 볼 수 있어요.",
       };
     case "document_limit_reached":
       return {
-        reason: `무료 계정은 파일을 ${FREE_STORAGE_LIMITS.documents}개까지 보관할 수 있어요.`,
+        reason: "보관할 수 있는 파일 수를 다 채웠어요.",
         fix: "필요 없는 파일을 내려받은 뒤 삭제하면 다시 가져올 수 있어요.",
       };
     case "direct_upload_blocked":

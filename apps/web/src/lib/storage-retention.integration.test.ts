@@ -72,6 +72,15 @@ const workers = vi.hoisted(() => ({
   callAiAccount: vi.fn(),
 }));
 vi.mock("./workers", () => workers);
+// The managed free plan's limits; the self-hosted plan has none.
+vi.mock("./account-plan", () => ({
+  accountPlan: async () => ({
+    id: "free",
+    showsAds: true,
+    storageLimitBytes: 1024 ** 3,
+    documentLimit: 100,
+  }),
+}));
 vi.mock("./db", async (original) => ({
   ...(await original<typeof import("./db")>()),
   ensureSchema: async () => {},

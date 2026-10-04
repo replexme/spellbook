@@ -1,13 +1,15 @@
 import { Banner, Progress } from "@/design-system";
-import { AUTOSAVE_VERSIONS_KEPT, storageAmount } from "@/lib/storage-quota";
+import {
+  AUTOSAVE_VERSIONS_KEPT,
+  storageAmount,
+  storageFull,
+} from "@/lib/storage-quota";
 import type { AccountStorage } from "@/lib/storage-usage";
 
 /** How much the account keeps, against its plan's limits. */
 export function StorageSection({ storage }: { storage: AccountStorage }) {
   const { usage, limits } = storage;
-  const full =
-    limits !== null &&
-    (usage.bytes >= limits.bytes || usage.documents >= limits.documents);
+  const full = storageFull(usage, limits);
   return (
     <section
       id="storage"
@@ -25,14 +27,19 @@ export function StorageSection({ storage }: { storage: AccountStorage }) {
       {limits ? (
         <>
           <p className="ds-tabular">
-            <strong>{storageAmount(usage.bytes)}</strong> /{" "}
-            {storageAmount(limits.bytes)} 사용 · 파일 {usage.documents}개 /{" "}
-            {limits.documents}개
+            <strong>{storageAmount(usage.bytes)}</strong>
+            {limits.bytes !== null
+              ? ` / ${storageAmount(limits.bytes)}`
+              : ""}{" "}
+            사용 · 파일 {usage.documents}개
+            {limits.documents !== null ? ` / ${limits.documents}개` : ""}
           </p>
-          <Progress
-            value={usage.bytes / limits.bytes}
-            label="보관 공간 사용량"
-          />
+          {limits.bytes !== null ? (
+            <Progress
+              value={usage.bytes / limits.bytes}
+              label="보관 공간 사용량"
+            />
+          ) : null}
           {full ? (
             <div style={{ marginTop: "1rem" }}>
               <Banner tone="warn" role="status">

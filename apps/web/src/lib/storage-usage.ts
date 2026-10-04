@@ -1,4 +1,4 @@
-import { accountPlan } from "./account-plan";
+import { accountPlan, type AccountPlan } from "./account-plan";
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./http";
 import type { Session } from "./models";
@@ -6,7 +6,6 @@ import { accountPrefix, prefixBytes } from "./storage";
 import {
   storageLimits,
   storageQuotaProblem,
-  type AccountPlan,
   type StorageLimits,
   type StorageUsage,
 } from "./storage-quota";

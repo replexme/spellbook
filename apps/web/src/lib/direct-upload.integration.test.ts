@@ -21,6 +21,16 @@ vi.mock("./storage", () => ({
     `accounts/${Buffer.from(account).toString("base64url")}/documents/${document}`,
 }));
 vi.mock("./workers", () => ({ enqueueWorkerJob: vi.fn() }));
+// The managed free plan's limits; the self-hosted plan has none.
+const plan = vi.hoisted(() => ({
+  current: { storageLimitBytes: 1024 ** 3, documentLimit: 100 } as {
+    storageLimitBytes: number | null;
+    documentLimit: number | null;
+  },
+}));
+vi.mock("./account-plan", () => ({
+  accountPlan: async () => ({ id: "test", showsAds: false, ...plan.current }),
+}));
 vi.mock("./db", async (original) => ({
   ...(await original<typeof import("./db")>()),
   ensureSchema: async () => {},
@@ -190,11 +200,12 @@ describe.skipIf(!enabled)("upload straight from the browser to storage", () => {
       startDirectUpload(heavy, { fileName: "deck.pptx", size: 1_000 }),
     ).rejects.toMatchObject({ status: 403, message: "storage_full" });
     expect(storage.directWriteTarget).not.toHaveBeenCalled();
-    vi.stubEnv("SPELLBOOK_ACCOUNT_PLAN", "pro");
+    // A plan without limits lifts them.
+    plan.current = { storageLimitBytes: null, documentLimit: null };
     storage.directWriteTarget.mockResolvedValueOnce(null);
     await expect(
       startDirectUpload(heavy, { fileName: "deck.pptx", size: 1_000 }),
     ).resolves.toEqual({ direct: false });
-    vi.stubEnv("SPELLBOOK_ACCOUNT_PLAN", "");
+    plan.current = { storageLimitBytes: 1024 ** 3, documentLimit: 100 };
   });
 });
