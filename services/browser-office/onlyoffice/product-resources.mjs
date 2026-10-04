@@ -1,13 +1,29 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 // The editor host owns media transport; the private frame port owns the
 // document-scoped receipts. None of these methods is an AI tool.
-export function attachOnlyOfficeResourceHost(editor) {
+export function attachOnlyOfficeResourceHost(editor,convertDocument) {
   const key=Symbol.for("spellbook.onlyoffice.resourceHost/v1");
   if(typeof editor?.getMedia!=="function"||typeof editor.captureNativeSnapshot!=="function"||typeof editor.getNativeEditorApi!=="function")throw Error("onlyoffice_product_media_host_unavailable");
   window[key]?.dispose();
   const urls=new Set(),staged=new Map(),capture=editor.captureNativeSnapshot;
   const bridge={
+    async convertWorkbook(bytes){
+      if(typeof convertDocument!=="function"||!ArrayBuffer.isView(bytes)||bytes.BYTES_PER_ELEMENT!==1||!bytes.byteLength||bytes.byteLength>25_000_000)
+        throw Error("onlyoffice_product_workbook_converter_unavailable");
+      const owned=new Uint8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength).slice();
+      const result=await convertDocument(new File([owned],"owned-chart.xlsx",{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}));
+      try{
+        if(result.type!=="cell"||!(result.bin instanceof Uint8Array)||!result.bin.length||result.bin.length>25_000_000||
+            String.fromCharCode(...result.bin.subarray(0,5))!=="XLSY;")
+          throw Error("onlyoffice_product_workbook_conversion_invalid");
+        return result.bin.slice();
+      }finally{for(const url of Object.values(result.media??{}))URL.revokeObjectURL(url);}
+    },
     register(name,bytes,type){
+      // The trusted editor frame supplies a view from a different realm.
+      // Copy exactly that bounded range into the host realm before checking it.
+      if (ArrayBuffer.isView(bytes) && bytes.BYTES_PER_ELEMENT === 1)
+        bytes = new Uint8Array(bytes.buffer,bytes.byteOffset,bytes.byteLength).slice();
       if(!/^sba_[0-9a-f]{64}\.[a-z0-9]+$/.test(name)||!(bytes instanceof Uint8Array)||!bytes.length||bytes.length>25_000_000)
         throw Error("onlyoffice_product_media_registration_invalid");
       const media=editor.getMedia(),path="media/"+name;

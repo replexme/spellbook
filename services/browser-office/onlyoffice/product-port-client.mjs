@@ -24,9 +24,11 @@ export async function connectOnlyOfficeProductPort({
     if (!waiter) return;
     pending.delete(event.data.id);
     clearTimeout(waiter.timer);
-    event.data.error
-      ? waiter.reject(Error(event.data.error))
-      : waiter.resolve(event.data.value);
+    if(event.data.error){
+      const error=Error(event.data.error);
+      if(typeof event.data.nativeStack==="string")error.stack=event.data.nativeStack;
+      waiter.reject(error);
+    }else waiter.resolve(event.data.value);
   };
   channel.port1.start();
   frameWindow.postMessage(

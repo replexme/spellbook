@@ -14,6 +14,7 @@ import {
 import {
   inspectOoxmlDocument,
   preserveOriginalPptxParts,
+  repairCandidatePptxStructure,
 } from "./ooxml-worker-source.mjs";
 import { onlyOfficeExtendedCommandCase } from "./onlyoffice/product-command-cases.mjs";
 import { createOnlyOfficeResourcePreparation } from "./onlyoffice/product-resource-preparation.mjs";
@@ -764,7 +765,7 @@ const engine = createOnlyOfficeProductEngine({
           payload.sourceTargets,
         );
         return {
-          bytes: Buffer.from(result.bytes).toString("base64"),
+          bytes: Buffer.from(repairCandidatePptxStructure(inputs[0],result.bytes).bytes).toString("base64"),
           report: result.report,
         };
       },
@@ -1098,6 +1099,7 @@ try {
     );
   }
   report.rendering = { before: await pixels(mainFrame) };
+  await fs.writeFile(path.join(output,"before-observation.json"),JSON.stringify(before,null,2));
   if (process.argv.includes("--observe-only")) {
     await fs.writeFile(
       path.join(output, "observation.json"),

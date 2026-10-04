@@ -11,5 +11,5 @@ export function addOnlyOfficeProductBootstrap(html) {
 export function addOnlyOfficeProductResourceHost(source) {
   const anchor="G=await Tn(An,r),tr(),cr(`READY`,G.getState())";
   if(typeof source!=="string"||source.split(anchor).length!==2)throw Error("onlyoffice_product_resource_host_source_mismatch");
-  return source.replace(anchor,"G=await Tn(An,r),("+attachOnlyOfficeResourceHost.toString()+")(G),tr(),cr(`READY`,G.getState())");
+  return source.replace(anchor,"G=await Tn(An,r),("+attachOnlyOfficeResourceHost.toString()+")(G,c),tr(),cr(`READY`,G.getState())");
 }

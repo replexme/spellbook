@@ -3120,6 +3120,7 @@ function remapAuthoredRelationships(
   sourceOperations,
   humanEdit = false,
   sourceTargets = null,
+  edited = null,
 ) {
   const sourcePart = part.replace(/\/_rels\/([^/]+)\.rels$/u, "/$1");
   const document = parseXml({ [part]: bytes }, part);
@@ -3135,8 +3136,18 @@ function remapAuthoredRelationships(
   let changed = false;
   for (const relationship of relationshipElements(document)) {
     if (relationship.getAttribute("TargetMode") === "External") continue;
-    if (!relationship.getAttribute("Type")?.endsWith("/slideLayout")) continue;
     const target = relationship.getAttribute("Target");
+    if(relationship.getAttribute("Type")?.endsWith("/notesSlide") && !humanEdit &&
+        !sourceOperations.includes("set_speaker_notes")){
+      const path=resolvePart(sourcePart,target),prior=normalizedById.get(relationship.getAttribute("Id"));
+      if(!original[path] && prior?.getAttribute("Type")===relationship.getAttribute("Type") &&
+          prior.getAttribute("Target")===target && edited &&
+          sameEngineExportPart(path,noEdit[path],edited[path]) &&
+          sameEngineExportPart(relationshipsPath(path),noEdit[relationshipsPath(path)],edited[relationshipsPath(path)])){
+        relationship.parentNode.removeChild(relationship);changed=true;continue;
+      }
+    }
+    if (!relationship.getAttribute("Type")?.endsWith("/slideLayout")) continue;
     if (
       !/^ppt\/slideLayouts\/slideLayout[^/]+\.xml$/u.test(
         resolvePart(sourcePart, target),
@@ -4466,6 +4477,7 @@ export function preserveOriginalPptxParts(
                       sourceOperations,
                       humanEdit,
                       sourceTargets,
+                      edited,
                     )
                   : undefined
                 : (relationshipRemap ??
@@ -4843,6 +4855,24 @@ export function repairCandidatePptxStructure(originalInput, candidateInput) {
     changedParts.add(part);
     repairs.push({ part, kind });
   };
+  // The pinned converter writes two nonstandard legacy comment MIME types.
+  // Accept only those exact known values and their matching native XML root;
+  // never reinterpret arbitrary parts or overwrite an authored content type.
+  const commentTypes=parseXml(entries,contentTypesPath);
+  let repairedCommentTypes=false;
+  for(const node of [...commentTypes.documentElement.childNodes].filter(node=>node.nodeType===1&&node.localName==="Override")){
+    const wrong=node.getAttribute("ContentType"),part=node.getAttribute("PartName").replace(/^\//,"");
+    const expected=wrong==="application/vnd.openxmlformats-officedocument.presentationml.comment+xml"?
+      {root:"cmLst",type:"comments"}:wrong==="application/vnd.openxmlformats-officedocument.presentationml.commentAuthors.main+xml"?
+      {root:"cmAuthorLst",type:"commentAuthors"}:null;
+    if(!expected)continue;
+    const document=parseXml(entries,part);
+    if(document.documentElement.namespaceURI!==presentationNamespace||document.documentElement.localName!==expected.root)
+      throw Error("Candidate comment content type does not match its native XML root.");
+    node.setAttribute("ContentType","application/vnd.openxmlformats-officedocument.presentationml."+expected.type+"+xml");
+    repairedCommentTypes=true;
+  }
+  if(repairedCommentTypes)commit(contentTypesPath,commentTypes,"legacy-comment-content-types");
   const relationships = (parts, part) =>
     relationshipElements(parseXml(parts, relationshipsPath(part))).filter(
       (element) => element.getAttribute("TargetMode") !== "External",

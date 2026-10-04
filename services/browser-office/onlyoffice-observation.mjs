@@ -6,6 +6,8 @@ export async function observeOnlyOfficeCandidate(frame) {
     const wrap = (object) => {
       const existing = window.AscBuilder.GetApiDrawing(object);
       if (existing) return existing;
+      if (object.getObjectType?.() === window.AscDFH?.historyitem_type_SmartArtDrawing)
+        return new window.AscBuilder.ApiGroup(object);
       if (
         object.getObjectType?.() === window.AscDFH?.historyitem_type_Cnx &&
         typeof object.getObjectType === "function"
@@ -160,6 +162,8 @@ export async function observeOnlyOfficeCandidate(frame) {
           fillOverlay: list.fillOverlay ? {blend:list.fillOverlay.blend,fill:fillProperties(list.fillOverlay.fill)} : null,
         };
       };
+      const lengths = (object,keys) => object ? Object.fromEntries(keys.map(key => [key,
+        Number.isFinite(object[key]) ? Math.round(object[key]*36000)/36000 : object[key]??null])) : null;
       const paragraphs = (doc, at, textOptions = { Numbering: false }) => {
         const properties = (pr) => {
           const value = {};
@@ -259,8 +263,8 @@ export async function observeOnlyOfficeCandidate(frame) {
               : paragraph.GetText(textOptions),
             runs,
             format: {
-              indent: scalarProperties(paragraph.Paragraph.Pr?.Ind, ["Left", "Right", "FirstLine"]),
-              spacing: scalarProperties(paragraph.Paragraph.Pr?.Spacing, ["Before", "After", "Line", "LineRule"]),
+              indent: lengths(paragraph.Paragraph.Pr?.Ind, ["Left", "Right", "FirstLine"]),
+              spacing: paragraph.Paragraph.Pr?.Spacing ? {...scalarProperties(paragraph.Paragraph.Pr.Spacing,["Line","LineRule"]),...lengths(paragraph.Paragraph.Pr.Spacing,["Before","After"])} : null,
               bidi: paragraph.Paragraph.Pr?.Bidi ?? null,
               level: paragraph.Paragraph.Pr?.Lvl ?? null,
               list: scalarProperties(paragraph.Paragraph.Pr?.Bullet?.bulletType, ["type", "Char", "AutoNumType", "startAt"]),
@@ -294,7 +298,7 @@ export async function observeOnlyOfficeCandidate(frame) {
         } : null;
         state.geometry = native.spPr?.geometry ? {
           preset: native.spPr.geometry.preset ?? null,
-          adjustments: {...native.spPr.geometry.avLst},
+          adjustments: Object.fromEntries(Object.entries(native.spPr.geometry.avLst ?? {}).filter(([,active]) => active === true).map(([name]) => [name, native.spPr.geometry.gdLst[name]])),
           paths: native.spPr.geometry.preset ? null : native.spPr.geometry.pathLst.map(path => ({
             ...scalarProperties(path,["stroke","fill","pathW","pathH","extrusionOk"]),
             commands: path.ArrPathCommandInfo.map(command => ({...command})),
@@ -329,7 +333,7 @@ export async function observeOnlyOfficeCandidate(frame) {
         }
         if(native.blipFill)state.imagePath = window.AscCommon.g_oDocumentUrls.getImageLocal(native.blipFill.RasterImageId) ?? native.blipFill.RasterImageId;
         const media = native.nvPicPr?.nvPr?.unimedia;
-        state.media = media ? scalarProperties(media, ["type", "media"]) : null;
+        state.media = media && (media.type != null || media.media != null) ? scalarProperties(media, ["type", "media"]) : null;
         // Public GetContent creates a missing text body; use the existing content only.
         const content = type === "table" ? null : d.Drawing?.getDocContent?.();
         state.text = content?.GetText?.({ Numbering: false }) ?? null;
@@ -475,11 +479,13 @@ export async function observeOnlyOfficeCandidate(frame) {
               yVal: cache(s.yVal?.numRef ?? s.yVal?.numLit),
             })) ?? null;
         }
-        const hyperlink = read(d, "GetHyperlink", at);
+        // The SDK builder getter creates ParaHyperlink through history setters.
+        // Read the native nonvisual property without constructing editing wrappers.
+        const hyperlink = native.getCNvProps?.()?.hlinkClick;
         if (hyperlink) {
           state.hyperlink = {
-            link: hyperlink.ParaHyperlink?.GetValue?.() ?? null,
-            tooltip: read(hyperlink, "GetScreenTipText", at + ".hyperlink"),
+            link: hyperlink.id ?? null,
+            tooltip: hyperlink.tooltip ?? null,
           };
         }
         if (d.Drawing?.spTree)

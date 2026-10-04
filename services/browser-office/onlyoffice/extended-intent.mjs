@@ -149,6 +149,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
         slide.narrow.drawingStyle.push(copy(actual.narrow.drawingStyle[index]));slide.narrow.wordArt.push(copy(actual.narrow.wordArt[index]));
       }
       slide.onlyoffice.layoutBinding={masterIndex:c.masterIndex,layoutIndex:c.nativeLayoutIndex};
+      slide.narrow.layout={name:layout.name,type:layout.type};
       rebaseOnlyOfficeIntentIdentities(slide,slide.slideIndex);
       continue;
     }
@@ -341,7 +342,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
       continue;
     }
     if(["set_animation_timing","remove_animation_effect","move_animation_effect"].includes(c.op)){
-      const index=Number(c.animationId.split(":a")[1]),slide=left.slides[c.slideIndex].onlyoffice;
+      const index=Number(c.animationId.split(":a")[1]),slide=left.slides[Number(c.animationId.split(":a")[0])].onlyoffice;
       need(slide.effects?.[index],"animation_target");
       if(c.op==="remove_animation_effect")slide.effects.splice(index,1);
       else if(c.op==="move_animation_effect"){const [effect]=slide.effects.splice(index,1);slide.effects.splice(c.animationIndex,0,effect);}
@@ -539,7 +540,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
             need(empty?.length===1&&!empty[0].runs.length,"table_merge_continuation_empty");
             old.tableParagraphs[r][col]=copy(empty);
           }
-          old.tableCells[r][col]=old.tableParagraphs[r][col].map(para=>para.text).join("");
+          old.tableCells[r][col]=old.tableParagraphs[r][col].map(para=>para.text.replace(/(?:\r\n|\r|\n|\t)$/, "\r\n")).join("");
           if(narrow)narrow.cells[r][col].text=old.tableCells[r][col];
         });
         if(sourceRow>=c.startRow&&sourceRow<=c.endRow){
@@ -592,7 +593,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
         if(paras===null){
           const empty=observed.tableParagraphs[r][col];need(empty?.length===1&&!empty[0].runs.length,"table_split_empty_cell");old.tableParagraphs[r][col]=copy(empty);
         }
-        old.tableCells[r][col]=old.tableParagraphs[r][col].map(para=>para.text).join("");if(narrow)narrow.cells[r][col].text=old.tableCells[r][col];
+        old.tableCells[r][col]=old.tableParagraphs[r][col].map(para=>para.text.replace(/(?:\r\n|\r|\n|\t)$/, "\r\n")).join("");if(narrow)narrow.cells[r][col].text=old.tableCells[r][col];
       }));
       if(narrow)narrow.rows=old.tableCellProperties.length;
       old.tableLayout.columnWidthsEmu=grid.slice(1).map((edge,i)=>Math.round(edge-grid[i]));
@@ -690,7 +691,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
       const text=para.runs.map(run=>run.text).join("");need(text.slice(c.startOffset,c.endOffset)===c.expectedText,"text_range_stale");
       let cursor=0,inserted=false;const runs=[];
       for(const run of para.runs){const end=cursor+run.text.length;
-        if(end<=c.startOffset||cursor>=c.endOffset){if(!inserted&&cursor>=c.endOffset){runs.push({...copy(run),text:c.text});inserted=true;}runs.push(copy(run));}
+        if(end<=c.startOffset||cursor>=c.endOffset&&!(c.startOffset===c.endOffset&&cursor<=c.startOffset&&end>c.startOffset)){if(!inserted&&cursor>=c.endOffset){runs.push({...copy(run),text:c.text});inserted=true;}runs.push(copy(run));}
         else{const prefix=run.text.slice(0,Math.max(0,c.startOffset-cursor)),suffix=run.text.slice(Math.max(0,c.endOffset-cursor));if(prefix)runs.push({...copy(run),text:prefix});if(!inserted){runs.push({...copy(run),text:c.text});inserted=true;}if(suffix)runs.push({...copy(run),text:suffix});}cursor=end;
       }
       if(!inserted){need(para.runs.length,"empty_range_style");runs.push({...copy(para.runs.at(-1)),text:c.text});}

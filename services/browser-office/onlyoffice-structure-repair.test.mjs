@@ -231,3 +231,17 @@ test("SmartArt repair removes only an identity child-space mapping and preserves
     );
   }
 });
+
+test("legacy comment MIME repairs retain matching authored XML and refuse a foreign root",()=>{
+  const original=fixture(),candidate={...original};
+  const ns="http://schemas.openxmlformats.org/presentationml/2006/main";
+  candidate["ppt/comments/comment1.xml"]=strToU8(`<p:cmLst xmlns:p="${ns}"/>`);
+  candidate["ppt/commentAuthors.xml"]=strToU8(`<p:cmAuthorLst xmlns:p="${ns}"/>`);
+  candidate["[Content_Types].xml"]=strToU8(`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/comments/comment1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.comment+xml"/><Override PartName="/ppt/commentAuthors.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.commentAuthors.main+xml"/></Types>`);
+  const repaired=unzipSync(repairCandidatePptxStructure(zipSync(original),zipSync(candidate)).bytes);
+  const types=strFromU8(repaired["[Content_Types].xml"]);
+  assert.match(types,/presentationml\.comments\+xml/);assert.match(types,/presentationml\.commentAuthors\+xml/);
+  assert.deepEqual(repaired["ppt/comments/comment1.xml"],candidate["ppt/comments/comment1.xml"]);
+  candidate["ppt/commentAuthors.xml"]=strToU8(`<p:slide xmlns:p="${ns}"/>`);
+  assert.throws(()=>repairCandidatePptxStructure(zipSync(original),zipSync(candidate)),/comment content type does not match/);
+});

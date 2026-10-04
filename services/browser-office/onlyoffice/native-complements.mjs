@@ -124,6 +124,13 @@ export function installOnlyOfficeNativeComplements() {
     run.Paragraph?.Refresh_RecalcData2?.(0, 0);
   };
   const copy = word.CTextPr.prototype.Copy, merge = word.CTextPr.prototype.Merge;
+  const setFromObject = word.CTextPr.prototype.Set_FromObject;
+  word.CTextPr.prototype.Set_FromObject = function(value, ...args) {
+    const result = setFromObject.call(this, value, ...args);
+    if (value && Object.hasOwn(value, "spellbookEffects"))
+      this.spellbookEffects = value.spellbookEffects?.createDuplicate() ?? null;
+    return result;
+  };
   word.CTextPr.prototype.Copy = function(...args) {
     const result = copy.apply(this, args);
     if (this.spellbookEffects) result.spellbookEffects = this.spellbookEffects.createDuplicate();

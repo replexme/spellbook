@@ -117,7 +117,7 @@ export function installOnlyOfficeProductPort({
           port?.postMessage({ id: request.id, value });
           if (request.method === "close") await dispose();
         },
-        (error) => port?.postMessage({ id: request.id, error: error.message }),
+        (error) => port?.postMessage({ id: request.id, error: error.message, nativeStack: error.stack }),
       );
     };
     port.start();

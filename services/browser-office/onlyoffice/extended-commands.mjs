@@ -41,7 +41,8 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
   const rgb = (n) => api.CreateRGBColor((n >>> 16) & 255, (n >>> 8) & 255, n & 255);
   const solid = (n) => api.CreateSolidFill(rgb(n));
   const wrap = (shape) => window.AscBuilder.GetApiDrawing(shape) ??
-    (shape?.getObjectType?.() === window.AscDFH.historyitem_type_Cnx ? new window.AscBuilder.ApiShape(shape) : null);
+    (shape?.getObjectType?.() === window.AscDFH.historyitem_type_Cnx ? new window.AscBuilder.ApiShape(shape) :
+      shape?.getObjectType?.() === window.AscDFH.historyitem_type_SmartArtDrawing ? new window.AscBuilder.ApiGroup(shape) : null);
   const resolve = (id) => {
     need(typeof id === "string" && /^\d+(?:\/\d+)+$/.test(id), "target_invalid");
     const [si, ...path] = id.split("/").map(Number);
@@ -157,6 +158,21 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
       if (value) para.AddText(value);
       if (i) doc.Push(para);
     });
+  };
+  // Presentation runs have native content history. Word range operations use
+  // document selection APIs that the presentation model does not implement.
+  const textRuns = para => {
+    const result=[];
+    const visit=node=>{
+      if(node?.Run && typeof node.GetText === "function"){
+        const text=node.GetText({Numbering:false});
+        if(text && text!=="\r" && text!=="\n" && text!=="\r\n")result.push({run:node.Run,text});
+      }else for(let i=0;i<(node?.GetElementsCount?.()??0);i++)visit(node.GetElement(i));
+    };visit(para);return result;
+  };
+  const writeRun = (run,text) => {
+    need(!run.FieldType && !run.Content.some(item=>item.IsParaEnd?.()),"text_run_boundary_unavailable");
+    run.ClearContent();if(text)run.AddText(text,0);
   };
   const body = () => {
     need(source.txBody && source.txBody.bodyPr, "text_body_unavailable");
@@ -419,8 +435,8 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
       need(receipt && receipt.sha256===c.nativeAsset.sha256 && receipt.url===c.nativeAsset.url && receipt.fileName===c.nativeAsset.fileName, "asset_authority_required");
       need(c.op.endsWith("image") ? receipt.kind === "image" : ["audio","video"].includes(receipt.kind), "asset_kind_invalid");
       if(c.op.startsWith("replace"))need(source.isImage?.(),"image_target_required");
-      if(c.op==="replace_image")need(!source.nvPicPr?.nvPr?.unimedia,"image_target_required");
-      if(c.op==="replace_media")need(source.nvPicPr?.nvPr?.unimedia,"media_target_required");
+      if(c.op==="replace_image")need(!source.nvPicPr?.nvPr?.unimedia?.media,"image_target_required");
+      if(c.op==="replace_media")need(typeof source.nvPicPr?.nvPr?.unimedia?.media==="string"&&source.nvPicPr.nvPr.unimedia.media.length,"media_target_required");
       break;
     }
     case "set_smartart_node": case "add_smartart_node": case "delete_smartart_node": {
@@ -585,13 +601,38 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
       }
       case "text_autofit": case "set_text_box": { const pr = body(); if (c.op === "text_autofit") { pr.textFit = new f.CTextFit(); pr.textFit.type = c.autofit ? f.text_fit_NormAuto : f.text_fit_No; } else { for (const [key, field] of [["marginLeft","lIns"],["marginRight","rIns"],["marginTop","tIns"],["marginBottom","bIns"]]) if (c[key] != null) pr[field] = c[key] / 100; if (c.wordWrap != null) pr.wrap = c.wordWrap ? f.nTWTNone + 1 : f.nTWTNone; if (c.autoGrowHeight != null) { pr.textFit = new f.CTextFit(); pr.textFit.type = c.autoGrowHeight ? f.text_fit_Auto : f.text_fit_No; } if(c.autoGrowWidth!=null)pr.wrap=c.autoGrowWidth?f.nTWTNone:f.nTWTNone+1; } source.txBody.setBodyPr(pr); return true; }
       case "set_fontwork": { const pr = body(); pr.prstTxWarp = f.CreatePrstTxWarpGeometry(c.fontwork.preset); source.txBody.setBodyPr(pr); return true; }
-      case "set_text_case": { const paragraphs = content().GetAllParagraphs(); for (const para of paragraphs) { para.SetCaps(c.textCase === "uppercase"); para.SetSmallCaps(c.textCase === "small_caps"); if (["lowercase", "title"].includes(c.textCase)) { let inWord = false; for (let i = 0; i < para.GetElementsCount(); i++) { const run = para.GetElement(i); if (!run?.Run || typeof run.GetText !== "function") continue; const text = run.GetText({Numbering:false}); const lang = window.Asc.g_oLcidIdToNameMap?.[run.Run.Pr?.Lang?.Val]; let result = ""; for (const char of text) { const word = /[\p{L}\p{M}\p{N}'’]/u.test(char); result += c.textCase === "title" && word && !inWord ? char.toLocaleUpperCase(lang) : char.toLocaleLowerCase(lang); inWord = word; } const range = run.GetRange(0, text.length); range.Delete(); range.AddText(result, "before"); } } } return true; }
+      case "set_text_case": {
+        for(const para of content().GetAllParagraphs()){
+          para.SetCaps(c.textCase === "uppercase");para.SetSmallCaps(c.textCase === "small_caps");
+          if(!["lowercase","title"].includes(c.textCase))continue;
+          let inWord=false;
+          for(const {run,text} of textRuns(para)){
+            const lang=window.Asc.g_oLcidIdToNameMap?.[run.Pr?.Lang?.Val];let result="";
+            for(const char of text){const word=/[\p{L}\p{M}\p{N}'’]/u.test(char);result+=c.textCase==="title"&&word&&!inWord?char.toLocaleUpperCase(lang):char.toLocaleLowerCase(lang);inWord=word;}
+            if(result!==text)writeRun(run,result);
+          }
+        }return true;
+      }
       case "set_paragraph_format": { const q = c.paragraphFormat, pr = paragraph.GetParaPr(); for (const [key, method] of [["leftMargin","SetIndLeft"],["rightMargin","SetIndRight"],["firstLineIndent","SetIndFirstLine"]]) if (q[key] != null) pr[method](q[key] * 1440 / 2540); if (q.topMargin != null) pr.SetSpacingBefore(q.topMargin * 1440 / 2540); if (q.bottomMargin != null) pr.SetSpacingAfter(q.bottomMargin * 1440 / 2540); if (q.direction != null) { const native = paragraph.Paragraph; if (q.direction === "top-to-bottom") { const b = body(); b.vert = f.nVertTTvert; source.txBody.setBodyPr(b); } else native.SetParagraphBidi(q.direction === "right-to-left"); } return true; }
       case "set_paragraph_list": { const q = c.paragraphList, bullet = new f.CBullet(); bullet.bulletType = new f.CBulletType(); if (q.type === "none") bullet.bulletType.type = f.BULLET_TYPE_BULLET_NONE; else if (q.type === "bullet") { bullet.bulletType.type = f.BULLET_TYPE_BULLET_CHAR; bullet.bulletType.Char = q.bulletCharacter; } else { bullet.bulletType.type = f.BULLET_TYPE_BULLET_AUTONUM; bullet.bulletType.AutoNumType = q.prefix === "(" ? f.numbering_presentationnumfrmt_ArabicParenBoth : q.suffix === ")" ? f.numbering_presentationnumfrmt_ArabicParenR : q.suffix === "." ? f.numbering_presentationnumfrmt_ArabicPeriod : f.numbering_presentationnumfrmt_ArabicPlain; bullet.bulletType.startAt = q.startWith; } paragraph.Paragraph.Set_Bullet(bullet); paragraph.Paragraph.Set_PresentationLevel(q.level); return true; }
-      case "replace_text_range": { const range = paragraph.GetRange(c.startOffset, c.endOffset); need(range, "text_range_missing"); range.Delete(); range.AddText(c.text, "before"); return true; }
+      case "replace_text_range": {
+        const runs=textRuns(paragraph);need(runs.length,"empty_range_style");
+        let cursor=0,inserted=false;
+        for(const {run,text} of runs){
+          const end=cursor+text.length;let value=text;
+          if(end>c.startOffset&&(cursor<c.endOffset||c.startOffset===c.endOffset&&cursor<=c.startOffset)){
+            value=text.slice(0,Math.max(0,c.startOffset-cursor));
+            if(!inserted){value+=c.text;inserted=true;}
+            value+=text.slice(Math.max(0,c.endOffset-cursor));
+          }else if(!inserted&&cursor>=c.endOffset){value=c.text+text;inserted=true;}
+          if(value!==text)writeRun(run,value);cursor=end;
+        }
+        if(!inserted)writeRun(runs.at(-1).run,runs.at(-1).text+c.text);
+        return true;
+      }
       case "set_object_interaction": { if (c.interaction === "none") { source.getCNvProps().setHlinkClick(null); return true; } const link = c.interaction === "external_url" ? c.url : c.interaction === "internal_slide" ? "ppaction://hlinksldjumpslide" + c.targetSlideIndex : "ppaction://hlinkshowjump?jump=" + {next_slide:"nextslide",previous_slide:"previousslide",first_slide:"firstslide",last_slide:"lastslide",end_show:"endshow"}[c.interaction]; need(link, "interaction_invalid"); return d.SetHyperlink(api.CreateHyperlink(link, c.description ?? "")); }
       case "set_connector": { const q = c.connector; const geometry = f.CreateGeometry({straight:"line",standard:"bentConnector3",curve:"curvedConnector3"}[q.kind]); source.spPr.setGeometry(geometry); const x = Math.min(q.start.x,q.end.x), y = Math.min(q.start.y,q.end.y); d.SetPosition(x * 360,y * 360); d.SetSize(Math.abs(q.end.x-q.start.x)*360,Math.abs(q.end.y-q.start.y)*360); d.SetFlipH(q.end.x < q.start.x); d.SetFlipV(q.end.y < q.start.y); const pr = source.nvSpPr.nvUniSpPr.copy(); pr.stCnxId = q.startElementId ? resolve(q.startElementId).shape.Id : null; pr.endCnxId = q.endElementId ? resolve(q.endElementId).shape.Id : null; pr.stCnxIdx = q.startGluePoint; pr.endCnxIdx = q.endGluePoint; source.nvSpPr.setUniSpPr(pr); return true; }
-      case "set_table_cell_format": { const cell = tableCell(c.row,c.column), q = c.tableCellFormat; if (q.fillColor != null) cell.SetShd("clear",(q.fillColor>>>16)&255,(q.fillColor>>>8)&255,q.fillColor&255); if (q.fillOpacity != null) { const shd = cell.Cell.Pr.Shd?.Copy() ?? new window.AscCommonWord.CDocumentShd(); shd.Unifill = shd.Unifill?.createDuplicate() ?? solid(q.fillColor ?? 0xffffff).UniFill; shd.Unifill.transparent = q.fillOpacity * 255 / 100; cell.Cell.Set_Shd(shd); } for (const para of cell.GetContent().GetAllParagraphs()) { if (q.fontColor != null) {
+      case "set_table_cell_format": { const cell = tableCell(c.row,c.column), q = c.tableCellFormat; if (q.fillColor != null || q.fillOpacity != null) { const shd=cell.Cell.Pr.Shd?.Copy()??new window.AscCommonWord.CDocumentShd(); shd.Value=window.Asc.c_oAscShdClear; shd.Unifill=q.fillColor!=null?solid(q.fillColor).UniFill:shd.Unifill?.createDuplicate(); need(shd.Unifill,"table_cell_fill_unavailable"); if(q.fillOpacity!=null)shd.Unifill.transparent=q.fillOpacity*255/100; cell.Cell.Set_Shd(shd); } for (const para of cell.GetContent().GetAllParagraphs()) { if (q.fontColor != null) {
           const paint = node => {
             if (typeof node.Set_Unifill === "function") { node.Set_Unifill(solid(q.fontColor).UniFill); node.Set_Color?.(undefined); node.Set_TextFill?.(undefined); }
             node.Content?.forEach(paint);
@@ -621,6 +662,20 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
         const t=chart(),plot=t.Chart.chart.plotArea,method={column:"switchToBarChart",line:"switchToLineChart",area:"switchToAreaChart",pie:"switchToPieChart",scatter:"switchToScatterChart",radar:"switchToRadar"}[c.chartType];
         const originalAxes=[...plot.axId];
         plot[method](c.nativeChartType);
+        // The pinned SDK adds regular axes both in createLineChart and in
+        // switchToLineChart. Remove repeated references with native history;
+        // retain the first axis, its authored properties and ordering.
+        for(const typed of plot.charts){
+          const seen=new Set();
+          for(let index=0;index<(typed.axId?.length??0);index++){
+            const axis=typed.axId[index];
+            if(!seen.has(axis)){seen.add(axis);continue;}
+            const change=new window.AscDFH.CChangesDrawingsContent(typed,window.AscDFH.historyitem_CommonChart_AddAxId,index,[axis],false);
+            h.Add(change);change.Redo();index--;
+          }
+        }
+        // The plot collection was populated from that same duplicate list.
+        for(let index=plot.axId.length-1;index>=0;index--)if(plot.axId.indexOf(plot.axId[index])!==index)plot.removeAxisByPos(index);
         for(const axis of plot.axId){
           const kind=axis.getObjectType()===window.AscDFH.historyitem_type_CatAx?"category":axis.getObjectType()===window.AscDFH.historyitem_type_ValAx?"value":"other";
           const prior=originalAxes.find(item=>item.axPos===axis.axPos)??originalAxes.find(item=>
@@ -642,7 +697,8 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
         const q=c.slideMetadata;
         if(q.backgroundObjectsVisible!=null)slide.Slide.setShowMasterSp(q.backgroundObjectsVisible);
         if(q.duration!=null||q.autoAdvance!=null){
-          const transition=slide.GetSlideShowTransition();
+          const transition=api.CreateSlideShowTransition();
+          transition.Transition=slide.Slide.transition.createDuplicate();
           if(q.duration!=null){transition.SetAdvanceTime(q.duration*1000);transition.SetAdvanceOnTime(true);}
           if(q.autoAdvance!=null)transition.SetAdvanceOnTime(q.autoAdvance);
           need(slide.SetSlideShowTransition(transition),"metadata_transition_rejected");
@@ -702,7 +758,7 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
         const timing=effect.Timing,sequences=timing.getEffectsSequences();
         const owner=sequences.find(sequence=>sequence.slice(1).some(item=>item._apiId===effect._apiId));
         need(owner,"animation_target_missing");
-        const index=owner.findIndex(item=>item._apiId===effect._apiId),original=owner[index];
+        const index=owner.findIndex((item,index)=>index>0&&item._apiId===effect._apiId),original=owner[index];
         const target=effect.GetShape();need(target,"animation_target_missing");
         const replacement=timing.createEffect(target.Drawing.GetId(),c.nativePreset.presetClass,
           c.nativePreset.presetId,c.nativePreset.presetSubtype,null);

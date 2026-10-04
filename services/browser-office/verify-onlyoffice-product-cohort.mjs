@@ -54,18 +54,27 @@ const results = [], report = {
   canonicalCount:operations.length, excludedOperations, newBuilds:0, requiredStages, results,
   status:"running", sourceStable:true,
 };
-const persist = () => fs.writeFile(path.join(output,"results.json"),JSON.stringify(report,null,2));
+// Independent documents may run in two headless local workers. Serialize
+// evidence writes and keep the ledger in manifest order despite completion order.
+let writes=Promise.resolve();
+const persist = () => {
+  const snapshot=JSON.stringify({...report,results:[...results].sort((a,b)=>operations.indexOf(a.operation)-operations.indexOf(b.operation))},null,2);
+  writes=writes.then(()=>fs.writeFile(path.join(output,"results.json"),snapshot));return writes;
+};
+const jobs=Number(flag("--jobs","1"));
+if(!Number.isSafeInteger(jobs)||jobs<1||jobs>2)throw Error("Invalid local verification worker count");
+report.localWorkers=jobs;
 const timeoutMs = Number(flag("--case-timeout-ms","600000"));
 if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 60000 || timeoutMs > 3600000)
   throw Error("Invalid case timeout");
 await persist();
-for (const operation of operations) {
+async function run(operation) {
   if (!repositoryIdentityStable(source,readRepositoryIdentity(sourceRoot))) {
-    report.sourceStable=false;report.status="source-changed";await persist();process.exitCode=1;break;
+    report.sourceStable=false;report.status="source-changed";await persist();process.exitCode=1;return;
   }
   const entry = entries.find(entry => entry.operation === operation);
   if (!entry) {
-    results.push({operation,status:"missing-case"});await persist();continue;
+    results.push({operation,status:"missing-case"});await persist();return;
   }
   const directory = path.join(output,operation), args = [
     path.join(sourceRoot,"services/browser-office/verify-onlyoffice-product-session.mjs"),
@@ -88,7 +97,7 @@ for (const operation of operations) {
   // evidence. No implicit fixture creation or build fallback exists here.
   let inputHash;
   try { inputHash=sha256(await fs.readFile(path.resolve(options["--input"]))); }
-  catch(error) {results.push({operation,status:"missing-input",error:error.message});await persist();continue;}
+  catch(error) {results.push({operation,status:"missing-input",error:error.message});await persist();return;}
   const started = Date.now();
   const log = await fs.open(path.join(output,operation+".log"),"wx");
   let timedOut=false;
@@ -108,12 +117,16 @@ for (const operation of operations) {
   try {evidence=JSON.parse(await fs.readFile(path.join(directory,"report.json"),"utf8"));} catch {}
   const stages=evidence?.stages??[],missingStages=requiredStages.filter(stage=>!stages.includes(stage));
   const passed=exit.code===0&&!timedOut&&evidence?.status==="product-session-command-verified"&&missingStages.length===0;
-  results.push({operation,status:passed?"passed":"failed",inputSha256:inputHash,elapsedMs:Date.now()-started,
+  const result={operation,status:passed?"passed":"failed",inputSha256:inputHash,elapsedMs:Date.now()-started,
     exit,timedOut,missingStages,evidence:path.relative(output,path.join(directory,"report.json")),
-    timings:evidence?.timings??null,error:evidence?.error??evidence?.errors??null});
-  await persist();
-  process.stdout.write(JSON.stringify({operation,status:results.at(-1).status,completed:results.length,total:operations.length})+"\n");
+    timings:evidence?.timings??null,error:evidence?.error??evidence?.errors??null};
+  results.push(result);await persist();
+  process.stdout.write(JSON.stringify({operation,status:result.status,completed:results.length,total:operations.length})+"\n");
 }
+let next=0;
+await Promise.all(Array.from({length:jobs},async()=>{
+  while(next<operations.length&&report.sourceStable)await run(operations[next++]);
+}));
 report.sourceStable &&= repositoryIdentityStable(source,readRepositoryIdentity(sourceRoot));
 report.passed=results.filter(result=>result.status==="passed").length;
 report.status=report.sourceStable&&report.passed===operations.length?"verified":"incomplete";

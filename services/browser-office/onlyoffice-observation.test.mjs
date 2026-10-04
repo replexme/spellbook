@@ -415,3 +415,14 @@ test("chart series type is read from its containing native chart instead of a br
   assert.equal(result.extended.slides[0].drawings[0].series[0].chartType, 42);
   assert.equal(result.unavailable.length, 0);
 });
+
+test("adjustment values and native hyperlinks are observed without history setters",async()=>{
+  const {frame,slides}=candidate();
+  const native={x:0,y:0,extX:10,extY:10,getOwnName:()=>"Connector",getCNvProps:()=>({hlinkClick:{id:"https://example.test",tooltip:"Owned"}}),spPr:{geometry:{preset:"curvedConnector3",avLst:{adj1:true,removed:false},gdLst:{adj1:50000,removed:42}}}};
+  const drawing={Drawing:native,GetClassType:()=>"shape",GetDocContent:()=>null,GetHyperlink:()=>{throw Error("history setter getter invoked");}};
+  for(const name of ["GetPosX","GetPosY","GetWidth","GetHeight","GetRotation","GetFlipH","GetFlipV"])drawing[name]=()=>0;
+  slides[0].Slide.cSld.spTree=[native];slides[0].GetAllDrawings=()=>[drawing];
+  const read=async()=>JSON.parse(JSON.stringify((await observeOnlyOfficeCandidate(frame)).extended.slides[0].drawings[0]));
+  const before=await read();assert.deepEqual(before.geometry.adjustments,{adj1:50000});assert.deepEqual(before.hyperlink,{link:"https://example.test",tooltip:"Owned"});
+  native.spPr.geometry.gdLst.adj1=70000;assert.deepEqual((await read()).geometry.adjustments,{adj1:70000});
+});
