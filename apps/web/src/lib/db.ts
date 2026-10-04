@@ -1,5 +1,7 @@
 import postgres, { type Sql } from "postgres";
 
+import { runUsageEventMigrations } from "./usage-events-schema";
+
 let client: Sql | null = null;
 let schemaReady: Promise<void> | null = null;
 
@@ -325,6 +327,7 @@ export async function runMigrations(): Promise<void> {
     alter table spellbook_account_providers add column if not exists custom_base_url text;
     update spellbook_jobs set payload = payload - 'apiKey' where payload ? 'apiKey';
   `);
+  await runUsageEventMigrations(sql);
 }
 
 export async function closeDbForTests(): Promise<void> {

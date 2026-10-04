@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { currentSession } from "@/lib/auth";
+import { recordUsageEvent } from "@/lib/usage-events";
 import NativeDocument from "@/components/native-document";
 import { aiConnectorConfig } from "@/lib/ai-connector-config";
 import { configuredEditorMode } from "@/lib/editor-mode";
@@ -12,7 +13,9 @@ export default async function DocumentPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  if (!(await currentSession())) redirect("/auth/login");
+  const session = await currentSession();
+  if (!session) redirect("/auth/login");
+  await recordUsageEvent(session.accountId, { type: "visit" });
   const { id } = await params;
   if (configuredEditorMode() === "browser")
     redirect(`/browser-documents/${encodeURIComponent(id)}`);
