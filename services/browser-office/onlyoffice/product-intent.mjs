@@ -15,6 +15,7 @@ const formatting = {
   font_color: "color",
   set_character_spacing: "characterSpacing",
   set_script_position: "GetVertAlign",
+  set_text_language: "GetLanguage",
 };
 export const onlyOfficeIntentOperations = Object.freeze([
   "move",
@@ -166,7 +167,9 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
                     ? command.script === "normal"
                       ? "baseline"
                       : command.script
-                    : command[op];
+                    : op === "set_text_language"
+                      ? Intl.getCanonicalLocales(command.languageTag)[0]
+                      : command[op];
         if (
           !runs.length ||
           runs.some(

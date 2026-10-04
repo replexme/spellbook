@@ -137,6 +137,7 @@ export async function observeOnlyOfficeCandidate(frame) {
               "GetCaps",
               "GetSmallCaps",
               "GetDoubleStrikeout",
+              "GetLanguage",
             ])
               value[key] =
                 read(pr, key, at + ".text") ??

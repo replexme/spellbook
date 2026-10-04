@@ -292,6 +292,7 @@ export function createOnlyOfficeProductEngine({
                 "paragraph_alignment",
                 "set_character_spacing",
                 "set_script_position",
+                "set_text_language",
               ].includes(command.op) &&
               !shape.getDocContent?.()
             )
@@ -328,6 +329,30 @@ export function createOnlyOfficeProductEngine({
             )
               throw Error("onlyoffice_product_argument_invalid:alignment");
             if (command.op === "font_size") requireNumber("size", 1, 400);
+            if (command.op === "set_text_language") {
+              if (typeof command.languageTag !== "string")
+                throw Error("onlyoffice_product_argument_invalid:languageTag");
+              let tag;
+              try {
+                tag = Intl.getCanonicalLocales(command.languageTag)[0];
+              } catch {
+                throw Error("onlyoffice_product_argument_invalid:languageTag");
+              }
+              const language = window.Asc.g_oLcidNameToIdMap[tag];
+              if (
+                !Number.isSafeInteger(language) ||
+                language < 1 ||
+                window.Asc.g_oLcidIdToNameMap[language] !== tag
+              )
+                throw Error("onlyoffice_product_language_unavailable:" + tag);
+              return {
+                ...command,
+                nativeId: shape.Id,
+                slideIndex: slide,
+                index,
+                nativeLanguageId: language,
+              };
+            }
             if (command.op === "set_line_style") {
               if (!shape.spPr?.ln)
                 throw Error(
@@ -685,6 +710,19 @@ export function createOnlyOfficeProductEngine({
               for (const paragraph of content().GetAllParagraphs()) {
                 setColor(paragraph.Paragraph.TextPr);
                 paragraph.Paragraph.Content.forEach(setColor);
+              }
+              return true;
+            }
+            case "set_text_language": {
+              const setLanguage = (run) => {
+                // Set_Lang replaces EastAsia/Bidi too. Change only the primary
+                // PPTX run language through its own native history setter.
+                run?.Set_Lang_Val?.(command.nativeLanguageId);
+                run?.Content?.forEach(setLanguage);
+              };
+              for (const paragraph of content().GetAllParagraphs()) {
+                setLanguage(paragraph.Paragraph.TextPr);
+                paragraph.Paragraph.Content.forEach(setLanguage);
               }
               return true;
             }

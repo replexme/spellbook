@@ -112,6 +112,7 @@ test("text color observation uses native RGB when the pinned getter incorrectly 
     "GetCaps",
     "GetSmallCaps",
     "GetDoubleStrikeout",
+    "GetLanguage",
     "GetFontFamily",
   ])
     textPr[method] = () => null;

@@ -360,6 +360,70 @@ test("connector preflight binds the observed native object even when the public 
   }
 });
 
+test("line-style bindings reject SDK enum disagreement before native editing", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  const old = globalThis.window;
+  const shape = { Id: "native-line", spPr: { ln: { w: 36000 } } };
+  let arrowType = 5;
+  globalThis.window = {
+    Asc: {
+      c_oDashType: { dot: 2 },
+      editor: {
+        WordControl: {
+          m_oLogicDocument: { Slides: [{ cSld: { spTree: [shape] } }] },
+        },
+      },
+    },
+    AscBuilder: { GetApiDrawing: () => ({ Drawing: shape, SetOutLine() {} }) },
+    AscFormat: {
+      EndArrow: class {
+        GetTypeCode() {
+          return arrowType;
+        }
+        GetSizeCode(size) {
+          return { lg: 0, med: 1, sm: 2 }[size];
+        }
+      },
+    },
+  };
+  const command = {
+    op: "set_line_style",
+    elementId: "0/0",
+    lineStyle: {
+      dash: "dot",
+      startArrow: { type: "triangle", width: null, length: "lg" },
+      endArrow: null,
+    },
+  };
+  try {
+    const engine = createOnlyOfficeProductEngine({
+      getFrame: async () => ({
+        evaluate: async (fn, argument) => fn(argument),
+      }),
+    });
+    const [bound] = await engine.preflight([command]);
+    assert.deepEqual(bound.nativeLineStyle, {
+      dash: 2,
+      headEnd: { type: 5, w: 1, len: 0 },
+    });
+    arrowType = 1;
+    await assert.rejects(
+      engine.preflight([command]),
+      /line_style_sdk_mismatch/,
+    );
+    arrowType = 5;
+    window.Asc.c_oDashType.dot = 23;
+    await assert.rejects(
+      engine.preflight([command]),
+      /line_style_sdk_mismatch/,
+    );
+  } finally {
+    globalThis.window = old;
+  }
+});
+
 test("line width changes retain authored color, cap and dash and reject ignored setters", () => {
   const before = document();
   before.slides[0].narrow.drawingStyle[0].line = {
@@ -439,6 +503,99 @@ test("rounded twips cannot hide a hundredth-point spacing loss", () => {
       ]),
     /intent_mismatch:set_character_spacing/,
   );
+});
+
+test("text language normalizes its tag and preserves other run properties", () => {
+  const before = document(),
+    after = structuredClone(before);
+  after.slides[0].onlyoffice.drawings[0].paragraphs[0].runs[0].style.GetLanguage =
+    "ko-KR";
+  const command = {
+    op: "set_text_language",
+    elementId: "0/0",
+    languageTag: "KO-kr",
+  };
+  verifyOnlyOfficeProductIntent(before, after, [command]);
+  after.slides[0].onlyoffice.drawings[0].paragraphs[0].runs[0].style.GetBold = true;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+});
+
+test("native text language changes only the primary language and uses native history setters", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  const old = globalThis.window;
+  const makeRun = () => ({
+    primary: 1033,
+    bidi: 1025,
+    eastAsia: 1041,
+    Set_Lang() {
+      throw Error("whole language replacement loses other script languages");
+    },
+    Set_Lang_Val(value) {
+      this.primary = value;
+    },
+  });
+  const run = makeRun(),
+    end = makeRun();
+  const shape = { Id: "native-text", getDocContent: () => ({}) };
+  const model = {
+    Slides: [{ cSld: { spTree: [shape] } }],
+    Recalculate() {},
+    RedrawCurSlide() {},
+    Document_UpdateInterfaceState() {},
+  };
+  const drawing = {
+    Drawing: shape,
+    GetDocContent: () => ({
+      GetAllParagraphs: () => [{ Paragraph: { TextPr: end, Content: [run] } }],
+    }),
+  };
+  globalThis.window = {
+    Asc: {
+      editor: {
+        isGroupActions: () => true,
+        executeGroupActionsStart() {},
+        executeGroupActionsEnd() {},
+        WordControl: { m_oLogicDocument: model, GoToPage() {} },
+      },
+    },
+    AscBuilder: {
+      GetApiDrawing: () => drawing,
+      Slide: {
+        Api: {
+          GetPresentation: () => ({
+            GetSlideByIndex: () => ({ Slide: model.Slides[0] }),
+            CreateNewHistoryPoint() {},
+          }),
+        },
+      },
+    },
+    AscCommon: { History: { Get_RecalcData() {}, getGroupChanges() {} } },
+  };
+  try {
+    const engine = createOnlyOfficeProductEngine({
+      getFrame: async () => ({
+        evaluate: async (fn, argument) => fn(argument),
+      }),
+    });
+    await engine.apply({
+      op: "set_text_language",
+      slideIndex: 0,
+      nativeId: "native-text",
+      nativeLanguageId: 1042,
+    });
+    for (const value of [run, end]) {
+      assert.equal(value.primary, 1042);
+      assert.equal(value.bidi, 1025);
+      assert.equal(value.eastAsia, 1041);
+    }
+  } finally {
+    globalThis.window = old;
+  }
 });
 
 test("image cropping verifies all edges and preserves picture geometry and other objects", () => {
