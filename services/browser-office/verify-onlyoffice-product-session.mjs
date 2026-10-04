@@ -295,6 +295,21 @@ async function tableDetails(frame) {
         .filter((s) => s.isTable?.())
         .map((shape) =>
           shape.graphicObject.Content.map((row) => ({
+            tableGeometry: {
+              grid: shape.graphicObject.TableGrid,
+              calculatedGrid: shape.graphicObject.TableGridCalc,
+              cumulativeGrid: shape.graphicObject.TableSumGrid,
+              x: shape.x,
+              y: shape.y,
+              width: shape.extX,
+              height: shape.extY,
+              transform: Object.fromEntries(
+                ["offX", "offY", "extX", "extY"].map((key) => [
+                  key,
+                  shape.spPr.xfrm[key],
+                ]),
+              ),
+            },
             height: {
               value: row.Get_Height().Value,
               rule: row.Get_Height().HRule,
@@ -347,6 +362,7 @@ async function tableDetails(frame) {
                     )
                     .map(([key, value]) => [key, value?.Name]),
                 ),
+                preferredWidth: cell.Get_W(),
                 margins: pr.TableCellMar,
                 borders: Object.fromEntries(
                   Object.entries(pr.TableCellBorders).map(([key, value]) => [
@@ -1241,6 +1257,7 @@ try {
       persisted.candidateBytes,
     );
     report.rendering.edited = await pixels(mainFrame);
+    report.editedTableDetails = await tableDetails(mainFrame);
     if (
       ![
         "set_shape_name",
@@ -1433,6 +1450,7 @@ try {
       : report.rendering.edited;
     assert.equal(session.status().undo, manualFlow ? 2 : 1);
     await session.undo();
+    report.recoveredUndoTableDetails = await tableDetails(mainFrame);
     assertSameCanvas(
       await pixels(mainFrame),
       manualFlow ? report.rendering.edited : report.rendering.before,
