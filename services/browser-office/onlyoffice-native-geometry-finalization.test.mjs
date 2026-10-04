@@ -108,3 +108,18 @@ test("manual checkpoint preserves authored crop despite inverse writer truncatio
     delete globalThis.window;
   }
 });
+
+test("generated SmartArt geometry stays derived while authored placement is finalized",()=>{
+  const make=value=>({offX:value,setOffX(value){this.offX=value;}});
+  const root=make(90000.75/36000),derived=make(7000.75/36000),authored=make(7000.75/36000);
+  const diagram={getObjectType:()=>123,isLocalDrawingPart:false,spPr:{xfrm:root},spTree:[{spPr:{xfrm:derived}}]};
+  const local={getObjectType:()=>123,isLocalDrawingPart:true,spTree:[{spPr:{xfrm:authored}}]};
+  const model={Slides:[{cSld:{spTree:[diagram,local]}}],Recalculate(){}};
+  globalThis.window={Asc:{editor:{WordControl:{m_oLogicDocument:model}}},AscDFH:{historyitem_type_SmartArt:123},AscCommon:{History:{Index:0,Points:[{Items:[{}]}],getGroupChanges:()=>[],Get_RecalcData:()=>({})}}};
+  try{
+    assert.equal(finalizeOnlyOfficeNativeGeometry(),true);
+    assert.equal(Math.trunc(root.offX*36000),90000);
+    assert.equal(derived.offX,7000.75/36000);
+    assert.equal(Math.trunc(authored.offX*36000),7000);
+  }finally{delete globalThis.window;}
+});

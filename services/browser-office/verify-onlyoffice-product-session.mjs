@@ -1474,13 +1474,15 @@ try {
     report.stages.push("redo-exact-approved-package");
     finalExpected = applied.observation;
     if (manualFlow) {
-      const textIndex = finalExpected.slides[
+      // This media fixture has a photograph over the tail of its text box.
+      // Move the visible replaced icon rather than typing behind that image.
+      const textIndex = operation === "replace_media" ? -1 : finalExpected.slides[
         selectedSlideIndex
       ].elements.findIndex(
-        (element) => typeof element.text === "string" && element.text.length,
+        (element) => typeof element.text === "string" && element.text.trim().length,
       );
       const manualIndex =
-        textIndex >= 0 ? textIndex : Number(target.elementId.split("/")[1]);
+        textIndex >= 0 ? textIndex : Number((command.elementId ?? target.elementId).split("/")[1]);
       const manualBefore =
         finalExpected.slides[selectedSlideIndex].elements[manualIndex];
       assert(manualBefore, "Manual edit needs an existing native object");

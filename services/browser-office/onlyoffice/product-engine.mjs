@@ -161,8 +161,12 @@ export function verifyOnlyOfficeProductObservation(expected, actual) {
 export function finalizeOnlyOfficeNativeGeometry({cropNativeIds = null} = {}) {
   const model = window.Asc.editor.WordControl.m_oLogicDocument;
   const pending = [];
-  const visit = (shape) => {
-    const transform = shape.spPr?.xfrm;
+  const visit = (shape, generatedDiagram = false) => {
+    // Generated SmartArt drawing coordinates are derived from semantic
+    // constraints again on import. Quantizing those caches would make the
+    // live picture differ from that regenerated drawing. Keep authored root
+    // placement and authored group geometry on the normal finalization path.
+    const transform = generatedDiagram ? null : shape.spPr?.xfrm;
     if (transform)
       for (const key of [
         "offX",
@@ -244,7 +248,8 @@ export function finalizeOnlyOfficeNativeGeometry({cropNativeIds = null} = {}) {
         });
       }
     }
-    for (const child of shape.spTree ?? []) visit(child);
+    const generated = generatedDiagram || Number.isSafeInteger(window.AscDFH?.historyitem_type_SmartArt) && shape.getObjectType?.() === window.AscDFH.historyitem_type_SmartArt && shape.isLocalDrawingPart === false;
+    for (const child of shape.spTree ?? []) visit(child, generated);
   };
   for (const slide of model.Slides)
     for (const shape of slide.cSld.spTree) visit(shape);
