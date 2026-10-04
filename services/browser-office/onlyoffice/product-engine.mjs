@@ -5,6 +5,7 @@ import {
 } from "./product-intent.mjs";
 import { observeOnlyOfficeCandidate } from "../onlyoffice-observation.mjs";
 import { onlyOfficeCharacterSpacingTwips } from "./character-spacing.mjs";
+import { onlyOfficeCropObservation } from "./crop.mjs";
 import { onlyOfficeOpacityNative } from "./opacity.mjs";
 import { onlyOfficeLineStylePatch } from "./line-style.mjs";
 import {
@@ -35,7 +36,10 @@ export async function observeOnlyOfficeProduct(frame) {
       width: Math.round(w * 100),
       height: Math.round(h * 100),
       objectName: shape.ownName,
-      onlyoffice: authored,
+      onlyoffice: {
+        ...authored,
+        crop: onlyOfficeCropObservation(authored.crop),
+      },
       elements: children.map((child, index) =>
         element(child, id + "/" + index),
       ),

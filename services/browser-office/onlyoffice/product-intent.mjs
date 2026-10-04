@@ -3,6 +3,7 @@ import {
   firstDocumentStateDifference,
   quantizedOutlineDifference,
 } from "../../office-session-spike/document-state-evidence.mjs";
+import { onlyOfficeCropObservation } from "./crop.mjs";
 import { onlyOfficeLineStylePatch } from "./line-style.mjs";
 
 const formatting = {
@@ -589,12 +590,12 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
             original.onlyoffice.locks.noResize = value.lockSize;
         }
       } else if (op === "crop_image") {
-        original.onlyoffice.crop = {
+        original.onlyoffice.crop = onlyOfficeCropObservation({
           l: command.left * 100,
           t: command.top * 100,
           r: (1 - command.right) * 100,
           b: (1 - command.bottom) * 100,
-        };
+        });
       } else if (op === "paragraph_alignment") {
         if (
           !newDrawing.paragraphs.length ||
