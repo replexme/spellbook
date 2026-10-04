@@ -1023,6 +1023,7 @@ test("text replacement retains the first paragraph's inherited defaults and end 
       },
     },
     GetElement() {
+      if (!existing) return null;
       return {
         GetTextPr: () => runStyle,
         SetTextPr: (style) => {
@@ -1042,10 +1043,14 @@ test("text replacement retains the first paragraph's inherited defaults and end 
     },
     SetTextPr(properties) {
       assert.equal(existing, false);
-      this.end = properties;
+      if (properties === endStyle) this.end = properties;
+      else this.style = properties;
+      return true;
     },
-    AddText() {
-      throw Error("appended a redundant empty run");
+    AddText(text) {
+      if (existing) throw Error("appended a redundant empty run");
+      this.text = text;
+      return true;
     },
   });
   const first = makeParagraph(true);

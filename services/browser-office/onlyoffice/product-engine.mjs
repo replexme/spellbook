@@ -614,16 +614,20 @@ export function createOnlyOfficeProductEngine({
                 if (paragraphProperties)
                   paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
               }
-              // CorrectContent already leaves an empty run. Appending another
-              // run makes that invisible run affect live font metrics, but the
-              // writer drops it. Fill the retained run so live and file agree.
+              // Existing paragraphs retain their native empty run. Newly
+              // created paragraphs have no run until the first AddText call.
               const run = paragraph.GetElement(0);
-              if (!run || typeof run.AddText !== "function")
-                throw Error("onlyoffice_product_empty_run_unavailable");
-              if (properties && !run.SetTextPr(properties))
-                throw Error("onlyoffice_product_native_rejected");
-              if (!run.AddText(line))
-                throw Error("onlyoffice_product_native_rejected");
+              if (run && typeof run.AddText === "function") {
+                if (properties && !run.SetTextPr(properties))
+                  throw Error("onlyoffice_product_native_rejected");
+                if (!run.AddText(line))
+                  throw Error("onlyoffice_product_native_rejected");
+              } else if (index) {
+                if (properties && !paragraph.SetTextPr(properties))
+                  throw Error("onlyoffice_product_native_rejected");
+                if (!paragraph.AddText(line))
+                  throw Error("onlyoffice_product_native_rejected");
+              } else throw Error("onlyoffice_product_empty_run_unavailable");
               if (index && !c.Push(paragraph))
                 throw Error("onlyoffice_product_native_rejected");
             }
