@@ -43,3 +43,16 @@ test("owned workbook conversion strips only the checked native file envelope",as
     assert.notEqual(await host.fingerprint(changed),before);host.dispose();
   }finally{URL.revokeObjectURL(url);globalThis.window=prior;}
 });
+
+test("converter-local media masks stage bytes and Undo removes their transport",()=>{
+  const prior=globalThis.window;globalThis.window={addEventListener(){}};
+  const media={},name="sba_"+"c".repeat(64)+".wav",shape={nvPicPr:{nvPr:{unimedia:{media:"/working/media/"+name}}}};
+  const model={Get_AllImageUrls:()=>[],Slides:[{cSld:{spTree:[shape]}}],slideMasters:[]};
+  try{
+    attachOnlyOfficeResourceHost({getMedia:()=>media,captureNativeSnapshot(){},getNativeEditorApi:()=>({WordControl:{m_oLogicDocument:model}})});
+    const host=window[Symbol.for("spellbook.onlyoffice.resourceHost/v1")],url=host.register(name,Uint8Array.of(1,2,3),"audio/wav");
+    host.sync();assert.equal(media["media/"+name],url);
+    shape.nvPicPr.nvPr.unimedia=null;host.sync();assert.equal(media["media/"+name],undefined);
+    shape.nvPicPr.nvPr.unimedia={media:"/working/media/"+name};host.sync();assert.equal(media["media/"+name],url);host.dispose();
+  }finally{globalThis.window=prior;}
+});

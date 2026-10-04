@@ -18,10 +18,16 @@ function diagramTextDerivations(before,after,points){
     if(owners.every(point=>point.textBodyInsets?.[inset]==null)&&before.bodyProperties&&after.bodyProperties)
       before.bodyProperties[inset]=after.bodyProperties[inset];
   if(owners.some(point=>point.customText===true))return;
-  before.paragraphs?.forEach((para,pi)=>para.runs.forEach((run,ri)=>{
-    const actual=after.paragraphs?.[pi]?.runs?.[ri]?.style;
-    if(actual&&Number.isFinite(actual.GetFontSize)&&actual.GetFontSize>0)run.style.GetFontSize=actual.GetFontSize;
-  }));
+  before.paragraphs?.forEach((para,pi)=>{
+    const observed=after.paragraphs?.[pi];if(!observed)return;
+    for(const [group,keys] of [["indent",["Left","FirstLine"]],["spacing",["Before","After","Line","LineRule"]]])
+      for(const key of keys)if(owners.every(point=>point.paragraphOverrides?.[pi]?.[group]?.[key]==null)&&para.format?.[group]&&observed.format?.[group])
+        para.format[group][key]=observed.format[group][key];
+    para.runs.forEach((run,ri)=>{
+      const actual=observed.runs?.[ri]?.style;
+      if(actual&&Number.isFinite(actual.GetFontSize)&&actual.GetFontSize>0)run.style.GetFontSize=actual.GetFontSize;
+    });
+  });
 }
 const color = rgb => ({type:1,id:null,rgb:{R:(rgb>>>16)&255,G:(rgb>>>8)&255,B:rgb&255,A:255},modifiers:[]});
 const emptyEffects = () => ({outerShadow:null,glow:null,softEdge:null,blur:null,reflection:null,innerShadow:null,presetShadow:null,fillOverlay:null});
@@ -409,11 +415,13 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
         need(added.length===1&&added[0].type===0&&typeof added[0].id==="string"&&added[0].id.length>=32,"diagram_added_node_identity");
         addedId=added[0].id;
         const text=q.text.replace(/\r\n/g,"\n").split("\n").map(line=>line+"\r\n").join("");
-        diagram.points.push({...copy(point),id:addedId,type:0,text});
+        diagram.points.push({...copy(point),id:addedId,type:0,text,...(point.paragraphOverrides?{paragraphOverrides:q.text.replace(/\r\n/g,"\n").split("\n").map(()=>copy(point.paragraphOverrides[0]))}:{})});
         diagram.connections.push({src:c.nativeDiagramParent,dest:addedId,type:0,srcOrd:c.nativeDiagramOrder,destOrd:diagram.connections.find(edge=>edge.dest===point.id)?.destOrd??0});
       }else{
         need((point.text??"").replace(/\r?\n$/,"")===q.expectedText&&!diagram.connections.some(edge=>edge.src===point.id),"diagram_delete_node_binding");
         diagram.points=diagram.points.filter(item=>item.id!==point.id);diagram.connections=diagram.connections.filter(edge=>edge.dest!==point.id);
+        const parents=new Set(diagram.connections.filter(edge=>edge.type===0).map(edge=>edge.src));
+        for(const parent of parents)diagram.connections.filter(edge=>edge.type===0&&edge.src===parent).sort((a,b)=>a.srcOrd-b.srcOrd).forEach((edge,index)=>{edge.srcOrd=index;});
       }
       same(diagram,actual,"diagram_semantic_preservation");
       const leaves=(elements,drawings,result=[])=>{
@@ -456,7 +464,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
       const diagram=a.element.onlyoffice.diagram,q=c.smartartNode;
       need(diagram,"diagram_target");
       const point=diagram.points.filter(point=>point.type===0&&(point.text??"").replace(/\r?\n$/,"")===q.expectedText)[q.occurrence];
-      need(point,"diagram_node_target");point.text=q.text.replace(/\r\n/g,"\n").split("\n").map(line=>line+"\r\n").join("");
+      need(point,"diagram_node_target");if(point.paragraphOverrides)point.paragraphOverrides=q.text.replace(/\r\n/g,"\n").split("\n").map(()=>copy(point.paragraphOverrides[0]));point.text=q.text.replace(/\r\n/g,"\n").split("\n").map(line=>line+"\r\n").join("");
       const leaves=[];
       const visit=(elements,drawings)=>elements.forEach((element,i)=>{const drawing=drawings[i];if(drawing.diagramPointIds?.includes(point.id))leaves.push({element,drawing});if(element.elements?.length)visit(element.elements,drawing.groupChildren??[]);});
       visit(a.element.elements,old.groupChildren??[]);need(leaves.length===1,"diagram_node_binding");

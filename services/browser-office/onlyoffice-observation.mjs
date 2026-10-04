@@ -74,6 +74,10 @@ export async function observeOnlyOfficeCandidate(frame) {
                   id: p.modelId,
                   type: p.type,
                   customText:p.prSet?.custT??null,
+                  paragraphOverrides:(p.t?.content?.Content??[]).map(paragraph=>({
+                    indent:Object.fromEntries(["Left","Right","FirstLine"].map(key=>[key,paragraph.Pr?.Ind?.[key]??null])),
+                    spacing:Object.fromEntries(["Line","LineRule","Before","After"].map(key=>[key,paragraph.Pr?.Spacing?.[key]??null])),
+                  })),
                   textBodyInsets:Object.fromEntries(["lIns","rIns","tIns","bIns"].map(key=>[key,Number.isFinite(p.t?.bodyPr?.[key])?Math.round(p.t.bodyPr[key]*36000)/36000:null])),
                   text: p.t?.content?.GetText?.({ Numbering: false }) ?? null,
                 })),

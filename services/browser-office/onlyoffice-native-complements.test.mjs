@@ -6,7 +6,7 @@ import {installOnlyOfficeNativeComplements} from "./onlyoffice/native-complement
 // Reproduce the pinned loader's ReadRunProperties -> CTextPr.Set_FromObject
 // boundary. Its original implementation copies only known SDK fields.
 test("decoded run effects survive the native text-property import copy",()=>{
-  const previous=globalThis.window;
+  const previous=globalThis.window,previousDocument=globalThis.document;
   class TextPr{Set_FromObject(value){this.font=value.font;}Copy(){const result=new TextPr();result.font=this.font;return result;}Merge(value){this.font=value.font;}}
   class Run{Get_CompiledPr(){return {};}Draw_Elements(state){return state.Graphics.m_oContext.shadowColor;}}
   class Comment{createDuplicate(){return new Comment();}}
@@ -34,9 +34,11 @@ test("decoded run effects survive the native text-property import copy",()=>{
     detached({spellbookEffects:{EffectLst:effects}});
     assert.deepEqual(writer.records,[{type:2,value:effects}]);assert.equal(writer.effects,effects);
     const run=new Run();run.Pr={spellbookEffects:{EffectLst:{outerShdw:{color:{color:{RGBA:{R:1,G:2,B:3}}}}}}};
-    const ctx={shadowColor:"transparent",shadowOffsetX:0,shadowOffsetY:0,shadowBlur:0};
-    assert.equal(run.Draw_Elements({Graphics:{m_oContext:ctx}}),"rgba(1,2,3,1)");assert.equal(ctx.shadowColor,"transparent");
-    run.Pr.spellbookEffects=null;assert.equal(run.Draw_Elements({Graphics:{m_oContext:ctx}}),"transparent");
+    const context=()=>({canvas:{width:8,height:8},shadowColor:"transparent",shadowOffsetX:0,shadowOffsetY:0,shadowBlur:0,getTransform(){return {a:1,b:0,c:0,d:1,e:0,f:0};},setTransform(){},clearRect(){},save(){this.prior=[this.shadowColor,this.shadowOffsetX,this.shadowOffsetY,this.shadowBlur];},restore(){[this.shadowColor,this.shadowOffsetX,this.shadowOffsetY,this.shadowBlur]=this.prior;},drawImage(){this.composedShadow=this.shadowColor;}});
+    globalThis.document={createElement:()=>{const target=context();return {width:8,height:8,getContext:()=>target};}};
+    const ctx=context(),graphics={m_oContext:ctx};
+    assert.equal(run.Draw_Elements({Graphics:graphics}),"transparent");assert.equal(ctx.composedShadow,"rgba(1,2,3,1)");assert.equal(ctx.shadowColor,"transparent");assert.equal(graphics.m_oContext,ctx);
+    run.Pr.spellbookEffects=null;assert.equal(run.Draw_Elements({Graphics:graphics}),"transparent");
     imported.Set_FromObject({font:"Arial",spellbookEffects:null});assert.equal(imported.spellbookEffects,null);
-  }finally{globalThis.window=previous;}
+  }finally{globalThis.window=previous;globalThis.document=previousDocument;}
 });

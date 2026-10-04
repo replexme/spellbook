@@ -224,26 +224,36 @@ export function installOnlyOfficeNativeComplements() {
   // The singleton is used by the SDK's clipboard/native-content paths too.
   if (common.pptx_content_writer) common.pptx_content_writer.BinaryFileWriter = new common.CBinaryFileWriter();
   common.pptx_content_writer?.BinaryFileWriter.Init();
-  const draw = window.AscWord.Run.prototype.Draw_Elements;
+  const draw = window.AscWord.Run.prototype.Draw_Elements, masks=new WeakMap();
   window.AscWord.Run.prototype.Draw_Elements = function(state) {
-    // Native compiled-property interning ignores extension fields. The run
-    // owns an explicit effect override, including null to cancel inheritance.
-    const properties = Object.hasOwn(this.Pr ?? {}, "spellbookEffects")
-      ? this.Pr.spellbookEffects : this.Get_CompiledPr(false)?.spellbookEffects;
-    const shadow = properties?.EffectLst?.outerShdw;
-    const graphics = state.Graphics, ctx = graphics?.m_oContext;
-    if (!shadow || !ctx) return draw.call(this, state);
-    const previous = [ctx.shadowColor, ctx.shadowOffsetX, ctx.shadowOffsetY, ctx.shadowBlur];
-    const color = shadow.color?.color?.RGBA;
-    const alpha = (shadow.color?.Mods?.Mods?.find(m => m.name === "alpha")?.val ?? 100000) / 100000;
-    const angle = (shadow.dir ?? 2700000) / 60000 * Math.PI / 180;
-    const scale = graphics.m_oCoordTransform?.sx ?? 1;
-    ctx.shadowColor = `rgba(${color?.R ?? 0},${color?.G ?? 0},${color?.B ?? 0},${alpha})`;
-    ctx.shadowOffsetX = (shadow.dist ?? 38100) / 36000 * Math.cos(angle) * scale;
-    ctx.shadowOffsetY = (shadow.dist ?? 38100) / 36000 * Math.sin(angle) * scale;
-    ctx.shadowBlur = (shadow.blurRad ?? 0) / 36000 * scale;
-    try { return draw.call(this, state); }
-    finally { [ctx.shadowColor, ctx.shadowOffsetX, ctx.shadowOffsetY, ctx.shadowBlur] = previous; }
+    const properties=Object.hasOwn(this.Pr??{},"spellbookEffects")?this.Pr.spellbookEffects:this.Get_CompiledPr(false)?.spellbookEffects;
+    const shadow=properties?.EffectLst?.outerShdw,graphics=state.Graphics,ctx=graphics?.m_oContext;
+    if(!shadow||!ctx)return draw.call(this,state);
+    // Native glyph textures have their own temporary clip rectangles. Draw
+    // the run once into a reusable mask and compose its shadow after those
+    // clips have closed, preserving glyph shaping and the native draw state.
+    let mask=masks.get(ctx);
+    if(!mask){mask=document.createElement("canvas");masks.set(ctx,mask);}
+    if(mask.width!==ctx.canvas.width||mask.height!==ctx.canvas.height){mask.width=ctx.canvas.width;mask.height=ctx.canvas.height;}
+    const target=mask.getContext("2d"),transform=ctx.getTransform();
+    target.setTransform(1,0,0,1,0,0);target.clearRect(0,0,mask.width,mask.height);target.setTransform(transform);
+    const fields=["fillStyle","strokeStyle","lineWidth","lineCap","lineJoin","miterLimit","font","textAlign","textBaseline","direction","globalAlpha","globalCompositeOperation","imageSmoothingEnabled"];
+    for(const field of fields)target[field]=ctx[field];
+    target.shadowColor="transparent";target.shadowBlur=0;target.shadowOffsetX=0;target.shadowOffsetY=0;
+    let result;graphics.m_oContext=target;
+    try{result=draw.call(this,state);}finally{graphics.m_oContext=ctx;}
+    const color=shadow.color?.color?.RGBA,alpha=(shadow.color?.Mods?.Mods?.find(mod=>mod.name==="alpha")?.val??100000)/100000;
+    const angle=(shadow.dir??2700000)/60000*Math.PI/180,scale=graphics.m_oCoordTransform?.sx??1;
+    ctx.save();
+    try{
+      ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation="source-over";
+      ctx.shadowColor=`rgba(${color?.R??0},${color?.G??0},${color?.B??0},${alpha})`;
+      ctx.shadowOffsetX=(shadow.dist??38100)/36000*Math.cos(angle)*scale;
+      ctx.shadowOffsetY=(shadow.dist??38100)/36000*Math.sin(angle)*scale;
+      ctx.shadowBlur=(shadow.blurRad??0)/36000*scale;ctx.drawImage(mask,0,0);
+    }finally{ctx.restore();}
+    for(const field of fields)ctx[field]=target[field];
+    ctx.setTransform(target.getTransform());return result;
   };
   window.Asc.c_oAscSlideTransitionParams.Fade_ThroughWhite = white;
   const transition = window.Asc.CAscSlideTransition.prototype;
