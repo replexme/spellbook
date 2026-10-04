@@ -1022,7 +1022,19 @@ test("text replacement retains the first paragraph's inherited defaults and end 
         this.props = value;
       },
     },
-    GetElement: () => ({ GetTextPr: () => runStyle }),
+    GetElement() {
+      return {
+        GetTextPr: () => runStyle,
+        SetTextPr: (style) => {
+          this.style = style;
+          return style;
+        },
+        AddText: (text) => {
+          this.text = text;
+          return true;
+        },
+      };
+    },
     GetTextPr: () => endStyle,
     GetParaPr: () => ({ ParaPr: { Copy: () => ({ spacingAfter: 0 }) } }),
     RemoveAllElements() {
@@ -1032,14 +1044,8 @@ test("text replacement retains the first paragraph's inherited defaults and end 
       assert.equal(existing, false);
       this.end = properties;
     },
-    AddText(text) {
-      this.text = text;
-      return {
-        SetTextPr: (style) => {
-          this.style = style;
-          return style;
-        },
-      };
+    AddText() {
+      throw Error("appended a redundant empty run");
     },
   });
   const first = makeParagraph(true);
