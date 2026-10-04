@@ -125,3 +125,18 @@ test("replacement and explicit formatting in one request have their combined int
     { op: "font_size", elementId: "0/0", size: 32 },
   ]);
 });
+
+test("native adapter retains the artifact rebinding port used after Undo and Redo", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  let bound;
+  const engine = createOnlyOfficeProductEngine({
+    bindArtifact: async (bytes) => {
+      bound = bytes;
+    },
+  });
+  const bytes = Uint8Array.of(1, 2, 3);
+  await engine.bindArtifact(bytes);
+  assert.equal(bound, bytes);
+});

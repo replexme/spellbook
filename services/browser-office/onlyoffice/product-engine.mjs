@@ -112,6 +112,7 @@ export function createOnlyOfficeProductEngine({
   open,
   inspect,
   snapshot,
+  bindArtifact,
 }) {
   return {
     open,
@@ -369,6 +370,7 @@ export function createOnlyOfficeProductEngine({
       return true;
     },
     snapshot,
+    bindArtifact,
     undo: async () =>
       (await getFrame()).evaluate(() => window.Asc.editor.Undo()),
     redo: async () =>
