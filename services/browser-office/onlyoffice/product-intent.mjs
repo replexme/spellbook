@@ -109,7 +109,9 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
       delete original[key];
       delete actual[key];
     }
-    for (const [op, command] of final) {
+    for (const [op, command] of [...final].sort(
+      ([a], [b]) => Number(!!formatting[b]) - Number(!!formatting[a]),
+    )) {
       if (formatting[op]) {
         const property = formatting[op],
           runs = newDrawing.paragraphs.flatMap((p) => p.runs);

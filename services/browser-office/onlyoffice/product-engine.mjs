@@ -300,7 +300,8 @@ export function createOnlyOfficeProductEngine({
             c.RemoveAllElements();
             const paragraph = c.GetElement(0);
             if (properties) paragraph.SetTextPr(properties);
-            if (paragraphProperties) paragraph.SetParaPr(paragraphProperties);
+            if (paragraphProperties)
+              paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
             return paragraph.AddText(command.text);
           }
           case "font_size":
