@@ -72,6 +72,8 @@ export async function connectOnlyOfficeProductPort({
   return {
     observe: () => call("observe"),
     changeToken: () => call("changeToken"),
+    approveNativeChanges: (token) => call("approveNativeChanges", token),
+    verifyManualChanges: () => call("verifyManualChanges"),
     prepareManualCheckpoint: () => call("prepareManualCheckpoint"),
     preflight: (commands) => call("preflight", commands),
     begin: () => call("begin"),

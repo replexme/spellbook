@@ -290,7 +290,11 @@ test("private native change evidence tracks authored history, excluding selectio
   );
   const old = globalThis.window;
   const history = { Index: -1, Points: [], SavedIndex: null };
-  globalThis.window = { AscCommon: { History: history } };
+  globalThis.window = {
+    AscCommon: { History: history },
+    AscDFH: { historyitem_CNvPr_SetId: 7 },
+    Asc: { editor: { WordControl: { m_oLogicDocument: {} } } },
+  };
   const engine = createOnlyOfficeProductEngine({
     getFrame: async () => ({ evaluate: async (fn) => fn() }),
   });

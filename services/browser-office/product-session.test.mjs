@@ -437,6 +437,39 @@ test("unobserved native edits cannot save an older file, execute AI or alter rec
   assert.equal((await s.session.observe()).revision, "r2");
 });
 
+test("mixed observed and unsupported native edits refuse before journal or host writes", async () => {
+  let unsupported = false;
+  const approvals = [];
+  const s = setup({
+    changeToken: async () => "captured",
+    approveNativeChanges: async (token) => approvals.push(token),
+    verifyManualChanges: async () => {
+      if (unsupported)
+        throw Error("product_unobserved_native_edit:object_identity");
+    },
+  });
+  await s.session.open(s.bytes(1));
+  s.change(3);
+  unsupported = true;
+  await assert.rejects(s.session.observe(), /product_unobserved_native_edit/);
+  let written = false;
+  await assert.rejects(
+    s.session.save(async () => {
+      written = true;
+    }),
+    /product_unobserved_native_edit/,
+  );
+  await assert.rejects(apply(s, 2), /product_unobserved_native_edit/);
+  assert.equal(written, false);
+  assert.equal(s.record(), null);
+  assert.deepEqual(approvals, ["captured"]);
+  unsupported = false;
+  s.change(1);
+  assert.equal((await s.session.observe()).revision, "r1");
+  await apply(s, 2);
+  assert.equal((await s.session.observe()).revision, "r2");
+});
+
 test("owned native transactions and restored artifact history refresh private change evidence", async () => {
   const s = setup();
   let token = 0;

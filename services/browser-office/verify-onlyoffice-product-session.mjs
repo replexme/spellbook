@@ -878,6 +878,8 @@ const engine = createOnlyOfficeProductEngine({
 for (const method of [
   "observe",
   "changeToken",
+  "approveNativeChanges",
+  "verifyManualChanges",
   "prepareManualCheckpoint",
   "preflight",
   "begin",
@@ -1004,25 +1006,39 @@ try {
   report.timings.openWithBaselineAndAdmissionMs =
     performance.now() - phaseStarted;
   report.stages.push("original-open-and-file-admission");
-  if (process.argv.includes("--unobserved-native-probe")) {
+  if (
+    process.argv.includes("--unobserved-native-probe") ||
+    process.argv.includes("--mixed-unobserved-native-probe")
+  ) {
+    const mixed = process.argv.includes("--mixed-unobserved-native-probe");
     const originalToken = await engine.changeToken();
     const token = await engine.begin();
-    await mainFrame.evaluate((slideIndex) => {
-      const editor = window.Asc.editor;
-      editor.executeGroupActionsStart();
-      try {
-        const model = editor.WordControl.m_oLogicDocument;
-        const properties =
-          model.Slides[slideIndex].cSld.spTree[0].getCNvProps();
-        properties.setId(properties.id + 1000000);
-      } finally {
-        editor.executeGroupActionsEnd();
-      }
-    }, selectedSlideIndex);
+    await mainFrame.evaluate(
+      ({ slideIndex, mixed }) => {
+        const editor = window.Asc.editor;
+        editor.executeGroupActionsStart();
+        try {
+          const model = editor.WordControl.m_oLogicDocument;
+          const properties =
+            model.Slides[slideIndex].cSld.spTree[0].getCNvProps();
+          properties.setId(properties.id + 1000000);
+          if (mixed) {
+            const shape = model.Slides[slideIndex].cSld.spTree[0];
+            shape.spPr.xfrm.setOffX(shape.spPr.xfrm.offX + 1);
+            model.Recalculate();
+          }
+        } finally {
+          editor.executeGroupActionsEnd();
+        }
+      },
+      { slideIndex: selectedSlideIndex, mixed },
+    );
     await engine.finish(token, true);
     assert.notEqual(await engine.changeToken(), originalToken);
     // This property has not yet been admitted by the candidate observation.
-    verifyOnlyOfficeProductObservation(before, await engine.observe());
+    if (mixed)
+      assert.notEqual((await engine.observe()).revision, before.revision);
+    else verifyOnlyOfficeProductObservation(before, await engine.observe());
     await assert.rejects(session.observe(), /product_unobserved_native_edit/);
     let written = false;
     await assert.rejects(
@@ -1417,7 +1433,7 @@ try {
     await assert.rejects(
       session.apply({
         expectedRevision: before.revision,
-        commands: [rollbackCommand, { ...command, op: "set_sections" }],
+        commands: [rollbackCommand, { ...command, op: "set_slide_size" }],
       }),
       /operation_unavailable/,
     );

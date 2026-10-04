@@ -36,6 +36,12 @@ export function installOnlyOfficeProductPort({
     switch (method) {
       case "changeToken":
         return engine.changeToken();
+      case "approveNativeChanges":
+        if (typeof payload !== "string" || payload.length > 256)
+          throw Error("onlyoffice_product_change_token_invalid");
+        return engine.approveNativeChanges(payload);
+      case "verifyManualChanges":
+        return engine.verifyManualChanges();
       case "prepareManualCheckpoint":
         if (transactions.size)
           throw Error("onlyoffice_product_transaction_busy");

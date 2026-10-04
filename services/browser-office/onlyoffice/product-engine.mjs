@@ -6,6 +6,11 @@ import {
 import { observeOnlyOfficeCandidate } from "../onlyoffice-observation.mjs";
 import { onlyOfficeCharacterSpacingTwips } from "./character-spacing.mjs";
 import { normalizedSections } from "../slide-sections.mjs";
+import {
+  captureOnlyOfficeNativeChanges,
+  approveOnlyOfficeNativeChanges,
+  verifyOnlyOfficeManualChanges,
+} from "./identity-evidence.mjs";
 import { ensureOnlyOfficeSectionHistory } from "./section-history.mjs";
 import { onlyOfficeCropObservation } from "./crop.mjs";
 import { onlyOfficeOpacityNative } from "./opacity.mjs";
@@ -250,28 +255,11 @@ export function createOnlyOfficeProductEngine({
     // Private live-session evidence only. It is not a persisted semantic hash.
     // Empty points, selection and save indices do not represent authored edits.
     changeToken: async () =>
-      (await getFrame()).evaluate(() => {
-        const history = window.AscCommon.History;
-        if (
-          !history ||
-          !Array.isArray(history.Points) ||
-          !Number.isSafeInteger(history.Index)
-        )
-          throw Error("onlyoffice_product_change_token_unavailable");
-        let count = 0,
-          last = null;
-        for (const point of history.Points.slice(0, history.Index + 1))
-          for (const item of point.Items) {
-            if (
-              !Number.isSafeInteger(item.Binary?.Pos) ||
-              !Number.isSafeInteger(item.Binary?.Len)
-            )
-              throw Error("onlyoffice_product_change_token_unavailable");
-            count++;
-            last = item.Binary;
-          }
-        return JSON.stringify([count, last?.Pos ?? null, last?.Len ?? null]);
-      }),
+      (await getFrame()).evaluate(captureOnlyOfficeNativeChanges),
+    approveNativeChanges: async (token) =>
+      (await getFrame()).evaluate(approveOnlyOfficeNativeChanges, token),
+    verifyManualChanges: async () =>
+      (await getFrame()).evaluate(verifyOnlyOfficeManualChanges),
     prepareManualCheckpoint: async () =>
       (await getFrame()).evaluate(finalizeOnlyOfficeNativeGeometry),
     observe: async () => observeOnlyOfficeProduct(await getFrame()),

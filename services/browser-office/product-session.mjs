@@ -120,12 +120,15 @@ export function createProductSession({
       throw Error("product_native_change_token_invalid");
     return token;
   };
-  const acceptNativeToken = () => {
-    acceptedNativeToken = lastObservedNativeToken;
+  const acceptNativeToken = async () => {
+    const token = lastObservedNativeToken;
+    await engine.approveNativeChanges?.(token);
+    acceptedNativeToken = token;
   };
   const manualCheckpoint = async (reason) => {
     ready();
     let live = await observe();
+    await engine.verifyManualChanges?.();
     if (live.revision === current.observation.revision) {
       if (acceptedNativeToken !== lastObservedNativeToken)
         throw Error("product_unobserved_native_edit");
@@ -176,7 +179,7 @@ export function createProductSession({
         throw error;
       }
       current = target;
-      acceptNativeToken();
+      await acceptNativeToken();
       return true;
     }
 
@@ -234,7 +237,7 @@ export function createProductSession({
       throw error;
     }
     current = accepted;
-    acceptNativeToken();
+    await acceptNativeToken();
     return true;
   };
   const liveMatches = async (expected) => {
@@ -281,7 +284,7 @@ export function createProductSession({
         throw error;
       }
       current = target;
-      acceptNativeToken();
+      await acceptNativeToken();
       return true;
     } catch (error) {
       // Restore a failed history move; leave the journal and retained histories intact.
@@ -314,7 +317,7 @@ export function createProductSession({
         undo = [];
         redo = [];
         failed = false;
-        acceptNativeToken();
+        await acceptNativeToken();
         return structuredClone(observation);
       }),
     observe: () =>
@@ -409,7 +412,7 @@ export function createProductSession({
           }
           await liveMatches(edited);
           current = accepted;
-          acceptNativeToken();
+          await acceptNativeToken();
           return {
             observation: structuredClone(edited),
             artifactReceipt: structuredClone(accepted.receipt),
@@ -605,7 +608,7 @@ export function createProductSession({
         }
         const live = await observe();
         failed = false;
-        acceptNativeToken();
+        await acceptNativeToken();
         return structuredClone(live);
       }),
     status: () => ({
