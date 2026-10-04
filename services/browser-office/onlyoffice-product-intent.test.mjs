@@ -1114,3 +1114,60 @@ test("text replacement retains the first paragraph's inherited defaults and end 
     globalThis.window = old;
   }
 });
+
+test("whole-batch validation finishes before fallback-font loading and waits for the native callback", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  const old = globalThis.window;
+  let loaded = 0,
+    done,
+    returned = false;
+  const shape = { Id: "text", getDocContent: () => ({}) };
+  globalThis.window = {
+    Asc: {
+      editor: {
+        WordControl: {
+          m_oLogicDocument: { Slides: [{ cSld: { spTree: [shape] } }] },
+        },
+      },
+    },
+    AscBuilder: { GetApiDrawing: () => ({ Drawing: shape }) },
+    AscFonts: {
+      FontPickerByCharacter: {
+        checkText(text, editor, callback) {
+          loaded++;
+          assert.equal(text, "한글");
+          done = callback;
+          return true;
+        },
+      },
+    },
+  };
+  try {
+    const engine = createOnlyOfficeProductEngine({
+      getFrame: async () => ({ evaluate: async (fn, arg) => fn(arg) }),
+    });
+    await assert.rejects(
+      engine.preflight([
+        { op: "replace_text", elementId: "0/0", text: "한글" },
+        { op: "unknown" },
+      ]),
+      /operation_unavailable/,
+    );
+    assert.equal(loaded, 0);
+    const result = engine
+      .preflight([{ op: "replace_text", elementId: "0/0", text: "한글" }])
+      .then((value) => {
+        returned = true;
+        return value;
+      });
+    await new Promise(setImmediate);
+    assert.equal(loaded, 1);
+    assert.equal(returned, false);
+    done();
+    assert.equal((await result)[0].nativeId, "text");
+  } finally {
+    globalThis.window = old;
+  }
+});
