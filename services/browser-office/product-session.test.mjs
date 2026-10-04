@@ -31,6 +31,10 @@ function setup() {
     },
     observe: async () => observation(value),
     inspect: async (bytes) => observation(bytes[2]),
+    verifyIntent: async (_, after, commands) => {
+      if (after.revision !== "r" + commands.at(-1).value)
+        throw Error("intent_mismatch");
+    },
     preflight: async (commands) => {
       calls.push("preflight");
       if (commands.some((c) => c.op === "reject"))
@@ -388,4 +392,13 @@ test("native user Undo and Redo reuse exact approved files and request boundarie
   s.engine.snapshot = snapshot;
   await s.session.undo();
   assert.equal((await s.session.observe()).revision, "r1");
+});
+
+test("a ignored setter cannot report a successful no-op for a different requested value", async () => {
+  const s = setup();
+  await s.session.open(s.bytes(1));
+  s.engine.apply = async () => {};
+  await assert.rejects(apply(s, 2), /intent_mismatch/);
+  assert.equal(s.record(), null);
+  assert.equal(s.session.status().undo, 0);
 });

@@ -1,4 +1,8 @@
 /* SPDX-License-Identifier: MPL-2.0 */
+import {
+  onlyOfficeIntentOperations,
+  verifyOnlyOfficeProductIntent,
+} from "./product-intent.mjs";
 import { observeOnlyOfficeCandidate } from "../onlyoffice-observation.mjs";
 import {
   beginCandidateTransaction,
@@ -101,24 +105,7 @@ export function verifyOnlyOfficeProductObservation(expected, actual) {
     );
 }
 
-export const onlyOfficeProductOperations = Object.freeze([
-  "move",
-  "resize",
-  "rotate",
-  "flip",
-  "set_shape_name",
-  "fill_color",
-  "line_color",
-  "delete_element",
-  "replace_text",
-  "font_size",
-  "font_family",
-  "bold",
-  "italic",
-  "underline",
-  "strikethrough",
-  "font_color",
-]);
+export const onlyOfficeProductOperations = onlyOfficeIntentOperations;
 
 export function createOnlyOfficeProductEngine({
   getFrame,
@@ -129,6 +116,7 @@ export function createOnlyOfficeProductEngine({
   return {
     open,
     inspect,
+    verifyIntent: verifyOnlyOfficeProductIntent,
     observe: async () => observeOnlyOfficeProduct(await getFrame()),
     preflight: async (commands) => {
       const frame = await getFrame();
@@ -304,9 +292,16 @@ export function createOnlyOfficeProductEngine({
           case "delete_element":
             return d.Delete();
           case "replace_text": {
-            const c = content();
+            const c = content(),
+              first = c.GetAllParagraphs()[0];
+            const properties =
+              first?.GetElement(0)?.GetTextPr?.() ?? first?.GetTextPr();
+            const paragraphProperties = first?.GetParaPr();
             c.RemoveAllElements();
-            return c.GetElement(0).AddText(command.text);
+            const paragraph = c.GetElement(0);
+            if (properties) paragraph.SetTextPr(properties);
+            if (paragraphProperties) paragraph.SetParaPr(paragraphProperties);
+            return paragraph.AddText(command.text);
           }
           case "font_size":
             return content()

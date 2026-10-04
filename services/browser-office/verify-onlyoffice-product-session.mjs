@@ -172,6 +172,7 @@ const report = {
   sourceIdentities,
   distribution,
   inputSha256: hash(input),
+  preservationWorkerSha256: hash(worker),
   startedAt: new Date().toISOString(),
   newBuilds: 0,
   productionPromoted: false,
@@ -409,7 +410,28 @@ const engine = createOnlyOfficeProductEngine({
       await opened.context.close();
     }
   },
-  snapshot: async ({ authorize }) => {
+  bindArtifact: async (bytes) => {
+    await mainPage.evaluate(
+      (bytes) => window.__ONLYOFFICE_PRODUCT_PRESERVATION__.bind(bytes),
+      Array.from(bytes),
+    );
+    await captureStableOnlyOfficeBaseline(mainPage, save);
+  },
+  snapshot: async ({ before, commands, authorize }) => {
+    await mainPage.evaluate((intent) => (window.__comparisonIntent = intent), {
+      sourceOperations: commands?.map((c) => c.op) ?? null,
+      sourceTargets:
+        commands?.map((c) => {
+          const [slideIndex, shapeIndex] = c.elementId.split("/").map(Number);
+          return {
+            op: c.op,
+            slideIndex,
+            shapeIndex,
+            name:
+              before.slides[slideIndex].elements[shapeIndex].objectName ?? "",
+          };
+        }) ?? null,
+    });
     pendingAuthorization = authorize;
     try {
       return Buffer.from((await save(mainPage)).base64, "base64");

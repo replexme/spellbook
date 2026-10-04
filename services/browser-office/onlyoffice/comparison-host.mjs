@@ -33,6 +33,7 @@ ${
     ? `const sourceCheckpoints=new Map();
 window.__ONLYOFFICE_PRODUCT_PRESERVATION__={
  begin:()=>{if(saveContext||sourceCheckpoints.size)throw new Error('product_source_checkpoint_busy');const token=crypto.randomUUID();sourceCheckpoints.set(token,{original,noEditBytes,saved:window.__comparisonSaved,writeCount});return token;},
+ bind:bytes=>{if(saveContext||sourceCheckpoints.size||!bytes?.length||bytes.length>64*1024*1024)throw new Error('product_source_binding_invalid');original=Uint8Array.from(bytes);noEditBytes=null;window.__comparisonSaved=original;},
  finish:(token,commit)=>{const state=sourceCheckpoints.get(token);if(!state||typeof commit!=='boolean'||saveContext)throw new Error('product_source_checkpoint_invalid');if(!commit){original=state.original;noEditBytes=state.noEditBytes;window.__comparisonSaved=state.saved;writeCount=state.writeCount;}sourceCheckpoints.delete(token);}
 };`
     : ""

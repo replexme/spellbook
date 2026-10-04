@@ -32,6 +32,7 @@ export function createProductSession({
     "undo",
     "redo",
     "inspect",
+    "verifyIntent",
   ])
     if (typeof engine?.[name] !== "function")
       throw new TypeError("Missing engine port: " + name);
@@ -139,6 +140,8 @@ export function createProductSession({
       const target = known.direction === "undo" ? moved.before : moved.after;
       await verifyObservation(target.observation, live);
       await artifacts.require(target.bytes, target.observation.revision);
+      await engine.bindArtifact?.(target.bytes.slice());
+      await liveMatches(target.observation);
       undo = matchedUndo.map((entry) => entry.originalEntry);
       redo = matchedRedo.map((entry) => entry.originalEntry);
       commands = undo.flatMap((entry) => entry.commands);
@@ -234,6 +237,9 @@ export function createProductSession({
       await verifyObservation(target.observation, live);
       // Undo/Redo are allowed to reuse only the exact previously inspected file.
       await artifacts.require(target.bytes, target.observation.revision);
+      if (entry.native !== false)
+        await engine.bindArtifact?.(target.bytes.slice());
+      await liveMatches(target.observation);
       const nextCommands =
         direction === "undo"
           ? commands.slice(0, -entry.commands.length)
@@ -259,6 +265,7 @@ export function createProductSession({
           await engine.open(current.bytes.slice());
           invalidateNativeHistory();
         } else await engine[direction === "undo" ? "redo" : "undo"]();
+        await engine.bindArtifact?.(current.bytes.slice());
         await liveMatches(current.observation);
       } catch (restoreError) {
         failed = true;
@@ -321,6 +328,7 @@ export function createProductSession({
         try {
           for (const command of prepared) await engine.apply(command);
           const edited = await observe();
+          await engine.verifyIntent(before, edited, input.commands);
           if (edited.revision === before.revision) {
             await engine.finish(token, false);
             await liveMatches(before);
@@ -523,6 +531,7 @@ export function createProductSession({
             try {
               for (const command of prepared) await engine.apply(command);
               const edited = await observe();
+              await engine.verifyIntent(previous.observation, edited, group);
               const bytes = await engine.snapshot({
                 before: previous.observation,
                 edited,
