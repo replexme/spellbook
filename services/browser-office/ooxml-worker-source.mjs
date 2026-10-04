@@ -3951,7 +3951,7 @@ export function preserveOriginalPptxParts(
       "Native snapshot comparison exceeds the browser memory limit.",
     );
 
-  if (sourceOperations.includes("set_sections")) {
+  if (sourceOperations.includes("set_sections") && sourceTargets?.some(target=>target.op === "set_sections")) {
     if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== "set_sections")
       throw new Error("Native sections require one declared complete section list.");
     const expected = normalizedSections(sourceTargets[0].sections,orderedSlidePaths(original).length);
