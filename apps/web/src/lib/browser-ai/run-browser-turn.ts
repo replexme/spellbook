@@ -2,6 +2,7 @@ import type { ModelSettings } from "../ai-models";
 import { loadEditorAsset } from "../editor-asset";
 import type { BrowserKeyProvider } from "./key-store";
 import {
+  newModelInput,
   runNativeTurn,
   type NativeObservation,
   type NativePermission,
@@ -137,6 +138,7 @@ export async function runBrowserTurn(
   },
 ): Promise<void> {
   const executionToken = crypto.randomUUID();
+  const modelInput = newModelInput();
   const post = async (path: "tools" | "callback", body: object) => {
     const response = await fetch(`/api/native/jobs/${job.jobId}/${path}`, {
       method: "POST",
@@ -284,7 +286,8 @@ export async function runBrowserTurn(
           elementIds: mode === "selection" ? selected : [],
         },
         host,
-        web: browserWebTools,
+        web: browserWebTools(job),
+        modelInput,
         initialObservation: current,
         initialPages,
         signal: deps.signal,
@@ -304,6 +307,8 @@ export async function runBrowserTurn(
     await post("callback", {
       status: "failed",
       error: error instanceof Error ? error.message : "native_worker_failed",
+      // What the provider used before the failure still counts.
+      result: { modelInput },
     }).catch(() => undefined);
   } finally {
     clearInterval(heartbeat);

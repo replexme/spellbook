@@ -2,8 +2,8 @@ import type { WebTools } from "./native-turn";
 
 /*
  * Web access for an AI request run in this browser. Wikipedia search is
- * called directly (it allows browser requests); reading an arbitrary page
- * goes through Spellbook's page reader, because most sites do not.
+ * called directly (it allows browser requests); reading a page goes through
+ * Spellbook's page reader for this request, because most sites do not.
  */
 
 async function search(query: string, signal: AbortSignal) {
@@ -36,23 +36,37 @@ async function search(query: string, signal: AbortSignal) {
   return [];
 }
 
-async function readPage(url: string, signal: AbortSignal) {
-  try {
-    const response = await fetch("/api/web/page", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url }),
-      cache: "no-store",
-      signal,
-    });
-    const value = (await response.json()) as { text?: string; error?: string };
-    if (!response.ok || typeof value.text !== "string")
-      throw new Error(value.error ?? `HTTP ${response.status}`);
-    return value.text || "The webpage content is empty.";
-  } catch (error) {
-    if (signal.aborted) throw error;
-    return `Webpage fetch error: ${error instanceof Error ? error.message : String(error)}`;
+/** Web tools for one running request, using that request's capability. */
+export function browserWebTools(job: {
+  jobId: string;
+  capability: string;
+}): WebTools {
+  async function readPage(url: string, signal: AbortSignal) {
+    try {
+      const response = await fetch(
+        `/api/native/jobs/${encodeURIComponent(job.jobId)}/web-page`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${job.capability}`,
+          },
+          body: JSON.stringify({ url }),
+          cache: "no-store",
+          signal,
+        },
+      );
+      const value = (await response.json()) as {
+        text?: string;
+        error?: string;
+      };
+      if (!response.ok || typeof value.text !== "string")
+        throw new Error(value.error ?? `HTTP ${response.status}`);
+      return value.text || "The webpage content is empty.";
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return `Webpage fetch error: ${error instanceof Error ? error.message : String(error)}`;
+    }
   }
+  return { search, readPage };
 }
-
-export const browserWebTools: WebTools = { search, readPage };
