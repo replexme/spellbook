@@ -7,6 +7,7 @@ export function createOnlyOfficeComparisonHost({
   preserveSource = false,
   repairStructure = false,
   authorizeArtifact = false,
+  preservationBridge = false,
 }) {
   const origin = new URL(inputOrigin);
   if (!["127.0.0.1", "localhost"].includes(origin.hostname))
@@ -39,13 +40,14 @@ window.__ONLYOFFICE_PRODUCT_PRESERVATION__={
     : ""
 }
 const preserveEnabled=${JSON.stringify(preserveSource)};
-const preservationWorker=preserveEnabled?new Worker('/comparison-repair.js',{type:'module'}):null;
+const preservationBridge=${JSON.stringify(preservationBridge)};
+const preservationWorker=preserveEnabled&&!preservationBridge?new Worker('/comparison-repair.js',{type:'module'}):null;
 const pendingPreservations=new Map();
 if(preservationWorker){
  preservationWorker.onmessage=({data})=>{const pending=pendingPreservations.get(data.requestId);if(!pending)return;pendingPreservations.delete(data.requestId);if(data.error)pending.reject(new Error(data.error));else pending.resolve({bytes:new Uint8Array(data.bytes),report:data.report});};
  preservationWorker.onerror=event=>{for(const pending of pendingPreservations.values())pending.reject(new Error(event.message));pendingPreservations.clear();};
 }
-const preserve=payload=>new Promise((resolve,reject)=>{const requestId=crypto.randomUUID();pendingPreservations.set(requestId,{resolve,reject});try{preservationWorker.postMessage({requestId,operation:'preserve-native',...payload});}catch(error){pendingPreservations.delete(requestId);reject(error);}});
+const preserve=payload=>preservationBridge?window.__ONLYOFFICE_PRODUCT_PRESERVE__(payload):new Promise((resolve,reject)=>{const requestId=crypto.randomUUID();pendingPreservations.set(requestId,{resolve,reject});try{preservationWorker.postMessage({requestId,operation:'preserve-native',...payload});}catch(error){pendingPreservations.delete(requestId);reject(error);}});
 try {
  const file=new File([await (await fetch('/compare.pptx',{cache:'no-store'})).arrayBuffer()],'compare.pptx',{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'});
  original=${repairStructure ? "new Uint8Array(await (await fetch('/original.pptx',{cache:'no-store'})).arrayBuffer())" : "null"};

@@ -5,7 +5,7 @@ import vm from "node:vm";
 import { randomUUID } from "node:crypto";
 import { createOnlyOfficeComparisonHost } from "./onlyoffice/comparison-host.mjs";
 
-async function host(authorizeArtifact = false) {
+async function host(authorizeArtifact = false, preservationBridge = false) {
   let options,
     value = 1;
   const requests = [],
@@ -61,6 +61,7 @@ async function host(authorizeArtifact = false) {
     preserveSource: true,
     repairStructure: true,
     authorizeArtifact,
+    preservationBridge,
   });
   const script = html
     .slice(
@@ -233,4 +234,34 @@ test("rollback after artifact approval restores the original preservation baseli
   assert.deepEqual([...h.requests.at(-1).noEditBytes], [1]);
   h.worker.reply(3);
   await retry;
+});
+
+test("no-build source preservation still requires exact artifact approval before a public save ACK", async () => {
+  const h = await host(true, true);
+  h.window.__comparisonIntent = {
+    sourceOperations: ["set_speaker_notes"],
+    sourceTargets: [{ op: "set_speaker_notes", slideIndex: 0 }],
+  };
+  let called = 0;
+  h.window.__ONLYOFFICE_PRODUCT_PRESERVE__ = async (payload) => {
+    called++;
+    assert.deepEqual(Array.from(payload.bytes), [1]);
+    assert.deepEqual(Array.from(payload.noEditBytes), [1]);
+    assert.deepEqual(Array.from(payload.editedBytes), [2]);
+    return { bytes: Uint8Array.of(22), report: {} };
+  };
+  h.window.__ONLYOFFICE_PRODUCT_ADMIT__ = async () => false;
+  h.setValue(2);
+  await assert.rejects(
+    h.window.__ONLYOFFICE_SAVE_E2E__.save(),
+    /artifact_not_approved/,
+  );
+  assert.equal(called, 1);
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 0);
+  h.window.__ONLYOFFICE_PRODUCT_ADMIT__ = async (bytes) => {
+    assert.deepEqual(Array.from(bytes), [22]);
+    return true;
+  };
+  await h.window.__ONLYOFFICE_SAVE_E2E__.save();
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 1);
 });

@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { chromium } from "@playwright/test";
 import Ajv from "ajv";
+import { preserveOriginalPptxParts } from "./ooxml-worker-source.mjs";
 import { createOnlyOfficeComparisonHost } from "./onlyoffice/comparison-host.mjs";
 import {
   createOnlyOfficeProductEngine,
@@ -226,6 +227,7 @@ const server = createServer(async (req, res) => {
       preserveSource: true,
       repairStructure: true,
       authorizeArtifact: true,
+      preservationBridge: true,
     })
       .replaceAll(
         "'/compare.pptx'",
@@ -580,6 +582,14 @@ const journal = {
   },
 };
 report.recoveryProvider = "existing-opfs-two-slot-journal";
+report.preservationExecution = {
+  mode: "current-source-direct-node-through-real-save-callback",
+  sourceSha256: hash(
+    await fs.readFile("services/browser-office/ooxml-worker-source.mjs"),
+  ),
+  newBuilds: 0,
+  limitation: "Diagnostic bridge; not production browser bundle admission",
+};
 const engine = createOnlyOfficeProductEngine({
   getFrame: async () => mainFrame,
   open: async (bytes) => {
@@ -591,6 +601,27 @@ const engine = createOnlyOfficeProductEngine({
     const opened = await open(bytes, mainContext);
     mainPage = opened.page;
     mainFrame = opened.frame;
+    // Run the current preservation source directly. The retained bundle is
+    // used only for its unchanged final structure repair; never rebuild it.
+    await mainPage.exposeFunction(
+      "__ONLYOFFICE_PRODUCT_PRESERVE_BINARY__",
+      async (payload) => {
+        const inputs = [
+          payload.bytes,
+          payload.noEditBytes,
+          payload.editedBytes,
+        ].map((bytes) => Buffer.from(bytes, "base64"));
+        const result = preserveOriginalPptxParts(
+          ...inputs,
+          payload.sourceOperations,
+          payload.sourceTargets,
+        );
+        return {
+          bytes: Buffer.from(result.bytes).toString("base64"),
+          report: result.report,
+        };
+      },
+    );
     await mainPage.exposeFunction(
       "__ONLYOFFICE_PRODUCT_ADMIT_BINARY__",
       async (bytes) => {
@@ -601,6 +632,16 @@ const engine = createOnlyOfficeProductEngine({
       },
     );
     await mainPage.evaluate(() => {
+      window.__ONLYOFFICE_PRODUCT_PRESERVE__ = async (payload) => {
+        const binary = window.__productBinaryCodec;
+        const result = await window.__ONLYOFFICE_PRODUCT_PRESERVE_BINARY__({
+          ...payload,
+          bytes: binary.encodeBinary(payload.bytes),
+          noEditBytes: binary.encodeBinary(payload.noEditBytes),
+          editedBytes: binary.encodeBinary(payload.editedBytes),
+        });
+        return { ...result, bytes: binary.decodeBinary(result.bytes) };
+      };
       window.__ONLYOFFICE_PRODUCT_ADMIT__ = (bytes) =>
         window.__ONLYOFFICE_PRODUCT_ADMIT_BINARY__(
           window.__productBinaryCodec.encodeBinary(bytes),
