@@ -842,6 +842,7 @@ const engine = createOnlyOfficeProductEngine({
 for (const method of [
   "observe",
   "changeToken",
+  "prepareManualCheckpoint",
   "preflight",
   "begin",
   "apply",

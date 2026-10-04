@@ -1487,11 +1487,16 @@ for (const op of ["insert_table_rows", "delete_table_rows"])
       changed.tableCells[1][0] = "\t";
       changed.tableParagraphs[1][0][0].text = "\t";
       table.cells[1][0].text = "\t";
-      assert.doesNotThrow(() => verifyOnlyOfficeProductIntent(before, after, commands));
+      assert.doesNotThrow(() =>
+        verifyOnlyOfficeProductIntent(before, after, commands),
+      );
       // Do not trim real authored whitespace into a false empty-cell result.
       for (const text of [" \t", "\t\t", "\n\t"]) {
         changed.tableCells[1][0] = text;
-        assert.throws(() => verifyOnlyOfficeProductIntent(before, after, commands), /new_table_row_content/);
+        assert.throws(
+          () => verifyOnlyOfficeProductIntent(before, after, commands),
+          /new_table_row_content/,
+        );
       }
       changed.tableCells[1][0] = "\t";
     }

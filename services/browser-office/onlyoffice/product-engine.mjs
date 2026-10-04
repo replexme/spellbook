@@ -123,6 +123,62 @@ export function verifyOnlyOfficeProductObservation(expected, actual) {
     );
 }
 
+// The pinned serializer stores millimetres as truncated integer EMUs. Keyboard
+// movement uses view pixels and can leave sub-EMU coordinates in native history.
+// Finalize those coordinates in that same history point before approving bytes;
+// otherwise exact file recovery can draw a different pixel boundary.
+export function finalizeOnlyOfficeNativeGeometry() {
+  const model = window.Asc.editor.WordControl.m_oLogicDocument;
+  const pending = [];
+  const visit = (shape) => {
+    const transform = shape.spPr?.xfrm;
+    if (transform)
+      for (const key of [
+        "offX",
+        "offY",
+        "extX",
+        "extY",
+        "chOffX",
+        "chOffY",
+        "chExtX",
+        "chExtY",
+      ]) {
+        const value = transform[key];
+        if (!Number.isFinite(value)) continue;
+        const scaled = value * 36000;
+        if (Math.abs(scaled - Math.round(scaled)) <= 1e-7) continue;
+        const wanted = Math.trunc(scaled);
+        let serializable = wanted / 36000;
+        for (
+          let attempt = 0;
+          Math.trunc(serializable * 36000) !== wanted && attempt < 8;
+          attempt++
+        )
+          serializable +=
+            Math.sign(wanted) *
+            Math.max(Math.abs(serializable), 1) *
+            Number.EPSILON;
+        const setter = transform["set" + key[0].toUpperCase() + key.slice(1)];
+        if (
+          Math.trunc(serializable * 36000) !== wanted ||
+          typeof setter !== "function"
+        )
+          throw Error("onlyoffice_product_geometry_not_serializable");
+        pending.push(() => setter.call(transform, serializable));
+      }
+    for (const child of shape.spTree ?? []) visit(child);
+  };
+  for (const slide of model.Slides)
+    for (const shape of slide.cSld.spTree) visit(shape);
+  if (!pending.length) return false;
+  const history = window.AscCommon.History;
+  if (!history.Points[history.Index]?.Items.length)
+    throw Error("onlyoffice_product_geometry_history_required");
+  for (const apply of pending) apply();
+  model.Recalculate();
+  return true;
+}
+
 export const onlyOfficeProductOperations = onlyOfficeIntentOperations;
 
 export function createOnlyOfficeProductEngine({
@@ -162,6 +218,8 @@ export function createOnlyOfficeProductEngine({
           }
         return JSON.stringify([count, last?.Pos ?? null, last?.Len ?? null]);
       }),
+    prepareManualCheckpoint: async () =>
+      (await getFrame()).evaluate(finalizeOnlyOfficeNativeGeometry),
     observe: async () => observeOnlyOfficeProduct(await getFrame()),
     preflight: async (commands) => {
       const frame = await getFrame();

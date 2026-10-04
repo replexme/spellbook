@@ -36,6 +36,10 @@ export function installOnlyOfficeProductPort({
     switch (method) {
       case "changeToken":
         return engine.changeToken();
+      case "prepareManualCheckpoint":
+        if (transactions.size)
+          throw Error("onlyoffice_product_transaction_busy");
+        return engine.prepareManualCheckpoint();
       case "observe":
         return engine.observe();
       case "preflight":

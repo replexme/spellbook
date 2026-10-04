@@ -125,7 +125,7 @@ export function createProductSession({
   };
   const manualCheckpoint = async (reason) => {
     ready();
-    const live = await observe();
+    let live = await observe();
     if (live.revision === current.observation.revision) {
       if (acceptedNativeToken !== lastObservedNativeToken)
         throw Error("product_unobserved_native_edit");
@@ -180,6 +180,7 @@ export function createProductSession({
       return true;
     }
 
+    if (await engine.prepareManualCheckpoint?.()) live = await observe();
     const bytes = await engine.snapshot({
       before: current.observation,
       edited: live,

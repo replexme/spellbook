@@ -458,3 +458,23 @@ test("owned native transactions and restored artifact history refresh private ch
   await s.session.recover();
   assert.equal((await s.session.observe()).revision, "r2");
 });
+
+test("manual artifact finalization is reobserved and never runs on known Undo or Redo", async () => {
+  const s = setup();
+  await s.session.open(s.bytes(1));
+  await apply(s, 2);
+  let prepared = 0;
+  s.engine.prepareManualCheckpoint = async () => {
+    prepared++;
+    s.change(4);
+    return true;
+  };
+  s.change(3);
+  await s.session.checkpointManual();
+  assert.equal(prepared, 1);
+  assert.equal(s.record().candidateBytes[2], 4);
+  await s.session.undo();
+  assert.equal(prepared, 1);
+  await s.session.redo();
+  assert.equal(prepared, 1);
+});
