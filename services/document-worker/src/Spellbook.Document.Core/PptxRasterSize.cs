@@ -34,7 +34,7 @@ public readonly record struct PptxRasterSize(int Width, int Height)
             ToPixels(widthEmu, dotsPerInch),
             ToPixels(heightEmu, dotsPerInch));
         if ((long)size.Width * size.Height > MaxPixelsPerSlide)
-            throw new InvalidDataException($"Slide exceeds the safe raster size of {MaxPixelsPerSlide} pixels.");
+            throw new InvalidDataException(PptxImagePixelBudget.RejectionCode);
         return size;
     }
 

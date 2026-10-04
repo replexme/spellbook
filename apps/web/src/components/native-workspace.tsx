@@ -25,6 +25,11 @@ import {
 } from "@/lib/browser-ai/key-store";
 import type { BrowserJob } from "@/lib/browser-ai/run-browser-turn";
 import { useAiAccount } from "@/lib/use-ai-account";
+import {
+  readBrowserDocument,
+  writeBrowserDocument,
+} from "@/lib/browser-document-transfer";
+import { uploadFailure } from "@/lib/upload-reasons";
 import type { AiConnectorConfig } from "@/lib/ai-connector-config";
 import { CompareDialog, type ComparePair } from "./workspace/compare-dialog";
 import { Composer } from "./workspace/composer";
@@ -84,6 +89,13 @@ interface BrowserLaunch extends LaunchBase {
   revision: string;
   maxBytes: number;
 }
+
+// Save refusals that a person can act on; each has its own explanation.
+const SAVE_REFUSALS = new Set([
+  "storage_full",
+  "document_limit_reached",
+  "direct_upload_blocked",
+]);
 
 export type NativeLaunch = WopiLaunch | BrowserLaunch;
 
@@ -293,6 +305,11 @@ export function NativeWorkspace({
     [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState<PendingTurn | null>(initialQueued);
   const [error, setError] = useState(""),
+    // A page that fixes the error (for example the plan section).
+    [errorLink, setErrorLink] = useState<{
+      label: string;
+      href: string;
+    } | null>(null),
     [saveState, setSaveState] = useState("저장됨"),
     [savedAt, setSavedAt] = useState<string | null>(null);
   const saveStateRef = useRef(saveState);
@@ -805,28 +822,11 @@ export function NativeWorkspace({
       if (launch.editorKind !== "browser" || browserOpening.current) return;
       browserOpening.current = true;
       try {
-        const response = await fetch(`${launch.contentApiBase}/contents`, {
-          cache: "no-store",
-        });
-        if (!response.ok) {
-          const value = await response.json().catch(() => ({}));
-          throw new Error(value.error ?? "browser_document_download_failed");
-        }
-        const revision = response.headers.get("etag") ?? "";
-        const contentType = response.headers
-          .get("content-type")
-          ?.split(";", 1)[0];
-        const bytes = await response.arrayBuffer();
-        if (
-          revision !== launch.revision ||
-          contentType !==
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation" ||
-          !bytes.byteLength ||
-          bytes.byteLength > launch.maxBytes ||
-          new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 2))[0] !== 0x50 ||
-          new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 2))[1] !== 0x4b
-        )
-          throw new Error("browser_document_identity_mismatch");
+        const { revision, bytes } = await readBrowserDocument(
+          launch.contentApiBase,
+          launch.revision,
+          launch.maxBytes,
+        );
         browserRevision.current = revision;
         channel.postMessage(
           {
@@ -880,22 +880,12 @@ export function NativeWorkspace({
       };
       pendingSaveRevision.current = saveRevision.current + 1;
       try {
-        const response = await fetch(`${launch.contentApiBase}/contents`, {
-          method: "PUT",
-          headers: {
-            "content-type":
-              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            "if-match": browserRevision.current,
-          },
-          body: message.bytes,
-          cache: "no-store",
-        });
-        const value = await response.json().catch(() => ({}));
-        if (!response.ok)
-          throw new Error(value.error ?? "browser_document_save_failed");
-        const revision = response.headers.get("etag") ?? value.revision ?? "";
-        if (typeof revision !== "string" || !revision)
-          throw new Error("browser_save_revision_missing");
+        const value = await writeBrowserDocument(
+          launch.contentApiBase,
+          browserRevision.current,
+          message.bytes,
+        );
+        const revision = value.revision;
         const pendingRequest = pendingBrowserSave.current;
         if (!pendingRequest || pendingRequest.requestId !== message.requestId)
           return;
@@ -929,6 +919,15 @@ export function NativeWorkspace({
           return;
         }
         setSaveState("저장 실패");
+        const code = cause instanceof Error ? cause.message : "";
+        if (SAVE_REFUSALS.has(code)) {
+          // Over the plan's storage, or a network that blocks storage:
+          // say why, and what to do (download or delete to make room).
+          const failure = uploadFailure(code, launch.fileName, launch.maxBytes);
+          setError(`${failure.reason} ${failure.fix}`);
+          setErrorLink(failure.link ?? null);
+          return;
+        }
         setError(
           "이 파일의 변경을 안전하게 저장하지 못했어요. 편집 내용을 확인하고 다시 시도해 주세요.",
         );
@@ -2409,11 +2408,20 @@ export function NativeWorkspace({
                         icon="close"
                         label="알림 닫기"
                         size="sm"
-                        onClick={() => setError("")}
+                        onClick={() => {
+                          setError("");
+                          setErrorLink(null);
+                        }}
                       />
                     }
                   >
                     {error}
+                    {errorLink ? (
+                      <>
+                        {" "}
+                        <a href={errorLink.href}>{errorLink.label}</a>
+                      </>
+                    ) : null}
                   </Banner>
                 ) : null}
                 {assetNotice ? (

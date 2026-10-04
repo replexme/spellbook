@@ -1,4 +1,4 @@
-import { uploadDocument } from "@/lib/orchestration";
+import { recoverStaleDocumentJobs, uploadDocument } from "@/lib/orchestration";
 import { listLibrary } from "@/lib/document-library";
 import { requireSession, routeError } from "@/lib/http";
 
@@ -6,8 +6,10 @@ export const runtime = "nodejs";
 
 export async function GET(request: Request) {
   try {
+    const session = await requireSession(request);
+    await recoverStaleDocumentJobs({ accountId: session.accountId });
     return Response.json({
-      documents: await listLibrary(await requireSession(request)),
+      documents: await listLibrary(session),
     });
   } catch (error) {
     return routeError(error);

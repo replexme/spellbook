@@ -256,20 +256,22 @@ export async function pollNativeSession(
     throw new HttpError(400, "invalid_event_cursor");
   await failInterruptedNativeTurn(native.id, documentId);
   const retryAfterSeconds = jobRedeliverySeconds();
+  // Save checks (scan_render) are recovered by recoverStaleDocumentJobs,
+  // which never sends a job again while a worker may still be rendering it.
   const pending = await db()`select id,job_type,payload from spellbook_jobs
     where document_id=${documentId} and status='queued'
       and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second')
-      and job_type in ('native_turn','scan_render')
-      and (job_type <> 'native_turn' or coalesce(payload->>'execution','internal') = 'internal')
+      and job_type='native_turn'
+      and coalesce(payload->>'execution','internal') = 'internal'
     order by created_at limit 2`;
   for (const job of pending) {
-    const target = job.job_type === "native_turn" ? "ai" : "document";
-    const path =
-      job.job_type === "native_turn"
-        ? "/internal/jobs/native"
-        : "/internal/jobs/scan-render";
     try {
-      await enqueueWorkerJob(job.id, target, path, job.payload);
+      await enqueueWorkerJob(
+        job.id,
+        "ai",
+        "/internal/jobs/native",
+        job.payload,
+      );
       await db()`update spellbook_jobs set dispatched_at=now(),error=null,updated_at=now()
         where id=${job.id} and status='queued'
           and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second')`;

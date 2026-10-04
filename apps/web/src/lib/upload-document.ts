@@ -1,3 +1,5 @@
+import { RELAYED_FILE_MAX_BYTES } from "./browser-document-transfer";
+
 /** A failed upload; the message is a reason code from upload-reasons.ts. */
 export class UploadError extends Error {}
 
@@ -102,6 +104,9 @@ export function uploadDocumentFile(
         if (typeof id !== "string") throw new UploadError("unexpected_error");
         return id;
       }
+      // The app relays only small files; say so instead of "too large".
+      if (file.size > RELAYED_FILE_MAX_BYTES)
+        throw new UploadError("direct_upload_blocked");
     }
     const form = new FormData();
     form.set("file", file);

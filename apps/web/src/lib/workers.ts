@@ -1,10 +1,24 @@
 export type WorkerTarget = "document" | "ai";
 
+/**
+ * Which line a document job waits in. Saves of work in progress ("save")
+ * must not wait behind newly imported files ("upload"); a managed queue
+ * adapter gives each its own queue. Direct local delivery has no queue.
+ */
+export type WorkerLane = "upload" | "save";
+
+export interface WorkerDelivery {
+  /** 0 for the first delivery; a redelivery of a stale job counts up. */
+  attempt?: number;
+  lane?: WorkerLane;
+}
+
 export async function enqueueWorkerJob(
   _jobId: string,
   target: WorkerTarget,
   path: string,
   payload: unknown,
+  _delivery: WorkerDelivery = {},
 ): Promise<void> {
   const response = await internalFetch(`${workerUrl(target)}${path}`, {
     method: "POST",

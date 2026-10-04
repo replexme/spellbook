@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { createReadStream } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -135,6 +136,71 @@ export async function objectHead(
   } finally {
     await handle.close();
   }
+}
+
+/**
+ * An object's size, first bytes and SHA-256, read as a stream so a large
+ * file never sits in memory whole. Null when the object does not exist.
+ */
+export async function objectDigest(
+  objectName: string,
+  headLength: number,
+): Promise<{ size: number; head: Buffer; sha256: string } | null> {
+  const file = objectPath(objectName);
+  const stat = await fs.stat(file).catch(() => null);
+  if (!stat?.isFile()) return null;
+  const hash = createHash("sha256");
+  const chunks: Buffer[] = [];
+  let collected = 0;
+  for await (const chunk of createReadStream(file)) {
+    const data = chunk as Buffer;
+    hash.update(data);
+    if (collected < headLength) {
+      chunks.push(data.subarray(0, headLength - collected));
+      collected += Math.min(data.length, headLength - collected);
+    }
+  }
+  return {
+    size: stat.size,
+    head: Buffer.concat(chunks),
+    sha256: hash.digest("hex"),
+  };
+}
+
+/** Moves one object to a new name inside the store. */
+export async function moveObject(from: string, to: string): Promise<void> {
+  const destination = objectPath(to);
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.rename(objectPath(from), destination);
+}
+
+/** Total bytes stored under a folder (a name prefix ending in "/"). */
+export async function prefixBytes(prefix: string): Promise<number> {
+  return directoryBytes(objectPath(prefix.replace(/\/+$/, "")));
+}
+
+/** Removes every object under a folder (a name prefix ending in "/"). */
+export async function deletePrefix(prefix: string): Promise<void> {
+  await fs.rm(objectPath(prefix.replace(/\/+$/, "")), {
+    recursive: true,
+    force: true,
+  });
+}
+
+async function directoryBytes(directory: string): Promise<number> {
+  const entries = await fs
+    .readdir(directory, { withFileTypes: true })
+    .catch((error) => {
+      if (hasCode(error, "ENOENT")) return [];
+      throw error;
+    });
+  let total = 0;
+  for (const entry of entries) {
+    const child = path.join(directory, entry.name);
+    if (entry.isDirectory()) total += await directoryBytes(child);
+    else if (entry.isFile()) total += (await fs.stat(child)).size;
+  }
+  return total;
 }
 
 export async function getJsonObject<T>(objectName: string): Promise<T> {

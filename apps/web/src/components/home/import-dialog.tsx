@@ -265,6 +265,11 @@ export function ImportDialog({
         {step.failure.reason}
       </Banner>
       <p className="dialog-lead">{step.failure.fix}</p>
+      {step.failure.link ? (
+        <p className="dialog-lead">
+          <a href={step.failure.link.href}>{step.failure.link.label}</a>
+        </p>
+      ) : null}
     </Dialog>
   );
 }

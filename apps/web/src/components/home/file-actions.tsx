@@ -13,6 +13,7 @@ import {
   TextField,
 } from "@/design-system";
 import type { LibraryDocument } from "@/lib/history-types";
+import { retryableFailure } from "@/lib/upload-reasons";
 
 export function documentHref(document: LibraryDocument) {
   return `/documents/${document.id}`;
@@ -23,10 +24,12 @@ export function FileMenu({
   document,
   onRename,
   onDelete,
+  onRetry,
 }: {
   document: LibraryDocument;
   onRename: (document: LibraryDocument) => void;
   onDelete: (document: LibraryDocument) => void;
+  onRetry?: (document: LibraryDocument) => void;
 }) {
   const ready =
     document.status !== "failed" && document.status !== "processing";
@@ -57,6 +60,18 @@ export function FileMenu({
               onSelect={() => {
                 close();
                 window.location.assign(documentHref(document));
+              }}
+            />
+          ) : null}
+          {document.status === "failed" &&
+          onRetry &&
+          retryableFailure(document.failureCode) ? (
+            <MenuItem
+              icon="refresh"
+              title="다시 확인하기"
+              onSelect={() => {
+                close();
+                onRetry(document);
               }}
             />
           ) : null}

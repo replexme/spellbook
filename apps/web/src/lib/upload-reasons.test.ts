@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { precheckUpload, uploadFailure } from "./upload-reasons";
+import {
+  failureShort,
+  precheckUpload,
+  retryableFailure,
+  uploadFailure,
+} from "./upload-reasons";
 
 const MAX = 50 * 1024 * 1024;
 
@@ -28,6 +33,14 @@ describe("upload reasons", () => {
       "invalid_package",
       "document_processing_failed",
       "storage_capacity_exhausted",
+      "too_many_slides",
+      "expanded_too_large",
+      "image_too_large",
+      "render_timeout",
+      "processing_timeout",
+      "storage_full",
+      "document_limit_reached",
+      "direct_upload_blocked",
       "network",
       "something_new",
     ]) {
@@ -46,5 +59,22 @@ describe("upload reasons", () => {
       "file_too_large",
     );
     expect(precheckUpload({ name: "A.PPTX", size: 10 }, MAX)).toBeNull();
+  });
+
+  it("tells a full account how to make room", () => {
+    for (const code of ["storage_full", "document_limit_reached"]) {
+      expect(uploadFailure(code, "a.pptx", MAX).fix).toContain("삭제");
+      expect(uploadFailure(code, "a.pptx", MAX).link?.href).toBe(
+        "/settings#plan",
+      );
+    }
+  });
+
+  it("offers a second check only where it can pass", () => {
+    expect(retryableFailure("processing_timeout")).toBe(true);
+    expect(retryableFailure("render_timeout")).toBe(true);
+    expect(retryableFailure("encrypted_or_legacy_file")).toBe(false);
+    expect(retryableFailure("too_many_slides")).toBe(false);
+    expect(failureShort("image_too_large")).toBe("아주 큰 그림이 들어 있어요");
   });
 });

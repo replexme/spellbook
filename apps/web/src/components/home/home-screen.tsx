@@ -136,6 +136,19 @@ export function HomeScreen({
     }
   }, []);
 
+  // Checks a file again after a check that may pass on retry.
+  const retry = useCallback(
+    (document: LibraryDocument) => {
+      void fetch(`/api/documents/${document.id}/retry`, {
+        method: "POST",
+        cache: "no-store",
+      })
+        .catch(() => undefined)
+        .finally(() => void load());
+    },
+    [load],
+  );
+
   const warmEditor = useCallback(() => {
     // Opening a document keeps its own retry path if prewarming fails.
     void fetch("/api/office/warm", { method: "POST", keepalive: true }).catch(
@@ -420,6 +433,7 @@ export function HomeScreen({
                       document={document}
                       onRename={setRenaming}
                       onDelete={setDeleting}
+                      onRetry={retry}
                     />
                   </li>
                 ))}
@@ -449,6 +463,7 @@ export function HomeScreen({
                       document={document}
                       onRename={setRenaming}
                       onDelete={setDeleting}
+                      onRetry={retry}
                     />
                   </li>
                 ))}

@@ -1,5 +1,6 @@
 import { requireSession, routeError } from "@/lib/http";
 import { ASSET_UPLOAD_MAX_BYTES, uploadAsset } from "@/lib/image-assets";
+import { assertStorageAvailable } from "@/lib/storage-usage";
 
 const multipartOverheadAllowance = 100_000;
 
@@ -36,6 +37,7 @@ export async function POST(
     ).get("file");
     if (!(file instanceof File))
       return Response.json({ error: "file_required" }, { status: 400 });
+    await assertStorageAvailable(session, { addingBytes: file.size });
     return Response.json(
       await uploadAsset(session, (await context.params).id, file),
       { status: 201 },

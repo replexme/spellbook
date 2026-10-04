@@ -25,15 +25,22 @@ public sealed class PptxSafetyScanner
             throw new InvalidDataException("Only .pptx packages are accepted.");
         }
 
-        if (file.Length <= 0 || file.Length > DefaultMaxCompressedBytes)
+        // Limit violations carry the stable reason code as the message so
+        // WorkerFailure.Code reports them verbatim to the product.
+        if (file.Length <= 0)
         {
-            throw new InvalidDataException($"Compressed PPTX size must be between 1 and {DefaultMaxCompressedBytes} bytes.");
+            throw new InvalidDataException("invalid_package");
+        }
+
+        if (file.Length > DefaultMaxCompressedBytes)
+        {
+            throw new InvalidDataException("file_too_large");
         }
 
         using var archive = ZipFile.OpenRead(path);
         if (archive.Entries.Count > DefaultMaxEntries)
         {
-            throw new InvalidDataException($"PPTX contains more than {DefaultMaxEntries} entries.");
+            throw new InvalidDataException("expanded_too_large");
         }
 
         long totalUncompressed = 0;
@@ -61,12 +68,12 @@ public sealed class PptxSafetyScanner
 
             if (totalUncompressed > DefaultMaxUncompressedBytes)
             {
-                throw new InvalidDataException($"Expanded PPTX exceeds {DefaultMaxUncompressedBytes} bytes.");
+                throw new InvalidDataException("expanded_too_large");
             }
 
             if (entry.CompressedLength > 0 && entry.Length / (double)entry.CompressedLength > DefaultMaxCompressionRatio)
             {
-                throw new InvalidDataException($"Entry '{entry.FullName}' exceeds the allowed compression ratio.");
+                throw new InvalidDataException("expanded_too_large");
             }
 
             hasContentTypes |= entry.FullName.Equals("[Content_Types].xml", StringComparison.Ordinal);
@@ -80,7 +87,7 @@ public sealed class PptxSafetyScanner
             {
                 slideCount++;
                 if (slideCount > DefaultMaxSlides)
-                    throw new InvalidDataException($"PPTX exceeds the beta limit of {DefaultMaxSlides} slides.");
+                    throw new InvalidDataException("too_many_slides");
             }
 
             if (entry.FullName.EndsWith(".rels", StringComparison.OrdinalIgnoreCase))
