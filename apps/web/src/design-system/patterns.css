@@ -2475,6 +2475,7 @@ ol.connect {
 }
 
 .support-link {
+  align-self: center;
   color: var(--ds-text-secondary);
   font-size: var(--ds-text-sm);
   text-decoration: underline;
