@@ -28,6 +28,15 @@ window.__ONLYOFFICE_SAVE_E2E__={getStatus:()=>({ready:editor?.getState().status=
 window.__comparisonStructuralRepairs=[];
 window.__comparisonPreservations=[];
 let noEditBytes=null,original=null;
+${
+  authorizeArtifact
+    ? `const sourceCheckpoints=new Map();
+window.__ONLYOFFICE_PRODUCT_PRESERVATION__={
+ begin:()=>{if(saveContext||sourceCheckpoints.size)throw new Error('product_source_checkpoint_busy');const token=crypto.randomUUID();sourceCheckpoints.set(token,{original,noEditBytes,saved:window.__comparisonSaved,writeCount});return token;},
+ finish:(token,commit)=>{const state=sourceCheckpoints.get(token);if(!state||typeof commit!=='boolean'||saveContext)throw new Error('product_source_checkpoint_invalid');if(!commit){original=state.original;noEditBytes=state.noEditBytes;window.__comparisonSaved=state.saved;writeCount=state.writeCount;}sourceCheckpoints.delete(token);}
+};`
+    : ""
+}
 const preserveEnabled=${JSON.stringify(preserveSource)};
 const preservationWorker=preserveEnabled?new Worker('/comparison-repair.js',{type:'module'}):null;
 const pendingPreservations=new Map();

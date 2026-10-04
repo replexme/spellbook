@@ -417,6 +417,31 @@ for (const method of [
       async ({ method, args }) => window.__productNativePort[method](...args),
       { method, args },
     );
+const nativeBegin = engine.begin,
+  nativeFinish = engine.finish;
+engine.begin = async () => {
+  const sourceToken = await mainPage.evaluate(() =>
+    window.__ONLYOFFICE_PRODUCT_PRESERVATION__.begin(),
+  );
+  try {
+    return { native: await nativeBegin(), sourceToken };
+  } catch (error) {
+    await mainPage.evaluate(
+      (token) =>
+        window.__ONLYOFFICE_PRODUCT_PRESERVATION__.finish(token, false),
+      sourceToken,
+    );
+    throw error;
+  }
+};
+engine.finish = async (token, commit) => {
+  await nativeFinish(token.native, commit);
+  await mainPage.evaluate(
+    ({ token, commit }) =>
+      window.__ONLYOFFICE_PRODUCT_PRESERVATION__.finish(token, commit),
+    { token: token.sourceToken, commit },
+  );
+};
 report.nativeTransport = "origin-and-session-bound-message-port";
 const session = createProductSession({
   engine,
@@ -554,6 +579,22 @@ try {
   assert.deepEqual(await pixels(mainFrame), report.rendering.before);
   assert.equal(session.status().redo, 1);
   report.stages.push("native-failure-rollback-retains-old-redo");
+  const saveJournal = journal.save;
+  journal.save = async () => {
+    throw Error("injected_journal_disk_full");
+  };
+  await assert.rejects(
+    session.apply({
+      expectedRevision: before.revision,
+      commands: [rollbackCommand],
+    }),
+    /injected_journal_disk_full/,
+  );
+  journal.save = saveJournal;
+  assert.equal(session.status().ready, true);
+  assert.equal(session.status().redo, 1);
+  assert.deepEqual(await pixels(mainFrame), report.rendering.before);
+  report.stages.push("journal-failure-restores-native-and-source-baselines");
   let beginCount = 0;
   const originalBegin = engine.begin;
   engine.begin = async () => {

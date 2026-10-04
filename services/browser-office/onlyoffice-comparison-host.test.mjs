@@ -209,3 +209,28 @@ test("product artifact refusal cannot advance native baseline or acknowledge a h
   await retry;
   assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 1);
 });
+
+test("rollback after artifact approval restores the original preservation baseline", async () => {
+  const h = await host(true);
+  h.window.__ONLYOFFICE_PRODUCT_ADMIT__ = async () => true;
+  h.window.__comparisonIntent = {
+    sourceOperations: ["move"],
+    sourceTargets: [],
+  };
+  const token = h.window.__ONLYOFFICE_PRODUCT_PRESERVATION__.begin();
+  h.setValue(2);
+  const saved = h.window.__ONLYOFFICE_SAVE_E2E__.save();
+  await h.settle();
+  h.worker.reply(2);
+  await saved;
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 1);
+  h.window.__ONLYOFFICE_PRODUCT_PRESERVATION__.finish(token, false);
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 0);
+  h.setValue(3);
+  const retry = h.window.__ONLYOFFICE_SAVE_E2E__.save();
+  await h.settle();
+  assert.deepEqual([...h.requests.at(-1).bytes], [1]);
+  assert.deepEqual([...h.requests.at(-1).noEditBytes], [1]);
+  h.worker.reply(3);
+  await retry;
+});
