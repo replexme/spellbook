@@ -199,8 +199,8 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         }
       } else if (op === "replace_text") {
         if (
-          actual.text.replace(/\r\n/g, "\n").trimEnd() !==
-          command.text.replace(/\r\n/g, "\n").trimEnd()
+          actual.text.replace(/\r\n/g, "\n").replace(/\n$/, "") !==
+          command.text.replace(/\r\n/g, "\n")
         )
           throw Error("onlyoffice_product_intent_mismatch:text");
         const initial = oldDrawing.paragraphs.flatMap((p) => p.runs)[0]?.style;

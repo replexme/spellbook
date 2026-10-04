@@ -366,7 +366,7 @@ export function createOnlyOfficeProductEngine({
         m.RedrawCurSlide();
         m.Document_UpdateInterfaceState();
       }, command.nativeId);
-      return result;
+      return true;
     },
     snapshot,
     undo: async () =>
