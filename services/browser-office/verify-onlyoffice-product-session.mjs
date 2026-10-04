@@ -712,11 +712,11 @@ try {
     assert.equal(session.status().undo, 2);
     // Use the editor's own buttons, independent of the product history API.
     const manualRevision = finalExpected.revision;
-    await mainFrame.getByRole("button", { name: /^Undo$/ }).click();
+    await mainFrame.locator("#id-toolbar-btn-undo").click();
     const nativeUndo = await session.observe();
     assert.equal(nativeUndo.revision, applied.observation.revision);
     assert.equal(session.status().redo, 1);
-    await mainFrame.getByRole("button", { name: /^Redo$/ }).click();
+    await mainFrame.locator("#id-toolbar-btn-redo").click();
     finalExpected = await session.observe();
     assert.equal(finalExpected.revision, manualRevision);
     assert.equal(session.status().redo, 0);
