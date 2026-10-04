@@ -166,6 +166,53 @@ export function finalizeOnlyOfficeNativeGeometry() {
           throw Error("onlyoffice_product_geometry_not_serializable");
         pending.push(() => setter.call(transform, serializable));
       }
+    const rectangle = shape.blipFill?.srcRect;
+    if (rectangle) {
+      const values = {};
+      let changed = false;
+      for (const key of ["l", "t", "r", "b"]) {
+        const value = rectangle[key];
+        values[key] = value;
+        if (!Number.isFinite(value)) continue;
+        const inverted = key === "r" || key === "b";
+        const encoded = (v) => (inverted ? 100 - v : v) * 1000;
+        const scaled = encoded(value);
+        const wanted =
+          Math.abs(scaled - Math.round(scaled)) <= 1e-7
+            ? Math.round(scaled)
+            : Math.trunc(scaled);
+        let serializable = inverted ? 100 - wanted / 1000 : wanted / 1000;
+        for (
+          let attempt = 0;
+          Math.trunc(encoded(serializable)) !== wanted && attempt < 8;
+          attempt++
+        )
+          serializable +=
+            (inverted ? -1 : 1) *
+            Math.sign(wanted) *
+            Math.max(Math.abs(serializable), 1) *
+            Number.EPSILON;
+        if (Math.trunc(encoded(serializable)) !== wanted)
+          throw Error("onlyoffice_product_crop_not_serializable");
+        values[key] = serializable;
+        changed ||= serializable !== value;
+      }
+      if (changed) {
+        if (
+          typeof shape.setBlipFill !== "function" ||
+          typeof shape.blipFill.createDuplicate !== "function"
+        )
+          throw Error("onlyoffice_product_crop_history_unavailable");
+        pending.push(() => {
+          // setSrcRect ignores tiny differences, although the writer truncates them.
+          // Its underlying native fill setter records the exact value in this point.
+          const fill = shape.blipFill.createDuplicate();
+          fill.srcRect = new window.AscFormat.CSrcRect();
+          Object.assign(fill.srcRect, values);
+          shape.setBlipFill(fill);
+        });
+      }
+    }
     for (const child of shape.spTree ?? []) visit(child);
   };
   for (const slide of model.Slides)
