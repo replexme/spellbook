@@ -3718,7 +3718,7 @@ function connectChangedNewNotes(original, noEdit, edited, merged, operations, ta
   if (!humanEdit && !operations.includes("set_speaker_notes")) return [];
   const patched = [];
   const slides = orderedSlidePaths(original);
-  const permitted = humanEdit ? slides : (targets ?? []).filter((t) => t.op === "set_speaker_notes").map((t) => slides[t.slideIndex]);
+  const permitted = humanEdit || targets === null ? slides : (targets ?? []).filter((t) => t.op === "set_speaker_notes").map((t) => slides[t.slideIndex]);
   const allowedSlides = new Set(permitted);
   if (!humanEdit)
     for (const slide of slides) {
@@ -3747,6 +3747,7 @@ function connectChangedNewNotes(original, noEdit, edited, merged, operations, ta
   for (const slide of new Set(permitted)) {
     if (!slide || !edited[relationshipsPath(slide)]) continue;
     const notes = relationshipsOfType(edited, slide, "notesSlide");
+    if (!notes.length) continue;
     if (notes.length !== 1) throw new Error(`Native snapshot cannot identify notes for ${slide}.`);
     const part = notes[0].target;
     if (original[part] || !merged[part] || sameEngineExportPart(part, noEdit[part], edited[part])) continue;
