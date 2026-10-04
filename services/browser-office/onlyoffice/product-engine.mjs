@@ -15,20 +15,50 @@ export async function observeOnlyOfficeProduct(frame) {
       "onlyoffice_product_observation_unavailable:" +
         projection.unavailable.join(","),
     );
-  const slides = projection.common.slides.map((slide, slideIndex) => ({
-    slideIndex,
-    elements: slide.shapes.map((shape, index) => ({
-      elementId: slideIndex + "/" + index,
+  // Use the product's hundredth-millimetre geometry once; duplicate SDK
+  // millimetre fields must not bypass the common physical-outline budget.
+  const element = (shape, id) => {
+    const { x, y, w, h, children, ...authored } = shape;
+    return {
+      elementId: id,
       kind: shape.type,
       text: shape.text,
-      x: shape.x * 100,
-      y: shape.y * 100,
-      width: shape.w * 100,
-      height: shape.h * 100,
+      x: Math.round(x * 100),
+      y: Math.round(y * 100),
+      width: Math.round(w * 100),
+      height: Math.round(h * 100),
       objectName: shape.ownName,
-      onlyoffice: shape,
-    })),
-    onlyoffice: projection.extended.slides[slideIndex],
+      onlyoffice: authored,
+      elements: children.map((child, index) =>
+        element(child, id + "/" + index),
+      ),
+    };
+  };
+  const drawing = (value) => {
+    const {
+      GetPosX,
+      GetPosY,
+      GetWidth,
+      GetHeight,
+      groupChildren,
+      ...authored
+    } = value;
+    // OOXML angles are serialized as integer 1/60000 degrees. The pinned
+    // SDK can round one unit downward; expose millidegrees consistently.
+    if (typeof authored.GetRotation === "number")
+      authored.GetRotation = Math.round(authored.GetRotation * 1000) / 1000;
+    if (groupChildren) authored.groupChildren = groupChildren.map(drawing);
+    return authored;
+  };
+  const slides = projection.common.slides.map((slide, slideIndex) => ({
+    slideIndex,
+    elements: slide.shapes.map((shape, index) =>
+      element(shape, slideIndex + "/" + index),
+    ),
+    onlyoffice: {
+      ...projection.extended.slides[slideIndex],
+      drawings: projection.extended.slides[slideIndex].drawings.map(drawing),
+    },
     narrow: projection.narrow[slideIndex],
   }));
   const state = {
@@ -181,7 +211,9 @@ export function createOnlyOfficeProductEngine({
             if (command.op.endsWith("opacity")) requireNumber("opacity", 0, 1);
             if (
               ["fill_color", "line_color", "font_color"].includes(command.op) &&
-              !/^#[\da-f]{6}$/i.test(command.color ?? "")
+              (!Number.isSafeInteger(command.color) ||
+                command.color < 0 ||
+                command.color > 0xffffff)
             )
               throw Error("onlyoffice_product_color_invalid");
             if (
@@ -232,10 +264,9 @@ export function createOnlyOfficeProductEngine({
         p.CreateNewHistoryPoint();
         const color = () =>
           api.CreateRGBColor(
-            ...command.color
-              .slice(1)
-              .match(/../g)
-              .map((v) => parseInt(v, 16)),
+            (command.color >>> 16) & 255,
+            (command.color >>> 8) & 255,
+            command.color & 255,
           );
         const fill = () => api.CreateSolidFill(color());
         const content = () => {

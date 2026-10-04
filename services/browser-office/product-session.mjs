@@ -158,7 +158,7 @@ export function createProductSession({
         const input = structuredClone(request);
         if (
           !input?.commands?.length ||
-          input.commands.length > 100 ||
+          input.commands.length > 50 ||
           typeof input.expectedRevision !== "string"
         )
           throw Error("product_command_request_invalid");

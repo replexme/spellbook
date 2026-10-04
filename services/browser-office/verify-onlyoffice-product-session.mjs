@@ -99,6 +99,29 @@ const candidateServer = createServer(async (req, res) => {
 await new Promise((resolve) => candidateServer.listen(0, "127.0.0.1", resolve));
 candidateOrigin = "http://127.0.0.1:" + candidateServer.address().port;
 const server = createServer(async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", candidateOrigin);
+  if (req.url.startsWith("/repo/")) {
+    try {
+      const file = path.resolve(
+        integrationRoot,
+        "services",
+        decodeURIComponent(
+          new URL(req.url, "http://localhost").pathname.slice(6),
+        ),
+      );
+      if (
+        !file.startsWith(path.join(integrationRoot, "services") + path.sep) ||
+        !file.endsWith(".mjs")
+      )
+        throw Error("invalid_source_path");
+      res.writeHead(200, { "content-type": "text/javascript" });
+      res.end(await fs.readFile(file));
+    } catch {
+      res.writeHead(404);
+      res.end();
+    }
+    return;
+  }
   const url = new URL(req.url, "http://localhost");
   const token = url.searchParams.get("document");
   if (url.pathname === "/compare.html") {
@@ -196,6 +219,44 @@ async function open(bytes, providedContext) {
     .frames()
     .find((f) => f.url().includes("/presentationeditor/"));
   assert(frame);
+  const sessionId = crypto.randomUUID(),
+    framePath = [];
+  for (let child = frame; child.parentFrame(); child = child.parentFrame())
+    framePath.unshift(child.parentFrame().childFrames().indexOf(child));
+  await frame.evaluate(
+    async (config) => {
+      const { installOnlyOfficeProductPort } = await import(config.url);
+      window.__productPortDispose = installOnlyOfficeProductPort({
+        clientWindow: window.top,
+        clientOrigin: config.clientOrigin,
+        sessionId: config.sessionId,
+      });
+    },
+    {
+      url: origin + "/repo/browser-office/onlyoffice/product-native-port.mjs",
+      clientOrigin: origin,
+      sessionId,
+    },
+  );
+  await page.evaluate(
+    async (config) => {
+      const { connectOnlyOfficeProductPort } = await import(config.url);
+      let frameWindow = window;
+      for (const index of config.framePath)
+        frameWindow = frameWindow.frames[index];
+      window.__productNativePort = await connectOnlyOfficeProductPort({
+        frameWindow,
+        frameOrigin: config.frameOrigin,
+        sessionId: config.sessionId,
+      });
+    },
+    {
+      url: origin + "/repo/browser-office/onlyoffice/product-port-client.mjs",
+      frameOrigin: candidateOrigin,
+      sessionId,
+      framePath,
+    },
+  );
   return { page, frame, context };
 }
 async function save(page) {
@@ -323,7 +384,9 @@ const engine = createOnlyOfficeProductEngine({
   inspect: async (bytes) => {
     const opened = await open(bytes);
     try {
-      return await observeOnlyOfficeProduct(opened.frame);
+      return await opened.page.evaluate(() =>
+        window.__productNativePort.observe(),
+      );
     } finally {
       await opened.context.close();
     }
@@ -337,6 +400,24 @@ const engine = createOnlyOfficeProductEngine({
     }
   },
 });
+// Commands cross the same restricted browser port a product host consumes.
+// Playwright observes pixels and installs the trusted source, but never executes
+// command handlers or supplies JavaScript for a model-requested mutation.
+for (const method of [
+  "observe",
+  "preflight",
+  "begin",
+  "apply",
+  "finish",
+  "undo",
+  "redo",
+])
+  engine[method] = (...args) =>
+    mainPage.evaluate(
+      async ({ method, args }) => window.__productNativePort[method](...args),
+      { method, args },
+    );
+report.nativeTransport = "origin-and-session-bound-message-port";
 const session = createProductSession({
   engine,
   journal,
@@ -373,14 +454,14 @@ try {
     underline: { underline: true },
     strikethrough: { strikethrough: true },
     font_family: { family: "Arial" },
-    font_color: { color: "#FF0000" },
+    font_color: { color: 0xff0000 },
     replace_text: { text: "Verified product text" },
-    fill_color: { color: "#FFE600" },
+    fill_color: { color: 0xffe600 },
     resize: { width: target.width + 500, height: target.height + 500 },
     rotate: { degrees: 15 },
     flip: { axis: "horizontal" },
     set_shape_name: { name: "Verified title" },
-    line_color: { color: "#FF0000" },
+    line_color: { color: 0xff0000 },
   };
   Object.assign(command, args[operation]);
   const applied = await session.apply({
