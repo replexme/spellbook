@@ -6,7 +6,7 @@ import "@/design-system/components.css";
 import "@/design-system/patterns.css";
 
 export const metadata: Metadata = {
-  title: "Spellbook — AI PowerPoint Editor",
+  title: "Spellbook — 가진 PPT를 열어 AI와 함께 고치는 편집기",
   description: "원본 PPTX를 보면서 고치고 편집 가능한 상태로 돌려받는 도구",
 };
 

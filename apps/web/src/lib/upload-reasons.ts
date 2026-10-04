@@ -33,6 +33,11 @@ export function uploadFailure(
             reason: "PowerPoint 파일(.pptx)만 가져올 수 있어요.",
             fix: "PowerPoint에서 .pptx로 저장한 파일을 골라 주세요.",
           };
+    case "browser_unsupported":
+      return {
+        reason: "이 브라우저에서는 PPTX를 편집할 수 없어요.",
+        fix: "PC의 최신 Chrome·Edge나 Android의 최신 Chrome에서 Spellbook을 열고 가져와 주세요. Safari, Firefox, iPhone·iPad에서는 아직 편집할 수 없어요.",
+      };
     case "empty_file":
       return {
         reason: "빈 파일이에요.",

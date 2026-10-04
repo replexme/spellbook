@@ -77,4 +77,11 @@ describe("upload reasons", () => {
     expect(retryableFailure("too_many_slides")).toBe(false);
     expect(failureShort("image_too_large")).toBe("아주 큰 그림이 들어 있어요");
   });
+
+  it("names the browsers that can edit when this one cannot", () => {
+    const failure = uploadFailure("browser_unsupported", "a.pptx", MAX);
+    expect(failure.reason).toContain("이 브라우저");
+    expect(failure.fix).toContain("Chrome");
+    expect(failure.fix).toContain("iPhone");
+  });
 });

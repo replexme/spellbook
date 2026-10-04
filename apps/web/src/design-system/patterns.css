@@ -2410,3 +2410,136 @@ ol.connect {
   font-size: var(--ds-text-xs);
   vertical-align: 1px;
 }
+
+/* ---- Status pages: not found, failures, download problems ---- */
+
+.status-screen {
+  display: grid;
+  place-items: center;
+  min-height: 100dvh;
+  padding: var(--ds-space-6) var(--ds-space-4);
+  background: var(--ds-bg-app);
+}
+
+.status-card {
+  display: grid;
+  justify-items: start;
+  gap: var(--ds-space-4);
+  width: min(480px, 100%);
+  padding: var(--ds-space-8);
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg-surface);
+  box-shadow: var(--ds-shadow-1);
+}
+
+.status-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--ds-radius-lg);
+  background: var(--ds-bg-muted);
+  color: var(--ds-text-secondary);
+}
+
+.status-card h1 {
+  margin: 0;
+  font-size: var(--ds-text-xl);
+  font-weight: var(--ds-weight-bold);
+  line-height: var(--ds-leading-tight);
+}
+
+.status-body {
+  display: grid;
+  gap: var(--ds-space-2);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-base);
+  line-height: var(--ds-leading-relaxed);
+}
+
+.status-body > p {
+  margin: 0;
+}
+
+.status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-2);
+}
+
+.status-reference {
+  margin: 0;
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-xs);
+}
+
+.support-link {
+  align-self: center;
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-sm);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.support-link:hover {
+  color: var(--ds-text);
+}
+
+.legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ds-space-3);
+  margin: 0;
+  color: var(--ds-text-tertiary);
+  font-size: var(--ds-text-xs);
+}
+
+.legal-links a {
+  color: inherit;
+}
+
+@media (max-width: 480px) {
+  .status-card {
+    padding: var(--ds-space-6) var(--ds-space-5);
+  }
+}
+
+.account-deletion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--ds-space-3);
+  margin-top: var(--ds-space-4);
+  padding: var(--ds-space-4);
+  border: 1px solid var(--ds-danger-border);
+  border-radius: var(--ds-radius-md);
+}
+
+.account-deletion > div {
+  display: grid;
+  gap: var(--ds-space-1);
+  min-width: 0;
+  flex: 1 1 240px;
+}
+
+.account-deletion small {
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-xs);
+  line-height: var(--ds-leading);
+}
+
+.account-deletion-list {
+  display: grid;
+  gap: var(--ds-space-1);
+  margin: 0 0 var(--ds-space-3);
+  padding-left: var(--ds-space-5);
+  color: var(--ds-text-secondary);
+  font-size: var(--ds-text-sm);
+  line-height: var(--ds-leading);
+}
+
+.settings-links {
+  margin-top: var(--ds-space-4);
+}

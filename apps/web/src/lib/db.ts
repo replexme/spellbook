@@ -1,5 +1,7 @@
 import postgres, { type Sql } from "postgres";
 
+import { runUsageEventMigrations } from "./usage-events-schema";
+
 let client: Sql | null = null;
 let schemaReady: Promise<void> | null = null;
 
@@ -345,6 +347,7 @@ export async function runMigrations(): Promise<void> {
     alter table spellbook_native_turns add column if not exists model_usage jsonb;
     alter table spellbook_jobs add column if not exists web_page_reads integer not null default 0;
   `);
+  await runUsageEventMigrations(sql);
 }
 
 export async function closeDbForTests(): Promise<void> {

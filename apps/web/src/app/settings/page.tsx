@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { SettingsScreen } from "@/components/settings/settings-screen";
+import { accountClosureInfo } from "@/lib/account-closure";
 import { aiConnectorConfig } from "@/lib/ai-connector-config";
 import { currentSession } from "@/lib/auth";
 import { accountStorage } from "@/lib/storage-usage";
@@ -17,6 +18,7 @@ export default async function SettingsPage() {
       email={session.email}
       aiConnector={aiConnectorConfig()}
       storage={storage}
+      accountClosure={accountClosureInfo()}
     />
   );
 }

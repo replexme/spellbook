@@ -1,6 +1,7 @@
 "use client";
 
 import { aiRequestError } from "@/lib/ai-errors";
+import { reportSaveFailure } from "@/lib/save-failure-report";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Banner, Icon, IconButton, Tabs } from "@/design-system";
 import { collaboraCssVariables } from "@/design-system/editor-theme";
@@ -38,7 +39,8 @@ import { buildConversation, type LiveMessage } from "./workspace/conversation";
 import { ConversationLog } from "./workspace/conversation-log";
 import { when, type PermissionMode } from "./copy";
 import { DownloadDialog } from "./workspace/download-dialog";
-import { OpeningView } from "./workspace/opening";
+import { EditorOpening } from "./workspace/editor-loading";
+import { PanelError } from "./workspace/panel-error";
 import { PhoneSlides } from "./workspace/phone-slides";
 import {
   suggestionsFor,
@@ -944,7 +946,10 @@ export function NativeWorkspace({
   }, [messages, history.length]);
   useEffect(() => {
     if (saveState === "저장됨") setSavedAt(when(Date.now()));
-  }, [saveState]);
+    // The server never sees a save the editor could not hand over.
+    if (saveState === "저장 실패")
+      reportSaveFailure(launch.documentId, launch.editorKind);
+  }, [saveState, launch.documentId, launch.editorKind]);
   useEffect(() => {
     if (!busy) setLookingAt(null);
   }, [busy]);
@@ -2296,14 +2301,12 @@ export function NativeWorkspace({
           />
         ) : null}
         {!engineReady ? (
-          <OpeningView
-            preview={restoring ? null : openingPreview}
-            previews={restoring ? [] : openingPreviews}
-            message={
-              restoring
-                ? "이전 버전을 불러오고 있어요"
-                : "편집기 준비 중 · 처음 열 때는 1분쯤 걸려요"
-            }
+          <EditorOpening
+            preview={openingPreview ?? null}
+            previews={openingPreviews}
+            restoring={Boolean(restoring)}
+            documentId={launch.documentId}
+            onRetry={onReload}
           />
         ) : null}
       </section>
@@ -2412,29 +2415,15 @@ export function NativeWorkspace({
               </div>
               <footer className="ws-panel-footer">
                 {error ? (
-                  <Banner
-                    tone="danger"
-                    role="alert"
-                    action={
-                      <IconButton
-                        icon="close"
-                        label="알림 닫기"
-                        size="sm"
-                        onClick={() => {
-                          setError("");
-                          setErrorLink(null);
-                        }}
-                      />
-                    }
-                  >
-                    {error}
-                    {errorLink ? (
-                      <>
-                        {" "}
-                        <a href={errorLink.href}>{errorLink.label}</a>
-                      </>
-                    ) : null}
-                  </Banner>
+                  <PanelError
+                    error={error}
+                    link={errorLink}
+                    documentId={launch.documentId}
+                    onDismiss={() => {
+                      setError("");
+                      setErrorLink(null);
+                    }}
+                  />
                 ) : null}
                 {assetNotice ? (
                   <Banner tone="ok" role="status">

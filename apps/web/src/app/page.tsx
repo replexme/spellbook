@@ -4,6 +4,7 @@ import { aiConnectorConfig } from "@/lib/ai-connector-config";
 import { currentSession } from "@/lib/auth";
 import { currentPresentationFormat } from "@/lib/document-formats";
 import { signInErrorMessage } from "@/lib/sign-in-errors";
+import { recordUsageEvent } from "@/lib/usage-events";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,7 @@ export default async function HomePage({
       />
     );
   }
+  await recordUsageEvent(session.accountId, { type: "visit" });
   return (
     <HomeScreen
       email={session.email}
