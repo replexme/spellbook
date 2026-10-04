@@ -433,7 +433,7 @@ export function createProductSession({
           } catch (restoreError) {
             failed = true;
             throw Error(
-              "product_mutation_restore_failed:" + restoreError.message,
+              "product_mutation_restore_failed:" + restoreError.message + ";original_failure:" + error.message,
               { cause: error },
             );
           }

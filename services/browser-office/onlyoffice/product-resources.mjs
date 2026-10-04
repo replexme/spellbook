@@ -5,8 +5,19 @@ export function attachOnlyOfficeResourceHost(editor,convertDocument) {
   const key=Symbol.for("spellbook.onlyoffice.resourceHost/v1");
   if(typeof editor?.getMedia!=="function"||typeof editor.captureNativeSnapshot!=="function"||typeof editor.getNativeEditorApi!=="function")throw Error("onlyoffice_product_media_host_unavailable");
   window[key]?.dispose();
-  const urls=new Set(),staged=new Map(),capture=editor.captureNativeSnapshot;
+  const urls=new Set(),staged=new Map(),digests=new Map(),capture=editor.captureNativeSnapshot;
   const bridge={
+    async fingerprint(reference){
+      const media=editor.getMedia(),entries=[...Object.entries(media),...[...staged].map(([name,item])=>[name,item.url])];
+      const url=entries.find(([name,value])=>name===reference||name==="media/"+reference||value===reference)?.[1];
+      if(typeof url!=="string"||!url.startsWith("blob:"))throw Error("onlyoffice_product_media_reference_not_owned:"+reference);
+      if(!digests.has(url))digests.set(url,(async()=>{
+        const response=await fetch(url);if(!response.ok)throw Error("onlyoffice_product_media_read_failed");
+        const bytes=await response.arrayBuffer();if(!bytes.byteLength||bytes.byteLength>25_000_000)throw Error("onlyoffice_product_media_size_invalid");
+        return "sha256:"+Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256",bytes)),n=>n.toString(16).padStart(2,"0")).join("");
+      })());
+      return digests.get(url);
+    },
     async convertWorkbook(bytes){
       if(typeof convertDocument!=="function"||!ArrayBuffer.isView(bytes)||bytes.BYTES_PER_ELEMENT!==1||!bytes.byteLength||bytes.byteLength>25_000_000)
         throw Error("onlyoffice_product_workbook_converter_unavailable");
@@ -56,7 +67,7 @@ export function attachOnlyOfficeResourceHost(editor,convertDocument) {
         if(referenced)media[path]=value.url;else if(media[path]===value.url)delete media[path];
       }
     },
-    dispose(){editor.captureNativeSnapshot=capture;for(const url of urls)URL.revokeObjectURL(url);urls.clear();staged.clear();if(window[key]===bridge)delete window[key];},
+    dispose(){editor.captureNativeSnapshot=capture;for(const url of urls)URL.revokeObjectURL(url);urls.clear();staged.clear();digests.clear();if(window[key]===bridge)delete window[key];},
   };
   // Every save entry point captures bytes and media together. Registering an
   // asset stages its transport only; rejected requests and undone insertions

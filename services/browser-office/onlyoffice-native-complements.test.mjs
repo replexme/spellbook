@@ -8,12 +8,12 @@ import {installOnlyOfficeNativeComplements} from "./onlyoffice/native-complement
 test("decoded run effects survive the native text-property import copy",()=>{
   const previous=globalThis.window;
   class TextPr{Set_FromObject(value){this.font=value.font;}Copy(){const result=new TextPr();result.font=this.font;return result;}Merge(value){this.font=value.font;}}
-  class Run{Draw_Elements(){}}
+  class Run{Get_CompiledPr(){return {};}Draw_Elements(state){return state.Graphics.m_oContext.shadowColor;}}
   class Comment{createDuplicate(){return new Comment();}}
   class CommentData{createDuplicate(){return new CommentData();}}
   class Presentation{internalCalculateData(){}}
   class Transition{parseXmlParameters(){}fillXmlParams(){}}
-  class Writer{}
+  class Writer{constructor(){this.records=[];this.WriteRunProperties=pr=>{this.written=pr;};this.WriteRecord1=(type,value,write)=>{this.records.push({type,value});write(value);};this.WriteEffectLst=value=>{this.effects=value;};}}
   class Loader{}
   globalThis.window={Asc:{CAscSlideTransition:Transition,c_oAscSlideTransitionParams:{}},AscCommon:{CBinaryFileWriter:Writer,BinaryPPTYLoader:Loader,CComment:Comment,CCommentData:CommentData},AscCommonWord:{CTextPr:TextPr},AscWord:{Run},AscCommonSlide:{CPresentation:Presentation,fLoadComments(){}},AscFormat:{CEffectProperties:class {}},AscDFH:{historyitem_type_Presentation:65536,historyitem_type_Comment:131072,historyitem_type_ParaRun:196608,changesFactory:{},drawingsChangesMap:{},drawingContentChanges:{},drawingsConstructorsMap:{}}};
   const effect=value=>({value,createDuplicate(){return effect(this.value);}});
@@ -24,6 +24,14 @@ test("decoded run effects survive the native text-property import copy",()=>{
     assert.equal(imported.spellbookEffects.value,75);assert.notEqual(imported.spellbookEffects,decoded.spellbookEffects);
     decoded.spellbookEffects.value=100;assert.equal(imported.spellbookEffects.value,75);
     assert.equal(imported.Copy().spellbookEffects.value,75);
+    const writer=new window.AscCommon.CBinaryFileWriter(),detached=writer.WriteRunProperties;
+    const effects={outerShdw:{dist:36000}};
+    detached({spellbookEffects:{EffectLst:effects}});
+    assert.deepEqual(writer.records,[{type:2,value:effects}]);assert.equal(writer.effects,effects);
+    const run=new Run();run.Pr={spellbookEffects:{EffectLst:{outerShdw:{color:{color:{RGBA:{R:1,G:2,B:3}}}}}}};
+    const ctx={shadowColor:"transparent",shadowOffsetX:0,shadowOffsetY:0,shadowBlur:0};
+    assert.equal(run.Draw_Elements({Graphics:{m_oContext:ctx}}),"rgba(1,2,3,1)");assert.equal(ctx.shadowColor,"transparent");
+    run.Pr.spellbookEffects=null;assert.equal(run.Draw_Elements({Graphics:{m_oContext:ctx}}),"transparent");
     imported.Set_FromObject({font:"Arial",spellbookEffects:null});assert.equal(imported.spellbookEffects,null);
   }finally{globalThis.window=previous;}
 });

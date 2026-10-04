@@ -35,6 +35,18 @@ export async function observeOnlyOfficeProduct(frame) {
       "onlyoffice_product_observation_unavailable:" +
         projection.unavailable.join(","),
     );
+  // Converter-assigned filenames are transport details. Compare owned asset
+  // bytes across live editing, conversion and recovery instead.
+  const references=new Set();
+  const collect=value=>{if(!value||typeof value!=="object")return;if(typeof value.imagePath==="string")references.add(value.imagePath);if(typeof value.media?.media==="string")references.add(value.media.media);Object.values(value).forEach(collect);};
+  collect(projection);
+  const fingerprints=references.size?await frame.evaluate(async refs=>{
+    const host=window.parent[Symbol.for("spellbook.onlyoffice.resourceHost/v1")];
+    if(typeof host?.fingerprint!=="function")throw Error("onlyoffice_product_media_fingerprint_host_required");
+    return Object.fromEntries(await Promise.all(refs.map(async ref=>[ref,await host.fingerprint(ref)])));
+  },[...references]):{};
+  const normalize=value=>{if(!value||typeof value!=="object")return;if(typeof value.imagePath==="string")value.imagePath=fingerprints[value.imagePath];if(typeof value.media?.media==="string")value.media.media=fingerprints[value.media.media];Object.values(value).forEach(normalize);};
+  normalize(projection);
   // Use the product's hundredth-millimetre geometry once; duplicate SDK
   // millimetre fields must not bypass the common physical-outline budget.
   const element = (shape, id) => {

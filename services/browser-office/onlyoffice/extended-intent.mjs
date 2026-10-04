@@ -205,8 +205,8 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
         need(element.height===drawing.tableLayout.computedHeight,"creation_table_height");
       }
       if(c.op==="insert_image"||c.op==="insert_media"){
-        need(c.nativeAsset&&drawing.imagePath===(c.op==="insert_image"?c.nativeAsset.fileName:c.nativeAsset.posterPath),"creation_asset");
-        if(c.op==="insert_media")same({type:c.nativeAsset.kind==="video"?7:8,media:c.nativeAsset.fileName},drawing.media,"creation_media");
+        need(c.nativeAsset&&drawing.imagePath===(c.op==="insert_image"?"sha256:"+c.nativeAsset.sha256:"sha256:"+c.nativeAsset.posterPath.slice(4,-4)),"creation_asset");
+        if(c.op==="insert_media")same({type:c.nativeAsset.kind==="video"?7:8,media:"sha256:"+c.nativeAsset.sha256},drawing.media,"creation_media");
       }
       // Newly created default properties have no author-owned predecessor.
       // Admit them only after checking every requested input; all existing
@@ -326,7 +326,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
       else{
         const count=remainingCommands.filter(command=>command.op==="add_comment"&&command.slideIndex===c.slideIndex).length;
         need(actual.length===old.length+count,"comment_count");const added=actual[old.length];
-        need(added.text===c.text&&added.author===c.author&&added.x===(c.x??0)&&added.y===(c.y??0)&&added.solved===false&&added.replies.length===0,"new_comment");
+        need(added.text===c.text&&added.author===c.author&&added.x===Math.round(c.nativeCommentPosition.x*100)&&added.y===Math.round(c.nativeCommentPosition.y*100)&&added.solved===false&&added.replies.length===0,"new_comment");
         need(added.initials===(c.initials??c.author.split(" ").filter(Boolean).map(word=>word.slice(0,1)).join("")),"comment_initials");
         need(typeof added.time==="string"&&/^\d+$/.test(added.time),"comment_time");old.push(copy(added));
       }
@@ -380,10 +380,10 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
         a.style.fill=copy(b.style.fill);a.style.fillStyle=copy(b.style.fillStyle);
       }
     }else if(c.op==="replace_image") {
-      need(c.nativeAsset?.kind==="image","image_authority");old.imagePath=c.nativeAsset.fileName;
+      need(c.nativeAsset?.kind==="image","image_authority");old.imagePath="sha256:"+c.nativeAsset.sha256;
     }else if(c.op==="replace_media"){
       need(["audio","video"].includes(c.nativeAsset?.kind),"media_authority");
-      old.media={type:c.nativeAsset.kind==="video"?7:8,media:c.nativeAsset.fileName};
+      old.media={type:c.nativeAsset.kind==="video"?7:8,media:"sha256:"+c.nativeAsset.sha256};
     }else if(c.op==="add_smartart_node"||c.op==="delete_smartart_node"){
       const diagram=a.element.onlyoffice.diagram,actual=b.element.onlyoffice.diagram,q=c.smartartNode;
       need(diagram&&actual,"diagram_target");

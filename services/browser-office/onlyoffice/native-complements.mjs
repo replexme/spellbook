@@ -110,6 +110,15 @@ export function installOnlyOfficeNativeComplements() {
   d.historyitem_Spellbook_DimensionsOnly = dimensions;
   d.changesFactory[dimensions] = d.CChangesDrawingsObject;
   d.drawingsChangesMap[dimensions] = (model, size) => { model.sldSz = size; };
+  // The SDK's DataModel history map replaces data but leaves the layout tree
+  // bound to the previous data. Clear that derived cache for both Undo/Redo.
+  if(Number.isSafeInteger(d.historyitem_SmartArtDataModel)){
+    const restoreData=d.drawingsChangesMap[d.historyitem_SmartArtDataModel];
+    if(typeof restoreData!=="function")throw Error("onlyoffice_product_diagram_history_unavailable");
+    d.drawingsChangesMap[d.historyitem_SmartArtDataModel]=(shape,value)=>{
+      restoreData(shape,value);shape.smartArtTree=null;shape.recalcSmartArtConnections();
+    };
+  }
   const type = d.historyitem_type_ParaRun | 65002;
   if (d.changesFactory[type] || d.drawingsChangesMap[type] || d.drawingContentChanges[type])
     throw Error("onlyoffice_product_native_complement_history_collision");
@@ -147,11 +156,11 @@ export function installOnlyOfficeNativeComplements() {
     const instance = Reflect.construct(writer, args);
     const write = instance.WriteRunProperties;
     instance.WriteRunProperties = function(pr, ...rest) {
-      const result = write.call(this, pr, ...rest);
+      const result = write.call(instance, pr, ...rest);
       if (pr?.spellbookEffects?.EffectLst)
-        this.WriteRecord1(2, pr.spellbookEffects.EffectLst, this.WriteEffectLst);
+        instance.WriteRecord1(2, pr.spellbookEffects.EffectLst, instance.WriteEffectLst);
       else if (pr?.spellbookEffects?.EffectDag)
-        this.WriteRecord1(2, pr.spellbookEffects.EffectDag, this.WriteEffectDag);
+        instance.WriteRecord1(2, pr.spellbookEffects.EffectDag, instance.WriteEffectDag);
       return result;
     };
     return instance;
@@ -197,7 +206,11 @@ export function installOnlyOfficeNativeComplements() {
   common.pptx_content_writer?.BinaryFileWriter.Init();
   const draw = window.AscWord.Run.prototype.Draw_Elements;
   window.AscWord.Run.prototype.Draw_Elements = function(state) {
-    const shadow = this.Get_CompiledPr(false)?.spellbookEffects?.EffectLst?.outerShdw;
+    // Native compiled-property interning ignores extension fields. The run
+    // owns an explicit effect override, including null to cancel inheritance.
+    const properties = Object.hasOwn(this.Pr ?? {}, "spellbookEffects")
+      ? this.Pr.spellbookEffects : this.Get_CompiledPr(false)?.spellbookEffects;
+    const shadow = properties?.EffectLst?.outerShdw;
     const graphics = state.Graphics, ctx = graphics?.m_oContext;
     if (!shadow || !ctx) return draw.call(this, state);
     const previous = [ctx.shadowColor, ctx.shadowOffsetX, ctx.shadowOffsetY, ctx.shadowBlur];

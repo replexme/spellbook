@@ -29,3 +29,17 @@ test("owned workbook conversion strips only the checked native file envelope",as
     size=2;await assert.rejects(host.convertWorkbook(Uint8Array.of(80,75)),/binary_length_invalid/);host.dispose();
   }finally{globalThis.window=prior;}
 });
+
+ test("media identities use owned bytes across converter filename changes",async()=>{
+  const prior=globalThis.window;globalThis.window={addEventListener(){}};
+  const url=URL.createObjectURL(new Blob([Uint8Array.of(1,2,3)])),media={"media/image1.png":url};
+  try{
+    attachOnlyOfficeResourceHost({getMedia:()=>media,captureNativeSnapshot(){},getNativeEditorApi:()=>({})});
+    const host=window[Symbol.for("spellbook.onlyoffice.resourceHost/v1")];
+    const before=await host.fingerprint("image1.png");delete media["media/image1.png"];media["media/renamed.png"]=url;
+    assert.equal(await host.fingerprint("renamed.png"),before);assert.match(before,/^sha256:[0-9a-f]{64}$/);
+    await assert.rejects(host.fingerprint("https://example.com/unowned.png"),/reference_not_owned/);
+    const changed=host.register("sba_"+"b".repeat(64)+".png",Uint8Array.of(3,2,1),"image/png");
+    assert.notEqual(await host.fingerprint(changed),before);host.dispose();
+  }finally{URL.revokeObjectURL(url);globalThis.window=prior;}
+});
