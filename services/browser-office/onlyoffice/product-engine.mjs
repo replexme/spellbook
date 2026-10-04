@@ -561,7 +561,13 @@ export function createOnlyOfficeProductEngine({
             const properties =
               first?.GetElement(0)?.GetTextPr?.() ?? first?.GetTextPr();
             const paragraphProperties = first?.GetParaPr();
-            c.RemoveAllElements();
+            const endProperties = first?.GetTextPr();
+            // Keep the existing first paragraph's inheritance and end marker.
+            // Replacing the whole content creates new paragraph defaults.
+            for (let index = c.GetElementsCount() - 1; index > 0; index--)
+              if (!c.RemoveElement(index))
+                throw Error("onlyoffice_product_native_rejected");
+            first.RemoveAllElements();
             // AddText writes a run: embedded LF is not a document paragraph.
             // Materialize each canonical line as a real native paragraph.
             for (const [index, line] of text
@@ -570,10 +576,14 @@ export function createOnlyOfficeProductEngine({
               .entries()) {
               const paragraph =
                 index === 0 ? c.GetElement(0) : api.CreateParagraph();
-              if (properties) paragraph.SetTextPr(properties);
-              if (paragraphProperties)
-                paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
-              paragraph.AddText(line);
+              if (index) {
+                if (endProperties) paragraph.SetTextPr(endProperties);
+                if (paragraphProperties)
+                  paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
+              }
+              const run = paragraph.AddText(line);
+              if (properties && !run.SetTextPr(properties))
+                throw Error("onlyoffice_product_native_rejected");
               if (index && !c.Push(paragraph))
                 throw Error("onlyoffice_product_native_rejected");
             }
