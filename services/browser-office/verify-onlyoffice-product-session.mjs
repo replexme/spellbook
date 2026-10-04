@@ -280,8 +280,10 @@ async function save(page) {
     };
   });
 }
+const pixelStates = new Map();
 async function pixels(frame) {
-  return frame.evaluate(async () => {
+  const result = await frame.evaluate(async (codecUrl) => {
+    const codec = await import(codecUrl);
     // Compare document rendering in the same view state. Native selection
     // handles are transient UI, not saved document content.
     const editor = window.Asc.editor;
@@ -304,7 +306,14 @@ async function pixels(frame) {
       ).join("");
       stable = digest === previous ? stable + 1 : 0;
       if (stable >= 3)
-        return { width: canvas.width, height: canvas.height, sha256: digest };
+        return {
+          width: canvas.width,
+          height: canvas.height,
+          sha256: digest,
+          base64: codec.encodeBinary(
+            new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+          ),
+        };
       previous = digest;
     }
     throw Error("canvas_not_stable");
