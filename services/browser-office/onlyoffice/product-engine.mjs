@@ -237,6 +237,8 @@ export function createOnlyOfficeProductEngine({
                 "strikethrough",
                 "font_color",
                 "paragraph_alignment",
+                "set_character_spacing",
+                "set_script_position",
               ].includes(command.op) &&
               !shape.getDocContent?.()
             )
@@ -273,6 +275,22 @@ export function createOnlyOfficeProductEngine({
             )
               throw Error("onlyoffice_product_argument_invalid:alignment");
             if (command.op === "font_size") requireNumber("size", 1, 400);
+            if (command.op === "set_character_spacing") {
+              requireNumber("spacing", -100, 100);
+              if (
+                Math.abs(
+                  command.spacing * 20 - Math.round(command.spacing * 20),
+                ) > 1e-8
+              )
+                throw Error(
+                  "onlyoffice_product_argument_invalid:spacing_precision",
+                );
+            }
+            if (
+              command.op === "set_script_position" &&
+              !["normal", "superscript", "subscript"].includes(command.script)
+            )
+              throw Error("onlyoffice_product_argument_invalid:script");
             if (command.op.endsWith("opacity")) requireNumber("opacity", 0, 1);
             if (
               ["fill_color", "line_color", "font_color"].includes(command.op) &&
@@ -437,6 +455,18 @@ export function createOnlyOfficeProductEngine({
               return content()
                 .GetAllParagraphs()
                 .forEach((p) => p.SetFontSize(command.size * 2));
+            case "set_character_spacing":
+              return content()
+                .GetAllParagraphs()
+                .forEach((p) => p.SetSpacing(Math.round(command.spacing * 20)));
+            case "set_script_position":
+              return content()
+                .GetAllParagraphs()
+                .forEach((p) =>
+                  p.SetVertAlign(
+                    command.script === "normal" ? "baseline" : command.script,
+                  ),
+                );
             case "font_family":
               return content()
                 .GetAllParagraphs()

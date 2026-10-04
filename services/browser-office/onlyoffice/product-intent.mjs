@@ -12,6 +12,8 @@ const formatting = {
   underline: "GetUnderline",
   strikethrough: "GetStrikeout",
   font_color: "color",
+  set_character_spacing: "GetSpacing",
+  set_script_position: "GetVertAlign",
 };
 export const onlyOfficeIntentOperations = Object.freeze([
   "move",
@@ -138,7 +140,13 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
               ? Array(4).fill(command.family)
               : op === "font_color"
                 ? { rgb: rgb(command.color), theme: false, auto: false }
-                : command[op];
+                : op === "set_character_spacing"
+                  ? Math.round(command.spacing * 20)
+                  : op === "set_script_position"
+                    ? command.script === "normal"
+                      ? "baseline"
+                      : command.script
+                    : command[op];
         if (
           !runs.length ||
           runs.some(

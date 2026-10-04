@@ -66,6 +66,42 @@ const text = (doc, value) => {
   drawing.paragraphs[0].text = value + "\r\n";
   drawing.paragraphs[0].runs[0].text = value;
 };
+for (const [op, args, property, wanted] of [
+  ["set_character_spacing", { spacing: 2 }, "GetSpacing", 40],
+  ["set_script_position", { script: "normal" }, "GetVertAlign", "baseline"],
+  [
+    "set_script_position",
+    { script: "superscript" },
+    "GetVertAlign",
+    "superscript",
+  ],
+  ["set_script_position", { script: "subscript" }, "GetVertAlign", "subscript"],
+])
+  test(
+    op +
+      " verifies every run and preserves other formatting: " +
+      JSON.stringify(args),
+    () => {
+      const before = document(),
+        after = structuredClone(before);
+      const style =
+        after.slides[0].onlyoffice.drawings[0].paragraphs[0].runs[0].style;
+      style[property] = wanted;
+      const command = { op, elementId: "0/0", ...args };
+      verifyOnlyOfficeProductIntent(before, after, [command]);
+      style.GetBold = true;
+    assert.throws(
+      () => verifyOnlyOfficeProductIntent(before, after, [command]),
+      /unrequested_change/,
+      );
+      style.GetBold = false;
+      style[property] = "wrong";
+      assert.throws(
+        () => verifyOnlyOfficeProductIntent(before, after, [command]),
+        /intent_mismatch/,
+      );
+    },
+  );
 test("a persisted wrong font size is rejected as a requested-effect failure", () => {
   const before = document(),
     after = structuredClone(before);

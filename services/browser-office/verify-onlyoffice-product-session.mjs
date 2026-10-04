@@ -828,6 +828,8 @@ try {
     line_color: { color: 0xff0000 },
     line_width: { size: 4 },
     paragraph_alignment: { alignment: "right" },
+    set_character_spacing: { spacing: 2 },
+    set_script_position: { script: "superscript" },
     rename_slide: { slideIndex: 0, elementId: null, name: "Verified slide" },
     set_slide_hidden: { slideIndex: 0, elementId: null, hidden: true },
   };
