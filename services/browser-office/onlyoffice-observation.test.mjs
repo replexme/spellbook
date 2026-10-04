@@ -212,7 +212,7 @@ test("master, layout, theme and section changes are included without creating ab
     Theme: {
       name: "theme",
       themeElements: {
-        clrScheme: { name: "palette", colors: [] },
+        clrScheme: { name: "palette", colors: Array.from({length:14}, (_,id)=>({color:{type:3,id}})) },
         fontScheme: {
           name: "fonts",
           majorFont: { latin: "Arial", ea: "", cs: "" },
@@ -228,6 +228,7 @@ test("master, layout, theme and section changes are included without creating ab
   const before = await observeOnlyOfficeCandidate(frame);
   assert.equal(before.extended.masters[0].layouts[0].name, "layout");
   assert.equal(before.extended.masters[0].theme.fonts.major.latin, "Arial");
+  assert.deepEqual(Array.from(before.extended.masters[0].theme.colors.values,color=>color.id), [0,1,2,3,4,5,8,9,10,11,12,13]);
   assert.equal(before.extended.sections[0].name, "Section A");
   master.Theme.name = "modified theme";
   assert.notDeepEqual(

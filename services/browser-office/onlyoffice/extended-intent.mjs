@@ -218,7 +218,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
     }
     if(c.op==="set_slide_size") {
       const ratioX=c.width/left.width,ratioY=c.height/left.height;
-      left.width=c.width;left.height=c.height;
+      left.width=Math.round(c.width);left.height=Math.round(c.height);
       if(c.scaleContent){
         const visit=(elements)=>elements.forEach(element=>{element.x=Math.round(element.x*ratioX);element.y=Math.round(element.y*ratioY);element.width=Math.round(element.width*ratioX);element.height=Math.round(element.height*ratioY);visit(element.elements);});
         left.slides.forEach(slide=>visit(slide.elements));

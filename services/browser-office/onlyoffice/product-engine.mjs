@@ -103,8 +103,8 @@ export async function observeOnlyOfficeProduct(frame) {
       })),
     })),
     sections: projection.extended.sections,
-    width: projection.extended.width * 100,
-    height: projection.extended.height * 100,
+    width: Math.round(projection.extended.width * 100),
+    height: Math.round(projection.extended.height * 100),
   };
   state.styleCatalog=onlyOfficeDocumentFillCatalog(state);
   return {
@@ -239,7 +239,7 @@ export function finalizeOnlyOfficeNativeGeometry() {
   if (!history.Points[history.Index]?.Items.length)
     throw Error("onlyoffice_product_geometry_history_required");
   for (const apply of pending) apply();
-  model.Recalculate();
+  model.Recalculate(history.Get_RecalcData(null,history.getGroupChanges()));
   return true;
 }
 

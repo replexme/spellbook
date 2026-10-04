@@ -15,7 +15,9 @@ const sourceRoot = path.resolve(import.meta.dirname, "../..");
 const source = readRepositoryIdentity(sourceRoot);
 if (source.dirty) throw Error("Commit implementation before recording cohort evidence");
 const registryBytes = await fs.readFile(path.join(sourceRoot,"contracts/native-edit-capabilities.json"));
-const operations = Object.keys(JSON.parse(registryBytes).mutationModel.operations);
+const operationContracts=JSON.parse(registryBytes).mutationModel.operations;
+const operations = Object.keys(operationContracts).filter(operation=>operationContracts[operation].availability!=="format_excluded");
+const excludedOperations=Object.keys(operationContracts).filter(operation=>operationContracts[operation].availability==="format_excluded");
 const manifestBytes = await fs.readFile(path.resolve(manifestPath));
 const manifest = JSON.parse(manifestBytes);
 const entries = manifest.cases;
@@ -46,7 +48,7 @@ const requiredStages = [
 ];
 const results = [], report = {
   source, registrySha256:sha256(registryBytes), manifestSha256:sha256(manifestBytes),
-  canonicalCount:operations.length, newBuilds:0, requiredStages, results,
+  canonicalCount:operations.length, excludedOperations, newBuilds:0, requiredStages, results,
   status:"running", sourceStable:true,
 };
 const persist = () => fs.writeFile(path.join(output,"results.json"),JSON.stringify(report,null,2));
@@ -105,7 +107,7 @@ for (const operation of operations) {
   const passed=exit.code===0&&!timedOut&&evidence?.status==="product-session-command-verified"&&missingStages.length===0;
   results.push({operation,status:passed?"passed":"failed",inputSha256:inputHash,elapsedMs:Date.now()-started,
     exit,timedOut,missingStages,evidence:path.relative(output,path.join(directory,"report.json")),
-    timings:evidence?.timings??null,error:evidence?.errors??null});
+    timings:evidence?.timings??null,error:evidence?.error??evidence?.errors??null});
   await persist();
   process.stdout.write(JSON.stringify({operation,status:results.at(-1).status,completed:results.length,total:operations.length})+"\n");
 }

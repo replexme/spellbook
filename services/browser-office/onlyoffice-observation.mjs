@@ -547,7 +547,7 @@ export async function observeOnlyOfficeCandidate(frame) {
                 name: theme.name,
                 colors: {
                   name: scheme?.clrScheme?.name ?? null,
-                  values: scheme?.clrScheme?.colors.map(nativeColor) ?? [],
+                  values: scheme?.clrScheme?.colors ? [0,1,2,3,4,5,8,9,10,11,12,13].map(index=>nativeColor(scheme.clrScheme.colors[index])) : [],
                 },
                 fonts: {
                   name: scheme?.fontScheme?.name ?? null,

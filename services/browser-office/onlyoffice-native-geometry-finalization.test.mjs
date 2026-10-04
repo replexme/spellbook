@@ -4,6 +4,8 @@ import test from "node:test";
 import { finalizeOnlyOfficeNativeGeometry } from "./onlyoffice/product-engine.mjs";
 test("human pixel movement keeps its existing native history point and exact serialized positions", () => {
   const changes = [];
+  const groupChanges = [{ section: true }];
+  const recalcData = { typedChanges: groupChanges };
   const make = (value) => ({
     offX: value,
     setOffX(v) {
@@ -29,13 +31,14 @@ test("human pixel movement keeps its existing native history point and exact ser
         },
       },
     ],
-    Recalculate() {
+    Recalculate(data) {
+      assert.strictEqual(data, recalcData);
       changes.push("recalculate");
     },
   };
   globalThis.window = {
     Asc: { editor: { WordControl: { m_oLogicDocument: model } } },
-    AscCommon: { History: { Points: [point], Index: 0 } },
+    AscCommon: { History: { Points: [point], Index: 0, getGroupChanges:()=>groupChanges, Get_RecalcData:(index, values)=>{ assert.equal(index,null); assert.strictEqual(values,groupChanges); return recalcData; } } },
   };
   try {
     assert.equal(finalizeOnlyOfficeNativeGeometry(), true);
@@ -58,7 +61,7 @@ test("human pixel movement keeps its existing native history point and exact ser
 
 test("manual checkpoint preserves authored crop despite inverse writer truncation", () => {
   const original = { l: 0, t: 0, r: 89.069, b: 100 };
-  const history = { Points: [{ Items: [{ human: true }] }], Index: 0 };
+  const history = { Points: [{ Items: [{ human: true }] }], Index: 0, getGroupChanges:()=>[], Get_RecalcData:()=>({}) };
   const shape = {
     blipFill: {
       srcRect: original,

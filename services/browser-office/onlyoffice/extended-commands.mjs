@@ -528,8 +528,8 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
         // dimensions map and native slide/master/layout size histories together.
         const type = window.AscDFH.historyitem_Spellbook_DimensionsOnly;
         need(Number.isSafeInteger(type), "dimension_history_unavailable");
-        const size = new window.AscCommonSlide.CSlideSize();
-        size.setCX(c.width * 360); size.setCY(c.height * 360);
+        const size = model.sldSz.createDuplicate();
+        size.setCX(Math.round(c.width * 360)); size.setCY(Math.round(c.height * 360));
         const change = new window.AscDFH.CChangesDrawingsObject(model, type, model.sldSz, size);
         h.Add(change); change.Redo();
         for (const master of model.slideMasters) {

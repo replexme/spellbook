@@ -66,7 +66,7 @@ for(const [assetId,part,mediaType,name] of [[imageId,"ppt/media/image1.png","ima
   resources[assetId]={assetId,mediaType,path:target,sourcePart:part,sha256:sha256(assets[part])};
 }
 const resourceFile=path.join(output,"resources.json");await fs.writeFile(resourceFile,JSON.stringify(resources,null,2));
-const cases=Object.entries(registry.mutationModel.operations).map(([operation,contract])=>{
+const cases=Object.entries(registry.mutationModel.operations).filter(([,contract])=>contract.availability!=="format_excluded").map(([operation,contract])=>{
   let input=authoredPath;
   if(["move_slide","delete_slide","duplicate_slide","set_sections"].includes(operation))input=path.resolve("artifacts/office-audit-20261004/native-sections-real24-fixture.pptx");
   else if(contract.family.startsWith("table_"))input=path.join(root,"table-structure/baseline.pptx");
