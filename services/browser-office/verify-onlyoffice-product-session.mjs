@@ -1166,14 +1166,14 @@ try {
         sections: [
           {
             id: "{11111111-1111-4111-8111-111111111111}",
-            name: "검증 첫 구역",
+            name: "새로 검증한 첫 구역",
             startSlideIndex: 0,
           },
           ...(before.slides.length > 1
             ? [
                 {
                   id: "{22222222-2222-4222-8222-222222222222}",
-                  name: "검증 두 번째 구역",
+                  name: "새로 검증한 두 번째 구역",
                   startSlideIndex: 1,
                 },
               ]

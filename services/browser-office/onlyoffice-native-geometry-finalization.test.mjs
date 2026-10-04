@@ -63,6 +63,7 @@ test("manual checkpoint preserves authored crop despite inverse writer truncatio
   const original = { l: 0, t: 0, r: 89.069, b: 100 };
   const history = { Points: [{ Items: [{ human: true }] }], Index: 0, getGroupChanges:()=>[], Get_RecalcData:()=>({}) };
   const shape = {
+    Id:"owned-image",
     blipFill: {
       srcRect: original,
       createDuplicate() {
@@ -90,7 +91,10 @@ test("manual checkpoint preserves authored crop despite inverse writer truncatio
   };
   try {
     assert.equal(Math.trunc((100 - original.r) * 1000), 10930);
-    assert.equal(finalizeOnlyOfficeNativeGeometry(), true);
+    assert.equal(finalizeOnlyOfficeNativeGeometry({cropNativeIds:[]}), false);
+    assert.strictEqual(shape.blipFill.srcRect,original);
+    assert.equal(Math.trunc((100 - shape.blipFill.srcRect.r) * 1000), 10930);
+    assert.equal(finalizeOnlyOfficeNativeGeometry({cropNativeIds:[shape.Id]}), true);
     assert.equal(Math.trunc((100 - shape.blipFill.srcRect.r) * 1000), 10931);
     assert.equal(Number(shape.blipFill.srcRect.r.toFixed(3)), original.r);
     assert.equal(history.Points.length, 1);

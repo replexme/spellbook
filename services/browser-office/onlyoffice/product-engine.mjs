@@ -144,7 +144,7 @@ export function verifyOnlyOfficeProductObservation(expected, actual) {
 // movement uses view pixels and can leave sub-EMU coordinates in native history.
 // Finalize those coordinates in that same history point before approving bytes;
 // otherwise exact file recovery can draw a different pixel boundary.
-export function finalizeOnlyOfficeNativeGeometry() {
+export function finalizeOnlyOfficeNativeGeometry({cropNativeIds = null} = {}) {
   const model = window.Asc.editor.WordControl.m_oLogicDocument;
   const pending = [];
   const visit = (shape) => {
@@ -184,7 +184,7 @@ export function finalizeOnlyOfficeNativeGeometry() {
         pending.push(() => setter.call(transform, serializable));
       }
     const rectangle = shape.blipFill?.srcRect;
-    if (rectangle) {
+    if (rectangle && (cropNativeIds === null || cropNativeIds.includes(shape.Id))) {
       const values = {};
       let changed = false;
       for (const key of ["l", "t", "r", "b"]) {
@@ -1735,7 +1735,7 @@ export function createOnlyOfficeProductEngine({
         },
         { nativeId: command.nativeId, op: command.op },
       );
-      await frame.evaluate(finalizeOnlyOfficeNativeGeometry);
+      await frame.evaluate(finalizeOnlyOfficeNativeGeometry,{cropNativeIds:command.op==="crop_image"?[command.nativeId]:[]});
       return true;
     },
     snapshot,
