@@ -47,6 +47,7 @@ for(const deferred of [false,true])test(`native effect import and ${deferred?"de
     imported.Set_FromObject({font:"Arial",spellbookEffects:null});assert.equal(imported.spellbookEffects,null);
     const main={fillStyle:"#000000",colors:[],fillRect(){this.colors.push(this.fillStyle);}},overlay={...main,colors:[]};
     const animation={Param:window.Asc.c_oAscSlideTransitionParams.Fade_ThroughWhite,phase:.49,Rect:{x:0,y:2,w:8,h:4},DemonstrationObject:{Canvas:{getContext:()=>main},Overlay:{getContext:()=>overlay}},_getPart(){return this.phase;}};
+    const mainFill=main.fillRect,overlayFill=overlay.fillRect;
     let nextPhase=.6;
     const nativeFade=()=>{
       animation.phase=nextPhase;main.fillStyle="#000000";main.fillRect(0,0,8,8);main.fillRect(0,2,8,4);
@@ -60,7 +61,7 @@ for(const deferred of [false,true])test(`native effect import and ${deferred?"de
     assert.deepEqual(main.colors,["#000000","#ffffff"]);assert.deepEqual(overlay.colors,["#000000"]);
     assert.equal(animation.Param,window.Asc.c_oAscSlideTransitionParams.Fade_ThroughWhite);
     nextPhase=.4;animation.IsBackward=true;unboundFade();assert.equal(overlay.colors.at(-1),"#ffffff");
-    assert.equal(main.fillRect,Object.getOwnPropertyDescriptor(main,"fillRect").value);
+    assert.strictEqual(main.fillRect,mainFill);assert.strictEqual(overlay.fillRect,overlayFill);
 
   }finally{globalThis.window=previous;globalThis.document=previousDocument;}
 });
