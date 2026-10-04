@@ -1256,8 +1256,20 @@ try {
         const removedIndex = Number(target.elementId.split("/")[1]);
         expected.elementId = `${selectedSlideIndex}/${index > removedIndex ? index - 1 : index}`;
       }
+      const expectedSlide =
+        operation === "move_slide"
+          ? command.targetSlideIndex
+          : selectedSlideIndex;
+      if (operation === "move_slide") {
+        const renumber = (value) => {
+          value.elementId =
+            expectedSlide + "/" + value.elementId.split("/").slice(1).join("/");
+          value.elements.forEach(renumber);
+        };
+        renumber(expected);
+      }
       assert.deepEqual(
-        applied.observation.slides[selectedSlideIndex].elements.find(
+        applied.observation.slides[expectedSlide].elements.find(
           (e) => e.elementId === expected.elementId,
         ),
         expected,
