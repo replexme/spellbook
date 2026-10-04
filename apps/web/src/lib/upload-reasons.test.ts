@@ -62,8 +62,12 @@ describe("upload reasons", () => {
   });
 
   it("tells a full account how to make room", () => {
-    for (const code of ["storage_full", "document_limit_reached"])
+    for (const code of ["storage_full", "document_limit_reached"]) {
       expect(uploadFailure(code, "a.pptx", MAX).fix).toContain("삭제");
+      expect(uploadFailure(code, "a.pptx", MAX).link?.href).toBe(
+        "/settings#plan",
+      );
+    }
   });
 
   it("offers a second check only where it can pass", () => {

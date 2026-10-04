@@ -45,7 +45,8 @@ export function StorageSection({ storage }: { storage: AccountStorage }) {
               <Banner tone="warn" role="status">
                 보관 공간이 가득 찼어요. 새 파일 가져오기와 새 저장은 멈췄지만,
                 파일 열기·내려받기·삭제는 그대로 돼요. 필요 없는 파일을 내려받은
-                뒤 삭제하면 다시 쓸 수 있어요.
+                뒤 삭제하거나 <a href="#plan">요금제</a>를 바꾸면 다시 쓸 수
+                있어요.
               </Banner>
             </div>
           ) : null}

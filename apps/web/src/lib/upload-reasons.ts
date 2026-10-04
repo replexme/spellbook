@@ -3,7 +3,15 @@
  * and what to do. Keys are the reason codes the upload route returns.
  */
 
-export type UploadFailure = { reason: string; fix: string };
+export type UploadFailure = {
+  reason: string;
+  fix: string;
+  /** Where the fix can be done, when it is on another page. */
+  link?: { label: string; href: string };
+};
+
+// Over a plan's storage: the plan section offers a larger plan.
+const PLAN_LINK = { label: "요금제 보기", href: "/settings#plan" };
 
 const SAVE_AS_PPTX =
   "PowerPoint에서 ‘파일 › 다른 이름으로 저장 › PowerPoint 프레젠테이션(.pptx)’으로 저장한 뒤 다시 가져오세요.";
@@ -83,12 +91,14 @@ export function uploadFailure(
     case "storage_full":
       return {
         reason: "보관 공간을 다 썼어요.",
-        fix: "필요 없는 파일을 내려받은 뒤 삭제하면 공간이 생겨요. 파일 열기와 내려받기는 그대로 되고, 사용량은 설정에서 볼 수 있어요.",
+        fix: "필요 없는 파일을 내려받은 뒤 삭제하거나 요금제를 바꾸면 공간이 생겨요. 파일 열기와 내려받기는 그대로 돼요.",
+        link: PLAN_LINK,
       };
     case "document_limit_reached":
       return {
         reason: "보관할 수 있는 파일 수를 다 채웠어요.",
-        fix: "필요 없는 파일을 내려받은 뒤 삭제하면 다시 가져올 수 있어요.",
+        fix: "필요 없는 파일을 내려받은 뒤 삭제하거나 요금제를 바꾸면 다시 가져올 수 있어요.",
+        link: PLAN_LINK,
       };
     case "direct_upload_blocked":
       return {

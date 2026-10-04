@@ -305,6 +305,11 @@ export function NativeWorkspace({
     [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState<PendingTurn | null>(initialQueued);
   const [error, setError] = useState(""),
+    // A page that fixes the error (for example the plan section).
+    [errorLink, setErrorLink] = useState<{
+      label: string;
+      href: string;
+    } | null>(null),
     [saveState, setSaveState] = useState("저장됨"),
     [savedAt, setSavedAt] = useState<string | null>(null);
   const saveStateRef = useRef(saveState);
@@ -920,6 +925,7 @@ export function NativeWorkspace({
           // say why, and what to do (download or delete to make room).
           const failure = uploadFailure(code, launch.fileName, launch.maxBytes);
           setError(`${failure.reason} ${failure.fix}`);
+          setErrorLink(failure.link ?? null);
           return;
         }
         setError(
@@ -2402,11 +2408,20 @@ export function NativeWorkspace({
                         icon="close"
                         label="알림 닫기"
                         size="sm"
-                        onClick={() => setError("")}
+                        onClick={() => {
+                          setError("");
+                          setErrorLink(null);
+                        }}
                       />
                     }
                   >
                     {error}
+                    {errorLink ? (
+                      <>
+                        {" "}
+                        <a href={errorLink.href}>{errorLink.label}</a>
+                      </>
+                    ) : null}
                   </Banner>
                 ) : null}
                 {assetNotice ? (
