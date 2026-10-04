@@ -5,6 +5,9 @@ namespace Spellbook.Document.Core;
 /// <summary>
 /// Stable reasons for a failed document job. The product UI turns each code
 /// into a sentence and a next step; the exception message stays in logs.
+/// Processing failures map to: encrypted_or_legacy_file, invalid_package,
+/// broken_presentation, too_many_slides, expanded_too_large, file_too_large,
+/// image_too_large, render_timeout, render_failed and processing_failed.
 /// </summary>
 public static partial class WorkerFailure
 {
@@ -21,6 +24,8 @@ public static partial class WorkerFailure
 
     public static string Code(Exception exception)
     {
+        if (exception is RenderTimeoutException)
+            return "render_timeout";
         var message = exception.Message;
         if (exception is InvalidDataException && ReasonCode().IsMatch(message))
             return message;

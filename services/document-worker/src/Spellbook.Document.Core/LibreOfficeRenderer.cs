@@ -7,6 +7,49 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
 {
     private const int RasterDotsPerInch = 144;
     private const int MaxRenderAttempts = 2;
+    public const int DefaultRenderTimeoutSeconds = 300;
+    internal const int MinRenderTimeoutSeconds = 10;
+    internal const int MaxRenderTimeoutSeconds = 840;
+    private static readonly TimeSpan ProcessStopGrace = TimeSpan.FromSeconds(10);
+
+    private readonly TimeSpan renderTimeout;
+    private readonly PptxImagePixelBudget pixelBudget;
+
+    /// <summary>
+    /// Reads the render deadline from SPELLBOOK_RENDER_TIMEOUT_SECONDS (whole
+    /// seconds, 10..840, default 300). A missing, malformed or out-of-range
+    /// value uses the default so a configuration typo cannot take the worker
+    /// down; the fallback is reported on standard error.
+    /// </summary>
+    public LibreOfficeRenderer()
+        : this(
+            RenderTimeoutFrom(Environment.GetEnvironmentVariable("SPELLBOOK_RENDER_TIMEOUT_SECONDS")),
+            PptxImagePixelBudget.FromEnvironment())
+    {
+    }
+
+    internal LibreOfficeRenderer(TimeSpan renderTimeout, PptxImagePixelBudget? pixelBudget = null)
+    {
+        if (renderTimeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(renderTimeout), renderTimeout, "Render timeout must be positive.");
+        this.renderTimeout = renderTimeout;
+        this.pixelBudget = pixelBudget ?? new PptxImagePixelBudget();
+    }
+
+    internal static TimeSpan RenderTimeoutFrom(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return TimeSpan.FromSeconds(DefaultRenderTimeoutSeconds);
+        if (int.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var seconds)
+            && seconds is >= MinRenderTimeoutSeconds and <= MaxRenderTimeoutSeconds)
+            return TimeSpan.FromSeconds(seconds);
+        Console.Error.WriteLine(JsonSerializer.Serialize(new
+        {
+            eventType = "render_timeout_config_ignored",
+            fallbackSeconds = DefaultRenderTimeoutSeconds
+        }));
+        return TimeSpan.FromSeconds(DefaultRenderTimeoutSeconds);
+    }
 
     public string Name => "LibreOffice";
 
@@ -23,6 +66,28 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
              slideIndexes.Count != slideIndexes.Distinct().Count()))
             throw new ArgumentException("Selected slide indexes must be distinct and non-negative.", nameof(slideIndexes));
         if (slideIndexes is { Count: 0 }) return [];
+        pixelBudget.Check(pptxPath);
+        // One deadline covers every LibreOffice, Python, fc-cache, pdfinfo and
+        // pdftoppm process of this call. Cancelling it kills each process tree.
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(renderTimeout);
+        try
+        {
+            return await RenderWithinDeadlineAsync(pptxPath, outputDirectory, deadline.Token, slideIndexes);
+        }
+        catch (OperationCanceledException)
+            when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            throw new RenderTimeoutException(renderTimeout);
+        }
+    }
+
+    private static async Task<IReadOnlyList<string>> RenderWithinDeadlineAsync(
+        string pptxPath,
+        string outputDirectory,
+        CancellationToken cancellationToken,
+        IReadOnlyList<int>? slideIndexes)
+    {
         Directory.CreateDirectory(outputDirectory);
         var rasterSize = PptxRasterSize.Read(pptxPath, RasterDotsPerInch);
         var workDirectory = Path.Combine(Path.GetTempPath(), $"spellbook-render-{Guid.NewGuid():N}");
@@ -339,9 +404,7 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
         }
         catch (OperationCanceledException)
         {
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync(CancellationToken.None);
-            await Task.WhenAll(output, error);
+            await StopProcessTreeAsync(process, output, error);
             throw;
         }
         var text = await output;
@@ -398,10 +461,7 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
         }
         catch (OperationCanceledException)
         {
-            // Disposing Process does not stop LibreOffice or its children.
-            if (!process.HasExited) process.Kill(entireProcessTree: true);
-            await process.WaitForExitAsync(CancellationToken.None);
-            await Task.WhenAll(stdout, stderr);
+            await StopProcessTreeAsync(process, stdout, stderr);
             throw;
         }
         var output = await stdout;
@@ -416,6 +476,37 @@ public sealed class LibreOfficeRenderer : IPresentationRenderer
                 standardOutputLogPath,
                 output.EndsWith('\n') ? output : $"{output}\n",
                 cancellationToken);
+        }
+    }
+
+    private static async Task StopProcessTreeAsync(Process process, Task stdout, Task stderr)
+    {
+        // Disposing Process does not stop LibreOffice or its children.
+        try
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException
+            or AggregateException or System.ComponentModel.Win32Exception)
+        {
+            // The process exited between the check and the kill, or part of
+            // the tree was already gone. The bounded wait below still applies.
+        }
+        // Bound the wait: a descendant that escaped the tree can keep a pipe
+        // open, and a cancelled render must never outlive its deadline by much.
+        using var grace = new CancellationTokenSource(ProcessStopGrace);
+        try
+        {
+            await process.WaitForExitAsync(grace.Token);
+            await Task.WhenAll(stdout, stderr).WaitAsync(grace.Token);
+        }
+        catch (OperationCanceledException) when (grace.IsCancellationRequested)
+        {
+            Console.Error.WriteLine(JsonSerializer.Serialize(new
+            {
+                eventType = "render_process_stop_incomplete",
+                executable = process.StartInfo.FileName
+            }));
         }
     }
 
