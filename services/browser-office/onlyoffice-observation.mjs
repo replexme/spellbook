@@ -46,6 +46,14 @@ export async function observeOnlyOfficeCandidate(frame) {
         ownName: x.getOwnName?.() ?? null,
         title: x.getCNvProps?.()?.title ?? "",
         description: x.getCNvProps?.()?.descr ?? "",
+        locks:
+          typeof x.getLockValue === "function"
+            ? Object.fromEntries(
+                Object.entries(window.AscFormat.LOCKS_MASKS).map(
+                  ([name, mask]) => [name, x.getLockValue(mask)],
+                ),
+              )
+            : null,
         textWarp: x.getBodyPr?.()?.prstTxWarp?.preset ?? null,
         crop: x.blipFill?.srcRect
           ? {

@@ -256,6 +256,18 @@ export function createOnlyOfficeProductEngine({
               )
                 throw Error("onlyoffice_product_argument_invalid:crop_extent");
             }
+            if (command.op === "set_object_lock") {
+              if (
+                typeof shape.setLockValue !== "function" ||
+                typeof shape.getLockValue !== "function"
+              )
+                throw Error("onlyoffice_product_lock_target_unavailable");
+              if (command.lockPosition == null && command.lockSize == null)
+                throw Error("onlyoffice_product_argument_invalid:empty_lock");
+              for (const key of ["lockPosition", "lockSize"])
+                if (command[key] != null && typeof command[key] !== "boolean")
+                  throw Error("onlyoffice_product_argument_invalid:" + key);
+            }
             const methods = {
               move: "SetPosition",
               resize: "SetSize",
@@ -633,6 +645,19 @@ export function createOnlyOfficeProductEngine({
               rectangle.r = (1 - command.right) * 100;
               rectangle.b = (1 - command.bottom) * 100;
               d.Drawing.setSrcRect(rectangle);
+              return true;
+            }
+            case "set_object_lock": {
+              if (command.lockPosition != null)
+                d.Drawing.setLockValue(
+                  window.AscFormat.LOCKS_MASKS.noMove,
+                  command.lockPosition,
+                );
+              if (command.lockSize != null)
+                d.Drawing.setLockValue(
+                  window.AscFormat.LOCKS_MASKS.noResize,
+                  command.lockSize,
+                );
               return true;
             }
             case "replace_text": {

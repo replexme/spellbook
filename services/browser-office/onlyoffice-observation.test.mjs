@@ -304,6 +304,9 @@ test("dynamic field definitions are stable across rendered cache changes and rem
 test("one synchronous native read retains connectors omitted by the public drawing list", async () => {
   const { frame, slides, window } = candidate();
   window.AscDFH = { historyitem_type_Cnx: 7 };
+  window.AscFormat = {
+    LOCKS_MASKS: { noMove: 1024, noResize: 4096, noCrop: 16777216 },
+  };
   const shape = {
     getObjectType: () => 7,
     getOwnName: () => "connector",
@@ -311,6 +314,7 @@ test("one synchronous native read retains connectors omitted by the public drawi
       title: "accessible connector",
       descr: "connects two nodes",
     }),
+    getLockValue: (mask) => mask !== 4096,
     x: 0,
     y: 0,
     extX: 10,
@@ -349,6 +353,10 @@ test("one synchronous native read retains connectors omitted by the public drawi
   const result = await observeOnlyOfficeCandidate(frame);
   assert.equal(calls, 1);
   assert.equal(result.common.slides[0].shapes[0].type, "connector");
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(result.common.slides[0].shapes[0].locks)),
+    { noMove: true, noResize: false, noCrop: true },
+  );
   assert.equal(result.common.slides[0].shapes[0].title, "accessible connector");
   assert.equal(
     result.common.slides[0].shapes[0].description,

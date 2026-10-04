@@ -24,6 +24,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "flip",
   "set_shape_name",
   "set_alt_text",
+  "set_object_lock",
   "crop_image",
   "fill_color",
   "line_color",
@@ -230,6 +231,15 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
       } else if (op === "set_alt_text") {
         for (const key of ["title", "description"])
           if (command[key] != null) original.onlyoffice[key] = command[key];
+      } else if (op === "set_object_lock") {
+        if (!original.onlyoffice.locks || !actual.onlyoffice.locks)
+          throw Error("onlyoffice_product_intent_locks_missing");
+        for (const value of group.filter((c) => c.op === "set_object_lock")) {
+          if (value.lockPosition != null)
+            original.onlyoffice.locks.noMove = value.lockPosition;
+          if (value.lockSize != null)
+            original.onlyoffice.locks.noResize = value.lockSize;
+        }
       } else if (op === "crop_image") {
         original.onlyoffice.crop = {
           l: command.left * 100,

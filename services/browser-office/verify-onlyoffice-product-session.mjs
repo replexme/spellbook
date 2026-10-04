@@ -886,6 +886,7 @@ try {
     set_character_spacing: { spacing: 2 },
     set_script_position: { script: "superscript" },
     set_text_language: { languageTag: "ko-KR" },
+    set_object_lock: { lockPosition: true, lockSize: true },
     rename_slide: {
       slideIndex: selectedSlideIndex,
       elementId: null,
@@ -989,6 +990,7 @@ try {
       "set_shape_name",
       "set_alt_text",
       "set_text_language",
+      "set_object_lock",
       "font_family",
       "flip",
       "rename_slide",

@@ -523,6 +523,38 @@ test("text language normalizes its tag and preserves other run properties", () =
   );
 });
 
+test("object locks compose requested flags and preserve every unsupplied lock", () => {
+  const before = document();
+  before.slides[0].elements[0].onlyoffice.locks = {
+    noMove: false,
+    noResize: false,
+    noCrop: true,
+  };
+  const after = structuredClone(before);
+  after.slides[0].elements[0].onlyoffice.locks.noMove = true;
+  after.slides[0].elements[0].onlyoffice.locks.noResize = true;
+  const commands = [
+    {
+      op: "set_object_lock",
+      elementId: "0/0",
+      lockPosition: true,
+      lockSize: null,
+    },
+    {
+      op: "set_object_lock",
+      elementId: "0/0",
+      lockPosition: null,
+      lockSize: true,
+    },
+  ];
+  verifyOnlyOfficeProductIntent(before, after, commands);
+  after.slides[0].elements[0].onlyoffice.locks.noCrop = false;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+});
+
 test("native text language changes only the primary language and uses native history setters", async () => {
   const { createOnlyOfficeProductEngine } = await import(
     "./onlyoffice/product-engine.mjs"
