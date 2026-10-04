@@ -915,6 +915,12 @@ try {
 } catch (error) {
   report.status = "failed";
   report.error = error.stack;
+  if (mainPage && !mainPage.isClosed()) {
+    await mainPage
+      .screenshot({ path: path.join(output, "failure.png") })
+      .catch(() => null);
+    report.failureRendering = await pixels(mainFrame).catch(() => null);
+  }
   if (mainFrame)
     report.unwrappedNativeObjects = await mainFrame
       .evaluate(() => {
