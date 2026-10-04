@@ -794,6 +794,11 @@ const engine = createOnlyOfficeProductEngine({
             ].includes(c.op)
           )
             return { op: c.op, slideIndex: c.slideIndex };
+          if (c.op === "set_reading_order")
+            return {
+              op: c.op,
+              slideIndex: Number(c.elementIds[0].split("/")[0]),
+            };
           const [slideIndex, shapeIndex] = c.elementId.split("/").map(Number);
           return {
             op: c.op,
@@ -1035,6 +1040,12 @@ try {
       rotate: { degrees: 15 },
       flip: { axis: "horizontal" },
       z_order: { position: flags("--position", "front") },
+      set_reading_order: {
+        elementId: null,
+        elementIds: before.slides[selectedSlideIndex].elements
+          .map((e) => e.elementId)
+          .reverse(),
+      },
       set_shape_name: { name: "Verified title" },
       set_alt_text: {
         title: "Verified accessible title",
@@ -1137,16 +1148,25 @@ try {
       assert(Math.abs(afterTarget.y - command.y) < 0.01);
     }
     if (operation === "replace_text")
-      assert.equal(afterTarget.text.trim(), command.text);
+      assert.equal(
+        afterTarget.text.replace(/\r\n/g, "\n").replace(/\n$/, ""),
+        command.text.replace(/\r\n/g, "\n"),
+      );
     for (const element of before.slides[selectedSlideIndex].elements.filter(
       (e) => e.elementId !== target.elementId,
     )) {
       const expected = structuredClone(element);
+      if (operation === "set_reading_order") {
+        expected.elementId = `${selectedSlideIndex}/${command.elementIds.indexOf(element.elementId)}`;
+      }
       if (operation === "z_order") {
-        const order = before.slides[selectedSlideIndex].elements.map((_, i) => i);
+        const order = before.slides[selectedSlideIndex].elements.map(
+          (_, i) => i,
+        );
         const originalIndex = Number(target.elementId.split("/")[1]);
         const destination = {
-          front: order.length - 1, back: 0,
+          front: order.length - 1,
+          back: 0,
           forward: Math.min(originalIndex + 1, order.length - 1),
           backward: Math.max(originalIndex - 1, 0),
         }[command.position];
@@ -1185,6 +1205,7 @@ try {
         "set_slide_hidden",
         "set_speaker_notes",
         "z_order",
+        "set_reading_order",
       ].includes(operation)
     )
       assert.notEqual(

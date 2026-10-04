@@ -23,6 +23,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "rotate",
   "flip",
   "z_order",
+  "set_reading_order",
   "set_shape_name",
   "set_alt_text",
   "set_object_lock",
@@ -74,11 +75,32 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
   // requested permutations, then undo that permutation in the observed model
   // before comparing all object properties. No names or hashes are guessed.
   const orders = new Map();
-  for (const command of commands.filter((c) => c.op === "z_order")) {
-    const [slideIndex, originalIndex] = command.elementId.split("/").map(Number);
+  for (const command of commands.filter((c) =>
+    ["z_order", "set_reading_order"].includes(c.op),
+  )) {
+    const id =
+      command.op === "set_reading_order"
+        ? command.elementIds[0]
+        : command.elementId;
+    const [slideIndex, originalIndex] = id.split("/").map(Number);
     const slide = left.slides[slideIndex];
     if (!slide || !slide.elements[originalIndex])
       throw Error("onlyoffice_product_intent_target_missing");
+    if (command.op === "set_reading_order") {
+      const desired = command.elementIds.map((id) => {
+        const [s, i] = id.split("/").map(Number);
+        if (s !== slideIndex || !slide.elements[i])
+          throw Error("onlyoffice_product_intent_mismatch:reading_order");
+        return i;
+      });
+      if (
+        desired.length !== slide.elements.length ||
+        new Set(desired).size !== desired.length
+      )
+        throw Error("onlyoffice_product_intent_mismatch:reading_order");
+      orders.set(slideIndex, desired);
+      continue;
+    }
     const order = orders.get(slideIndex) ?? slide.elements.map((_, i) => i);
     const index = order.indexOf(originalIndex);
     const destination = {
@@ -97,19 +119,27 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
     const observed = right.slides[slideIndex];
     if (observed.elements.length !== order.length)
       throw Error("onlyoffice_product_intent_mismatch:z_order_count");
-    const restore = (values) => order.map((_, original) => values[order.indexOf(original)]);
-    const tableOrder = order.filter((i) => left.slides[slideIndex].elements[i].kind === "table");
+    const restore = (values) =>
+      order.map((_, original) => values[order.indexOf(original)]);
+    const tableOrder = order.filter(
+      (i) => left.slides[slideIndex].elements[i].kind === "table",
+    );
     observed.narrow.table = left.slides[slideIndex].elements
-      .map((e, i) => e.kind === "table" ? observed.narrow.table[tableOrder.indexOf(i)] : undefined)
+      .map((e, i) =>
+        e.kind === "table"
+          ? observed.narrow.table[tableOrder.indexOf(i)]
+          : undefined,
+      )
       .filter((e) => e !== undefined);
     observed.elements = restore(observed.elements);
     observed.onlyoffice.drawings = restore(observed.onlyoffice.drawings);
     observed.narrow.drawingStyle = restore(observed.narrow.drawingStyle);
     observed.narrow.wordArt = restore(observed.narrow.wordArt);
-    const renumber = (elements, prefix) => elements.forEach((e, i) => {
-      e.elementId = prefix + "/" + i;
-      renumber(e.elements, e.elementId);
-    });
+    const renumber = (elements, prefix) =>
+      elements.forEach((e, i) => {
+        e.elementId = prefix + "/" + i;
+        renumber(e.elements, e.elementId);
+      });
     renumber(observed.elements, String(slideIndex));
   }
   const grouped = new Map();
@@ -169,6 +199,7 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
       }
       continue;
     }
+    if (command.op === "set_reading_order") continue;
     const group = grouped.get(command.elementId) ?? [];
     group.push(command);
     grouped.set(command.elementId, group);

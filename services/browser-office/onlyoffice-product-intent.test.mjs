@@ -1147,7 +1147,9 @@ test("whole-batch validation finishes before fallback-font loading and waits for
     AscFonts: {
       FontPickerByCharacter: {
         getFontBySymbol(codepoint) {
-          assert.ok(["한".codePointAt(0), "글".codePointAt(0)].includes(codepoint));
+          assert.ok(
+            ["한".codePointAt(0), "글".codePointAt(0)].includes(codepoint),
+          );
           return "Noto Sans KR";
         },
       },
@@ -1191,7 +1193,6 @@ test("whole-batch validation finishes before fallback-font loading and waits for
   }
 });
 
-
 test("table movement checks the requested authored position and preserves row rules", () => {
   const before = document();
   before.slides[0].elements[0].kind = "table";
@@ -1207,12 +1208,20 @@ test("table movement checks the requested authored position and preserves row ru
   layout.authoredFrame.offX = 500;
   layout.authoredFrame.offY = 600;
   const commands = [{ op: "move", elementId: "0/0", x: 500, y: 600 }];
-  assert.doesNotThrow(() => verifyOnlyOfficeProductIntent(before, after, commands));
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, commands),
+  );
   layout.authoredFrame.offX = 501;
-  assert.throws(() => verifyOnlyOfficeProductIntent(before, after, commands), /unrequested_change/);
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
   layout.authoredFrame.offX = 500;
   layout.rowHeights[0].value = 400;
-  assert.throws(() => verifyOnlyOfficeProductIntent(before, after, commands), /unrequested_change/);
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
 });
 
 for (const position of ["front", "forward", "back", "backward"])
@@ -1221,17 +1230,30 @@ for (const position of ["front", "forward", "back", "backward"])
     const index = ["front", "forward"].includes(position) ? 0 : 1;
     const after = structuredClone(before);
     const slide = after.slides[0];
-    for (const values of [slide.elements, slide.onlyoffice.drawings,
-      slide.narrow.drawingStyle, slide.narrow.wordArt]) values.reverse();
-    slide.elements.forEach((e, i) => { e.elementId = "0/" + i; });
+    for (const values of [
+      slide.elements,
+      slide.onlyoffice.drawings,
+      slide.narrow.drawingStyle,
+      slide.narrow.wordArt,
+    ])
+      values.reverse();
+    slide.elements.forEach((e, i) => {
+      e.elementId = "0/" + i;
+    });
     const commands = [{ op: "z_order", elementId: "0/" + index, position }];
-    assert.doesNotThrow(() => verifyOnlyOfficeProductIntent(before, after, commands));
+    assert.doesNotThrow(() =>
+      verifyOnlyOfficeProductIntent(before, after, commands),
+    );
     slide.elements[0].onlyoffice.text = "unrequested text";
-    assert.throws(() => verifyOnlyOfficeProductIntent(before, after, commands), /unrequested_change/);
+    assert.throws(
+      () => verifyOnlyOfficeProductIntent(before, after, commands),
+      /unrequested_change/,
+    );
   });
 
 test("stacking uses preflight identities across a batch and does not excuse a wrong order", () => {
-  const before = document(), after = structuredClone(before);
+  const before = document(),
+    after = structuredClone(before);
   const commands = [
     { op: "z_order", elementId: "0/0", position: "front" },
     { op: "z_order", elementId: "0/1", position: "front" },
@@ -1239,6 +1261,50 @@ test("stacking uses preflight identities across a batch and does not excuse a wr
   ];
   after.slides[0].elements[0].x = 123;
   after.slides[0].elements[0].y = 456;
-  assert.doesNotThrow(() => verifyOnlyOfficeProductIntent(before, after, commands));
-  assert.throws(() => verifyOnlyOfficeProductIntent(before, before, [commands[0]]), /intent_mismatch|unrequested_change/);
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, commands),
+  );
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, before, [commands[0]]),
+    /intent_mismatch|unrequested_change/,
+  );
+});
+
+test("reading order permutes all slide objects and preserves table and nested group evidence", () => {
+  const before = document();
+  before.slides[0].elements[0].kind = "table";
+  before.slides[0].narrow.table = [{ name: "authored table", rows: 1 }];
+  before.slides[0].onlyoffice.drawings[0].tableCells = [["cell"]];
+  before.slides[0].elements[1].kind = "group";
+  before.slides[0].elements[1].elements = [
+    { elementId: "0/1/0", text: "nested", elements: [] },
+  ];
+  const after = structuredClone(before),
+    slide = after.slides[0];
+  for (const array of [
+    slide.elements,
+    slide.onlyoffice.drawings,
+    slide.narrow.drawingStyle,
+    slide.narrow.wordArt,
+  ])
+    array.reverse();
+  slide.elements[0].elementId = "0/0";
+  slide.elements[0].elements[0].elementId = "0/0/0";
+  slide.elements[1].elementId = "0/1";
+  const commands = [{ op: "set_reading_order", elementIds: ["0/1", "0/0"] }];
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, commands),
+  );
+  slide.narrow.table[0].rows = 2;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+  assert.throws(
+    () =>
+      verifyOnlyOfficeProductIntent(before, before, [
+        { op: "set_reading_order", elementIds: ["0/0", "0/0"] },
+      ]),
+    /reading_order/,
+  );
 });

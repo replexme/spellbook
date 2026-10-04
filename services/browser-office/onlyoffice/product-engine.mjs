@@ -173,6 +173,52 @@ export function createOnlyOfficeProductEngine({
               throw Error(
                 "onlyoffice_product_operation_unavailable:" + command.op,
               );
+            if (command.op === "set_reading_order") {
+              const ids = command.elementIds;
+              if (
+                !Array.isArray(ids) ||
+                ids.length < 2 ||
+                ids.length > 256 ||
+                new Set(ids).size !== ids.length ||
+                ids.some(
+                  (id) => typeof id !== "string" || !/^\d+\/\d+$/.test(id),
+                )
+              )
+                throw Error("onlyoffice_product_reading_order_invalid");
+              const index = Number(ids[0].split("/")[0]);
+              const slide = m.Slides[index];
+              if (
+                !slide ||
+                ids.length !== slide.cSld.spTree.length ||
+                ids.some(
+                  (id) =>
+                    Number(id.split("/")[0]) !== index ||
+                    !slide.cSld.spTree[Number(id.split("/")[1])],
+                )
+              )
+                throw Error(
+                  "onlyoffice_product_reading_order_requires_all_slide_objects",
+                );
+              const controller = slide.graphicObjects;
+              if (
+                typeof controller?.bringToFront !== "function" ||
+                typeof controller.resetSelection !== "function" ||
+                typeof controller.selectObject !== "function"
+              )
+                throw Error("onlyoffice_product_reading_order_unavailable");
+              if (commands.some((c) => c.op === "delete_element"))
+                throw Error(
+                  "onlyoffice_product_topology_requires_separate_request",
+                );
+              return {
+                ...command,
+                slideIndex: index,
+                nativeId: slide.Id,
+                nativeIds: ids.map(
+                  (id) => slide.cSld.spTree[Number(id.split("/")[1])].Id,
+                ),
+              };
+            }
             if (
               [
                 "rename_slide",
@@ -237,16 +283,23 @@ export function createOnlyOfficeProductEngine({
               throw Error("onlyoffice_product_target_missing");
             if (command.op === "z_order") {
               const method = {
-                front: "bringToFront", forward: "bringForward",
-                back: "sendToBack", backward: "bringBackward",
+                front: "bringToFront",
+                forward: "bringForward",
+                back: "sendToBack",
+                backward: "bringBackward",
               }[command.position];
               const controller = m.Slides[slide]?.graphicObjects;
-              if (!method || typeof controller?.[method] !== "function" ||
-                  typeof controller.resetSelection !== "function" ||
-                  typeof controller.selectObject !== "function")
+              if (
+                !method ||
+                typeof controller?.[method] !== "function" ||
+                typeof controller.resetSelection !== "function" ||
+                typeof controller.selectObject !== "function"
+              )
                 throw Error("onlyoffice_product_z_order_unavailable");
               if (commands.some((c) => ["delete_element"].includes(c.op)))
-                throw Error("onlyoffice_product_topology_requires_separate_request");
+                throw Error(
+                  "onlyoffice_product_topology_requires_separate_request",
+                );
             }
             if (command.op === "set_table_cell") {
               const cell =
@@ -560,8 +613,10 @@ export function createOnlyOfficeProductEngine({
             new Promise((resolve) => {
               const picker = window.AscFonts?.FontPickerByCharacter;
               const loader = window.AscCommon?.g_font_loader;
-              if (typeof picker?.getFontBySymbol !== "function" ||
-                  typeof loader?.LoadFonts !== "function")
+              if (
+                typeof picker?.getFontBySymbol !== "function" ||
+                typeof loader?.LoadFonts !== "function"
+              )
                 throw Error("onlyoffice_product_character_fonts_unavailable");
               // checkText only loads newly discovered character ranges. A range
               // may already be known while its font bytes are still unavailable.
@@ -570,7 +625,10 @@ export function createOnlyOfficeProductEngine({
               const fonts = new Set();
               for (const character of text) {
                 const name = picker.getFontBySymbol(character.codePointAt(0));
-                if (name && window.AscFonts.g_map_font_index[name] !== undefined)
+                if (
+                  name &&
+                  window.AscFonts.g_map_font_index[name] !== undefined
+                )
                   fonts.add(name);
               }
               if (fonts.size) loader.LoadFonts([...fonts], resolve);
@@ -601,6 +659,31 @@ export function createOnlyOfficeProductEngine({
           const api = window.AscBuilder.Slide.Api,
             p = api.GetPresentation(),
             slide = p.GetSlideByIndex(command.slideIndex);
+          if (command.op === "set_reading_order") {
+            if (
+              slide?.Slide.Id !== command.nativeId ||
+              slide.Slide.cSld.spTree.length !== command.nativeIds.length
+            )
+              throw Error("onlyoffice_product_live_binding_changed");
+            const shapes = command.nativeIds.map((id) =>
+              slide.Slide.cSld.spTree.find((s) => s.Id === id),
+            );
+            if (shapes.some((s) => !s))
+              throw Error("onlyoffice_product_live_binding_changed");
+            editor.WordControl.GoToPage(command.slideIndex);
+            p.CreateNewHistoryPoint();
+            const controller = slide.Slide.graphicObjects;
+            try {
+              for (const shape of shapes) {
+                controller.resetSelection();
+                controller.selectObject(shape, command.slideIndex);
+                controller.bringToFront();
+              }
+            } finally {
+              window.AscCommon.IsChangingDrawingZIndex = false;
+            }
+            return true;
+          }
           const replaceContent = (c, text) => {
             if (!c) throw Error("onlyoffice_product_text_unavailable");
             const first = c.GetAllParagraphs()[0];
@@ -731,11 +814,16 @@ export function createOnlyOfficeProductEngine({
               controller.resetSelection();
               controller.selectObject(native, command.slideIndex);
               const method = {
-                front: "bringToFront", forward: "bringForward",
-                back: "sendToBack", backward: "bringBackward",
+                front: "bringToFront",
+                forward: "bringForward",
+                back: "sendToBack",
+                backward: "bringBackward",
               }[command.position];
-              try { controller[method](); }
-              finally { window.AscCommon.IsChangingDrawingZIndex = false; }
+              try {
+                controller[method]();
+              } finally {
+                window.AscCommon.IsChangingDrawingZIndex = false;
+              }
               return true;
             }
             case "move":
