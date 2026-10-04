@@ -1882,3 +1882,21 @@ test("deleting a slide preserves full retained slide properties and positional o
     /unrequested_change/,
   );
 });
+
+test("duplicating a slide copies its complete model after the requested source", () => {
+  const before = document();
+  before.slides[0].slideIndex = 0;
+  const after = structuredClone(before);
+  after.slides.push(structuredClone(after.slides[0]));
+  after.slides[1].slideIndex = 1;
+  after.slides[1].elements.forEach((e, i) => (e.elementId = "1/" + i));
+  const command = { op: "duplicate_slide", slideIndex: 0 };
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, [command]),
+  );
+  after.slides[1].onlyoffice.drawings[0].paragraphs[0].runs[0].style.GetBold = true;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+});

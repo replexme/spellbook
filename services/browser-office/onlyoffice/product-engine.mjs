@@ -282,6 +282,24 @@ export function createOnlyOfficeProductEngine({
               throw Error(
                 "onlyoffice_product_operation_unavailable:" + command.op,
               );
+            if (command.op === "duplicate_slide") {
+              const source = m.Slides[command.slideIndex];
+              if (
+                commands.length !== 1 ||
+                !Number.isSafeInteger(command.slideIndex) ||
+                command.slideIndex < 0 ||
+                !source ||
+                m.Slides.length >= 200
+              )
+                throw Error("onlyoffice_product_slide_duplicate_invalid");
+              if (m.Sections?.length)
+                throw Error("onlyoffice_product_slide_sections_unavailable");
+              return {
+                ...command,
+                nativeId: source.Id,
+                nativeIds: m.Slides.map((s) => s.Id),
+              };
+            }
             if (command.op === "delete_slide") {
               const source = m.Slides[command.slideIndex];
               if (
@@ -899,6 +917,29 @@ export function createOnlyOfficeProductEngine({
           const api = window.AscBuilder.Slide.Api,
             p = api.GetPresentation(),
             slide = p.GetSlideByIndex(command.slideIndex);
+          if (command.op === "duplicate_slide") {
+            const model = editor.WordControl.m_oLogicDocument;
+            if (
+              model.Slides[command.slideIndex]?.Id !== command.nativeId ||
+              model.Slides.length !== command.nativeIds.length ||
+              model.Slides.some((s, i) => s.Id !== command.nativeIds[i])
+            )
+              throw Error("onlyoffice_product_live_binding_changed");
+            p.CreateNewHistoryPoint();
+            const copy = slide.Duplicate(command.slideIndex + 1);
+            if (
+              !copy?.Slide ||
+              copy.Slide.Id === command.nativeId ||
+              model.Slides[command.slideIndex + 1] !== copy.Slide ||
+              model.Slides.length !== command.nativeIds.length + 1 ||
+              model.Slides.filter((_, i) => i !== command.slideIndex + 1).some(
+                (s, i) => s.Id !== command.nativeIds[i],
+              )
+            )
+              throw Error("onlyoffice_product_slide_duplicate_not_applied");
+            editor.WordControl.GoToPage(command.slideIndex + 1);
+            return true;
+          }
           if (command.op === "delete_slide") {
             const model = editor.WordControl.m_oLogicDocument;
             if (
@@ -1483,25 +1524,32 @@ export function createOnlyOfficeProductEngine({
         }
       }, command);
       if (result === false) throw Error("onlyoffice_product_native_rejected");
-      await frame.evaluate((nativeId) => {
-        const h = window.AscCommon.History,
-          m = window.Asc.editor.WordControl.m_oLogicDocument;
-        const target = m.Slides.flatMap((s) => s.cSld.spTree).find(
-          (x) => x.Id === nativeId,
-        );
-        target?.getDocContent?.()?.Recalc_AllParagraphs_CompiledPr?.();
-        if (target?.isTable?.()) {
-          for (const row of target.graphicObject.Content)
-            for (const cell of row.Content)
-              cell.Content.Recalc_AllParagraphs_CompiledPr();
-          target.Refresh_RecalcData2();
-        }
-        target?.recalcText?.();
-        target?.recalculate?.();
-        m.Recalculate(h.Get_RecalcData(null, h.getGroupChanges()));
-        m.RedrawCurSlide();
-        m.Document_UpdateInterfaceState();
-      }, command.nativeId);
+      await frame.evaluate(
+        ({ nativeId, op }) => {
+          const h = window.AscCommon.History,
+            m = window.Asc.editor.WordControl.m_oLogicDocument;
+          const target = m.Slides.flatMap((s) => s.cSld.spTree).find(
+            (x) => x.Id === nativeId,
+          );
+          target?.getDocContent?.()?.Recalc_AllParagraphs_CompiledPr?.();
+          if (target?.isTable?.()) {
+            for (const row of target.graphicObject.Content)
+              for (const cell of row.Content)
+                cell.Content.Recalc_AllParagraphs_CompiledPr();
+            target.Refresh_RecalcData2();
+          }
+          target?.recalcText?.();
+          target?.recalculate?.();
+          if (["move_slide", "delete_slide", "duplicate_slide"].includes(op)) {
+            m.updateSlideIndexes?.();
+            window.Asc.editor.WordControl.m_oDrawingDocument?.UpdateThumbnailsAttack?.();
+          }
+          m.Recalculate(h.Get_RecalcData(null, h.getGroupChanges()));
+          m.RedrawCurSlide();
+          m.Document_UpdateInterfaceState();
+        },
+        { nativeId: command.nativeId, op: command.op },
+      );
       return true;
     },
     snapshot,

@@ -39,6 +39,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "rename_slide",
   "move_slide",
   "delete_slide",
+  "duplicate_slide",
   "set_slide_hidden",
   "set_background",
   "set_speaker_notes",
@@ -155,8 +156,22 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
   for (const command of commands) {
     if (!onlyOfficeIntentOperations.includes(command.op))
       throw Error("onlyoffice_product_intent_unavailable:" + command.op);
-    if (["move_slide", "delete_slide"].includes(command.op)) {
-      const [moved] = left.slides.splice(command.slideIndex, 1);
+    if (
+      ["move_slide", "delete_slide", "duplicate_slide"].includes(command.op)
+    ) {
+      if (command.op === "duplicate_slide") {
+        if (!left.slides[command.slideIndex] || left.sections?.length)
+          throw Error("onlyoffice_product_intent_slide_duplicate_invalid");
+        left.slides.splice(
+          command.slideIndex + 1,
+          0,
+          structuredClone(left.slides[command.slideIndex]),
+        );
+      }
+      const [moved] =
+        command.op === "duplicate_slide"
+          ? [null]
+          : left.slides.splice(command.slideIndex, 1);
       if (
         command.op === "move_slide" &&
         (!moved ||
@@ -167,7 +182,10 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         throw Error("onlyoffice_product_intent_target_missing");
       if (command.op === "move_slide")
         left.slides.splice(command.targetSlideIndex, 0, moved);
-      else if (!moved || !left.slides.length || left.sections?.length)
+      else if (
+        command.op === "delete_slide" &&
+        (!moved || !left.slides.length || left.sections?.length)
+      )
         throw Error("onlyoffice_product_intent_slide_delete_invalid");
       const renumber = (elements, prefix) =>
         elements.forEach((element, index) => {

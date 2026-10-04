@@ -133,3 +133,51 @@ test("native slide deletion removes only its declared authored ownership", async
     /coordinates/,
   );
 });
+
+test("native slide duplication clones authored details missing from the native baseline", async () => {
+  const fixture = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/fixtures/general-native-surface.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
+  const original = unzipSync(fixture);
+  const doc = new DOMParser().parseFromString(
+    strFromU8(original["ppt/slides/slide1.xml"]),
+    "text/xml",
+  );
+  doc.getElementsByTagNameNS(a, "rPr")[0].setAttribute("altLang", "ko-KR");
+  original["ppt/slides/slide1.xml"] = strToU8(
+    new XMLSerializer().serializeToString(doc),
+  );
+  const baseline = {
+    ...original,
+    "ppt/slides/slide1.xml": strToU8(
+      strFromU8(original["ppt/slides/slide1.xml"]).replace(
+        / altLang="[^"]+"/g,
+        "",
+      ),
+    ),
+  };
+  const edited = applyOoxmlCommand(zipSync(baseline), {
+    op: "duplicate_slide",
+    slideIndex: 0,
+    insertIndex: 1,
+  }).bytes;
+  const result = preserveOriginalPptxParts(
+    zipSync(original),
+    zipSync(baseline),
+    edited,
+    ["duplicate_slide"],
+    [{ op: "duplicate_slide", slideIndex: 0 }],
+  );
+  const saved = unzipSync(result.bytes);
+  assert.deepEqual(
+    saved["ppt/slides/slide1.xml"],
+    original["ppt/slides/slide1.xml"],
+  );
+  assert.match(strFromU8(saved["ppt/slides/slide2.xml"]), /altLang="ko-KR"/);
+  assert.equal(result.report.topology.kind, "duplicate");
+});

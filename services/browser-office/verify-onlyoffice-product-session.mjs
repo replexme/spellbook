@@ -826,6 +826,7 @@ const engine = createOnlyOfficeProductEngine({
               "rename_slide",
               "move_slide",
               "delete_slide",
+              "duplicate_slide",
               "set_slide_hidden",
               "set_background",
               "set_speaker_notes",
@@ -1086,6 +1087,7 @@ try {
       y: target.y,
     });
     const args = {
+      duplicate_slide: { elementId: null, slideIndex: selectedSlideIndex },
       delete_slide: { elementId: null, slideIndex: selectedSlideIndex },
       move_slide: {
         elementId: null,
@@ -1286,6 +1288,7 @@ try {
     report.editedTableDetails = await tableDetails(mainFrame);
     if (
       ![
+        "duplicate_slide",
         "set_shape_name",
         "set_alt_text",
         "set_text_language",

@@ -2456,7 +2456,7 @@ function mergeDirectSlideTopology(
   // authored package instead of introducing export-created text bodies on
   // non-text decoration (thin rectangles otherwise acquire clamped margins).
   const baselinePaths = orderedSlidePaths(noEdit);
-  const mayBeClone = intent?.elements?.some(
+  const mayBeClone = Number.isInteger(intent?.cloneSourceSlideIndex) || intent?.elements?.some(
     (element) =>
       !(
         element.presentationObject === true &&
@@ -3949,6 +3949,24 @@ export function preserveOriginalPptxParts(
     throw new Error(
       "Native snapshot comparison exceeds the browser memory limit.",
     );
+
+  if (sourceOperations.includes("duplicate_slide")) {
+    if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== "duplicate_slide")
+      throw new Error("Native slide duplication requires one declared source.");
+    const sourceIndex = sourceTargets[0].slideIndex;
+    if (!Number.isSafeInteger(sourceIndex) || sourceIndex < 0 || sourceIndex >= orderedSlidePaths(original).length)
+      throw new Error("Native duplicate source is outside the authored deck.");
+    const intent = [{op:"native_slide_topology",slideIndex:sourceIndex+1,cloneSourceSlideIndex:sourceIndex}];
+    const topology = directSlideTopologyPaths(original,noEdit,rawEdited,intent);
+    if (topology?.kind !== "insert" || topology.index !== sourceIndex+1)
+      throw new Error("Native duplicate does not retain declared slide ownership.");
+    const aligned = renameEnginePackageParts(alignEngineSlideParts(original,rawEdited,topology.paths),workbookRenames);
+    const entries = mergeDirectSlideTopology(originalBytes,original,noEdit,aligned,topology,intent,{});
+    const bytes = zipSync(entries,{level:6,mtime:deterministicZipModifiedAt});
+    inspectOoxmlDocument(bytes);
+    const changed = changedPackageParts(original,entries);
+    return {bytes,report:{changedParts:changed,semanticPatchedParts:changed,suppressedNoopParts:[],suppressedOutOfBudgetParts:[],authoredShapeScopes:null,topologyAligned:true,topologyImportedDesign:null,topology:{kind:"duplicate",index:sourceIndex+1,sourceIndex},topologyExistingContentChanges:[]}};
+  }
 
   if (sourceOperations.some(op => ["move_slide", "delete_slide"].includes(op))) {
     if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== sourceOperations[0])
