@@ -1003,3 +1003,114 @@ test("table text reflow may change calculated height while authored heights and 
     /table_layout_height/,
   );
 });
+
+test("text replacement retains the first paragraph's inherited defaults and end style while creating real later paragraphs", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  const old = globalThis.window;
+  const runStyle = { TextPr: { FontSize: 32 } },
+    endStyle = { TextPr: { FontSize: 9 } };
+  const paragraphs = [];
+  const makeParagraph = (existing = false) => ({
+    text: "",
+    inherited: existing,
+    end: existing ? endStyle : null,
+    Paragraph: {
+      Set_Pr(value) {
+        assert.equal(existing, false);
+        this.props = value;
+      },
+    },
+    GetElement: () => ({ GetTextPr: () => runStyle }),
+    GetTextPr: () => endStyle,
+    GetParaPr: () => ({ ParaPr: { Copy: () => ({ spacingAfter: 0 }) } }),
+    RemoveAllElements() {
+      this.text = "";
+    },
+    SetTextPr(properties) {
+      assert.equal(existing, false);
+      this.end = properties;
+    },
+    AddText(text) {
+      this.text = text;
+      return {
+        SetTextPr: (style) => {
+          this.style = style;
+          return style;
+        },
+      };
+    },
+  });
+  const first = makeParagraph(true);
+  paragraphs.push(first, makeParagraph());
+  const content = {
+    GetAllParagraphs: () => paragraphs,
+    GetElementsCount: () => paragraphs.length,
+    GetElement: (i) => paragraphs[i],
+    RemoveElement: (i) => {
+      paragraphs.splice(i, 1);
+      return true;
+    },
+    Push: (p) => {
+      paragraphs.push(p);
+      return true;
+    },
+    RemoveAllElements() {
+      throw Error("discarded paragraph inheritance");
+    },
+  };
+  const shape = { Id: "text" };
+  const model = {
+    Slides: [{ cSld: { spTree: [shape] } }],
+    Recalculate() {},
+    RedrawCurSlide() {},
+    Document_UpdateInterfaceState() {},
+  };
+  globalThis.window = {
+    Asc: {
+      editor: {
+        isGroupActions: () => true,
+        executeGroupActionsStart() {},
+        executeGroupActionsEnd() {},
+        WordControl: { m_oLogicDocument: model, GoToPage() {} },
+      },
+    },
+    AscBuilder: {
+      GetApiDrawing: () => ({ Drawing: shape, GetDocContent: () => content }),
+      Slide: {
+        Api: {
+          CreateParagraph: () => makeParagraph(),
+          GetPresentation: () => ({
+            GetSlideByIndex: () => ({ Slide: model.Slides[0] }),
+            CreateNewHistoryPoint() {},
+          }),
+        },
+      },
+    },
+    AscCommon: { History: { Get_RecalcData() {}, getGroupChanges() {} } },
+  };
+  try {
+    const engine = createOnlyOfficeProductEngine({
+      getFrame: async () => ({ evaluate: async (fn, arg) => fn(arg) }),
+    });
+    await engine.apply({
+      op: "replace_text",
+      slideIndex: 0,
+      nativeId: "text",
+      text: "First\r\nSecond",
+    });
+    assert.equal(paragraphs.length, 2);
+    assert.equal(paragraphs[0], first);
+    assert.equal(first.end, endStyle);
+    assert.equal(first.Paragraph.props, undefined);
+    assert.deepEqual(
+      paragraphs.map((p) => p.text),
+      ["First", "Second"],
+    );
+    assert.equal(paragraphs[1].end, endStyle);
+    for (const paragraph of paragraphs) assert.equal(paragraph.style, runStyle);
+  } finally {
+    globalThis.window = old;
+  }
+});

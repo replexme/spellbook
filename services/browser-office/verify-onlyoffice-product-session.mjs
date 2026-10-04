@@ -280,7 +280,63 @@ const report = {
   timings: {},
 };
 const contexts = [];
-let mainPage, mainFrame, pendingAuthorization;
+let mainPage,
+  mainFrame,
+  pendingAuthorization,
+  lastObserved,
+  lastInspection,
+  lastCommandObservation,
+  commandTableDetails,
+  inspectedTableDetails;
+async function tableDetails(frame) {
+  return frame.evaluate(() =>
+    window.Asc.editor.WordControl.m_oLogicDocument.Slides.map((slide) =>
+      slide.cSld.spTree
+        .filter((s) => s.isTable?.())
+        .map((shape) =>
+          shape.graphicObject.Content.map((row) => ({
+            height: {
+              value: row.Get_Height().Value,
+              rule: row.Get_Height().HRule,
+            },
+            cells: row.Content.map((cell) => {
+              const p = cell.Content.Content[0],
+                c = p.Get_CompiledPr2(false),
+                pr = cell.Get_CompiledPr(false);
+              return {
+                spacing: c.ParaPr.Spacing,
+                fontSize: c.TextPr.FontSize,
+                fontSizeCS: c.TextPr.FontSizeCS,
+                fonts: Object.fromEntries(
+                  Object.entries(c.TextPr.RFonts)
+                    .filter(([key]) =>
+                      ["Ascii", "HAnsi", "EastAsia", "CS"].includes(key),
+                    )
+                    .map(([key, value]) => [key, value?.Name]),
+                ),
+                margins: pr.TableCellMar,
+                borders: Object.fromEntries(
+                  Object.entries(pr.TableCellBorders).map(([key, value]) => [
+                    key,
+                    {
+                      size: value?.Size,
+                      space: value?.Space,
+                      value: value?.Value,
+                    },
+                  ]),
+                ),
+                lines: p.Lines?.map((line) => ({
+                  metrics: line.Metrics,
+                  top: line.Top,
+                  bottom: line.Bottom,
+                })),
+              };
+            }),
+          })),
+        ),
+    ),
+  );
+}
 const mainContext = await browser.newContext({
   viewport: { width: 1440, height: 1000 },
 });
@@ -657,9 +713,13 @@ const engine = createOnlyOfficeProductEngine({
     await inspectFormat(bytes);
     const opened = await open(bytes);
     try {
-      return await opened.page.evaluate(() =>
+      const observation = await opened.page.evaluate(() =>
         window.__productNativePort.observe(),
       );
+      lastInspection = observation;
+      if (flags("--operation", "move") === "set_table_cell")
+        inspectedTableDetails = await tableDetails(opened.frame);
+      return observation;
     } finally {
       await opened.context.close();
     }
@@ -676,6 +736,9 @@ const engine = createOnlyOfficeProductEngine({
   },
   snapshot: async ({ before, commands, authorize }) => {
     if (commands) {
+      lastCommandObservation = lastObserved;
+      if (flags("--operation", "move") === "set_table_cell")
+        commandTableDetails = await tableDetails(mainFrame);
       assert.equal(
         await mainFrame.evaluate(() =>
           window.AscCommon.CollaborativeEditing.Get_GlobalLock(),
@@ -729,11 +792,14 @@ for (const method of [
   "undo",
   "redo",
 ])
-  engine[method] = (...args) =>
-    mainPage.evaluate(
+  engine[method] = async (...args) => {
+    const result = await mainPage.evaluate(
       async ({ method, args }) => window.__productNativePort[method](...args),
       { method, args },
     );
+    if (method === "observe") lastObserved = result;
+    return result;
+  };
 if (flags("--operation", "move") === "font_color") {
   const applyNative = engine.apply;
   engine.apply = async (command) => {
@@ -1282,6 +1348,19 @@ try {
 } catch (error) {
   report.status = "failed";
   report.error = error.stack;
+  await fs.writeFile(
+    path.join(output, "failure-observations.json"),
+    JSON.stringify(
+      {
+        command: lastCommandObservation,
+        inspected: lastInspection,
+        commandTableDetails,
+        inspectedTableDetails,
+      },
+      null,
+      2,
+    ),
+  );
   if (mainPage && !mainPage.isClosed()) {
     await mainPage
       .screenshot({ path: path.join(output, "failure.png") })
