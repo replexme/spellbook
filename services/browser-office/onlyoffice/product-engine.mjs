@@ -954,6 +954,7 @@ export function createOnlyOfficeProductEngine({
               )
             )
               throw Error("onlyoffice_product_slide_duplicate_not_applied");
+            copy.Slide.recalculate();
             editor.WordControl.GoToPage(command.slideIndex + 1);
             return true;
           }
