@@ -302,6 +302,24 @@ export async function runMigrations(): Promise<void> {
     alter table spellbook_native_sessions add column if not exists pending_undo_at timestamptz;
     alter table spellbook_native_sessions add column if not exists wopi_put_count integer not null default 0;
     alter table spellbook_documents add column if not exists failure_code text;
+    -- Deliveries of a job to its worker, counting redeliveries of a stale job.
+    alter table spellbook_jobs add column if not exists delivery_count integer not null default 0;
+    create index if not exists spellbook_jobs_queued_document_idx on spellbook_jobs(document_id, created_at) where status='queued';
+    -- Bytes stored under the document's folder (files, versions, previews,
+    -- images), measured from storage after it changes.
+    alter table spellbook_documents add column if not exists stored_bytes bigint;
+    alter table spellbook_documents add column if not exists stored_bytes_at timestamptz;
+    -- Storage folders whose database rows are already gone. Rows are written
+    -- in the same transaction that removes the versions, and deleted only
+    -- after the files are, so a crash leaves work, never dangling references.
+    create table if not exists spellbook_storage_deletions (
+      id bigserial primary key,
+      account_id text not null,
+      document_id uuid not null,
+      prefix text not null,
+      created_at timestamptz not null default now()
+    );
+    create index if not exists spellbook_storage_deletions_document_idx on spellbook_storage_deletions(document_id, id);
     create table if not exists spellbook_editor_engines (
       editor_mode text primary key check (editor_mode in ('wopi','browser')),
       patch_level text,
