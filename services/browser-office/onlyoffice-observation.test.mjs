@@ -232,3 +232,53 @@ test("master, layout, theme and section changes are included without creating ab
     ),
   );
 });
+
+test("dynamic field definitions are stable across rendered cache changes and remain distinct from literal text", async () => {
+  const { frame, slides, window } = candidate();
+  window.AscFormat = { CRGBColor: class {} };
+  let rendered = "1\r\n";
+  const run = {
+    Run: { FieldType: "slidenum", Guid: "field-guid" },
+    GetText: () => rendered.trim(),
+    GetTextPr: () =>
+      new Proxy(
+        {},
+        { get: (_target, name) => (name === "TextPr" ? {} : () => null) },
+      ),
+  };
+  const paragraph = {
+    GetElementsCount: () => 1,
+    GetElement: () => run,
+    GetText: () => rendered,
+  };
+  const content = { GetText: () => rendered };
+  const drawing = {
+    Drawing: { getOwnName: () => "number", getDocContent: () => content },
+    GetClassType: () => "shape",
+    GetDocContent: () => ({ GetAllParagraphs: () => [paragraph] }),
+    GetHyperlink: () => null,
+  };
+  for (const method of [
+    "GetPosX",
+    "GetPosY",
+    "GetWidth",
+    "GetHeight",
+    "GetRotation",
+    "GetFlipH",
+    "GetFlipV",
+  ])
+    drawing[method] = () => 0;
+  slides[0].GetAllDrawings = () => [drawing];
+  const before = (await observeOnlyOfficeCandidate(frame)).extended.slides[0]
+    .drawings[0];
+  rendered = "<#>\r\n";
+  const reopened = (await observeOnlyOfficeCandidate(frame)).extended.slides[0]
+    .drawings[0];
+  assert.deepEqual(before, reopened);
+  assert.equal(before.text, "<field:slidenum>\r\n");
+  run.Run.FieldType = null;
+  assert.notDeepEqual(
+    (await observeOnlyOfficeCandidate(frame)).extended.slides[0].drawings[0],
+    before,
+  );
+});

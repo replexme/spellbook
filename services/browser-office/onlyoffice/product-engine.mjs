@@ -57,7 +57,15 @@ export async function observeOnlyOfficeProduct(frame) {
   const slides = projection.common.slides.map((slide, slideIndex) => ({
     slideIndex,
     elements: slide.shapes.map((shape, index) =>
-      element(shape, slideIndex + "/" + index),
+      element(
+        projection.extended.slides[slideIndex].drawings[index]?.hasDynamicFields
+          ? {
+              ...shape,
+              text: projection.extended.slides[slideIndex].drawings[index].text,
+            }
+          : shape,
+        slideIndex + "/" + index,
+      ),
     ),
     onlyoffice: {
       ...projection.extended.slides[slideIndex],

@@ -151,16 +151,27 @@ async function extendedFeatures(frame) {
             const runs = [];
             const visit = (element) => {
               if (typeof element?.GetTextPr === "function") {
-                const text = element.GetText?.({ Numbering: false }) ?? "";
+                const field =
+                  typeof element.Run?.FieldType === "string"
+                    ? {
+                        type: element.Run.FieldType,
+                        guid: element.Run.Guid ?? null,
+                      }
+                    : null;
+                const text = field
+                  ? `<field:${field.type}>`
+                  : (element.GetText?.({ Numbering: false }) ?? "");
                 if (text && text !== "\r" && text !== "\n") {
                   const style = properties(element.GetTextPr());
                   const last = runs.at(-1);
                   if (
                     last &&
+                    !field &&
+                    !last.field &&
                     JSON.stringify(last.style) === JSON.stringify(style)
                   )
                     last.text += text;
-                  else runs.push({ text, style });
+                  else runs.push({ text, style, ...(field ? { field } : {}) });
                 }
               } else if (typeof element?.GetElementsCount === "function") {
                 for (let i = 0; i < element.GetElementsCount(); i++)
@@ -169,8 +180,17 @@ async function extendedFeatures(frame) {
             };
             for (let i = 0; i < paragraph.GetElementsCount(); i++)
               visit(paragraph.GetElement(i));
-            return { text: paragraph.GetText({ Numbering: false }), runs };
+            return {
+              text: runs.some((run) => run.field)
+                ? runs.map((run) => run.text).join("") + "\r\n"
+                : paragraph.GetText({ Numbering: false }),
+              runs,
+            };
           });
+        if (state.paragraphs.some((p) => p.runs.some((r) => r.field))) {
+          state.hasDynamicFields = true;
+          state.text = state.paragraphs.map((p) => p.text).join("");
+        }
       }
 
       if (d.Table?.Content)
