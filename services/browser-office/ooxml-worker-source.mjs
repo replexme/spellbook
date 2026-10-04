@@ -783,7 +783,7 @@ function preserveUnaffectedSlideShapes(
       if (sourceOperations.includes("replace_text")) {
         try {
           const text = readShapeText(editedShape);
-          replaceShapeText(source, text);
+          replaceNativeShapeText(source, text);
           if (readShapeText(source) !== text) return null;
         } catch { return null; }
         const properties = [source, baseline, editedShape].map(shape =>
@@ -816,8 +816,25 @@ function preserveUnaffectedSlideShapes(
     pairs.map((pair) => [pair.editedId, pair.sourceId]),
   );
   for (const pair of pairs) {
-    const { source, baseline, editedShape, index } = pair;
-    if (hasRelationshipReference(source)) continue;
+    let { source, baseline } = pair;
+    const { editedShape, index } = pair;
+    const topologyRequests = geometrySources?.targets?.filter(target =>
+      ["insert_table_rows", "delete_table_rows", "insert_table_columns", "delete_table_columns"].includes(target.op) &&
+      Number.isSafeInteger(target.index) && Number.isSafeInteger(target.count) &&
+      target.shapeIndex === index);
+    if (hasRelationshipReference(source)) {
+      if (!topologyRequests?.length) continue;
+      // Merge authored and both native rows in one relationship ID space.
+      // The package-level remapper then retains the authored .rels as usual.
+      const related = relationshipsPath(part);
+      const entries = geometrySources.entries;
+      const aligned = [source, baseline].map((node, i) => remapPartRelationshipIds(
+        part, serializeXml(node), entries[2][related], entries[i][related],
+        [entries[2], entries[i]]));
+      if (aligned.some(bytes => !bytes))
+        throw new Error("Native table rows cannot preserve authored relationships in " + part);
+      [source, baseline] = aligned.map(bytes => parseXml({ [part]: bytes }, part).documentElement);
+    }
     if (
       additiveOnly ||
       untargeted(source, index) ||
@@ -833,7 +850,11 @@ function preserveUnaffectedSlideShapes(
       continue;
     }
     // Preserve authored properties wherever the two native exports agree.
-    const merged = mergeElementThreeWay(documents[2], source, baseline, editedShape);
+    const merged = topologyRequests?.length
+      ? (topologyRequests[0].op.endsWith("columns") ? mergeNativeTableColumns : mergeNativeTableRows)(documents[2], source, baseline, editedShape, topologyRequests)
+      : mergeElementThreeWay(documents[2], source, baseline, editedShape);
+    if (topologyRequests?.length && !merged)
+      throw new Error("Native table row topology cannot preserve authored rows in " + part);
     if (merged)
       replacements.push({ pair, editedShape, restored: false, node: merged });
   }
@@ -948,6 +969,102 @@ function preserveUnaffectedSlideShapes(
   )
     return null;
   return serializeXml(documents[2]);
+}
+
+// Row coordinates come from the validated native request, never from a guess
+// at repeated or empty cell text. Existing rows keep their authored XML; only
+// genuinely new rows come from the native editor's selected-row defaults.
+function mergeNativeTableRows(document, source, baseline, edited, requests) {
+  const originals = [source, baseline, edited];
+  const tables = originals.map(shape => [...shape.getElementsByTagNameNS(drawingNamespace, "tbl")]);
+  if (tables.some(t => t.length !== 1)) return null;
+  const rows = tables.map(t => xmlElementChildren(t[0]).filter(c =>
+    c.namespaceURI === drawingNamespace && c.localName === "tr"));
+  if (rows[0].length !== rows[1].length) return null;
+  const order = rows[0].map((_, i) => i);
+  for (const request of requests) {
+    if (request.count < 1 || request.count > 100 || request.index < 0 || request.index > order.length) return null;
+    if (request.op === "insert_table_rows")
+      order.splice(request.index, 0, ...Array(request.count).fill(null));
+    else {
+      if (request.index + request.count > order.length || request.count >= order.length) return null;
+      order.splice(request.index, request.count);
+    }
+  }
+  if (order.length !== rows[2].length) return null;
+  const copies = originals.map(shape => shape.cloneNode(true));
+  for (const shape of copies) {
+    const table = shape.getElementsByTagNameNS(drawingNamespace, "tbl")[0];
+    for (const row of xmlElementChildren(table).filter(c =>
+      c.namespaceURI === drawingNamespace && c.localName === "tr")) table.removeChild(row);
+  }
+  const merged = mergeElementThreeWay(document, ...copies);
+  if (!merged) return null;
+  const table = merged.getElementsByTagNameNS(drawingNamespace, "tbl")[0];
+  const successor = xmlElementChildren(table).find(c =>
+    c.namespaceURI === drawingNamespace && c.localName === "extLst");
+  for (const [index, original] of order.entries()) {
+    const row = original === null
+      ? importOoxmlSubtree(document, rows[2][index], true)
+      : mergeElementThreeWay(document, rows[0][original], rows[1][original], rows[2][index]);
+    if (!row) return null;
+    table.insertBefore(row, successor ?? null);
+  }
+  return merged;
+}
+
+// Column coordinates likewise identify retained grid entries and cells without
+// comparing their text. Row-level authored properties stay in the three-way
+// merge, and only new cells inherit native insertion defaults.
+function mergeNativeTableColumns(document, source, baseline, edited, requests) {
+  const inputs = [source, baseline, edited];
+  const child = (node, name) => xmlElementChildren(node).filter(c => c.namespaceURI === drawingNamespace && c.localName === name);
+  const tables = inputs.map(shape => [...shape.getElementsByTagNameNS(drawingNamespace, "tbl")]);
+  if (tables.some(t => t.length !== 1)) return null;
+  const grids = tables.map(t => child(t[0], "tblGrid"));
+  if (grids.some(g => g.length !== 1)) return null;
+  const columns = grids.map(g => child(g[0],"gridCol"));
+  const rows = tables.map(t => child(t[0],"tr"));
+  if (rows.some(r => r.length !== rows[0].length) || columns[0].length !== columns[1].length) return null;
+  const order = columns[0].map((_,index) => index);
+  for (const request of requests) {
+    if (request.count < 1 || request.count > 100 || request.index < 0 || request.index > order.length) return null;
+    if (request.op === "insert_table_columns") order.splice(request.index,0,...Array(request.count).fill(null));
+    else if (request.op === "delete_table_columns" && request.index + request.count <= order.length && request.count < order.length)
+      order.splice(request.index,request.count);
+    else return null;
+  }
+  if (order.length !== columns[2].length || order.length > 256) return null;
+  const cells = rows.map(rs => rs.map(r => child(r,"tc")));
+  if (cells.some((rs,i) => rs.some(row => row.length !== columns[i].length))) return null;
+  const copies = inputs.map(shape => shape.cloneNode(true));
+  for (const copy of copies) {
+    const table = copy.getElementsByTagNameNS(drawingNamespace,"tbl")[0];
+    const grid = child(table,"tblGrid")[0];
+    for (const col of child(grid,"gridCol")) grid.removeChild(col);
+    for (const row of child(table,"tr")) for (const cell of child(row,"tc")) row.removeChild(cell);
+  }
+  const merged = mergeElementThreeWay(document,...copies);
+  if (!merged) return null;
+  const table = merged.getElementsByTagNameNS(drawingNamespace,"tbl")[0];
+  const grid = child(table,"tblGrid")[0], mergedRows = child(table,"tr");
+  const append = (parent,node) => parent.insertBefore(node, child(parent,"extLst")[0] ?? null);
+  // A topology request owns added/deleted columns, not retained widths or
+  // cells. Native cumulative-grid subtraction can perturb those widths even
+  // after its history setter has kept the exact authored TableGrid.
+  for (const [index,original] of order.entries()) {
+    const col = original === null ? importOoxmlSubtree(document,columns[2][index],true)
+      : importOoxmlSubtree(document,columns[0][original],true);
+    if (!col) return null;
+    append(grid,col);
+    for (const [r,row] of mergedRows.entries()) {
+      const cell = original === null ? importOoxmlSubtree(document,cells[2][r][index],true)
+        : importOoxmlSubtree(document,cells[0][r][original],true);
+      if (!cell) return null;
+      append(row,cell);
+    }
+  }
+  return merged;
 }
 
 function removeDirectShapeFromOriginal(
@@ -3710,6 +3827,71 @@ export function mergeNumericWorkbookDelta(
     ? zipSync(result, { level: 6, mtime: deterministicZipModifiedAt })
     : null;
 }
+// A no-op export can materialize empty notes and their relationships. When
+// notes text is subsequently authored, its unchanged incoming relationship is
+// nevertheless required. Promote only the changed, authorized notes page;
+// never import every empty notes page from the engine's no-op export.
+function connectChangedNewNotes(original, noEdit, edited, merged, operations, targets, humanEdit, budget) {
+  if (!humanEdit && !operations.includes("set_speaker_notes")) return [];
+  const patched = [];
+  const slides = orderedSlidePaths(original);
+  const permitted = humanEdit || targets === null ? slides : (targets ?? []).filter((t) => t.op === "set_speaker_notes").map((t) => slides[t.slideIndex]);
+  const allowedSlides = new Set(permitted);
+  if (!humanEdit)
+    for (const slide of slides) {
+      if (allowedSlides.has(slide) || !edited[relationshipsPath(slide)]) continue;
+      for (const {target} of relationshipsOfType(edited, slide, "notesSlide"))
+        if (!original[target] && merged[target]) {
+          delete merged[target];
+          delete merged[relationshipsPath(target)];
+          patched.push(target);
+        }
+    }
+  const append = (source, kind, target) => {
+    const path = relationshipsPath(source);
+    const document = merged[path] ? parseXml(merged, path) : new DOMParser().parseFromString(`<Relationships xmlns="${packageRelationshipNamespace}"/>`, "application/xml");
+    if (relationshipElements(document).some((r) => r.getAttribute("Type").endsWith("/" + kind) && resolvePart(source, r.getAttribute("Target")) === target)) return null;
+    const id = nextRelationshipId(document);
+    const relationship = document.createElementNS(packageRelationshipNamespace, "Relationship");
+    relationship.setAttribute("Id", id);
+    relationship.setAttribute("Type", `${relationshipAttributeNamespace}/${kind}`);
+    relationship.setAttribute("Target", relativePart(source, target));
+    document.documentElement.appendChild(relationship);
+    merged[path] = serializeXml(document);
+    patched.push(path);
+    return id;
+  };
+  for (const slide of new Set(permitted)) {
+    if (!slide || !edited[relationshipsPath(slide)]) continue;
+    const notes = relationshipsOfType(edited, slide, "notesSlide");
+    if (!notes.length) continue;
+    if (notes.length !== 1) throw new Error(`Native snapshot cannot identify notes for ${slide}.`);
+    const part = notes[0].target;
+    if (original[part] || !merged[part] || sameEngineExportPart(part, noEdit[part], edited[part])) continue;
+    if (!budget.allowPartCreationOrDeletion || !budget.allowedCategories.has("slide_relationships") || !budget.allowedCategories.has("notes_relationships"))
+      throw new Error("Native snapshot cannot connect new notes outside its change budget.");
+    append(slide, "notesSlide", part);
+    const related = relationshipsPath(part);
+    if (!edited[related]) throw new Error(`Native snapshot is missing new notes relationships for ${part}.`);
+    merged[related] = edited[related];
+    patched.push(related);
+    const masters = relationshipsOfType(edited, part, "notesMaster");
+    if (masters.length !== 1) throw new Error(`Native snapshot cannot identify notes master for ${part}.`);
+    const master = masters[0].target;
+    const existing = merged[presentationRelationshipsPath] ? relationshipsOfType(merged, presentationPath, "notesMaster") : [];
+    if (!existing.some((r) => r.target === master)) {
+      if (!budget.allowedCategories.has("presentation_relationships") || !budget.allowedCategories.has("presentation"))
+        throw new Error("Native snapshot cannot connect notes master outside its change budget.");
+      const id = append(presentationPath, "notesMaster", master);
+      const presentation = parseXml(merged, presentationPath);
+      registerNotesMaster(presentation, id);
+      merged[presentationPath] = serializeXml(presentation);
+      patched.push(presentationPath);
+    }
+  }
+  return patched;
+}
+
 // Office can rewrite unrelated package parts even when no edit was made.
 // Compare two exports from that same engine, then apply only their actual
 // difference to the user's original package. Reopening the result and proving
@@ -3767,6 +3949,17 @@ export function preserveOriginalPptxParts(
       "Native snapshot comparison exceeds the browser memory limit.",
     );
 
+  const tableTopologyTargetsByPart = new Map();
+  if (sourceTargets?.some(t => sourceOperations.includes(t.op) && ["insert_table_rows", "delete_table_rows", "insert_table_columns", "delete_table_columns"].includes(t.op))) {
+    const paths = orderedSlidePaths(original);
+    for (const target of sourceTargets.filter(t => sourceOperations.includes(t.op) && ["insert_table_rows", "delete_table_rows", "insert_table_columns", "delete_table_columns"].includes(t.op))) {
+      const part = paths[target.slideIndex];
+      if (!part) throw new Error("Native table row target has no authored slide.");
+      const targets = tableTopologyTargetsByPart.get(part) ?? [];
+      targets.push(target);
+      tableTopologyTargetsByPart.set(part, targets);
+    }
+  }
   const shapeScopes = humanEdit
     ? null
     : slideShapeTargets(sourceOperations, sourceTargets);
@@ -3919,7 +4112,7 @@ export function preserveOriginalPptxParts(
             sourceOperations,
             targetNamesBySlide?.get(part) ?? null,
             targetIndexesBySlide?.get(part) ?? null,
-            { part, entries: [original, noEdit, edited] },
+            { part, entries: [original, noEdit, edited], targets: tableTopologyTargetsByPart.get(part) },
           )
       : null;
     if (targetIndexesBySlide?.has(part) && semanticShapePatch === null)
@@ -4024,6 +4217,7 @@ export function preserveOriginalPptxParts(
       suppressedNoopParts.push(part);
     if (engineChanged && !withinBudget) suppressedOutOfBudgetParts.push(part);
   }
+  semanticPatchedParts.push(...connectChangedNewNotes(original, noEdit, edited, merged, sourceOperations, sourceTargets, humanEdit, budget));
   // These repairs depend on the complete merged package: a restored
   // transition sound needs its media part, and every kept part needs a
   // declared content type.
@@ -5938,6 +6132,37 @@ function readParagraphText(paragraph) {
     }
   }
   return value;
+}
+
+// A whole native text replacement owns paragraph topology. Preserve the
+// author's first paragraph and first run style rather than importing the
+// engine's rewritten text body, inherited defaults and unrelated properties.
+function replaceNativeShapeText(shape, value) {
+  const paragraphs = [...shape.getElementsByTagNameNS(drawingNamespace, "p")];
+  const lines = value.replace(/\r\n/gu, "\n").split("\n");
+  if (paragraphs.length === lines.length) return replaceShapeText(shape, value);
+  if (!paragraphs.length ||
+      shape.getElementsByTagNameNS(drawingNamespace, "fld").length)
+    throw new Error("Native text replacement requires plain editable paragraphs.");
+  const first = paragraphs[0];
+  const parent = first.parentNode;
+  if (paragraphs.some(p => p.parentNode !== parent))
+    throw new Error("Native text replacement has ambiguous paragraph ownership.");
+  const template = first.cloneNode(true);
+  let retainedRun = false;
+  for (const child of [...template.childNodes]) {
+    if (child.nodeType !== 1 || child.namespaceURI !== drawingNamespace) continue;
+    if (child.localName === "r") {
+      if (!retainedRun) { retainedRun = true; continue; }
+      template.removeChild(child);
+    } else if (child.localName === "br") template.removeChild(child);
+  }
+  for (const line of lines) {
+    const paragraph = template.cloneNode(true);
+    replaceParagraphText(paragraph, line);
+    parent.insertBefore(paragraph, first);
+  }
+  for (const paragraph of paragraphs) parent.removeChild(paragraph);
 }
 
 function replaceShapeText(shape, value) {

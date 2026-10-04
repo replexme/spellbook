@@ -8,7 +8,7 @@ import { chromium } from "@playwright/test";
 import { strFromU8, unzipSync } from "fflate";
 
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
-import { buildHarness } from "./build-harness.mjs";
+import { prepareHarness } from "./build-harness.mjs";
 import { readRepositoryIdentity } from "./repository-identity.mjs";
 import { createHarnessServer } from "./server.mjs";
 import { applyOoxmlCommand } from "./ooxml-worker-source.mjs";
@@ -67,7 +67,7 @@ const candidateRuntime = candidateRuntimePath
   ? await admitCandidateRuntime({ runtimeDirectory: candidateRuntimePath })
   : null;
 
-await buildHarness();
+await prepareHarness();
 const server = createHarnessServer(
   candidateRuntime
     ? {
@@ -713,7 +713,12 @@ try {
   const save = await requestProductSave(page, { duplicate: true });
   // The harness's DOM save control must also use the product host transaction,
   // not download its last local buffer around the shared admission boundary.
-  await evaluateRenderer(page, () => document.querySelector("#save").click(), undefined, "request product save through DOM control");
+  await evaluateRenderer(
+    page,
+    () => document.querySelector("#save").click(),
+    undefined,
+    "request product save through DOM control",
+  );
   await page.waitForTimeout(100);
   assert.equal(
     (await hostEventCount(page, "save")) - save.previousCount,

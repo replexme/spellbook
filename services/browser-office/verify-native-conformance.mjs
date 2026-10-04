@@ -13,7 +13,7 @@ import {
   withNoopSaveBaseline,
 } from "../../scripts/native-mutation-conformance-runner.mjs";
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
-import { buildHarness } from "./build-harness.mjs";
+import { prepareHarness, verifyExistingArtifact } from "./build-harness.mjs";
 import { readRepositoryIdentity } from "./repository-identity.mjs";
 import { createHarnessServer } from "./server.mjs";
 
@@ -32,10 +32,12 @@ const documentToolProject = path.join(
   repositoryRoot,
   "services/document-worker/tools/Spellbook.Document.Tool/Spellbook.Document.Tool.csproj",
 );
-const documentTool = path.join(
-  repositoryRoot,
-  "services/document-worker/tools/Spellbook.Document.Tool/bin/Release/net10.0/Spellbook.Document.Tool.dll",
-);
+const documentTool = process.argv.includes("--existing-document-tool")
+  ? path.resolve(requiredFlagValue("--existing-document-tool"))
+  : path.join(
+      repositoryRoot,
+      "services/document-worker/tools/Spellbook.Document.Tool/bin/Release/net10.0/Spellbook.Document.Tool.dll",
+    );
 // A probe saves the package, preserves the author's parts and reopens it for
 // every operation and again for its Undo and Redo, so the full native surface
 // takes tens of minutes. The limit is a stuck probe, not a slow one.
@@ -90,14 +92,43 @@ const scenarios = selectedNames
   ? allScenarios.filter(({ name }) => selectedNames.includes(name))
   : allScenarios;
 
-await runProcess(
-  dotnetHostCommand(),
-  ["build", documentToolProject, "--configuration", "Release", "--nologo"],
-  path.join(outputRoot, "document-tool-build.log"),
-);
+const existingDocumentTool = process.argv.includes("--existing-document-tool");
+let documentToolEvidence = null;
+if (
+  process.argv.includes("--existing-harness-worker-sha256") &&
+  !existingDocumentTool
+)
+  throw Error(
+    "Existing harness mode also requires an existing document tool; no build was started.",
+  );
+if (existingDocumentTool) {
+  documentToolEvidence = await verifyExistingArtifact(
+    documentTool,
+    requiredFlagValue("--document-tool-sha256"),
+  );
+  if (!process.argv.includes("--existing-harness-worker-sha256"))
+    throw Error(
+      "Existing document-tool mode also requires an existing harness worker; no build was started.",
+    );
+} else {
+  await runProcess(
+    dotnetHostCommand(),
+    ["build", documentToolProject, "--configuration", "Release", "--nologo"],
+    path.join(outputRoot, "document-tool-build.log"),
+  );
+}
 
 const report = {
   schemaVersion: 1,
+  ...(existingDocumentTool
+    ? {
+        newBuilds: 0,
+        documentToolEvidence,
+        existingHarnessWorkerSha256: requiredFlagValue(
+          "--existing-harness-worker-sha256",
+        ),
+      }
+    : {}),
   status: "running",
   startedAt: new Date().toISOString(),
   candidateReceiptSha256: candidateRuntime.receiptSha256,
@@ -306,7 +337,7 @@ async function runBrowserProbe({
   env = {},
   logPath,
 }) {
-  await buildHarness();
+  await prepareHarness();
   const server = createHarnessServer({
     runtimeRoot: candidateRuntime.runtimeDirectory,
     runtimeIdentity: candidateRuntime.runtimeIdentity,

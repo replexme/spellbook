@@ -124,6 +124,10 @@ class MemoryDirectory {
   directories = new Map();
   files = new Map();
 
+  async *entries() {
+    for (const entry of this.files) yield entry;
+  }
+
   async getDirectoryHandle(name, options = {}) {
     if (!this.directories.has(name)) {
       if (!options.create) throw notFound();
@@ -177,3 +181,76 @@ class MemoryFile {
 function notFound() {
   return new DOMException("Not found", "NotFoundError");
 }
+
+test("a torn retained history file falls back to the other complete slot", async () => {
+  const root = new MemoryDirectory(),
+    journal = await openBrowserDocumentJournal({
+      identity: "manual-history",
+      root,
+    });
+  const gate = createProductArtifactAuthority({
+    inspect: async () => ({ slides: [{ elements: [] }] }),
+  });
+  const a = bytes(1),
+    b = bytes(2),
+    c = bytes(3);
+  const receipt = async (bytes, modelRevision) =>
+    gate.admit({ bytes, modelRevision, verify: () => {} });
+  const ra = await receipt(a, "a"),
+    rb = await receipt(b, "b"),
+    rc = await receipt(c, "c");
+  const record = {
+    fileName: "deck.pptx",
+    baseBytes: a,
+    candidateBytes: b,
+    commands: [{ op: "native_snapshot" }],
+    artifactReceipt: rb,
+    history: {
+      schemaVersion: 1,
+      undo: [
+        {
+          before: ra.candidateSha256,
+          after: rb.candidateSha256,
+          commands: [{ op: "native_snapshot" }],
+        },
+      ],
+      redo: [],
+    },
+    historyArtifacts: [
+      { bytes: a, artifactReceipt: ra },
+      { bytes: b, artifactReceipt: rb },
+    ],
+  };
+  await journal.save(record);
+  await journal.save({
+    ...record,
+    candidateBytes: c,
+    artifactReceipt: rc,
+    commands: [{ op: "native_snapshot" }, { op: "move" }],
+    history: {
+      ...record.history,
+      undo: [
+        ...record.history.undo,
+        {
+          before: rb.candidateSha256,
+          after: rc.candidateSha256,
+          commands: [{ op: "move" }],
+        },
+      ],
+    },
+    historyArtifacts: [
+      ...record.historyArtifacts,
+      { bytes: c, artifactReceipt: rc },
+    ],
+  });
+  const directory = [
+    ...root.directory("spellbook-browser-office-v1").directories.values(),
+  ][0];
+  directory.file(`history-${rc.candidateSha256}-a.pptx`).data = bytes(99);
+  const recovered = await journal.load();
+  assert.equal(recovered.metadata.generation, 1);
+  assert.deepEqual(recovered.candidateBytes, b);
+  assert.equal(recovered.historyArtifacts.length, 2);
+  await journal.clear();
+  assert.equal(directory.files.size, 0);
+});

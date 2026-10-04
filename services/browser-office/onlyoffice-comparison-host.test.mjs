@@ -5,7 +5,7 @@ import vm from "node:vm";
 import { randomUUID } from "node:crypto";
 import { createOnlyOfficeComparisonHost } from "./onlyoffice/comparison-host.mjs";
 
-async function host() {
+async function host(authorizeArtifact = false, preservationBridge = false) {
   let options,
     value = 1;
   const requests = [],
@@ -60,6 +60,8 @@ async function host() {
     origin: "http://127.0.0.1:1",
     preserveSource: true,
     repairStructure: true,
+    authorizeArtifact,
+    preservationBridge,
   });
   const script = html
     .slice(
@@ -179,5 +181,87 @@ test("native checkpoint acknowledgement retains the workbook preservation refere
   assert.deepEqual([...h.requests[0].editedBytes], [3]);
   h.worker.reply(13);
   await saved;
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 1);
+});
+
+test("product artifact refusal cannot advance native baseline or acknowledge a host write", async () => {
+  const h = await host(true);
+  h.window.__comparisonIntent = { sourceOperations: null, sourceTargets: null };
+  h.window.__ONLYOFFICE_PRODUCT_ADMIT__ = async () => {
+    throw Error("file_readback_failed");
+  };
+  h.setValue(2);
+  const refused = h.window.__ONLYOFFICE_SAVE_E2E__.save();
+  const rejected = assert.rejects(refused, /file_readback_failed/);
+  await h.settle();
+  h.worker.reply(12);
+  await rejected;
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 0);
+  assert.deepEqual([...h.window.__comparisonSaved], [1]);
+  h.window.__ONLYOFFICE_PRODUCT_ADMIT__ = async (bytes) => {
+    assert.deepEqual(Array.from(bytes), [13]);
+    return true;
+  };
+  const retry = h.window.__ONLYOFFICE_SAVE_E2E__.save();
+  await h.settle();
+  assert.deepEqual([...h.requests.at(-1).bytes], [1]);
+  assert.deepEqual([...h.requests.at(-1).noEditBytes], [1]);
+  h.worker.reply(13);
+  await retry;
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 1);
+});
+
+test("rollback after artifact approval restores the original preservation baseline", async () => {
+  const h = await host(true);
+  h.window.__ONLYOFFICE_PRODUCT_ADMIT__ = async () => true;
+  h.window.__comparisonIntent = {
+    sourceOperations: ["move"],
+    sourceTargets: [],
+  };
+  const token = h.window.__ONLYOFFICE_PRODUCT_PRESERVATION__.begin();
+  h.setValue(2);
+  const saved = h.window.__ONLYOFFICE_SAVE_E2E__.save();
+  await h.settle();
+  h.worker.reply(2);
+  await saved;
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 1);
+  h.window.__ONLYOFFICE_PRODUCT_PRESERVATION__.finish(token, false);
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 0);
+  h.setValue(3);
+  const retry = h.window.__ONLYOFFICE_SAVE_E2E__.save();
+  await h.settle();
+  assert.deepEqual([...h.requests.at(-1).bytes], [1]);
+  assert.deepEqual([...h.requests.at(-1).noEditBytes], [1]);
+  h.worker.reply(3);
+  await retry;
+});
+
+test("no-build source preservation still requires exact artifact approval before a public save ACK", async () => {
+  const h = await host(true, true);
+  h.window.__comparisonIntent = {
+    sourceOperations: ["set_speaker_notes"],
+    sourceTargets: [{ op: "set_speaker_notes", slideIndex: 0 }],
+  };
+  let called = 0;
+  h.window.__ONLYOFFICE_PRODUCT_PRESERVE__ = async (payload) => {
+    called++;
+    assert.deepEqual(Array.from(payload.bytes), [1]);
+    assert.deepEqual(Array.from(payload.noEditBytes), [1]);
+    assert.deepEqual(Array.from(payload.editedBytes), [2]);
+    return { bytes: Uint8Array.of(22), report: {} };
+  };
+  h.window.__ONLYOFFICE_PRODUCT_ADMIT__ = async () => false;
+  h.setValue(2);
+  await assert.rejects(
+    h.window.__ONLYOFFICE_SAVE_E2E__.save(),
+    /artifact_not_approved/,
+  );
+  assert.equal(called, 1);
+  assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 0);
+  h.window.__ONLYOFFICE_PRODUCT_ADMIT__ = async (bytes) => {
+    assert.deepEqual(Array.from(bytes), [22]);
+    return true;
+  };
+  await h.window.__ONLYOFFICE_SAVE_E2E__.save();
   assert.equal(h.window.__ONLYOFFICE_SAVE_E2E__.getStatus().writeCount, 1);
 });

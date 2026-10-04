@@ -1,6 +1,9 @@
 // One direct edit on a freshly opened PPTX, followed by Save. Keep private
 // inputs and outputs outside Git; the single JSON result contains no content.
-import { comparisonEditMarker as editMarker, assertComparisonMarkerAbsent } from "./comparison-input.mjs";
+import {
+  comparisonEditMarker as editMarker,
+  assertComparisonMarkerAbsent,
+} from "./comparison-input.mjs";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -9,7 +12,7 @@ import { chromium } from "@playwright/test";
 import { strFromU8, unzipSync } from "fflate";
 
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
-import { buildHarness } from "./build-harness.mjs";
+import { prepareHarness } from "./build-harness.mjs";
 import { createHarnessServer } from "./server.mjs";
 import { captureNativeSnapshots } from "../office-session-spike/probe-raw-snapshots.mjs";
 
@@ -39,9 +42,17 @@ if (
 const label = arg("--label");
 const saveBeforeObserve = process.argv.includes("--save-before-observe");
 if (saveBeforeObserve && scenario === "unobserved-picture-mode")
-  throw new Error("Immediate-save timing is separate from observation-coverage probes.");
-const coverageBoundary = process.argv.includes("--coverage-boundary") ? arg("--coverage-boundary") : "save";
-if (!["save","observe","heartbeat","ack","before-ai"].includes(coverageBoundary))
+  throw new Error(
+    "Immediate-save timing is separate from observation-coverage probes.",
+  );
+const coverageBoundary = process.argv.includes("--coverage-boundary")
+  ? arg("--coverage-boundary")
+  : "save";
+if (
+  !["save", "observe", "heartbeat", "ack", "before-ai"].includes(
+    coverageBoundary,
+  )
+)
   throw new Error("Unknown observation-coverage boundary");
 const captureUi = process.argv.includes("--capture-ui")
   ? path.resolve(arg("--capture-ui"))
@@ -59,7 +70,7 @@ const input = new Uint8Array(await readFile(inputPath));
 assertComparisonMarkerAbsent(input);
 
 const runtime = await admitCandidateRuntime({ runtimeDirectory });
-await buildHarness();
+await prepareHarness();
 const server = createHarnessServer({
   runtimeRoot: runtime.runtimeDirectory,
   browserProbeSource: inputPath,
@@ -115,11 +126,21 @@ if (diagnosticRaw) {
     const source = await response.text();
     const marker = "const requestId = `ooxml-preserve-${++requestSequence}`;";
     assert(source.includes(marker));
-    const topologyMarker = "const topologyVerified = persistedDirectSlideTopologyMatches(";
+    const topologyMarker =
+      "const topologyVerified = persistedDirectSlideTopologyMatches(";
     assert(source.includes(topologyMarker));
-    await route.fulfill({ response, body: source.replace(marker,
-      `globalThis.__humanSnapshot = { original, noEdit, edited, sourceOperations, sourceTargets };\n  ${marker}`).replace(topologyMarker,
-      `globalThis.__humanTopology = { before: persistenceStateFromObservation(reconciledObservation), live: persistenceStateFromObservation(live), reopened: persistenceStateFromObservation(preserved.observation), report: preserved.report };\n    ${topologyMarker}`) });
+    await route.fulfill({
+      response,
+      body: source
+        .replace(
+          marker,
+          `globalThis.__humanSnapshot = { original, noEdit, edited, sourceOperations, sourceTargets };\n  ${marker}`,
+        )
+        .replace(
+          topologyMarker,
+          `globalThis.__humanTopology = { before: persistenceStateFromObservation(reconciledObservation), live: persistenceStateFromObservation(live), reopened: persistenceStateFromObservation(preserved.observation), report: preserved.report };\n    ${topologyMarker}`,
+        ),
+    });
   });
 }
 
@@ -133,12 +154,16 @@ const result = {
 
 async function requestProductSave() {
   const previousCount = await page.evaluate(
-    () => globalThis.__spellbookProductHost.events.filter((e) => e.type === "save").length,
+    () =>
+      globalThis.__spellbookProductHost.events.filter((e) => e.type === "save")
+        .length,
   );
   const startedAt = Date.now();
   await page.evaluate(() =>
     globalThis.__spellbookProductHost.port.postMessage({
-      type: "command", messageId: "Action_Save", values: { Notify: true },
+      type: "command",
+      messageId: "Action_Save",
+      values: { Notify: true },
     }),
   );
   const saved = await waitEvent("save", previousCount, 180_000);
@@ -220,7 +245,9 @@ const engineState = async () => {
   });
   const first = observed?.slides?.[0]?.elements ?? [];
   return {
-    ...(scenario === "unobserved-picture-mode" ? { sourceSlides:observed.slides } : {}),
+    ...(scenario === "unobserved-picture-mode"
+      ? { sourceSlides: observed.slides }
+      : {}),
     slideCount: observed?.slides?.length ?? 0,
     firstSlideElements: first.length,
     elements: first.map((e) => ({
@@ -248,16 +275,31 @@ async function capturePrivateSnapshots() {
           binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
         return btoa(binary);
       }, kind);
-      if (encoded) await writeFile(path.join(diagnosticRaw, `${kind}.pptx`),
-        Buffer.from(encoded, "base64"), { mode: 0o600 });
+      if (encoded)
+        await writeFile(
+          path.join(diagnosticRaw, `${kind}.pptx`),
+          Buffer.from(encoded, "base64"),
+          { mode: 0o600 },
+        );
     }
     const intent = await page.evaluate(() => ({
       sourceOperations: globalThis.__humanSnapshot?.sourceOperations,
       sourceTargets: globalThis.__humanSnapshot?.sourceTargets,
     }));
-    await writeFile(path.join(diagnosticRaw, "intent.json"), JSON.stringify(intent, null, 2), { mode: 0o600 });
-    const topology = await page.evaluate(() => globalThis.__humanTopology ?? null);
-    if (topology) await writeFile(path.join(diagnosticRaw, "topology.json"), JSON.stringify(topology), { mode: 0o600 });
+    await writeFile(
+      path.join(diagnosticRaw, "intent.json"),
+      JSON.stringify(intent, null, 2),
+      { mode: 0o600 },
+    );
+    const topology = await page.evaluate(
+      () => globalThis.__humanTopology ?? null,
+    );
+    if (topology)
+      await writeFile(
+        path.join(diagnosticRaw, "topology.json"),
+        JSON.stringify(topology),
+        { mode: 0o600 },
+      );
   }
 }
 
@@ -348,8 +390,12 @@ try {
       const item = selection?.selected?.[0];
       if (item && selection.activeSlide === 0) {
         result.selectionKeys ??= Object.keys(item).join(",");
-        if (["type", "type-move", "type-continuous"].includes(scenario) &&
-          preferredTextTarget && item.elementId !== preferredTextTarget.id) continue;
+        if (
+          ["type", "type-move", "type-continuous"].includes(scenario) &&
+          preferredTextTarget &&
+          item.elementId !== preferredTextTarget.id
+        )
+          continue;
         if (
           !["type", "type-move", "type-continuous"].includes(scenario) ||
           (typeof item.text === "string" && item.text.trim().length > 0)
@@ -362,19 +408,28 @@ try {
 
   const beforeState = await engineState();
   // Edit authored text rather than adding text to an empty background shape.
-  const preferredTextTarget = beforeState.elements.filter(element =>
-    /^0\/[^/]+$/u.test(element.id) && typeof element.text === "string" && element.text.trim())
-    .sort((a,b) => b.text.trim().length - a.text.trim().length)[0];
+  const preferredTextTarget = beforeState.elements
+    .filter(
+      (element) =>
+        /^0\/[^/]+$/u.test(element.id) &&
+        typeof element.text === "string" &&
+        element.text.trim(),
+    )
+    .sort((a, b) => b.text.trim().length - a.text.trim().length)[0];
   let target = null;
   if (scenario === "roundtrip") {
     result.engineApplied = true;
   } else if (scenario === "unobserved-picture-mode") {
     let pendingSave = null;
     if (coverageBoundary === "ack") {
-      await page.evaluate(() => globalThis.__spellbookProductHost.port.postMessage({
-        type:"command",messageId:"Action_Save",values:{Notify:true},
-      }));
-      pendingSave=await waitEvent("save");
+      await page.evaluate(() =>
+        globalThis.__spellbookProductHost.port.postMessage({
+          type: "command",
+          messageId: "Action_Save",
+          values: { Notify: true },
+        }),
+      );
+      pendingSave = await waitEvent("save");
       if (pendingSave.error) throw new Error(pendingSave.error);
     }
     result.controlledProperty = await nativeCall({
@@ -385,33 +440,75 @@ try {
       result.controlledProperty.before !== result.controlledProperty.after;
     if (!result.engineApplied)
       throw new Error("Coverage probe did not change the engine");
-    result.coverageBoundary=coverageBoundary;
+    result.coverageBoundary = coverageBoundary;
     if (coverageBoundary === "heartbeat") {
       await page.waitForTimeout(12_000);
-      result.heartbeatUnreconciled = await page.evaluate(() => globalThis.spellbookBrowserOffice.diagnostics().unreconciledModelRevision);
-      assert(result.heartbeatUnreconciled,"Autosave must retain the unknown change as unreconciled");
+      result.heartbeatUnreconciled = await page.evaluate(
+        () =>
+          globalThis.spellbookBrowserOffice.diagnostics()
+            .unreconciledModelRevision,
+      );
+      assert(
+        result.heartbeatUnreconciled,
+        "Autosave must retain the unknown change as unreconciled",
+      );
     }
-    if (["observe","before-ai","ack"].includes(coverageBoundary)) {
+    if (["observe", "before-ai", "ack"].includes(coverageBoundary)) {
       if (coverageBoundary === "ack") {
-        await page.evaluate(requestId => globalThis.__spellbookProductHost.port.postMessage({
-          type:"save-result",requestId,ok:true,revision:'"coverage-server-accepted-baseline"',
-        }),pendingSave.requestId);
-        const response=await waitEvent("save-response");
-        result.outcome=response.success ? "incorrectly-acknowledged" : "refused";
-        result.error=response.error; result.acknowledgementModified=response.modified;
+        await page.evaluate(
+          (requestId) =>
+            globalThis.__spellbookProductHost.port.postMessage({
+              type: "save-result",
+              requestId,
+              ok: true,
+              revision: '"coverage-server-accepted-baseline"',
+            }),
+          pendingSave.requestId,
+        );
+        const response = await waitEvent("save-response");
+        result.outcome = response.success
+          ? "incorrectly-acknowledged"
+          : "refused";
+        result.error = response.error;
+        result.acknowledgementModified = response.modified;
       } else {
-        const target=beforeState.elements[0];
-        const request=coverageBoundary === "observe" ? {operation:"observe",captureSlideIndexes:[]} : {
-          operation:"edit",expectedRevision:beforeState.revision,expectedSlides:JSON.stringify(beforeState.sourceSlides),
-          command:{op:"move",elementId:target.id,x:target.x+100,y:target.y},
-          permission:{mode:"document",slideIndexes:[],elementIds:[]},suppressCapture:true,
-        };
-        try { await nativeCall(request); result.outcome="incorrectly-accepted"; }
-        catch(error) { result.outcome="refused";result.error=error.message; }
+        const target = beforeState.elements[0];
+        const request =
+          coverageBoundary === "observe"
+            ? { operation: "observe", captureSlideIndexes: [] }
+            : {
+                operation: "edit",
+                expectedRevision: beforeState.revision,
+                expectedSlides: JSON.stringify(beforeState.sourceSlides),
+                command: {
+                  op: "move",
+                  elementId: target.id,
+                  x: target.x + 100,
+                  y: target.y,
+                },
+                permission: {
+                  mode: "document",
+                  slideIndexes: [],
+                  elementIds: [],
+                },
+                suppressCapture: true,
+              };
+        try {
+          await nativeCall(request);
+          result.outcome = "incorrectly-accepted";
+        } catch (error) {
+          result.outcome = "refused";
+          result.error = error.message;
+        }
         if (coverageBoundary === "before-ai")
-          result.afterRejectedAi = await nativeCall({operation:"selection",__coverageProbe:"read"});
+          result.afterRejectedAi = await nativeCall({
+            operation: "selection",
+            __coverageProbe: "read",
+          });
       }
-      throw Object.assign(new Error("Coverage boundary checked"),{skip:true});
+      throw Object.assign(new Error("Coverage boundary checked"), {
+        skip: true,
+      });
     }
   } else if (["newslide", "dupslide", "delslide"].includes(scenario)) {
     const itemY = { newslide: 16, dupslide: 49, delslide: 145 }[scenario];
@@ -433,7 +530,8 @@ try {
     result.target = {
       kind: target.kind,
       elementId: target.elementId,
-      hadNonemptyText: typeof target.text === "string" && target.text.trim().length > 0,
+      hadNonemptyText:
+        typeof target.text === "string" && target.text.trim().length > 0,
       name: String(target.name ?? "").replace(/[^\x20-\x7e]/gu, "?"),
     };
     if (["type", "type-move", "type-continuous"].includes(scenario)) {
@@ -444,15 +542,32 @@ try {
       await page.keyboard.press("End");
       if (scenario === "type-continuous") {
         await page.evaluate(() => performance.mark("human-continuous-start"));
-        await page.keyboard.type(` ${editMarker} ${"input ".repeat(32)}`, { delay: 70 });
+        await page.keyboard.type(` ${editMarker} ${"input ".repeat(32)}`, {
+          delay: 70,
+        });
         result.continuousInput = await page.evaluate(() => {
-          const start = performance.getEntriesByName("human-continuous-start").at(-1).startTime;
+          const start = performance
+            .getEntriesByName("human-continuous-start")
+            .at(-1).startTime;
           const end = performance.now();
-          return { durationMs: end - start, wholeReadsDuringInput: performance.getEntriesByType("measure")
-            .filter(entry => entry.name === "spellbook-native-read:internal-observe" && entry.startTime >= start && entry.startTime <= end).length };
+          return {
+            durationMs: end - start,
+            wholeReadsDuringInput: performance
+              .getEntriesByType("measure")
+              .filter(
+                (entry) =>
+                  entry.name === "spellbook-native-read:internal-observe" &&
+                  entry.startTime >= start &&
+                  entry.startTime <= end,
+              ).length,
+          };
         });
         assert(result.continuousInput.durationMs > 10_000);
-        assert.equal(result.continuousInput.wholeReadsDuringInput, 0, "Autosave read held the engine during continuous input");
+        assert.equal(
+          result.continuousInput.wholeReadsDuringInput,
+          0,
+          "Autosave read held the engine during continuous input",
+        );
       } else await page.keyboard.type(` ${editMarker}`, { delay: 60 });
       await page.waitForTimeout(800);
       await page.keyboard.press("Escape");
@@ -474,7 +589,8 @@ try {
     ? beforeState
     : await engineState();
   result.checkpointMs = Date.now() - checkpointStarted;
-  result.checkpointTimingScope = "post-edit-host-observation-including-queue-wait";
+  result.checkpointTimingScope =
+    "post-edit-host-observation-including-queue-wait";
   const before =
     beforeState.elements.find((e) => e.id === target?.elementId) ??
     beforeState.elements.find((e) => e.name === target?.name);
@@ -499,8 +615,13 @@ try {
             ? afterState.slideCount > beforeState.slideCount
             : afterState.slideCount < beforeState.slideCount;
   if (scenario === "type-continuous") {
-    result.continuousInput.textRetained = after?.text?.includes(`${editMarker} ${"input ".repeat(32)}`) === true;
-    assert.equal(result.continuousInput.textRetained, true, "Continuous input was truncated or lost");
+    result.continuousInput.textRetained =
+      after?.text?.includes(`${editMarker} ${"input ".repeat(32)}`) === true;
+    assert.equal(
+      result.continuousInput.textRetained,
+      true,
+      "Continuous input was truncated or lost",
+    );
   }
   result.engineDelta = {
     slides: [beforeState.slideCount, afterState.slideCount],
@@ -644,7 +765,8 @@ try {
   if (receiptPath)
     await writeFile(receiptPath, JSON.stringify(result, null, 2) + "\n");
   if (scenario === "unobserved-picture-mode") {
-    const staleAiRejectedWithoutMutation = coverageBoundary === "before-ai" &&
+    const staleAiRejectedWithoutMutation =
+      coverageBoundary === "before-ai" &&
       result.error === "browser_package_revision_changed" &&
       result.afterRejectedAi?.x === result.controlledProperty?.x &&
       result.afterRejectedAi?.y === result.controlledProperty?.y;
@@ -652,7 +774,8 @@ try {
       result.engineApplied === true &&
       result.outcome === "refused" &&
       (staleAiRejectedWithoutMutation ||
-        (result.error === "browser_native_unobserved_change" && Boolean(result.metrics?.unreconciledModelRevision)));
+        (result.error === "browser_native_unobserved_change" &&
+          Boolean(result.metrics?.unreconciledModelRevision)));
     // Record the assertion too, not only the engine's refusal message.
     if (receiptPath)
       await writeFile(receiptPath, JSON.stringify(result, null, 2) + "\n");

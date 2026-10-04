@@ -1,7 +1,11 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 
-const maximumEntries = 32;
-const maximumRetainedBytes = 256 * 1024 * 1024;
+export const productHistoryLimits = Object.freeze({
+  maxEntries: 32,
+  maxBytes: 256 * 1024 * 1024,
+});
+const maximumEntries = productHistoryLimits.maxEntries;
+const maximumRetainedBytes = productHistoryLimits.maxBytes;
 
 export function snapshotProductEditState(state) {
   return {

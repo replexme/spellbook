@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 
+import { validateProductRecoveryHistory } from "./product-recovery-history.mjs";
+
 const schemaVersion = 1;
 const namespaceName = "spellbook-browser-office-v1";
 const slots = ["a", "b"];
@@ -59,10 +61,20 @@ export async function openBrowserDocumentJournal({
       candidateBytes,
       commands,
       artifactReceipt = null,
+      commandGroups = null,
+      appliedGroups = null,
+      history = null,
+      historyArtifacts = [],
     }) {
       validateBytes(baseBytes, "baseBytes");
       validateBytes(candidateBytes, "candidateBytes");
+      validateProductRecoveryHistory(history, historyArtifacts);
       const safeCommands = cloneCommands(commands);
+      const groupHistory = validateCommandGroups(
+        commandGroups,
+        appliedGroups,
+        safeCommands,
+      );
       const previous = await load();
       const generation = (previous?.metadata.generation ?? 0) + 1;
       const slot = slots[generation % slots.length];
@@ -79,6 +91,14 @@ export async function openBrowserDocumentJournal({
         throw new Error(
           "Browser recovery artifact evidence does not match its bytes.",
         );
+      for (const artifact of historyArtifacts) {
+        validateBytes(artifact.bytes, "historyArtifact");
+        if (
+          (await sha256(artifact.bytes, cryptoImpl)) !==
+          artifact.artifactReceipt.candidateSha256
+        )
+          throw Error("product_recovery_history_digest_mismatch");
+      }
       const metadata = {
         schemaVersion,
         generation,
@@ -90,11 +110,26 @@ export async function openBrowserDocumentJournal({
         baseSha256,
         candidateSha256,
         commands: safeCommands,
+        ...(history
+          ? {
+              productHistory: structuredClone(history),
+              historyReceipts: historyArtifacts.map((a) =>
+                structuredClone(a.artifactReceipt),
+              ),
+            }
+          : {}),
+        ...(groupHistory ?? {}),
         ...(artifactReceipt
           ? { artifactReceipt: structuredClone(artifactReceipt) }
           : {}),
         savedAt: new Date().toISOString(),
       };
+      for (const artifact of historyArtifacts)
+        await writeFile(
+          directory,
+          `history-${artifact.artifactReceipt.candidateSha256}-${slot}.pptx`,
+          artifact.bytes,
+        );
       await writeFile(directory, `base-${slot}.pptx`, baseBytes);
       await writeFile(directory, `candidate-${slot}.pptx`, candidateBytes);
       // Metadata is the commit record and is written last. If the browser dies
@@ -104,9 +139,26 @@ export async function openBrowserDocumentJournal({
         `metadata-${slot}.json`,
         new TextEncoder().encode(JSON.stringify(metadata)),
       );
+      // Remove only obsolete files belonging to the overwritten slot, after
+      // its new metadata is committed. The other generation stays recoverable.
+      if (directory.entries)
+        for await (const [name] of directory.entries()) {
+          const match = /^history-([0-9a-f]{64})-([ab])\.pptx$/.exec(name);
+          if (
+            match?.[2] === slot &&
+            !historyArtifacts.some(
+              (a) => a.artifactReceipt.candidateSha256 === match[1],
+            )
+          )
+            await removeFile(directory, name);
+        }
       return metadata;
     },
     async clear() {
+      if (directory.entries)
+        for await (const [name] of directory.entries())
+          if (/^history-[0-9a-f]{64}-[ab]\.pptx$/.test(name))
+            await removeFile(directory, name);
       await Promise.all(
         slots.flatMap((slot) =>
           [
@@ -127,7 +179,14 @@ async function loadSlot(directory, slot, cryptoImpl) {
       readFile(directory, `base-${slot}.pptx`),
       readFile(directory, `candidate-${slot}.pptx`),
     ]);
+    if (metadataBytes.byteLength > 1024 * 1024) return null;
     const metadata = JSON.parse(new TextDecoder().decode(metadataBytes));
+    if (
+      metadata.historyReceipts &&
+      (!Array.isArray(metadata.historyReceipts) ||
+        metadata.historyReceipts.length > 66)
+    )
+      return null;
     if (
       metadata?.schemaVersion !== schemaVersion ||
       !Number.isSafeInteger(metadata.generation) ||
@@ -138,6 +197,11 @@ async function loadSlot(directory, slot, cryptoImpl) {
       metadata.commands.length > maximumCommands
     )
       return null;
+    validateCommandGroups(
+      metadata.commandGroups ?? null,
+      metadata.appliedGroups ?? null,
+      metadata.commands,
+    );
     validateBytes(baseBytes, "baseBytes");
     validateBytes(candidateBytes, "candidateBytes");
     if (
@@ -145,7 +209,20 @@ async function loadSlot(directory, slot, cryptoImpl) {
       (await sha256(candidateBytes, cryptoImpl)) !== metadata.candidateSha256
     )
       return null;
-    return { metadata, baseBytes, candidateBytes };
+    const historyArtifacts = [];
+    for (const receipt of metadata.historyReceipts ?? []) {
+      if (!/^[0-9a-f]{64}$/.test(receipt?.candidateSha256)) return null;
+      const bytes = await readFile(
+        directory,
+        `history-${receipt.candidateSha256}-${slot}.pptx`,
+      );
+      validateBytes(bytes, "historyArtifact");
+      if ((await sha256(bytes, cryptoImpl)) !== receipt.candidateSha256)
+        return null;
+      historyArtifacts.push({ bytes, artifactReceipt: receipt });
+    }
+    validateProductRecoveryHistory(metadata.productHistory, historyArtifacts);
+    return { metadata, baseBytes, candidateBytes, historyArtifacts };
   } catch {
     return null;
   }
@@ -205,4 +282,27 @@ async function removeFile(directory, name) {
   } catch (error) {
     if (error?.name !== "NotFoundError") throw error;
   }
+}
+
+function validateCommandGroups(groups, appliedGroups, commands) {
+  if (groups === null) return null;
+  if (
+    !Array.isArray(groups) ||
+    groups.length > maximumCommands ||
+    !Number.isSafeInteger(appliedGroups) ||
+    appliedGroups < 0 ||
+    appliedGroups > groups.length ||
+    groups.some((g) => !Array.isArray(g) || !g.length)
+  )
+    throw Error("Browser recovery command groups are invalid.");
+  const safeGroups = JSON.parse(JSON.stringify(groups));
+  cloneCommands(safeGroups.flat());
+  if (
+    JSON.stringify(safeGroups.slice(0, appliedGroups).flat()) !==
+    JSON.stringify(commands)
+  )
+    throw Error(
+      "Browser recovery command groups do not match the applied commands.",
+    );
+  return { commandGroups: safeGroups, appliedGroups };
 }

@@ -37,10 +37,12 @@ function canonical(value) {
 // usable. A journal or a successful command is never itself admission evidence.
 export function createProductArtifactAuthority({
   inspect,
+  persistenceState = stateOf,
   maximumEntries = 128,
 }) {
   if (
     typeof inspect !== "function" ||
+    typeof persistenceState !== "function" ||
     !Number.isSafeInteger(maximumEntries) ||
     maximumEntries < 1
   )
@@ -112,7 +114,9 @@ export function createProductArtifactAuthority({
         throw new Error("browser_artifact_changed_during_verification");
       const persistedStateSha256 = await sha256(
         new TextEncoder().encode(
-          JSON.stringify(canonical(stateOf(inspected.observation))),
+          JSON.stringify(
+            canonical(persistenceState(structuredClone(inspected.observation))),
+          ),
         ),
       );
       const receipt = {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createProductArtifactAuthority } from "./product-artifact.mjs";
 import { assertArtifactMatchesObservation } from "./harness/product-persistence.mjs";
+import { onlyOfficePersistenceState } from "./onlyoffice/product-engine.mjs";
 
 function observed(text = "saved") {
   return {
@@ -146,6 +147,42 @@ test("recovery re-inspects the file and refuses stale semantic evidence", async 
     admit(authority(), document(2), "v1", { recoveredReceipt: receipt }),
     /recovery_evidence_mismatch/,
   );
+});
+
+test("ONLYOFFICE recovery includes styles, masters and themes but excludes live revision", async () => {
+  const original = observed();
+  original.slides[0].elements[0].onlyoffice = { fill: { color: 0xff0000 } };
+  original.masters = [{ theme: { fonts: { major: "Aptos" } } }];
+  const readback = async (state, recoveredReceipt = null) =>
+    admit(
+      authority({
+        inspect: async () => state,
+        persistenceState: onlyOfficePersistenceState,
+      }),
+      document(),
+      "live-revision",
+      { verify: () => {}, recoveredReceipt },
+    );
+  const receipt = await readback(original);
+  const changedRevision = structuredClone(original);
+  changedRevision.revision = "another-native-session";
+  await readback(changedRevision, receipt);
+  for (const change of [
+    (state) => {
+      state.slides[0].elements[0].onlyoffice.fill.color = 0x00ff00;
+    },
+    (state) => {
+      state.masters[0].theme.fonts.major = "Arial";
+    },
+  ]) {
+    const changed = structuredClone(original);
+    change(changed);
+    await assert.rejects(
+      readback(changed, receipt),
+      /recovery_evidence_mismatch/,
+    );
+  }
+  assert.equal(original.revision, "saved");
 });
 
 test("same exact artifact can reuse inspection while intent is verified on every admission", async () => {
