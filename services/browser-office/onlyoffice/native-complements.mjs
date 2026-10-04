@@ -12,24 +12,28 @@ export function installOnlyOfficeNativeComplements() {
     if (typeof fade !== "function") throw Error("onlyoffice_product_white_fade_unavailable");
     animation[Symbol.for("spellbook.onlyoffice.whiteFade/v1")] = true;
     animation._startFade = function() {
-      if (this.Param !== white) return fade.call(this);
-      const main = (this.DemonstrationObject?.Canvas ?? this.HtmlPage.m_oEditor.HtmlElement).getContext("2d");
-      const overlay = this.DemonstrationObject?.Overlay?.getContext("2d") ?? this.HtmlPage.m_oOverlayApi.m_oContext;
-      const part = this._getPart();
+      if (animation.Param !== white) return fade.call(animation);
+      const main = (animation.DemonstrationObject?.Canvas ?? animation.HtmlPage.m_oEditor.HtmlElement).getContext("2d");
+      const overlay = animation.DemonstrationObject?.Overlay?.getContext("2d") ?? animation.HtmlPage.m_oOverlayApi.m_oContext;
       const restores = [];
       for (const [ctx, base] of [[main, true], [overlay, false]]) {
         const fill = ctx.fillRect;
         ctx.fillRect = function(...args) {
           const color = this.fillStyle;
-          const whitePhase = base ? part > .5 : animation.IsBackward ? part >= .5 : part <= .5;
+          // The native method updates CurrentTime before drawing. Read the
+          // phase here, not before that update: crossing halfway paints the
+          // base once, so one stale phase would leave it black for the rest.
+          const part=animation._getPart(),rect=animation.Rect;
+          const slideRect=!rect||args[0]===rect.x&&args[1]===rect.y&&args[2]===rect.w&&args[3]===rect.h;
+          const whitePhase = base ? part > .5 && slideRect : part <= .5;
           if (whitePhase && ["#000000", "rgb(0,0,0)", "rgb(0, 0, 0)"].includes(color)) this.fillStyle = "#ffffff";
           try { return fill.apply(this, args); } finally { this.fillStyle = color; }
         };
         restores.push(() => {ctx.fillRect = fill;});
       }
-      this.Param = window.Asc.c_oAscSlideTransitionParams.Fade_Through_Black;
-      try { return fade.call(this); }
-      finally { this.Param = white; restores.forEach(restore => restore()); }
+      animation.Param = window.Asc.c_oAscSlideTransitionParams.Fade_Through_Black;
+      try { return fade.call(animation); }
+      finally { animation.Param = white; restores.forEach(restore => restore()); }
     };
   }
   };

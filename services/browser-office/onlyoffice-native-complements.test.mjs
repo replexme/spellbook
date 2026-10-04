@@ -45,5 +45,22 @@ for(const deferred of [false,true])test(`native effect import and ${deferred?"de
     if(deferred){graphics.m_oFullTransform={TransformPointX:(x,y)=>x*2-y,TransformPointY:(x,y)=>x+y*2};invoke();assert.equal(ctx.args.length,9);assert.equal(ctx.args[1],ctx.args[5]);assert.equal(ctx.args[2],ctx.args[6]);}
     run.Pr.spellbookEffects=null;assert.equal(invoke(),"transparent");
     imported.Set_FromObject({font:"Arial",spellbookEffects:null});assert.equal(imported.spellbookEffects,null);
+    const main={fillStyle:"#000000",colors:[],fillRect(){this.colors.push(this.fillStyle);}},overlay={...main,colors:[]};
+    const animation={Param:window.Asc.c_oAscSlideTransitionParams.Fade_ThroughWhite,phase:.49,Rect:{x:0,y:2,w:8,h:4},DemonstrationObject:{Canvas:{getContext:()=>main},Overlay:{getContext:()=>overlay}},_getPart(){return this.phase;}};
+    let nextPhase=.6;
+    const nativeFade=()=>{
+      animation.phase=nextPhase;main.fillStyle="#000000";main.fillRect(0,0,8,8);main.fillRect(0,2,8,4);
+      overlay.fillStyle="#000000";overlay.fillRect(0,2,8,4);
+    };
+    animation._startFade=nativeFade;
+    window.Asc.editor={WordControl:{DemonstrationManager:{Transition:animation}}};
+    window.Asc.c_oAscSlideTransitionParams.Fade_Through_Black=7;
+    installOnlyOfficeNativeComplements();
+    const unboundFade=animation._startFade;unboundFade();
+    assert.deepEqual(main.colors,["#000000","#ffffff"]);assert.deepEqual(overlay.colors,["#000000"]);
+    assert.equal(animation.Param,window.Asc.c_oAscSlideTransitionParams.Fade_ThroughWhite);
+    nextPhase=.4;animation.IsBackward=true;unboundFade();assert.equal(overlay.colors.at(-1),"#ffffff");
+    assert.equal(main.fillRect,Object.getOwnPropertyDescriptor(main,"fillRect").value);
+
   }finally{globalThis.window=previous;globalThis.document=previousDocument;}
 });
