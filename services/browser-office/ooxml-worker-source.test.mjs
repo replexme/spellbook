@@ -5217,3 +5217,29 @@ test("numeric workbook merge keeps author-only content and refuses any nonnumeri
   assert.equal(merge(renamed), null);
   assert.equal(merge(author, before, before), null);
 });
+
+test("native whole-text replacement may add plain paragraphs without importing engine font rewrites", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml";
+  const noEdit = withEngineSave(original, { shadow: false, keepRectangleAlignment: false });
+  const xml = new DOMParser().parseFromString(strFromU8(noEdit[part]), "text/xml");
+  const a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+  const p = "http://schemas.openxmlformats.org/presentationml/2006/main";
+  const body = xml.getElementsByTagNameNS(p, "txBody")[0];
+  const first = body.getElementsByTagNameNS(a, "p")[0];
+  first.getElementsByTagNameNS(a, "t")[0].textContent = "첫 번째";
+  const second = first.cloneNode(true);
+  second.getElementsByTagNameNS(a, "t")[0].textContent = "العربية Second";
+  body.appendChild(second);
+  const edited = { ...noEdit, [part]: strToU8(new XMLSerializer().serializeToString(xml)) };
+  const saved = unzipSync(preserveOriginalPptxParts(zipSync(original), zipSync(noEdit), zipSync(edited),
+    ["replace_text"], [{ op: "replace_text", slideIndex: 0, shapeIndex: 0, name: "TextBox 1" }]).bytes);
+  const result = new DOMParser().parseFromString(strFromU8(saved[part]), "text/xml");
+  const paragraphs = [...result.getElementsByTagNameNS(p, "txBody")[0].getElementsByTagNameNS(a, "p")];
+  assert.deepEqual(paragraphs.map(x => x.getElementsByTagNameNS(a, "t")[0].textContent), ["첫 번째", "العربية Second"]);
+  for (const paragraph of paragraphs)
+    assert.equal(paragraph.getElementsByTagNameNS(a, "latin")[0].getAttribute("typeface"), "Liberation Sans");
+  assert.match(strFromU8(saved[part]), /<a:p><a:pPr algn="ctr"\/><\/a:p>/u);
+  for (const [name, bytes] of Object.entries(original))
+    if (name !== part) assert.deepEqual(saved[name], bytes, name);
+});

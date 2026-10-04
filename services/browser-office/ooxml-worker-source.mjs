@@ -783,7 +783,7 @@ function preserveUnaffectedSlideShapes(
       if (sourceOperations.includes("replace_text")) {
         try {
           const text = readShapeText(editedShape);
-          replaceShapeText(source, text);
+          replaceNativeShapeText(source, text);
           if (readShapeText(source) !== text) return null;
         } catch { return null; }
         const properties = [source, baseline, editedShape].map(shape =>
@@ -6004,6 +6004,37 @@ function readParagraphText(paragraph) {
     }
   }
   return value;
+}
+
+// A whole native text replacement owns paragraph topology. Preserve the
+// author's first paragraph and first run style rather than importing the
+// engine's rewritten text body, inherited defaults and unrelated properties.
+function replaceNativeShapeText(shape, value) {
+  const paragraphs = [...shape.getElementsByTagNameNS(drawingNamespace, "p")];
+  const lines = value.replace(/\r\n/gu, "\n").split("\n");
+  if (paragraphs.length === lines.length) return replaceShapeText(shape, value);
+  if (!paragraphs.length ||
+      shape.getElementsByTagNameNS(drawingNamespace, "fld").length)
+    throw new Error("Native text replacement requires plain editable paragraphs.");
+  const first = paragraphs[0];
+  const parent = first.parentNode;
+  if (paragraphs.some(p => p.parentNode !== parent))
+    throw new Error("Native text replacement has ambiguous paragraph ownership.");
+  const template = first.cloneNode(true);
+  let retainedRun = false;
+  for (const child of [...template.childNodes]) {
+    if (child.nodeType !== 1 || child.namespaceURI !== drawingNamespace) continue;
+    if (child.localName === "r") {
+      if (!retainedRun) { retainedRun = true; continue; }
+      template.removeChild(child);
+    } else if (child.localName === "br") template.removeChild(child);
+  }
+  for (const line of lines) {
+    const paragraph = template.cloneNode(true);
+    replaceParagraphText(paragraph, line);
+    parent.insertBefore(paragraph, first);
+  }
+  for (const paragraph of paragraphs) parent.removeChild(paragraph);
 }
 
 function replaceShapeText(shape, value) {
