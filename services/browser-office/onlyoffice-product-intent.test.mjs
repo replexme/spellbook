@@ -855,3 +855,37 @@ test("opacity preflight admits canonical percentages, not a fraction-only range"
     globalThis.window = old;
   }
 });
+
+test("speaker notes replace text while preserving run style and all slide contents", () => {
+  const before = document();
+  const style = { GetFontSize: 24, GetBold: true, fonts: ["Arial"] };
+  before.slides[0].onlyoffice.notes = "old notes\r\n";
+  before.slides[0].onlyoffice.notesParagraphs = [
+    {
+      alignment: "left",
+      text: "old notes\r\n",
+      runs: [{ text: "old notes", style }],
+    },
+  ];
+  const after = structuredClone(before);
+  after.slides[0].onlyoffice.notes = "new notes\r\n";
+  after.slides[0].onlyoffice.notesParagraphs[0].text = "new notes\r\n";
+  after.slides[0].onlyoffice.notesParagraphs[0].runs[0].text = "new notes";
+  const command = [
+    { op: "set_speaker_notes", slideIndex: 0, text: "new notes" },
+  ];
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, command),
+  );
+  after.slides[0].onlyoffice.notesParagraphs[0].runs[0].style.GetBold = false;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, command),
+    /notes_style_lost/,
+  );
+  after.slides[0].onlyoffice.notesParagraphs[0].runs[0].style.GetBold = true;
+  after.slides[0].elements[1].text = "collateral";
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, command),
+    /unrequested_change/,
+  );
+});

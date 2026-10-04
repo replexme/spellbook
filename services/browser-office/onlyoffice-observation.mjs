@@ -415,6 +415,12 @@ export async function observeOnlyOfficeCandidate(frame) {
             state.notes =
               noteBody?.getDocContent?.()?.GetText?.({ Numbering: false }) ??
               null;
+            state.notesParagraphs = noteBody
+              ? (drawing(
+                  new window.AscBuilder.ApiShape(noteBody),
+                  at + ".notes",
+                ).paragraphs ?? null)
+              : null;
             const transition = read(s, "GetSlideShowTransition", at);
             if (transition) {
               state.transition = {};

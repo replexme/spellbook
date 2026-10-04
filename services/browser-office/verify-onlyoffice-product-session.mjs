@@ -649,9 +649,12 @@ const engine = createOnlyOfficeProductEngine({
       sourceTargets:
         commands?.map((c) => {
           if (
-            ["rename_slide", "set_slide_hidden", "set_background"].includes(
-              c.op,
-            )
+            [
+              "rename_slide",
+              "set_slide_hidden",
+              "set_background",
+              "set_speaker_notes",
+            ].includes(c.op)
           )
             return { op: c.op, slideIndex: c.slideIndex };
           const [slideIndex, shapeIndex] = c.elementId.split("/").map(Number);
@@ -901,6 +904,11 @@ try {
       elementId: null,
       hidden: true,
     },
+    set_speaker_notes: {
+      slideIndex: selectedSlideIndex,
+      elementId: null,
+      text: "검증된 발표자 노트\nSecond paragraph",
+    },
     set_background: {
       slideIndex: selectedSlideIndex,
       elementId: null,
@@ -999,6 +1007,7 @@ try {
       "flip",
       "rename_slide",
       "set_slide_hidden",
+      "set_speaker_notes",
     ].includes(operation)
   )
     assert.notEqual(

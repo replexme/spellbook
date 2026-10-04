@@ -36,6 +36,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "rename_slide",
   "set_slide_hidden",
   "set_background",
+  "set_speaker_notes",
   "delete_element",
   "replace_text",
   ...Object.keys(formatting),
@@ -72,16 +73,47 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
     if (!onlyOfficeIntentOperations.includes(command.op))
       throw Error("onlyoffice_product_intent_unavailable:" + command.op);
     if (
-      ["rename_slide", "set_slide_hidden", "set_background"].includes(
-        command.op,
-      )
+      [
+        "rename_slide",
+        "set_slide_hidden",
+        "set_background",
+        "set_speaker_notes",
+      ].includes(command.op)
     ) {
       const slide = left.slides[command.slideIndex];
       if (!slide) throw Error("onlyoffice_product_intent_target_missing");
       if (command.op === "rename_slide") slide.onlyoffice.name = command.name;
       else if (command.op === "set_slide_hidden")
         slide.onlyoffice.visible = !command.hidden;
-      else {
+      else if (command.op === "set_speaker_notes") {
+        const actual = right.slides[command.slideIndex].onlyoffice;
+        const normalize = (text) =>
+          text?.replace(/\r\n/g, "\n").replace(/\n$/, "");
+        if (normalize(actual.notes) !== command.text.replace(/\r\n/g, "\n"))
+          throw Error("onlyoffice_product_intent_mismatch:notes");
+        const initial = slide.onlyoffice.notesParagraphs?.flatMap(
+          (p) => p.runs,
+        )[0]?.style;
+        if (
+          initial &&
+          actual.notesParagraphs
+            ?.flatMap((p) => p.runs)
+            .some((r) => JSON.stringify(r.style) !== JSON.stringify(initial))
+        )
+          throw Error("onlyoffice_product_intent_mismatch:notes_style_lost");
+        const alignment = slide.onlyoffice.notesParagraphs?.[0]?.alignment;
+        if (
+          alignment != null &&
+          actual.notesParagraphs?.some((p) => p.alignment !== alignment)
+        )
+          throw Error(
+            "onlyoffice_product_intent_mismatch:notes_paragraph_style_lost",
+          );
+        slide.onlyoffice.notes = actual.notes;
+        slide.onlyoffice.notesParagraphs = structuredClone(
+          actual.notesParagraphs,
+        );
+      } else {
         const color = rgb(command.color);
         const desired = { R: color.r, G: color.g, B: color.b, A: 255 };
         slide.onlyoffice.background = {

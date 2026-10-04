@@ -174,9 +174,12 @@ export function createOnlyOfficeProductEngine({
                 "onlyoffice_product_operation_unavailable:" + command.op,
               );
             if (
-              ["rename_slide", "set_slide_hidden", "set_background"].includes(
-                command.op,
-              )
+              [
+                "rename_slide",
+                "set_slide_hidden",
+                "set_background",
+                "set_speaker_notes",
+              ].includes(command.op)
             ) {
               const index = command.slideIndex;
               const slide = m.Slides[index];
@@ -202,6 +205,19 @@ export function createOnlyOfficeProductEngine({
                   command.color > 0xffffff)
               )
                 throw Error("onlyoffice_product_color_invalid");
+              if (command.op === "set_speaker_notes") {
+                if (
+                  typeof command.text !== "string" ||
+                  command.text.length > 100000
+                )
+                  throw Error("onlyoffice_product_argument_invalid:notes");
+                if (
+                  !slide.notes &&
+                  (!m.notesMasters?.[0] ||
+                    typeof window.AscCommonSlide?.CreateNotes !== "function")
+                )
+                  throw Error("onlyoffice_product_notes_master_unavailable");
+              }
               return { ...command, nativeId: slide.Id };
             }
             if (
@@ -427,7 +443,8 @@ export function createOnlyOfficeProductEngine({
               !["normal", "superscript", "subscript"].includes(command.script)
             )
               throw Error("onlyoffice_product_argument_invalid:script");
-            if (command.op.endsWith("opacity")) requireNumber("opacity", 0, 100);
+            if (command.op.endsWith("opacity"))
+              requireNumber("opacity", 0, 100);
             if (
               ["fill_color", "line_color", "font_color"].includes(command.op) &&
               (!Number.isSafeInteger(command.color) ||
@@ -508,10 +525,26 @@ export function createOnlyOfficeProductEngine({
           const api = window.AscBuilder.Slide.Api,
             p = api.GetPresentation(),
             slide = p.GetSlideByIndex(command.slideIndex);
+          const replaceContent = (c, text) => {
+            if (!c) throw Error("onlyoffice_product_text_unavailable");
+            const first = c.GetAllParagraphs()[0];
+            const properties =
+              first?.GetElement(0)?.GetTextPr?.() ?? first?.GetTextPr();
+            const paragraphProperties = first?.GetParaPr();
+            c.RemoveAllElements();
+            const paragraph = c.GetElement(0);
+            if (properties) paragraph.SetTextPr(properties);
+            if (paragraphProperties)
+              paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
+            return paragraph.AddText(text);
+          };
           if (
-            ["rename_slide", "set_slide_hidden", "set_background"].includes(
-              command.op,
-            )
+            [
+              "rename_slide",
+              "set_slide_hidden",
+              "set_background",
+              "set_speaker_notes",
+            ].includes(command.op)
           ) {
             if (slide?.Slide.Id !== command.nativeId)
               throw Error("onlyoffice_product_live_binding_changed");
@@ -529,6 +562,20 @@ export function createOnlyOfficeProductEngine({
                   ),
                 ),
               );
+            if (command.op === "set_speaker_notes") {
+              let notes = slide.Slide.notes;
+              if (!notes) {
+                notes = window.AscCommonSlide.CreateNotes();
+                notes.setNotesMaster(
+                  editor.WordControl.m_oLogicDocument.notesMasters[0],
+                );
+                notes.setSlide(slide.Slide);
+                slide.Slide.setNotes(notes);
+              }
+              const body = notes.getBodyShape() ?? notes.createBodyShape();
+              const wrapper = new window.AscBuilder.ApiShape(body);
+              return replaceContent(wrapper.GetDocContent(), command.text);
+            }
             slide.Slide.setCSldName(command.name);
             return true;
           }
@@ -700,19 +747,8 @@ export function createOnlyOfficeProductEngine({
                 );
               return true;
             }
-            case "replace_text": {
-              const c = content(),
-                first = c.GetAllParagraphs()[0];
-              const properties =
-                first?.GetElement(0)?.GetTextPr?.() ?? first?.GetTextPr();
-              const paragraphProperties = first?.GetParaPr();
-              c.RemoveAllElements();
-              const paragraph = c.GetElement(0);
-              if (properties) paragraph.SetTextPr(properties);
-              if (paragraphProperties)
-                paragraph.Paragraph.Set_Pr(paragraphProperties.ParaPr.Copy());
-              return paragraph.AddText(command.text);
-            }
+            case "replace_text":
+              return replaceContent(content(), command.text);
             case "font_size":
               return content()
                 .GetAllParagraphs()
