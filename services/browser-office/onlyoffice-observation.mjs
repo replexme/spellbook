@@ -253,6 +253,11 @@ export async function observeOnlyOfficeCandidate(frame) {
             columnWidths: d.Table.TableGrid.map((width) =>
               Math.round(width * 100),
             ),
+            // Authored grid precision must survive summation before conversion
+            // to the product's hundredth-millimetre outline.
+            columnWidthsEmu: d.Table.TableGrid.map((width) =>
+              Math.round(width * 36000),
+            ),
             authoredFrame: Object.fromEntries(
               ["offX", "offY", "extX", "extY"].map((key) => [
                 key,

@@ -258,9 +258,16 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
       group.some((c) => c.op === "set_table_column_width")
     ) {
       const columns = oldDrawing.tableLayout.columnWidths;
-      for (const c of group.filter((c) => c.op === "set_table_column_width"))
+      const exactColumns = oldDrawing.tableLayout.columnWidthsEmu;
+      if (!exactColumns)
+        throw Error("onlyoffice_product_intent_column_precision_missing");
+      for (const c of group.filter((c) => c.op === "set_table_column_width")) {
         columns[c.index] = c.width;
-      const width = columns.reduce((sum, column) => sum + column, 0);
+        exactColumns[c.index] = c.width * 360;
+      }
+      const width = Math.round(
+        exactColumns.reduce((sum, column) => sum + column, 0) / 360,
+      );
       geometry.width = width;
       oldDrawing.tableLayout.authoredFrame.extX = width;
       oldDrawing.tableLayout.computedWidth = width;

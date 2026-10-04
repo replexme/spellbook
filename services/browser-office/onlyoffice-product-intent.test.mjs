@@ -1361,6 +1361,7 @@ test("column sizing changes its authored grid and frame without losing other col
     computedHeight: 300,
     computedWidth: 500,
     columnWidths: [200, 300],
+    columnWidthsEmu: [72000, 108000],
     authoredFrame: { extX: 500, extY: 300 },
     rowHeights: [{ value: 300, rule: 0, computedHeight: 300 }],
   };
@@ -1368,6 +1369,7 @@ test("column sizing changes its authored grid and frame without losing other col
   after.slides[0].elements[0].width = 1000;
   const changed = after.slides[0].onlyoffice.drawings[0].tableLayout;
   changed.columnWidths[0] = 700;
+  changed.columnWidthsEmu[0] = 700 * 360;
   changed.computedWidth = changed.authoredFrame.extX = 1000;
   const commands = [
     { op: "set_table_column_width", elementId: "0/0", index: 0, width: 700 },
