@@ -298,7 +298,7 @@ async function journalCall(operation, payload = null) {
   const result = await mainPage.evaluate(
     async ({ operation, payload, identity }) => {
       window.__productJournal ??= await (
-        await import("/product-journal.mjs")
+        await import("/repo/browser-office/opfs-journal.mjs")
       ).openBrowserDocumentJournal({ identity });
       if (operation === "save") {
         payload.baseBytes = Uint8Array.from(payload.baseBytes);
