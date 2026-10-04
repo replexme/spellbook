@@ -405,6 +405,9 @@ export function createOnlyOfficeProductEngine({
               const columns = table?.TableGrid?.length;
               if (
                 !columns ||
+                typeof window.AscDFH?.changesFactory?.[
+                  window.AscDFH.historyitem_Table_TableGrid
+                ] !== "function" ||
                 table.Content.some((row) => row.Content.length !== columns) ||
                 commands.length !== 1 ||
                 !Number.isSafeInteger(command.index) ||
@@ -1135,6 +1138,24 @@ export function createOnlyOfficeProductEngine({
               // Native column topology rebuilds running sums; keep exact authored
               // widths for retained columns through its own history grid setter.
               d.Table.SetTableGrid(grid);
+              // SetTableGrid ignores deltas below 0.001mm. Column topology
+              // rebuilds old values by cumulative subtraction, so apply its
+              // exact native history change when that tolerance hid a delta.
+              if (
+                d.Table.TableGrid.some((value, index) => value !== grid[index])
+              ) {
+                const NativeGridChange =
+                  window.AscDFH.changesFactory[
+                    window.AscDFH.historyitem_Table_TableGrid
+                  ];
+                const change = new NativeGridChange(
+                  d.Table,
+                  d.Table.TableGrid.slice(),
+                  grid.slice(),
+                );
+                window.AscCommon.History.Add(change);
+                change.Redo();
+              }
               d.Drawing.spPr.xfrm.setExtX(
                 grid.reduce((sum, width) => sum + width, 0),
               );
