@@ -889,6 +889,39 @@ for (const method of [
       async ({ method, args }) => window.__productNativePort[method](...args),
       { method, args },
     );
+    if (
+      method === "changeToken" &&
+      process.argv.includes("--native-history-trace")
+    ) {
+      const history = await mainFrame.evaluate(() => {
+        const h = window.AscCommon.History;
+        const names = Object.fromEntries(
+          Object.entries(window.AscDFH)
+            .filter(
+              ([name, value]) =>
+                name.startsWith("historyitem_") && typeof value === "number",
+            )
+            .map(([name, value]) => [value, name]),
+        );
+        return {
+          index: h.Index,
+          points: h.Points.slice(0, h.Index + 1)
+            .slice(-4)
+            .map((point) => ({
+              description: point.Description,
+              items: point.Items.slice(-32).map((item) => ({
+                type: names[item.Data?.Type] ?? item.Data?.Type,
+                owner: item.Data?.Class?.constructor?.name,
+                binary: item.Binary,
+              })),
+            })),
+        };
+      });
+      report.nativeHistoryTrace ??= [];
+      report.nativeHistoryTrace.push({ token: result, history });
+      if (report.nativeHistoryTrace.length > 40)
+        report.nativeHistoryTrace.shift();
+    }
     if (method === "observe") lastObserved = result;
     return result;
   };
