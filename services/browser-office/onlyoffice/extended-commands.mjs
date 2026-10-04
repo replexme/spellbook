@@ -545,7 +545,7 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
     const next=f.ExecuteNoHistory(()=>{
       const value=new previous.constructor();previous.copy2(value,{cacheImage:false});
       value.setParent(previous.parent);if(previous.group)value.setGroup(previous.group);
-      const bind=(before,after)=>{diagramRebindings.set(before.Id,after.Id);need((before.spTree?.length??0)===(after.spTree?.length??0),"diagram_clone_shape_count");before.spTree?.forEach((child,i)=>bind(child,after.spTree[i]));};bind(previous,value);
+      const bind=(before,after)=>{after.setParent(before.parent);diagramRebindings.set(before.Id,after.Id);need((before.spTree?.length??0)===(after.spTree?.length??0),"diagram_clone_shape_count");before.spTree?.forEach((child,i)=>bind(child,after.spTree[i]));};bind(previous,value);
       source=value;d=wrap(value);source.reconnectSmartArtShapes();
       if(c.op==="set_smartart_node"){
         const point=pointTarget(),leaves=[];

@@ -41,6 +41,13 @@ export function installOnlyOfficeNativeComplements() {
     throw Error("onlyoffice_product_native_complements_unavailable");
   if (!Number.isSafeInteger(d?.historyitem_type_ParaRun) || !Number.isSafeInteger(d.historyitem_type_Presentation))
     throw Error("onlyoffice_product_native_complement_history_unavailable");
+  // Native group normalization runs after keyboard movement as well as during
+  // export. Equal transforms are recalculation, not a second authored change.
+  for (const [name,field] of [["setOffX","offX"],["setOffY","offY"],["setExtX","extX"],["setExtY","extY"],["setChOffX","chOffX"],["setChOffY","chOffY"],["setChExtX","chExtX"],["setChExtY","chExtY"]]) {
+    const native=f.CXfrm?.prototype[name];
+    if(typeof native!=="function")continue;
+    f.CXfrm.prototype[name]=function(value){if(this[field]===value)return;return native.call(this,value);};
+  }
   const dimensions = d.historyitem_type_Presentation | 65003;
   const commentInitials = d.historyitem_type_Comment | 65004;
   if (!Number.isSafeInteger(d.historyitem_type_Comment) || d.changesFactory[commentInitials] || d.drawingsChangesMap[commentInitials])
