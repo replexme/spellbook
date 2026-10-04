@@ -890,6 +890,12 @@ export function createOnlyOfficeProductEngine({
           (x) => x.Id === nativeId,
         );
         target?.getDocContent?.()?.Recalc_AllParagraphs_CompiledPr?.();
+        if (target?.isTable?.()) {
+          for (const row of target.graphicObject.Content)
+            for (const cell of row.Content)
+              cell.Content.Recalc_AllParagraphs_CompiledPr();
+          target.Refresh_RecalcData2();
+        }
         target?.recalcText?.();
         target?.recalculate?.();
         m.Recalculate(h.Get_RecalcData(null, h.getGroupChanges()));
