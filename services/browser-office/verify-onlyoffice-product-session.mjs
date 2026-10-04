@@ -303,6 +303,11 @@ async function journalCall(operation, payload = null) {
       if (operation === "save") {
         payload.baseBytes = Uint8Array.from(payload.baseBytes);
         payload.candidateBytes = Uint8Array.from(payload.candidateBytes);
+        if (payload.historyArtifacts)
+          payload.historyArtifacts = payload.historyArtifacts.map((a) => ({
+            ...a,
+            bytes: Uint8Array.from(a.bytes),
+          }));
         return window.__productJournal.save(payload);
       }
       if (operation === "clear") return window.__productJournal.clear();
@@ -312,6 +317,10 @@ async function journalCall(operation, payload = null) {
             ...loaded,
             baseBytes: Array.from(loaded.baseBytes),
             candidateBytes: Array.from(loaded.candidateBytes),
+            historyArtifacts: loaded.historyArtifacts.map((a) => ({
+              ...a,
+              bytes: Array.from(a.bytes),
+            })),
           }
         : null;
     },
@@ -324,6 +333,10 @@ async function journalCall(operation, payload = null) {
   if (operation === "load" && result) {
     result.baseBytes = Uint8Array.from(result.baseBytes);
     result.candidateBytes = Uint8Array.from(result.candidateBytes);
+    result.historyArtifacts = result.historyArtifacts.map((a) => ({
+      ...a,
+      bytes: Uint8Array.from(a.bytes),
+    }));
   }
   return result;
 }
@@ -333,6 +346,10 @@ const journal = {
       ...record,
       baseBytes: Array.from(record.baseBytes),
       candidateBytes: Array.from(record.candidateBytes),
+      historyArtifacts: record.historyArtifacts?.map((a) => ({
+        ...a,
+        bytes: Array.from(a.bytes),
+      })),
     });
     persisted = await journalCall("load");
     assert.equal(hash(persisted.candidateBytes), metadata.candidateSha256);
@@ -521,6 +538,8 @@ try {
     line_color: { color: 0xff0000 },
   };
   Object.assign(command, args[operation]);
+  let finalExpected;
+  const manualFlow = process.argv.includes("--manual-flow");
   const applied = await session.apply({
     expectedRevision: before.revision,
     commands: [command],
@@ -659,24 +678,69 @@ try {
   report.rendering.redo = await pixels(mainFrame);
   assert.deepEqual(report.rendering.redo, report.rendering.edited);
   report.stages.push("redo-exact-approved-package");
+  finalExpected = applied.observation;
+  if (manualFlow) {
+    // SDK selects the text target only; actual text comes through browser keys.
+    await mainFrame.evaluate(() => {
+      const a = window.Asc.editor,
+        m = a.WordControl.m_oLogicDocument,
+        c = m.Slides[0].graphicObjects;
+      a.WordControl.Thumbnails.SelectPage(0);
+      c.resetSelection();
+      c.selectObject(m.Slides[0].cSld.spTree[0], 0);
+      m.Document_UpdateSelectionState();
+      c.startEditTextCurrentShape();
+      a.WordControl.m_oDrawingDocument.TargetStart();
+    });
+    const area = mainFrame.locator("#area_id");
+    if (await area.count()) await area.focus();
+    await mainPage.keyboard.press("End");
+    await mainPage.keyboard.insertText(" HUMAN_VERIFIED");
+    await mainPage.keyboard.press("Escape");
+    finalExpected = await session.observe();
+    assert(finalExpected.slides[0].elements[0].text.includes("HUMAN_VERIFIED"));
+    assert.equal(session.status().undo, 2);
+    report.rendering.manual = await pixels(mainFrame);
+    assert.notDeepEqual(report.rendering.manual, report.rendering.edited);
+    await mainPage.screenshot({ path: path.join(output, "manual.png") });
+    report.stages.push(
+      "real-keyboard-human-edit-admitted-with-earlier-ai-history",
+    );
+  }
   await assert.rejects(
     session.apply({ expectedRevision: before.revision, commands: [command] }),
     /stale/,
   );
   report.stages.push("stale-command-refused");
   const recovered = await session.recover();
-  verifyOnlyOfficeProductObservation(applied.observation, recovered);
+  verifyOnlyOfficeProductObservation(finalExpected, recovered);
   report.stages.push("recovery-exact-file-readback");
-  assert.equal(session.status().undo, 1);
+  const recoveryPixels = manualFlow
+    ? report.rendering.manual
+    : report.rendering.edited;
+  assert.equal(session.status().undo, manualFlow ? 2 : 1);
   await session.undo();
-  assert.deepEqual(await pixels(mainFrame), report.rendering.before);
+  assert.deepEqual(
+    await pixels(mainFrame),
+    manualFlow ? report.rendering.edited : report.rendering.before,
+  );
   await session.recover();
   assert.equal(session.status().redo, 1);
   await session.redo();
-  assert.deepEqual(await pixels(mainFrame), report.rendering.edited);
-  report.stages.push("recovered-native-undo-and-redo-branch");
+  assert.deepEqual(await pixels(mainFrame), recoveryPixels);
+  if (manualFlow) {
+    await session.undo();
+    await session.undo();
+    assert.deepEqual(await pixels(mainFrame), report.rendering.before);
+    await session.redo();
+    await session.redo();
+    assert.deepEqual(await pixels(mainFrame), recoveryPixels);
+    report.stages.push(
+      "recovered-mixed-human-and-ai-history-keeps-exact-files",
+    );
+  } else report.stages.push("recovered-native-undo-and-redo-branch");
   report.rendering.recovered = await pixels(mainFrame);
-  assert.deepEqual(report.rendering.recovered, report.rendering.edited);
+  assert.deepEqual(report.rendering.recovered, recoveryPixels);
   await mainPage.screenshot({ path: path.join(output, "recovered.png") });
   await assert.rejects(
     session.save(async () => ({ candidateSha256: "wrong" })),

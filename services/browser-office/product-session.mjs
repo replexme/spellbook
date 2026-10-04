@@ -1,7 +1,15 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import { createProductArtifactAuthority } from "./product-artifact.mjs";
-import { trimSessionProductHistory } from "./product-history.mjs";
+import {
+  recordManualProductCheckpoint,
+  trimSessionProductHistory,
+} from "./product-history.mjs";
 import { assertArtifactMatchesObservation } from "./harness/product-persistence.mjs";
+
+import {
+  captureProductRecoveryHistory,
+  validateProductRecoveryHistory,
+} from "./product-recovery-history.mjs";
 
 // Engine ports own native operations. The existing product artifact authority
 // owns exact-file admission for edits, history, saves and recovery alike.
@@ -68,19 +76,93 @@ export function createProductSession({
       commands = undo.flatMap((entry) => entry.commands);
     }
   };
-  const checkpoint = async (state) =>
-    journal.save({
+  const checkpoint = async (state) => {
+    const snapshotHistory = [...undo, ...redo].some(
+      (entry) =>
+        entry.native === false ||
+        entry.commands.some((c) => c.persistence === "native_snapshot"),
+    );
+    return journal.save({
       fileName: state.fileName ?? "document.pptx",
       baseBytes: base.bytes,
       candidateBytes: state.bytes,
       commands,
       artifactReceipt: state.receipt,
-      commandGroups: [
-        ...undo.map((entry) => entry.commands),
-        ...redo.toReversed().map((entry) => entry.commands),
-      ],
-      appliedGroups: undo.length,
+      commandGroups: snapshotHistory
+        ? null
+        : [
+            ...undo.map((entry) => entry.commands),
+            ...redo.toReversed().map((entry) => entry.commands),
+          ],
+      appliedGroups: snapshotHistory ? null : undo.length,
+      ...(snapshotHistory
+        ? captureProductRecoveryHistory(base, state, undo, redo)
+        : {}),
     });
+  };
+  const invalidateNativeHistory = () => {
+    for (const entry of [...undo, ...redo]) entry.native = false;
+  };
+  const manualCheckpoint = async (reason) => {
+    ready();
+    const live = await observe();
+    if (live.revision === current.observation.revision) return false;
+    const bytes = await engine.snapshot({
+      before: current.observation,
+      edited: live,
+      commands: null,
+      authorize: (bytes) => admit(bytes, live),
+    });
+    const accepted = await admit(bytes, live);
+    await liveMatches(live);
+    const previous = { commands, undo, redo, base };
+    const nextCommands = commands.slice();
+    const entries = undo.map((entry) => ({
+      command: entry.commands.length === 1 ? entry.commands[0] : null,
+      beforeBytes: entry.before.bytes,
+      afterBytes: entry.after.bytes,
+      beforeRevision: entry.before.observation.revision,
+      afterRevision: entry.after.observation.revision,
+      beforeSlides: entry.before.observation.slides,
+    }));
+    const priorEntry = entries.at(-1);
+    const manual = recordManualProductCheckpoint({
+      commands: nextCommands,
+      undoHistory: entries,
+      redoHistory: [],
+      beforeBytes: current.bytes,
+      afterBytes: accepted.bytes,
+      beforeRevision: current.observation.revision,
+      afterRevision: live.revision,
+      beforeSlides: current.observation.slides,
+      reason,
+    });
+    const coalesced =
+      priorEntry?.command?.sourceOperations?.[0] === "manual_edit";
+    undo = coalesced ? undo.slice(0, -1) : undo.slice();
+    if (manual) {
+      const before = coalesced ? previous.undo.at(-1).before : current;
+      undo.push({
+        before,
+        after: accepted,
+        commands: [manual],
+        beforeBytes: before.bytes,
+        afterBytes: accepted.bytes,
+        native: false,
+      });
+    }
+    redo = [];
+    commands = nextCommands;
+    boundHistory();
+    try {
+      await checkpoint(accepted);
+    } catch (error) {
+      ({ commands, undo, redo, base } = previous);
+      throw error;
+    }
+    current = accepted;
+    return true;
+  };
   const liveMatches = async (expected) => {
     const live = await observe();
     if (live.revision !== expected.revision)
@@ -89,6 +171,7 @@ export function createProductSession({
   };
   const history = async (direction) => {
     ready();
+    await manualCheckpoint("before_product_history");
     await liveMatches(current.observation);
     const from = direction === "undo" ? undo : redo,
       to = direction === "undo" ? redo : undo;
@@ -96,7 +179,10 @@ export function createProductSession({
     if (!entry) return false;
     const target = direction === "undo" ? entry.before : entry.after;
     try {
-      await engine[direction]();
+      if (entry.native === false) {
+        await engine.open(target.bytes.slice());
+        invalidateNativeHistory();
+      } else await engine[direction]();
       const live = await observe();
       await verifyObservation(target.observation, live);
       // Undo/Redo are allowed to reuse only the exact previously inspected file.
@@ -122,7 +208,10 @@ export function createProductSession({
     } catch (error) {
       // Restore a failed history move; leave the journal and retained histories intact.
       try {
-        await engine[direction === "undo" ? "redo" : "undo"]();
+        if (entry.native === false) {
+          await engine.open(current.bytes.slice());
+          invalidateNativeHistory();
+        } else await engine[direction === "undo" ? "redo" : "undo"]();
         await liveMatches(current.observation);
       } catch (restoreError) {
         failed = true;
@@ -150,8 +239,11 @@ export function createProductSession({
     observe: () =>
       serial(async () => {
         ready();
+        await manualCheckpoint("human_edit_observed");
         return observe();
       }),
+    checkpointManual: (reason = "human_edit") =>
+      serial(() => manualCheckpoint(reason)),
     apply: (request) =>
       serial(async () => {
         ready();
@@ -162,6 +254,7 @@ export function createProductSession({
           typeof input.expectedRevision !== "string"
         )
           throw Error("product_command_request_invalid");
+        await manualCheckpoint("before_ai_edit");
         const before = await liveMatches(current.observation);
         if (before.revision !== input.expectedRevision)
           throw Error("product_command_stale_observation");
@@ -261,6 +354,7 @@ export function createProductSession({
         ready();
         if (typeof persist !== "function")
           throw Error("product_persistence_callback_required");
+        await manualCheckpoint("before_product_save");
         await liveMatches(current.observation);
         const saved = current;
         const receipt = await artifacts.require(
@@ -300,7 +394,50 @@ export function createProductSession({
         );
         const restoredBase = await admit(recovery.baseBytes, baseObservation);
         const groups = recovery.metadata.commandGroups;
-        if (!groups) {
+        if (recovery.metadata.productHistory) {
+          validateProductRecoveryHistory(
+            recovery.metadata.productHistory,
+            recovery.historyArtifacts,
+          );
+          const states = new Map();
+          for (const artifact of recovery.historyArtifacts) {
+            const observation = await engine.inspect(artifact.bytes.slice());
+            const state = await admit(
+              artifact.bytes,
+              observation,
+              artifact.artifactReceipt,
+            );
+            states.set(state.receipt.candidateSha256, state);
+          }
+          const entry = (value) => ({
+            before: states.get(value.before),
+            after: states.get(value.after),
+            commands: structuredClone(value.commands),
+            beforeBytes: states.get(value.before).bytes,
+            afterBytes: states.get(value.after).bytes,
+            native: false,
+          });
+          const restoredUndo = recovery.metadata.productHistory.undo.map(entry),
+            restoredRedo = recovery.metadata.productHistory.redo.map(entry);
+          if (
+            (restoredUndo.at(-1)?.after.receipt.candidateSha256 &&
+              restoredUndo.at(-1).after.receipt.candidateSha256 !==
+                accepted.receipt.candidateSha256) ||
+            (restoredRedo.at(-1)?.before.receipt.candidateSha256 &&
+              restoredRedo.at(-1).before.receipt.candidateSha256 !==
+                accepted.receipt.candidateSha256) ||
+            JSON.stringify(restoredUndo.flatMap((e) => e.commands)) !==
+              JSON.stringify(recovery.metadata.commands)
+          )
+            throw Error("product_recovery_history_cursor_mismatch");
+          await engine.open(accepted.bytes.slice());
+          await verifyObservation(inspected, await observe());
+          base = restoredBase;
+          current = accepted;
+          commands = structuredClone(recovery.metadata.commands);
+          undo = restoredUndo;
+          redo = restoredRedo;
+        } else if (!groups) {
           await engine.open(accepted.bytes.slice());
           await verifyObservation(inspected, await observe());
           base = accepted;

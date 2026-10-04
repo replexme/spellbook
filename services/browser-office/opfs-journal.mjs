@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 
+import { validateProductRecoveryHistory } from "./product-recovery-history.mjs";
+
 const schemaVersion = 1;
 const namespaceName = "spellbook-browser-office-v1";
 const slots = ["a", "b"];
@@ -61,11 +63,14 @@ export async function openBrowserDocumentJournal({
       artifactReceipt = null,
       commandGroups = null,
       appliedGroups = null,
+      history = null,
+      historyArtifacts = [],
     }) {
       validateBytes(baseBytes, "baseBytes");
       validateBytes(candidateBytes, "candidateBytes");
+      validateProductRecoveryHistory(history, historyArtifacts);
       const safeCommands = cloneCommands(commands);
-      const history = validateCommandGroups(
+      const groupHistory = validateCommandGroups(
         commandGroups,
         appliedGroups,
         safeCommands,
@@ -86,6 +91,14 @@ export async function openBrowserDocumentJournal({
         throw new Error(
           "Browser recovery artifact evidence does not match its bytes.",
         );
+      for (const artifact of historyArtifacts) {
+        validateBytes(artifact.bytes, "historyArtifact");
+        if (
+          (await sha256(artifact.bytes, cryptoImpl)) !==
+          artifact.artifactReceipt.candidateSha256
+        )
+          throw Error("product_recovery_history_digest_mismatch");
+      }
       const metadata = {
         schemaVersion,
         generation,
@@ -97,12 +110,26 @@ export async function openBrowserDocumentJournal({
         baseSha256,
         candidateSha256,
         commands: safeCommands,
-        ...(history ?? {}),
+        ...(history
+          ? {
+              productHistory: structuredClone(history),
+              historyReceipts: historyArtifacts.map((a) =>
+                structuredClone(a.artifactReceipt),
+              ),
+            }
+          : {}),
+        ...(groupHistory ?? {}),
         ...(artifactReceipt
           ? { artifactReceipt: structuredClone(artifactReceipt) }
           : {}),
         savedAt: new Date().toISOString(),
       };
+      for (const artifact of historyArtifacts)
+        await writeFile(
+          directory,
+          `history-${artifact.artifactReceipt.candidateSha256}-${slot}.pptx`,
+          artifact.bytes,
+        );
       await writeFile(directory, `base-${slot}.pptx`, baseBytes);
       await writeFile(directory, `candidate-${slot}.pptx`, candidateBytes);
       // Metadata is the commit record and is written last. If the browser dies
@@ -112,9 +139,26 @@ export async function openBrowserDocumentJournal({
         `metadata-${slot}.json`,
         new TextEncoder().encode(JSON.stringify(metadata)),
       );
+      // Remove only obsolete files belonging to the overwritten slot, after
+      // its new metadata is committed. The other generation stays recoverable.
+      if (directory.entries)
+        for await (const [name] of directory.entries()) {
+          const match = /^history-([0-9a-f]{64})-([ab])\.pptx$/.exec(name);
+          if (
+            match?.[2] === slot &&
+            !historyArtifacts.some(
+              (a) => a.artifactReceipt.candidateSha256 === match[1],
+            )
+          )
+            await removeFile(directory, name);
+        }
       return metadata;
     },
     async clear() {
+      if (directory.entries)
+        for await (const [name] of directory.entries())
+          if (/^history-[0-9a-f]{64}-[ab]\.pptx$/.test(name))
+            await removeFile(directory, name);
       await Promise.all(
         slots.flatMap((slot) =>
           [
@@ -158,7 +202,20 @@ async function loadSlot(directory, slot, cryptoImpl) {
       (await sha256(candidateBytes, cryptoImpl)) !== metadata.candidateSha256
     )
       return null;
-    return { metadata, baseBytes, candidateBytes };
+    const historyArtifacts = [];
+    for (const receipt of metadata.historyReceipts ?? []) {
+      if (!/^[0-9a-f]{64}$/.test(receipt?.candidateSha256)) return null;
+      const bytes = await readFile(
+        directory,
+        `history-${receipt.candidateSha256}-${slot}.pptx`,
+      );
+      validateBytes(bytes, "historyArtifact");
+      if ((await sha256(bytes, cryptoImpl)) !== receipt.candidateSha256)
+        return null;
+      historyArtifacts.push({ bytes, artifactReceipt: receipt });
+    }
+    validateProductRecoveryHistory(metadata.productHistory, historyArtifacts);
+    return { metadata, baseBytes, candidateBytes, historyArtifacts };
   } catch {
     return null;
   }

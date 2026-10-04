@@ -79,9 +79,11 @@ function setup() {
           commandGroups: record.commandGroups,
           appliedGroups: record.appliedGroups,
           artifactReceipt: record.artifactReceipt,
+          productHistory: record.history,
         },
         baseBytes: record.baseBytes,
         candidateBytes: record.candidateBytes,
+        historyArtifacts: record.historyArtifacts,
       });
     },
     load: async () => structuredClone(stored),
@@ -298,4 +300,41 @@ test("bounded history advances the recovery base without losing retained batches
   for (let index = 0; index < 32; index++) await s.session.undo();
   assert.equal((await s.session.observe()).revision, "r4");
   assert.equal(await s.session.undo(), false);
+});
+
+test("human edits retain earlier AI Undo and survive recovery with a Redo branch", async () => {
+  const s = setup();
+  await s.session.open(s.bytes(1));
+  await apply(s, 2);
+  s.change(3);
+  await s.session.checkpointManual();
+  s.change(4);
+  await s.session.checkpointManual();
+  assert.equal(s.session.status().undo, 2);
+  await s.session.undo();
+  assert.equal((await s.session.observe()).revision, "r2");
+  await s.session.recover();
+  assert.equal(s.session.status().redo, 1);
+  await s.session.redo();
+  assert.equal((await s.session.observe()).revision, "r4");
+  await s.session.undo();
+  await s.session.undo();
+  assert.equal((await s.session.observe()).revision, "r1");
+});
+test("a failed human checkpoint keeps the last approved bytes and can be retried", async () => {
+  const s = setup();
+  await s.session.open(s.bytes(1));
+  await apply(s, 2);
+  s.change(3);
+  const old = s.record(),
+    save = s.journal.save;
+  s.journal.save = async () => {
+    throw Error("disk_full");
+  };
+  await assert.rejects(s.session.checkpointManual(), /disk_full/);
+  assert.deepEqual(s.record(), old);
+  s.journal.save = save;
+  await s.session.checkpointManual();
+  await s.session.undo();
+  assert.equal((await s.session.observe()).revision, "r2");
 });
