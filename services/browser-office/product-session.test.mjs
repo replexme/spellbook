@@ -362,3 +362,30 @@ test("acknowledged save preserves Undo and a later recovery base", async () => {
   await s.session.undo();
   assert.equal((await s.session.observe()).revision, "r1");
 });
+
+test("native user Undo and Redo reuse exact approved files and request boundaries", async () => {
+  const s = setup();
+  await s.session.open(s.bytes(1));
+  await s.session.apply({
+    expectedRevision: "r1",
+    commands: [
+      { op: "set", value: 2 },
+      { op: "set", value: 3 },
+    ],
+  });
+  const snapshot = s.engine.snapshot;
+  s.engine.snapshot = async () => {
+    throw Error("known_history_must_not_export");
+  };
+  await s.engine.undo();
+  await s.session.observe();
+  assert.equal(s.session.status().undo, 0);
+  assert.equal(s.session.status().redo, 1);
+  await s.engine.redo();
+  await s.session.observe();
+  assert.equal(s.session.status().undo, 1);
+  assert.equal(s.session.status().redo, 0);
+  s.engine.snapshot = snapshot;
+  await s.session.undo();
+  assert.equal((await s.session.observe()).revision, "r1");
+});

@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import { createProductArtifactAuthority } from "./product-artifact.mjs";
 import {
+  reconcileNativeHistoryRevision,
   recordManualProductCheckpoint,
   trimSessionProductHistory,
 } from "./product-history.mjs";
@@ -108,6 +109,52 @@ export function createProductSession({
     ready();
     const live = await observe();
     if (live.revision === current.observation.revision) return false;
+    // Reuse the shared history matcher when the person presses the native
+    // editor's Undo/Redo. A request batch is one native history entry.
+    const marker = (entry) =>
+      entry.commands.length === 1 ? entry.commands[0] : entry;
+    const wrapped = (entry) => ({
+      ...entry,
+      originalEntry: entry,
+      command: marker(entry),
+      beforeRevision: entry.before.observation.revision,
+      afterRevision: entry.after.observation.revision,
+    });
+    const previous = { commands, undo, redo, base };
+    const matchedUndo = undo.map(wrapped),
+      matchedRedo = redo.map(wrapped),
+      matchedCommands = undo.map(marker);
+    const sourceUndo = undo.at(-1),
+      sourceRedo = redo.at(-1);
+    const known = reconcileNativeHistoryRevision({
+      commands: matchedCommands,
+      undoHistory: matchedUndo,
+      redoHistory: matchedRedo,
+      currentBytes: current.bytes,
+      currentRevision: current.observation.revision,
+      observedRevision: live.revision,
+    });
+    if (known) {
+      const moved = known.direction === "undo" ? sourceUndo : sourceRedo;
+      const target = known.direction === "undo" ? moved.before : moved.after;
+      await verifyObservation(target.observation, live);
+      await artifacts.require(target.bytes, target.observation.revision);
+      undo = matchedUndo.map((entry) => entry.originalEntry);
+      redo = matchedRedo.map((entry) => entry.originalEntry);
+      commands = undo.flatMap((entry) => entry.commands);
+      const wasNative = moved.native;
+      moved.native = false;
+      try {
+        await checkpoint(target);
+      } catch (error) {
+        ({ commands, undo, redo, base } = previous);
+        moved.native = wasNative;
+        throw error;
+      }
+      current = target;
+      return true;
+    }
+
     const bytes = await engine.snapshot({
       before: current.observation,
       edited: live,
@@ -116,7 +163,6 @@ export function createProductSession({
     });
     const accepted = await admit(bytes, live);
     await liveMatches(live);
-    const previous = { commands, undo, redo, base };
     const nextCommands = commands.slice();
     const entries = undo.map((entry) => ({
       command: entry.commands.length === 1 ? entry.commands[0] : null,

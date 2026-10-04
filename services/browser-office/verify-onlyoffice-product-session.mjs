@@ -710,6 +710,17 @@ try {
       performance.now() - phaseStarted;
     assert(finalExpected.slides[0].elements[0].text.includes("HUMAN_VERIFIED"));
     assert.equal(session.status().undo, 2);
+    // Use the editor's own buttons, independent of the product history API.
+    const manualRevision = finalExpected.revision;
+    await mainFrame.getByRole("button", { name: /^Undo$/ }).click();
+    const nativeUndo = await session.observe();
+    assert.equal(nativeUndo.revision, applied.observation.revision);
+    assert.equal(session.status().redo, 1);
+    await mainFrame.getByRole("button", { name: /^Redo$/ }).click();
+    finalExpected = await session.observe();
+    assert.equal(finalExpected.revision, manualRevision);
+    assert.equal(session.status().redo, 0);
+    report.stages.push("native-editor-buttons-reconcile-with-product-history");
     report.rendering.manual = await pixels(mainFrame);
     assert.notDeepEqual(report.rendering.manual, report.rendering.edited);
     await mainPage.screenshot({ path: path.join(output, "manual.png") });
