@@ -493,6 +493,20 @@ export async function observeOnlyOfficeCandidate(frame) {
                   width: d.Drawing.spPr.ln.w ?? null,
                   dash: d.Drawing.spPr.ln.prstDash ?? null,
                   cap: d.Drawing.spPr.ln.cap ?? null,
+                  headEnd: d.Drawing.spPr.ln.headEnd
+                    ? {
+                        type: d.Drawing.spPr.ln.headEnd.type ?? null,
+                        w: d.Drawing.spPr.ln.headEnd.w ?? null,
+                        len: d.Drawing.spPr.ln.headEnd.len ?? null,
+                      }
+                    : null,
+                  tailEnd: d.Drawing.spPr.ln.tailEnd
+                    ? {
+                        type: d.Drawing.spPr.ln.tailEnd.type ?? null,
+                        w: d.Drawing.spPr.ln.tailEnd.w ?? null,
+                        len: d.Drawing.spPr.ln.tailEnd.len ?? null,
+                      }
+                    : null,
                 }
               : null,
           })),

@@ -5,6 +5,7 @@ import {
 } from "./product-intent.mjs";
 import { observeOnlyOfficeCandidate } from "../onlyoffice-observation.mjs";
 import { onlyOfficeCharacterSpacingTwips } from "./character-spacing.mjs";
+import { onlyOfficeLineStylePatch } from "./line-style.mjs";
 import {
   beginCandidateTransaction,
   finishCandidateTransaction,
@@ -264,12 +265,14 @@ export function createOnlyOfficeProductEngine({
               fill_color: "SetFill",
               line_color: "SetOutLine",
               line_width: "SetOutLine",
+              set_line_style: "SetOutLine",
               delete_element: "Delete",
             };
-            const d = window.AscBuilder.Slide.Api.GetPresentation()
-              .GetSlideByIndex(slide)
-              .GetAllDrawings()
-              .find((d) => d.Drawing === shape);
+            const d =
+              window.AscBuilder.GetApiDrawing(shape) ??
+              (shape.getObjectType?.() === window.AscDFH.historyitem_type_Cnx
+                ? new window.AscBuilder.ApiShape(shape)
+                : null);
             if (
               !d ||
               (methods[command.op] &&
@@ -325,6 +328,35 @@ export function createOnlyOfficeProductEngine({
             )
               throw Error("onlyoffice_product_argument_invalid:alignment");
             if (command.op === "font_size") requireNumber("size", 1, 400);
+            if (command.op === "set_line_style") {
+              if (!shape.spPr?.ln)
+                throw Error(
+                  "onlyoffice_product_line_style_requires_authored_outline",
+                );
+              if (
+                command.nativeLineStyle.dash != null &&
+                window.Asc.c_oDashType[command.lineStyle.dash] !==
+                  command.nativeLineStyle.dash
+              )
+                throw Error("onlyoffice_product_line_style_sdk_mismatch");
+              const sdk = new window.AscFormat.EndArrow();
+              for (const [key, native] of [
+                ["startArrow", "headEnd"],
+                ["endArrow", "tailEnd"],
+              ]) {
+                const requested = command.lineStyle[key];
+                if (requested == null) continue;
+                const wanted = command.nativeLineStyle[native];
+                if (
+                  wanted === null
+                    ? sdk.GetTypeCode(requested.type) !== 0
+                    : sdk.GetTypeCode(requested.type) !== wanted.type ||
+                      sdk.GetSizeCode(requested.width ?? "med") !== wanted.w ||
+                      sdk.GetSizeCode(requested.length ?? "med") !== wanted.len
+                )
+                  throw Error("onlyoffice_product_line_style_sdk_mismatch");
+              }
+            }
             if (command.op === "set_character_spacing") {
               requireNumber("spacing", -100, 100);
               if (
@@ -383,7 +415,14 @@ export function createOnlyOfficeProductEngine({
                     command.spacing,
                   ),
                 }
-              : command,
+              : command.op === "set_line_style"
+                ? {
+                    ...command,
+                    nativeLineStyle: onlyOfficeLineStylePatch(
+                      command.lineStyle,
+                    ),
+                  }
+                : command,
           ),
           supported: onlyOfficeProductOperations,
         },
@@ -448,9 +487,15 @@ export function createOnlyOfficeProductEngine({
               properties.setDescr(command.description);
             return true;
           }
-          const d = slide
-            .GetAllDrawings()
-            .find((d) => d.Drawing?.Id === command.nativeId);
+          const native = slide?.Slide.cSld.spTree.find(
+            (shape) => shape.Id === command.nativeId,
+          );
+          const d =
+            native &&
+            (window.AscBuilder.GetApiDrawing(native) ??
+              (native.getObjectType?.() === window.AscDFH.historyitem_type_Cnx
+                ? new window.AscBuilder.ApiShape(native)
+                : null));
           if (!d) throw Error("onlyoffice_product_live_binding_changed");
           editor.WordControl.GoToPage(command.slideIndex);
           p.CreateNewHistoryPoint();
@@ -491,6 +536,35 @@ export function createOnlyOfficeProductEngine({
               if (original) {
                 stroke.Ln = original.createDuplicate();
                 stroke.Ln.setFill(fill().UniFill);
+              }
+              return d.SetOutLine(stroke);
+            }
+            case "set_line_style": {
+              const original = d.Drawing.spPr?.ln;
+              if (!original)
+                throw Error(
+                  "onlyoffice_product_line_style_requires_authored_outline",
+                );
+              const stroke = api.CreateStroke(
+                original.w ?? 36000,
+                api.CreateNoFill(),
+              );
+              stroke.Ln = original.createDuplicate();
+              for (const [key, value] of Object.entries(
+                command.nativeLineStyle,
+              )) {
+                if (key === "dash") stroke.Ln.setPrstDash(value);
+                else {
+                  const arrow =
+                    value === null ? null : new window.AscFormat.EndArrow();
+                  if (arrow) {
+                    arrow.setType(value.type);
+                    arrow.setW(value.w);
+                    arrow.setLen(value.len);
+                  }
+                  if (key === "headEnd") stroke.Ln.setHeadEnd(arrow);
+                  else stroke.Ln.setTailEnd(arrow);
+                }
               }
               return d.SetOutLine(stroke);
             }

@@ -3,6 +3,7 @@ import {
   firstDocumentStateDifference,
   quantizedOutlineDifference,
 } from "../../office-session-spike/document-state-evidence.mjs";
+import { onlyOfficeLineStylePatch } from "./line-style.mjs";
 
 const formatting = {
   font_size: "GetFontSize",
@@ -26,6 +27,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "fill_color",
   "line_color",
   "line_width",
+  "set_line_style",
   "paragraph_alignment",
   "rename_slide",
   "set_slide_hidden",
@@ -241,6 +243,14 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         for (const drawing of [oldDrawing, newDrawing])
           for (const paragraph of drawing.paragraphs)
             delete paragraph.alignment;
+      } else if (op === "set_line_style") {
+        if (!oldStyle.line)
+          throw Error("onlyoffice_product_intent_line_missing");
+        for (const value of group.filter((c) => c.op === "set_line_style"))
+          Object.assign(
+            oldStyle.line,
+            onlyOfficeLineStylePatch(value.lineStyle),
+          );
       } else if (op === "line_width") {
         if (
           !newStyle.line ||

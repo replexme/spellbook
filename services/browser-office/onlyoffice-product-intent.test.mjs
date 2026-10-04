@@ -195,7 +195,7 @@ test("native setters unlock only synchronously and restore the UI lock on succes
     },
   };
   const model = {
-    Slides: [{ cSld: { spTree: [{ Id: "native-1" }] } }],
+    Slides: [0, 1, 2].map(() => ({ cSld: { spTree: [{ Id: "native-1" }] } })),
     Recalculate() {},
     RedrawCurSlide() {},
     Document_UpdateInterfaceState() {},
@@ -223,10 +223,14 @@ test("native setters unlock only synchronously and restore the UI lock on succes
   globalThis.window = {
     Asc: { editor },
     AscBuilder: {
+      GetApiDrawing: () => drawing,
       Slide: {
         Api: {
           GetPresentation: () => ({
-            GetSlideByIndex: () => ({ GetAllDrawings: () => [drawing] }),
+            GetSlideByIndex: (index) => ({
+              Slide: model.Slides[index],
+              GetAllDrawings: () => [drawing],
+            }),
             CreateNewHistoryPoint() {},
           }),
         },
@@ -305,6 +309,52 @@ test("private native change evidence tracks authored history, excluding selectio
     assert.notEqual(await engine.changeToken(), "[1,25,8]");
     history.Points[0].Items.push({});
     await assert.rejects(engine.changeToken(), /change_token_unavailable/);
+  } finally {
+    globalThis.window = old;
+  }
+});
+
+test("connector preflight binds the observed native object even when the public list omits it", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  const old = globalThis.window;
+  const connector = { Id: "native-connector", getObjectType: () => 7 };
+  globalThis.window = {
+    Asc: {
+      editor: {
+        WordControl: {
+          m_oLogicDocument: { Slides: [{ cSld: { spTree: [connector] } }] },
+        },
+      },
+    },
+    AscDFH: { historyitem_type_Cnx: 7 },
+    AscBuilder: {
+      GetApiDrawing: () => null,
+      ApiShape: class {
+        constructor(native) {
+          this.Drawing = native;
+        }
+        SetPosition() {}
+      },
+    },
+  };
+  try {
+    const engine = createOnlyOfficeProductEngine({
+      getFrame: async () => ({
+        evaluate: async (fn, argument) => fn(argument),
+      }),
+    });
+    const commands = await engine.preflight([
+      { op: "move", elementId: "0/0", x: 500, y: 0 },
+    ]);
+    assert.equal(commands[0].nativeId, "native-connector");
+    assert.equal(commands[0].slideIndex, 0);
+    connector.getObjectType = () => 8;
+    await assert.rejects(
+      engine.preflight([{ op: "move", elementId: "0/0", x: 500, y: 0 }]),
+      /target_method_unavailable/,
+    );
   } finally {
     globalThis.window = old;
   }
@@ -442,6 +492,72 @@ test("slide background replaces its fill while preserving every drawing and othe
     () => verifyOnlyOfficeProductIntent(before, after, commands),
     /unrequested_change/,
   );
+});
+
+test("line style composes partial changes and preserves width, color and unsupplied line ends", () => {
+  const before = document();
+  before.slides[0].narrow.drawingStyle[0].line = {
+    width: 36000,
+    color: { R: 0, G: 0, B: 0, A: 255 },
+    dash: 6,
+    headEnd: null,
+    tailEnd: { type: 1, w: 1, len: 1 },
+    cap: 0,
+  };
+  const after = structuredClone(before);
+  const commands = [
+    {
+      op: "set_line_style",
+      elementId: "0/0",
+      lineStyle: { dash: "lgDashDot", startArrow: null, endArrow: null },
+    },
+    {
+      op: "set_line_style",
+      elementId: "0/0",
+      lineStyle: {
+        dash: null,
+        startArrow: { type: "triangle", width: null, length: "lg" },
+        endArrow: null,
+      },
+    },
+  ];
+  const line = after.slides[0].narrow.drawingStyle[0].line;
+  line.dash = 4;
+  line.headEnd = { type: 5, w: 1, len: 0 };
+  verifyOnlyOfficeProductIntent(before, after, commands);
+  line.width = 72000;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+  line.width = 36000;
+  line.headEnd.len = 2;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+});
+
+test("clearing one arrow preserves an unsupplied dash and opposite end", () => {
+  const before = document();
+  before.slides[0].narrow.drawingStyle[0].line = {
+    dash: 6,
+    headEnd: { type: 5, w: 1, len: 1 },
+    tailEnd: { type: 1, w: 1, len: 1 },
+  };
+  const after = structuredClone(before);
+  after.slides[0].narrow.drawingStyle[0].line.headEnd = null;
+  verifyOnlyOfficeProductIntent(before, after, [
+    {
+      op: "set_line_style",
+      elementId: "0/0",
+      lineStyle: {
+        dash: null,
+        startArrow: { type: "none", width: null, length: null },
+        endArrow: null,
+      },
+    },
+  ]);
 });
 
 test("slide metadata commands verify the requested slide and preserve every drawing and other slide", () => {

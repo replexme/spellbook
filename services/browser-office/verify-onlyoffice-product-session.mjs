@@ -30,6 +30,14 @@ assert(
   Number.isSafeInteger(selectedSlideIndex) && selectedSlideIndex >= 0,
   "Invalid target slide index",
 );
+const elementIndexFlag = flags("--element-index", null);
+const selectedElementIndex =
+  elementIndexFlag === null ? null : Number(elementIndexFlag);
+assert(
+  selectedElementIndex === null ||
+    (Number.isSafeInteger(selectedElementIndex) && selectedElementIndex >= 0),
+  "Invalid target element index",
+);
 const candidate = path.resolve(
   flags(
     "--candidate-root",
@@ -815,15 +823,22 @@ try {
     (x) => x.kind === "shape" && Number.isFinite(x.x),
   );
   const target =
-    operation === "crop_image"
-      ? before.slides[selectedSlideIndex].elements.find(
-          (element) => element.kind === "image",
-        )
-      : ["resize", "fill_color", "line_color", "line_width", "flip"].includes(
-            operation,
+    selectedElementIndex !== null
+      ? before.slides[selectedSlideIndex].elements[selectedElementIndex]
+      : operation === "crop_image"
+        ? before.slides[selectedSlideIndex].elements.find(
+            (element) => element.kind === "image",
           )
-        ? targets.at(-1)
-        : targets[0];
+        : [
+              "resize",
+              "fill_color",
+              "line_color",
+              "line_width",
+              "set_line_style",
+              "flip",
+            ].includes(operation)
+          ? targets.at(-1)
+          : targets[0];
   assert(target);
   const command = Object.fromEntries(
     Object.keys(capabilities.toolInputSchema.properties).map((key) => [
@@ -860,6 +875,13 @@ try {
     crop_image: { left: 0.15, top: 0.1, right: 0.08, bottom: 0.06 },
     line_color: { color: 0xff0000 },
     line_width: { size: 4 },
+    set_line_style: {
+      lineStyle: {
+        dash: "lgDashDot",
+        startArrow: { type: "triangle", width: "med", length: "lg" },
+        endArrow: { type: "oval", width: "sm", length: "med" },
+      },
+    },
     paragraph_alignment: { alignment: "right" },
     set_character_spacing: { spacing: 2 },
     set_script_position: { script: "superscript" },
