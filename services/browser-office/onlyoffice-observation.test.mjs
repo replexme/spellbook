@@ -122,6 +122,7 @@ test("text color observation uses native RGB when the pinned getter incorrectly 
   });
   const run = { GetText: () => "red", GetTextPr: () => textPr };
   const paragraph = {
+    GetParaPr: () => ({ GetJc: () => "left" }),
     GetElementsCount: () => 1,
     GetElement: () => run,
     GetText: () => "red",
@@ -253,6 +254,7 @@ test("dynamic field definitions are stable across rendered cache changes and rem
       ),
   };
   const paragraph = {
+    GetParaPr: () => ({ GetJc: () => "left" }),
     GetElementsCount: () => 1,
     GetElement: () => run,
     GetText: () => rendered,

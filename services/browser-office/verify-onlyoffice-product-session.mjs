@@ -767,9 +767,13 @@ try {
   const targets = before.slides[0].elements.filter(
     (x) => x.kind === "shape" && Number.isFinite(x.x),
   );
-  const target = ["resize", "fill_color", "line_color", "flip"].includes(
-    operation,
-  )
+  const target = [
+    "resize",
+    "fill_color",
+    "line_color",
+    "line_width",
+    "flip",
+  ].includes(operation)
     ? targets.at(-1)
     : targets[0];
   assert(target);
@@ -801,6 +805,8 @@ try {
     flip: { axis: "horizontal" },
     set_shape_name: { name: "Verified title" },
     line_color: { color: 0xff0000 },
+    line_width: { size: 4 },
+    paragraph_alignment: { alignment: "right" },
   };
   Object.assign(command, args[operation]);
   let finalExpected;

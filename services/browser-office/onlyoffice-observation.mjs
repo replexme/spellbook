@@ -170,7 +170,7 @@ export async function observeOnlyOfficeCandidate(frame) {
           state.paragraphs = d
             .GetDocContent()
             .GetAllParagraphs()
-            .map((paragraph) => {
+            .map((paragraph, index) => {
               const runs = [];
               const visit = (element) => {
                 if (typeof element?.GetTextPr === "function") {
@@ -204,7 +204,14 @@ export async function observeOnlyOfficeCandidate(frame) {
               };
               for (let i = 0; i < paragraph.GetElementsCount(); i++)
                 visit(paragraph.GetElement(i));
+              const alignment = read(
+                paragraph.GetParaPr?.(),
+                "GetJc",
+                at + ".paragraph" + index,
+              );
               return {
+                alignment:
+                  alignment === "both" ? "justify" : (alignment ?? null),
                 text: runs.some((run) => run.field)
                   ? runs.map((run) => run.text).join("") + "\r\n"
                   : paragraph.GetText({ Numbering: false }),

@@ -261,3 +261,48 @@ test("private native change evidence tracks authored history, excluding selectio
     globalThis.window = old;
   }
 });
+
+test("line width changes retain authored color, cap and dash and reject ignored setters", () => {
+  const before = document();
+  before.slides[0].narrow.drawingStyle[0].line = {
+    width: 36000,
+    color: { R: 20, G: 30, B: 40 },
+    cap: 1,
+    dash: 4,
+  };
+  const after = structuredClone(before),
+    command = { op: "line_width", elementId: "0/0", size: 2 };
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /intent_mismatch:line_width/,
+  );
+  after.slides[0].narrow.drawingStyle[0].line.width = 72000;
+  verifyOnlyOfficeProductIntent(before, after, [command]);
+  after.slides[0].narrow.drawingStyle[0].line.cap = 0;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+});
+
+test("paragraph alignment requires the requested value in every paragraph and preserves run formatting", () => {
+  const before = document();
+  before.slides[0].onlyoffice.drawings[0].paragraphs[0].alignment = "left";
+  const after = structuredClone(before),
+    command = {
+      op: "paragraph_alignment",
+      elementId: "0/0",
+      alignment: "right",
+    };
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /intent_mismatch:paragraph_alignment/,
+  );
+  after.slides[0].onlyoffice.drawings[0].paragraphs[0].alignment = "right";
+  verifyOnlyOfficeProductIntent(before, after, [command]);
+  after.slides[0].onlyoffice.drawings[0].paragraphs[0].runs[0].style.GetBold = true;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+});

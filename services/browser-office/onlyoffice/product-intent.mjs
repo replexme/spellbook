@@ -21,6 +21,8 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "set_shape_name",
   "fill_color",
   "line_color",
+  "line_width",
+  "paragraph_alignment",
   "delete_element",
   "replace_text",
   ...Object.keys(formatting),
@@ -182,6 +184,23 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
           delete style.name;
           delete wordArt.name;
         }
+      } else if (op === "paragraph_alignment") {
+        if (
+          !newDrawing.paragraphs.length ||
+          newDrawing.paragraphs.some((p) => p.alignment !== command.alignment)
+        )
+          throw Error("onlyoffice_product_intent_mismatch:paragraph_alignment");
+        for (const drawing of [oldDrawing, newDrawing])
+          for (const paragraph of drawing.paragraphs)
+            delete paragraph.alignment;
+      } else if (op === "line_width") {
+        if (
+          !newStyle.line ||
+          newStyle.line.width !== Math.round(command.size * 36000)
+        )
+          throw Error("onlyoffice_product_intent_mismatch:line_width");
+        delete oldStyle.line.width;
+        delete newStyle.line.width;
       } else if (op === "fill_color" || op === "line_color") {
         const oldColor =
             op === "fill_color" ? oldStyle.fill : oldStyle.line?.color,

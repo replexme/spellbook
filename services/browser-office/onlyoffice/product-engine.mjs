@@ -192,6 +192,7 @@ export function createOnlyOfficeProductEngine({
               set_shape_name: "SetName",
               fill_color: "SetFill",
               line_color: "SetOutLine",
+              line_width: "SetOutLine",
               delete_element: "Delete",
             };
             const d = window.AscBuilder.Slide.Api.GetPresentation()
@@ -214,6 +215,7 @@ export function createOnlyOfficeProductEngine({
                 "underline",
                 "strikethrough",
                 "font_color",
+                "paragraph_alignment",
               ].includes(command.op) &&
               !shape.getDocContent?.()
             )
@@ -235,7 +237,20 @@ export function createOnlyOfficeProductEngine({
               requireNumber("height", 0.01);
             }
             if (command.op === "rotate") requireNumber("degrees");
-            if (command.op === "line_width") requireNumber("size", 0);
+            if (command.op === "line_width") {
+              requireNumber("size", 0, 100);
+              if (!shape.spPr?.ln)
+                throw Error(
+                  "onlyoffice_product_line_width_requires_authored_outline",
+                );
+            }
+            if (
+              command.op === "paragraph_alignment" &&
+              !["left", "center", "right", "justify"].includes(
+                command.alignment,
+              )
+            )
+              throw Error("onlyoffice_product_argument_invalid:alignment");
             if (command.op === "font_size") requireNumber("size", 1, 400);
             if (command.op.endsWith("opacity")) requireNumber("opacity", 0, 1);
             if (
@@ -341,6 +356,37 @@ export function createOnlyOfficeProductEngine({
                 stroke.Ln.setFill(fill().UniFill);
               }
               return d.SetOutLine(stroke);
+            }
+            case "line_width": {
+              const original = d.Drawing.spPr?.ln;
+              if (!original)
+                throw Error(
+                  "onlyoffice_product_line_width_requires_authored_outline",
+                );
+              const stroke = api.CreateStroke(
+                Math.round(command.size * 36000),
+                api.CreateNoFill(),
+              );
+              stroke.Ln = original.createDuplicate();
+              stroke.Ln.setW(Math.round(command.size * 36000));
+              return d.SetOutLine(stroke);
+            }
+            case "paragraph_alignment": {
+              const paragraphs = content().GetAllParagraphs();
+              if (!paragraphs.length)
+                throw Error("onlyoffice_product_text_unavailable");
+              for (const paragraph of paragraphs)
+                if (
+                  !paragraph
+                    .GetParaPr()
+                    .SetJc(
+                      command.alignment === "justify"
+                        ? "both"
+                        : command.alignment,
+                    )
+                )
+                  throw Error("onlyoffice_product_native_rejected");
+              return true;
             }
             case "delete_element":
               return d.Delete();
