@@ -117,14 +117,29 @@ async function extendedFeatures(frame) {
           value.fonts = ["ascii", "eastAsia", "hAnsi", "cs"].map(
             (slot) => read(pr, "GetFontFamily", at + ".text", slot) ?? null,
           );
+          const nativeColor = pr.TextPr?.Unifill?.fill?.color?.color;
           const color = read(pr, "GetColor", at + ".text");
-          value.color = color
-            ? {
-                rgb: color.GetRGB(),
-                theme: color.IsThemeColor(),
-                auto: color.IsAutoColor(),
-              }
-            : null;
+          // The pinned Word builder's GetColor reads CRGBColor.r/g/b, but
+          // the drawing model stores RGBA.R/G/B. Those missing fields are
+          // coerced to black. Read the authored RGB from the native fill.
+          value.color =
+            nativeColor instanceof window.AscFormat.CRGBColor
+              ? {
+                  rgb: {
+                    r: nativeColor.RGBA.R,
+                    g: nativeColor.RGBA.G,
+                    b: nativeColor.RGBA.B,
+                  },
+                  theme: false,
+                  auto: false,
+                }
+              : color
+                ? {
+                    rgb: color.GetRGB(),
+                    theme: color.IsThemeColor(),
+                    auto: color.IsAutoColor(),
+                  }
+                : null;
           return value;
         };
         state.paragraphs = d

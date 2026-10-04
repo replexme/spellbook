@@ -432,15 +432,14 @@ if (flags("--operation", "move") === "font_color") {
               B: p.Unifill.fill.color.color.B,
               r: p.Unifill.fill.color.color.r,
               type: p.Unifill.fill.color.color.constructor.name,
+              rgba: p.Unifill.fill.color.color.RGBA,
             }
           : null,
       });
-      return m.Slides[0].cSld.spTree[0]
-        .getDocContent()
-        .Content.map((p) => ({
-          end: pr(p.TextPr?.Value),
-          runs: p.Content.map((r) => pr(r.Pr)),
-        }));
+      return m.Slides[0].cSld.spTree[0].getDocContent().Content.map((p) => ({
+        end: pr(p.TextPr?.Value),
+        runs: p.Content.map((r) => pr(r.Pr)),
+      }));
     });
     return value;
   };
