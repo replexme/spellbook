@@ -185,6 +185,7 @@ test("native setters unlock only synchronously and restore the UI lock on succes
   let locked = true,
     fail = false,
     grouped = true;
+  const visitedPages = [];
   const drawing = {
     Drawing: { Id: "native-1" },
     SetPosition() {
@@ -207,7 +208,17 @@ test("native setters unlock only synchronously and restore the UI lock on succes
     executeGroupActionsEnd() {
       locked = true;
     },
-    WordControl: { m_oLogicDocument: model, Thumbnails: { SelectPage() {} } },
+    WordControl: {
+      m_oLogicDocument: model,
+      GoToPage(index) {
+        visitedPages.push(index);
+      },
+      Thumbnails: {
+        SelectPage() {
+          throw Error("thumbnail selection is not page navigation");
+        },
+      },
+    },
   };
   globalThis.window = {
     Asc: { editor },
@@ -230,11 +241,12 @@ test("native setters unlock only synchronously and restore the UI lock on succes
     const command = {
       op: "move",
       nativeId: "native-1",
-      slideIndex: 0,
+      slideIndex: 2,
       x: 100,
       y: 200,
     };
     assert.equal(await engine.apply(command), true);
+    assert.deepEqual(visitedPages, [2]);
     assert.equal(locked, true);
     fail = true;
     await assert.rejects(engine.apply(command), /native_setter_failed/);

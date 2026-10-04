@@ -417,6 +417,7 @@ export function createOnlyOfficeProductEngine({
           ) {
             if (slide?.Slide.Id !== command.nativeId)
               throw Error("onlyoffice_product_live_binding_changed");
+            editor.WordControl.GoToPage(command.slideIndex);
             p.CreateNewHistoryPoint();
             if (command.op === "set_slide_hidden")
               return slide.SetVisible(!command.hidden);
@@ -440,6 +441,7 @@ export function createOnlyOfficeProductEngine({
             const properties = shape?.getCNvProps?.();
             if (!properties)
               throw Error("onlyoffice_product_live_binding_changed");
+            editor.WordControl.GoToPage(command.slideIndex);
             p.CreateNewHistoryPoint();
             if (command.title != null) properties.setTitle(command.title);
             if (command.description != null)
@@ -450,9 +452,7 @@ export function createOnlyOfficeProductEngine({
             .GetAllDrawings()
             .find((d) => d.Drawing?.Id === command.nativeId);
           if (!d) throw Error("onlyoffice_product_live_binding_changed");
-          window.Asc.editor.WordControl.Thumbnails.SelectPage(
-            command.slideIndex,
-          );
+          editor.WordControl.GoToPage(command.slideIndex);
           p.CreateNewHistoryPoint();
           const color = () =>
             api.CreateRGBColor(

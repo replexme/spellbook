@@ -380,7 +380,9 @@ async function pixels(frame) {
       const model = editor.WordControl.m_oLogicDocument;
       if (!model.Slides[slideIndex])
         throw Error("diagnostic_target_slide_missing");
-      editor.WordControl.Thumbnails.SelectPage(slideIndex);
+      editor.WordControl.GoToPage(slideIndex);
+      if (model.CurPage !== slideIndex)
+        throw Error("diagnostic_canvas_slide_mismatch");
       model.Slides[model.CurPage]?.graphicObjects.resetSelection();
       model.Document_UpdateSelectionState();
       model.RedrawCurSlide();
@@ -1059,7 +1061,7 @@ try {
         const a = window.Asc.editor,
           m = a.WordControl.m_oLogicDocument,
           c = m.Slides[slideIndex].graphicObjects;
-        a.WordControl.Thumbnails.SelectPage(slideIndex);
+        a.WordControl.GoToPage(slideIndex);
         c.resetSelection();
         c.selectObject(m.Slides[slideIndex].cSld.spTree[index], slideIndex);
         m.Document_UpdateSelectionState();
