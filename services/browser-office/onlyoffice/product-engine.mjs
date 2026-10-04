@@ -319,7 +319,7 @@ export function createOnlyOfficeProductEngine({
                 !Number.isSafeInteger(command.height) ||
                 command.height < 100 ||
                 command.height > 100000 ||
-                window.Asc.linerule_AtLeast !== 1
+                window.Asc.linerule_AtLeast !== 0
               )
                 throw Error("onlyoffice_product_table_row_height_invalid");
             }

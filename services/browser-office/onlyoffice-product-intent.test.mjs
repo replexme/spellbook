@@ -1327,7 +1327,7 @@ test("row height admits only requested outer size while preserving other rows an
   changed.computedHeight = 550;
   changed.rowHeights[0] = {
     value: 380,
-    rule: 1,
+    rule: 0,
     computedHeight: 400,
     outerInsets: 20,
   };
