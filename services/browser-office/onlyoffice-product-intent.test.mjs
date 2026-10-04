@@ -1308,3 +1308,47 @@ test("reading order permutes all slide objects and preserves table and nested gr
     /reading_order/,
   );
 });
+
+test("row height admits only requested outer size while preserving other rows and borders", () => {
+  const before = document();
+  before.slides[0].elements[0].kind = "table";
+  const layout = {
+    computedHeight: 300,
+    authoredFrame: { extY: 300 },
+    rowHeights: [
+      { value: 150, rule: 1, computedHeight: 150, outerInsets: 20 },
+      { value: 150, rule: 1, computedHeight: 150, outerInsets: 20 },
+    ],
+  };
+  before.slides[0].onlyoffice.drawings[0].tableLayout = layout;
+  const after = structuredClone(before);
+  after.slides[0].elements[0].height = 550;
+  const changed = after.slides[0].onlyoffice.drawings[0].tableLayout;
+  changed.computedHeight = 550;
+  changed.rowHeights[0] = {
+    value: 380,
+    rule: 1,
+    computedHeight: 400,
+    outerInsets: 20,
+  };
+  const commands = [300, 400].map((height) => ({
+    op: "set_table_row_height",
+    elementId: "0/0",
+    index: 0,
+    height,
+  }));
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, commands),
+  );
+  changed.rowHeights[0].computedHeight = 390;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /table_row_height/,
+  );
+  changed.rowHeights[0].computedHeight = 400;
+  changed.rowHeights[1].value = 200;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+});

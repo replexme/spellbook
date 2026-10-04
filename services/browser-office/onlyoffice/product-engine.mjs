@@ -301,6 +301,28 @@ export function createOnlyOfficeProductEngine({
                   "onlyoffice_product_topology_requires_separate_request",
                 );
             }
+            if (
+              ["set_table_cell", "set_table_row_height"].includes(command.op) &&
+              shape.graphicObject?.Content?.some((row) =>
+                row.Content.some(
+                  (cell) => cell.Get_GridSpan() !== 1 || cell.GetVMerge() !== 1,
+                ),
+              )
+            )
+              throw Error("onlyoffice_product_merged_table_target_unavailable");
+            if (command.op === "set_table_row_height") {
+              const row = shape.graphicObject?.Content?.[command.index];
+              if (
+                !Number.isSafeInteger(command.index) ||
+                command.index < 0 ||
+                !row ||
+                !Number.isSafeInteger(command.height) ||
+                command.height < 100 ||
+                command.height > 100000 ||
+                window.Asc.linerule_AtLeast !== 1
+              )
+                throw Error("onlyoffice_product_table_row_height_invalid");
+            }
             if (command.op === "set_table_cell") {
               const cell =
                 shape.graphicObject?.Content?.[command.row]?.Content?.[
@@ -319,17 +341,6 @@ export function createOnlyOfficeProductEngine({
                 command.text.length > 100000
               )
                 throw Error("onlyoffice_product_argument_invalid:cell_text");
-              if (
-                shape.graphicObject.Content.some((row) =>
-                  row.Content.some(
-                    (cell) =>
-                      cell.Get_GridSpan() !== 1 || cell.GetVMerge() !== 1,
-                  ),
-                )
-              )
-                throw Error(
-                  "onlyoffice_product_merged_table_target_unavailable",
-                );
             }
             if (command.op === "set_alt_text") {
               const properties = shape.getCNvProps?.();
@@ -953,6 +964,12 @@ export function createOnlyOfficeProductEngine({
                   window.AscFormat.LOCKS_MASKS.noResize,
                   command.lockSize,
                 );
+              return true;
+            }
+            case "set_table_row_height": {
+              const row = d.GetRow(command.index);
+              if (!row) throw Error("onlyoffice_product_live_binding_changed");
+              row.SetHeight(command.height * 360);
               return true;
             }
             case "set_table_cell": {

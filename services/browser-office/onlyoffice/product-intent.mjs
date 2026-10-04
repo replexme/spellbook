@@ -42,6 +42,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "delete_element",
   "replace_text",
   "set_table_cell",
+  "set_table_row_height",
   ...Object.keys(formatting),
 ]);
 const rgb = (color) => ({
@@ -253,7 +254,9 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
     }
     if (
       original.kind === "table" &&
-      group.some((c) => c.op === "set_table_cell") &&
+      group.some((c) =>
+        ["set_table_cell", "set_table_row_height"].includes(c.op),
+      ) &&
       !group.some((c) => c.op === "resize")
     ) {
       // A native table grows to its content's page bounds. Row-height rules
@@ -267,6 +270,12 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
       geometry.height = actual.height;
       oldDrawing.tableLayout.computedHeight =
         newDrawing.tableLayout.computedHeight;
+      for (const c of group.filter((c) => c.op === "set_table_cell")) {
+        const initial = oldDrawing.tableLayout.rowHeights[c.row];
+        const observed = newDrawing.tableLayout.rowHeights[c.row];
+        if (initial && observed)
+          initial.computedHeight = observed.computedHeight;
+      }
     }
     const bounds = quantizedOutlineDifference(
       geometry,
@@ -287,7 +296,22 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
     for (const [op, command] of [...final].sort(
       ([a], [b]) => Number(!!formatting[b]) - Number(!!formatting[a]),
     )) {
-      if (formatting[op]) {
+      if (op === "set_table_row_height") {
+        const heights = new Map(
+          group.filter((c) => c.op === op).map((c) => [c.index, c]),
+        );
+        for (const c of heights.values()) {
+          const initial = oldDrawing.tableLayout?.rowHeights[c.index];
+          const observed = newDrawing.tableLayout?.rowHeights[c.index];
+          if (!initial || !observed || observed.computedHeight !== c.height)
+            throw Error("onlyoffice_product_intent_mismatch:table_row_height");
+          initial.value = Math.round(
+            Math.max(100, c.height - initial.outerInsets),
+          );
+          initial.rule = 1;
+          initial.computedHeight = c.height;
+        }
+      } else if (formatting[op]) {
         const property = formatting[op],
           runs = newDrawing.paragraphs.flatMap((p) => p.runs);
         const desired =
