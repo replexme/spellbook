@@ -44,7 +44,8 @@ export function createProductSession({
     commands = [],
     undo = [],
     redo = [],
-    failed = false;
+    failed = false,
+    savedDigest = null;
   let queue = Promise.resolve();
   const serial = (fn) => {
     const task = queue.then(fn);
@@ -230,6 +231,7 @@ export function createProductSession({
         const accepted = await admit(bytes, observation);
         current = accepted;
         base = accepted;
+        savedDigest = accepted.receipt.candidateSha256;
         commands = [];
         undo = [];
         redo = [];
@@ -370,11 +372,9 @@ export function createProductSession({
         // A provider may still accept direct human edits during the external write.
         await liveMatches(saved.observation);
         await journal.clear();
-        base = saved;
-        commands = [];
-        // Native Undo remains available, but journal deltas now have a new base.
-        undo = [];
-        redo = [];
+        savedDigest = saved.receipt.candidateSha256;
+        // Saving acknowledges a file; it does not erase the editor history.
+        // A later edit journals the same retained, bounded history from its base.
         return structuredClone(receipt);
       }),
     recover: () =>
@@ -383,15 +383,13 @@ export function createProductSession({
         if (!recovery) return null;
         const receipt = recovery.metadata.artifactReceipt;
         if (!receipt) throw Error("product_recovery_evidence_missing");
-        const inspected = await engine.inspect(recovery.candidateBytes.slice());
+        const inspected = await artifacts.inspect(recovery.candidateBytes);
         const accepted = await admit(
           recovery.candidateBytes,
           inspected,
           receipt,
         );
-        const baseObservation = await engine.inspect(
-          recovery.baseBytes.slice(),
-        );
+        const baseObservation = await artifacts.inspect(recovery.baseBytes);
         const restoredBase = await admit(recovery.baseBytes, baseObservation);
         const groups = recovery.metadata.commandGroups;
         if (recovery.metadata.productHistory) {
@@ -401,7 +399,7 @@ export function createProductSession({
           );
           const states = new Map();
           for (const artifact of recovery.historyArtifacts) {
-            const observation = await engine.inspect(artifact.bytes.slice());
+            const observation = await artifacts.inspect(artifact.bytes);
             const state = await admit(
               artifact.bytes,
               observation,
@@ -528,6 +526,7 @@ export function createProductSession({
       }),
     status: () => ({
       ready: !!current && !failed,
+      modified: !!current && current.receipt.candidateSha256 !== savedDigest,
       commands: commands.length,
       undo: undo.length,
       redo: redo.length,

@@ -37,7 +37,7 @@ function candidate() {
     evaluate: (fn) =>
       Promise.resolve(vm.runInNewContext(`(${fn})()`, { window })),
   };
-  return { frame, slides, presentation };
+  return { frame, slides, presentation, window };
 }
 
 test("candidate observation reads every slide without creating absent notes or timing", async () => {
@@ -80,4 +80,77 @@ test("candidate observation refuses an incomplete or empty slide scope", async (
     observeOnlyOfficeCandidate(frame),
     /slide_observation_unavailable/u,
   );
+});
+
+test("text color observation uses native RGB when the pinned getter incorrectly returns black", async () => {
+  const { frame, slides, window } = candidate();
+  class CRGBColor {
+    RGBA = { R: 255, G: 0, B: 0, A: 255 };
+  }
+  window.AscFormat = { CRGBColor };
+  const textPr = {
+    TextPr: { Unifill: { fill: { color: { color: new CRGBColor() } } } },
+  };
+  for (const method of [
+    "GetBold",
+    "GetItalic",
+    "GetUnderline",
+    "GetStrikeout",
+    "GetFontSize",
+    "GetVertAlign",
+    "GetSpacing",
+    "GetCaps",
+    "GetSmallCaps",
+    "GetDoubleStrikeout",
+    "GetFontFamily",
+  ])
+    textPr[method] = () => null;
+  textPr.GetColor = () => ({
+    GetRGB: () => ({ r: 0, g: 0, b: 0 }),
+    IsThemeColor: () => false,
+    IsAutoColor: () => false,
+  });
+  const run = { GetText: () => "red", GetTextPr: () => textPr };
+  const paragraph = {
+    GetElementsCount: () => 1,
+    GetElement: () => run,
+    GetText: () => "red",
+  };
+  const shape = {
+    x: 0,
+    y: 0,
+    extX: 10,
+    extY: 10,
+    getOwnName: () => "text",
+    getDocContent: () => ({ GetText: () => "red" }),
+  };
+  const drawing = {
+    Drawing: shape,
+    GetClassType: () => "shape",
+    GetDocContent: () => ({ GetAllParagraphs: () => [paragraph] }),
+    GetHyperlink: () => null,
+  };
+  for (const method of [
+    "GetPosX",
+    "GetPosY",
+    "GetWidth",
+    "GetHeight",
+    "GetRotation",
+    "GetFlipH",
+    "GetFlipV",
+  ])
+    drawing[method] = () => 0;
+  slides[0].Slide.cSld.spTree = [shape];
+  slides[0].GetAllDrawings = () => [drawing];
+  const result = await observeOnlyOfficeCandidate(frame);
+  assert.deepEqual(
+    JSON.parse(
+      JSON.stringify(
+        result.extended.slides[0].drawings[0].paragraphs[0].runs[0].style.color
+          .rgb,
+      ),
+    ),
+    { r: 255, g: 0, b: 0 },
+  );
+  assert.deepEqual(Array.from(result.unavailable), []);
 });

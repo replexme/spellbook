@@ -177,6 +177,7 @@ const report = {
   productionPromoted: false,
   errors: [],
   stages: [],
+  timings: {},
 };
 const contexts = [];
 let mainPage, mainFrame, pendingAuthorization;
@@ -495,7 +496,10 @@ const session = createProductSession({
   verifyObservation: verifyOnlyOfficeProductObservation,
 });
 try {
+  let phaseStarted = performance.now();
   const before = await session.open(input);
+  report.timings.openWithBaselineAndAdmissionMs =
+    performance.now() - phaseStarted;
   report.stages.push("original-open-and-file-admission");
   report.rendering = { before: await pixels(mainFrame) };
   const operation = flags("--operation", "move");
@@ -540,10 +544,13 @@ try {
   Object.assign(command, args[operation]);
   let finalExpected;
   const manualFlow = process.argv.includes("--manual-flow");
+  phaseStarted = performance.now();
   const applied = await session.apply({
     expectedRevision: before.revision,
     commands: [command],
   });
+  report.timings.commandWithFileAdmissionAndJournalMs =
+    performance.now() - phaseStarted;
   report.stages.push("canonical-command-live-apply-file-reopen-journal");
   await fs.writeFile(
     path.join(output, "observations.json"),
@@ -697,7 +704,10 @@ try {
     await mainPage.keyboard.press("End");
     await mainPage.keyboard.insertText(" HUMAN_VERIFIED");
     await mainPage.keyboard.press("Escape");
+    phaseStarted = performance.now();
     finalExpected = await session.observe();
+    report.timings.humanCheckpointWithFileAdmissionAndJournalMs =
+      performance.now() - phaseStarted;
     assert(finalExpected.slides[0].elements[0].text.includes("HUMAN_VERIFIED"));
     assert.equal(session.status().undo, 2);
     report.rendering.manual = await pixels(mainFrame);
@@ -712,7 +722,10 @@ try {
     /stale/,
   );
   report.stages.push("stale-command-refused");
+  phaseStarted = performance.now();
   const recovered = await session.recover();
+  report.timings.recoveryWithExactFileAndHistoryMs =
+    performance.now() - phaseStarted;
   verifyOnlyOfficeProductObservation(finalExpected, recovered);
   report.stages.push("recovery-exact-file-readback");
   const recoveryPixels = manualFlow
@@ -748,12 +761,21 @@ try {
   );
   assert(persisted);
   report.stages.push("wrong-save-ack-keeps-recovery");
+  phaseStarted = performance.now();
   report.saved = await session.save(async (bytes, receipt) => {
     await fs.writeFile(path.join(output, "saved.pptx"), bytes);
     return { candidateSha256: hash(bytes) };
   });
+  report.timings.acknowledgedFileSaveMs = performance.now() - phaseStarted;
   assert.equal(persisted, null);
   report.stages.push("acknowledged-exact-file-save");
+  if (manualFlow) {
+    await session.undo();
+    assert.deepEqual(await pixels(mainFrame), report.rendering.edited);
+    await session.redo();
+    assert.deepEqual(await pixels(mainFrame), recoveryPixels);
+    report.stages.push("acknowledged-save-keeps-earlier-undo-and-redo");
+  }
   report.status = "product-session-command-verified";
 } catch (error) {
   report.status = "failed";

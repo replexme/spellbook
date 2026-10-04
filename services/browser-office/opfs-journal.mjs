@@ -179,7 +179,14 @@ async function loadSlot(directory, slot, cryptoImpl) {
       readFile(directory, `base-${slot}.pptx`),
       readFile(directory, `candidate-${slot}.pptx`),
     ]);
+    if (metadataBytes.byteLength > 1024 * 1024) return null;
     const metadata = JSON.parse(new TextDecoder().decode(metadataBytes));
+    if (
+      metadata.historyReceipts &&
+      (!Array.isArray(metadata.historyReceipts) ||
+        metadata.historyReceipts.length > 66)
+    )
+      return null;
     if (
       metadata?.schemaVersion !== schemaVersion ||
       !Number.isSafeInteger(metadata.generation) ||

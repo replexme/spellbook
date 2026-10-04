@@ -255,6 +255,7 @@ test("recovery recreates batch boundaries and an existing Redo branch", async ()
   await s.session.recover();
   assert.deepEqual(s.session.status(), {
     ready: true,
+    modified: true,
     commands: 2,
     undo: 1,
     redo: 1,
@@ -337,4 +338,27 @@ test("a failed human checkpoint keeps the last approved bytes and can be retried
   await s.session.checkpointManual();
   await s.session.undo();
   assert.equal((await s.session.observe()).revision, "r2");
+});
+
+test("acknowledged save preserves Undo and a later recovery base", async () => {
+  const s = setup();
+  await s.session.open(s.bytes(1));
+  await apply(s, 2);
+  await s.session.save(async (_, r) => ({
+    candidateSha256: r.candidateSha256,
+  }));
+  assert.equal(s.session.status().modified, false);
+  assert.equal(s.session.status().undo, 1);
+  await s.session.undo();
+  assert.equal((await s.session.observe()).revision, "r1");
+  assert.equal(s.session.status().modified, true);
+  await s.session.recover();
+  await s.session.redo();
+  assert.equal((await s.session.observe()).revision, "r2");
+  assert.equal(s.session.status().modified, false);
+  await apply(s, 3);
+  await s.session.recover();
+  await s.session.undo();
+  await s.session.undo();
+  assert.equal((await s.session.observe()).revision, "r1");
 });
