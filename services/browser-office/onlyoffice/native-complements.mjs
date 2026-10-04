@@ -46,7 +46,7 @@ export function installOnlyOfficeNativeComplements() {
   for (const [name,field] of [["setOffX","offX"],["setOffY","offY"],["setExtX","extX"],["setExtY","extY"],["setChOffX","chOffX"],["setChOffY","chOffY"],["setChExtX","chExtX"],["setChExtY","chExtY"]]) {
     const native=f.CXfrm?.prototype[name];
     if(typeof native!=="function")continue;
-    f.CXfrm.prototype[name]=function(value){if(this[field]===value)return;return native.call(this,value);};
+    f.CXfrm.prototype[name]=function(value){if(this[field]===value||Number.isFinite(this[field])&&Number.isFinite(value)&&Math.abs(this[field]-value)<=Number.EPSILON*8*Math.max(1,Math.abs(this[field]),Math.abs(value)))return;return native.call(this,value);};
   }
   const dimensions = d.historyitem_type_Presentation | 65003;
   const commentInitials = d.historyitem_type_Comment | 65004;

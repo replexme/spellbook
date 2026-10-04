@@ -21,7 +21,7 @@ test("decoded run effects survive the native text-property import copy",()=>{
   const effect=value=>({value,Write_ToBinary(memory){memory.WriteLong(this.value);},createDuplicate(){return effect(this.value);}});
   try{
     installOnlyOfficeNativeComplements();
-    const transform=new Xfrm();transform.setOffX(12);transform.setOffX(12);assert.equal(transform.calls,1);transform.setOffX(13);assert.equal(transform.calls,2);
+    const transform=new Xfrm();transform.setOffX(12);transform.setOffX(12);assert.equal(transform.calls,1);transform.setOffX(13);assert.equal(transform.calls,2);transform.setOffX(13+Number.EPSILON*8);assert.equal(transform.calls,2);transform.setOffX(13+1e-8);assert.equal(transform.calls,3);
     const decoded={font:"Arial",spellbookEffects:effect(75)};
     const cache=window.AscWord.g_textPrCache;
     assert.notEqual(cache.getKey(decoded),cache.getKey({font:"Arial"}));

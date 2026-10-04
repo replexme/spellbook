@@ -56,3 +56,18 @@ test("converter-local media masks stage bytes and Undo removes their transport",
     shape.nvPicPr.nvPr.unimedia={media:"/working/media/"+name};host.sync();assert.equal(media["media/"+name],url);host.dispose();
   }finally{globalThis.window=prior;}
 });
+
+
+test("native mask files activate only the live poster's owned companion",()=>{
+  const prior=globalThis.window;globalThis.window={addEventListener(){}};
+  const media={},base="sba_"+"d".repeat(64);let used=[];
+  const model={Get_AllImageUrls:()=>used,Slides:[],slideMasters:[]};
+  try{
+    attachOnlyOfficeResourceHost({getMedia:()=>media,captureNativeSnapshot(){},getNativeEditorApi:()=>({WordControl:{m_oLogicDocument:model}})});
+    const host=window[Symbol.for("spellbook.onlyoffice.resourceHost/v1")];
+    const audio=host.register(base+".wav",Uint8Array.of(1,2),"audio/wav"),poster=host.register(base+".png",Uint8Array.of(3,4),"image/png");
+    used=[poster];host.sync();assert.equal(media["media/"+base+".wav"],audio);
+    used=[];host.sync();assert.deepEqual(media,{});
+    used=[poster];host.sync();assert.equal(media["media/"+base+".wav"],audio);host.dispose();
+  }finally{globalThis.window=prior;}
+});

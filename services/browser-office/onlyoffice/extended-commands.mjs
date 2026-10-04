@@ -41,7 +41,9 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
   const rgb = (n) => api.CreateRGBColor((n >>> 16) & 255, (n >>> 8) & 255, n & 255);
   const solid = (n) => api.CreateSolidFill(rgb(n));
   // Trusted converter worker stages owned files under this fixed directory.
-  const mediaNativePath=asset=>"/working/media/"+asset.fileName;
+  // The converter copies a companion beside the poster when this SDK mask
+  // does not point at an already existing input file.
+  const mediaNativePath=asset=>"maskFile."+asset.fileName.split(".").at(-1);
   const wrap = (shape) => window.AscBuilder.GetApiDrawing(shape) ??
     (shape?.getObjectType?.() === window.AscDFH.historyitem_type_Cnx ? new window.AscBuilder.ApiShape(shape) :
       shape?.getObjectType?.() === window.AscDFH.historyitem_type_SmartArtDrawing ? new window.AscBuilder.ApiGroup(shape) : null);

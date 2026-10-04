@@ -70,7 +70,8 @@ export function attachOnlyOfficeResourceHost(editor,convertDocument) {
       const media=editor.getMedia();
       for(const [path,value] of staged){
         if(value.original)continue;
-        const referenced=used.has(value.url)||used.has(path)||used.has("/working/"+path)||used.has(path.slice(6));
+        const poster=staged.get(path.replace(/\.[a-z0-9]+$/,".png"));
+        const referenced=used.has(value.url)||used.has(path)||used.has("/working/"+path)||used.has(path.slice(6))||Boolean(poster&&used.has(poster.url));
         if(referenced)media[path]=value.url;else if(media[path]===value.url)delete media[path];
       }
     },
