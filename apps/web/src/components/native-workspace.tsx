@@ -1,6 +1,6 @@
 "use client";
 
-import { userFacingError } from "@/lib/user-errors";
+import { aiRequestError } from "@/lib/ai-errors";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Banner, Icon, IconButton, Tabs } from "@/design-system";
 import { collaboraCssVariables } from "@/design-system/editor-theme";
@@ -292,6 +292,8 @@ export function NativeWorkspace({
   const [messages, setMessages] = useState<Message[]>([]),
     [busy, setBusy] = useState(false);
   const [queued, setQueued] = useState<PendingTurn | null>(initialQueued);
+  // Where this document's request waits for a free AI worker, if it waits.
+  const [queuePosition, setQueuePosition] = useState<number | null>(null);
   const [error, setError] = useState(""),
     [saveState, setSaveState] = useState("저장됨"),
     [savedAt, setSavedAt] = useState<string | null>(null);
@@ -515,9 +517,10 @@ export function NativeWorkspace({
         setBusy(false);
         setText(pending.draft);
         setError(
-          userFacingError(
+          aiRequestError(
             cause instanceof Error ? cause.message : null,
             "요청을 보내지 못했어요.",
+            pending.model?.provider,
           ),
         );
       }
@@ -671,9 +674,10 @@ export function NativeWorkspace({
       .catch((cause) => {
         if (abort.signal.aborted) return;
         setError(
-          userFacingError(
+          aiRequestError(
             cause instanceof Error ? cause.message : null,
             "AI 요청을 시작하지 못했어요.",
+            provider,
           ),
         );
         void api("cancel", {}).catch(() => undefined);
@@ -1375,6 +1379,7 @@ export function NativeWorkspace({
         await dispatchLocalJob(response.localJob);
       saveRevision.current =
         response.session?.saveRevision ?? saveRevision.current;
+      setQueuePosition(response.waiting?.position ?? null);
       setSessionObserved(true);
       if (response.session?.status === "validating")
         setSaveState("저장 검사 중…");
@@ -2178,7 +2183,14 @@ export function NativeWorkspace({
   const renderTurn = (turn: CardTurn) => {
     const key = `t:${turn.turnId ?? turn.key}`;
     if (outcomeOf(turn) === "running")
-      return <RunningCard turn={turn} lookingAt={lookingAt} onStop={stop} />;
+      return (
+        <RunningCard
+          turn={turn}
+          lookingAt={lookingAt}
+          onStop={stop}
+          queuePosition={queuePosition}
+        />
+      );
     return (
       <ResultCard
         turn={turn}

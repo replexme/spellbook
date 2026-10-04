@@ -5,6 +5,13 @@
  */
 import capabilities from "../../../../contracts/native-edit-capabilities.json";
 import { elementLabel } from "./element-label";
+import {
+  aiFailureMessage,
+  classifyAiFailure,
+  isKoreanSentence,
+  reportedAiFailure,
+  type AiFailureReason,
+} from "./ai-errors";
 
 export { elementLabel };
 
@@ -120,6 +127,8 @@ export type TurnRecord = {
   changed: boolean;
   reviewed: boolean;
   lastError: string | null;
+  /** The AI that ran the request (model settings provider); unset = default. */
+  provider?: string | null;
 };
 
 const MUTATIONS = new Set([
@@ -164,36 +173,6 @@ const failureRules: Array<{ test: RegExp; code: string; message: string }> = [
       "AI 작업 연결이 끊겼어요. 슬라이드를 확인한 뒤 다시 요청해 주세요.",
   },
   {
-    test: /selected_model_unavailable|model[^.]{0,40}(not found|unavailable|unsupported|does not exist)/i,
-    code: "model_unavailable",
-    message:
-      "선택한 AI 모델을 지금 쓸 수 없어요. 모델을 바꿔 다시 요청해 주세요.",
-  },
-  {
-    test: /rate[ _-]?limit|out of codex messages|usage limit|\b429\b|사용 한도/i,
-    code: "usage_limit",
-    message:
-      "AI 사용량 한도(Rate limit)에 도달했어요. 잠시 뒤 다시 요청하거나, 설정에서 API 키 또는 다른 AI로 전환해 주세요.",
-  },
-  {
-    test: /quota|insufficient_quota|잔액|크레딧|billing/i,
-    code: "quota_exhausted",
-    message:
-      "API 계정의 잔액(크레딧)이 부족해요. OpenAI/Anthropic 결제 상태를 확인하거나 다른 공급자로 전환해 주세요.",
-  },
-  {
-    test: /invalid_api_key|api_key_required|api key.*(invalid|required|missing)|API 키/i,
-    code: "api_key_invalid",
-    message:
-      "API 키가 올바르지 않거나 설정되지 않았어요. 설정에서 API 키를 확인해 주세요.",
-  },
-  {
-    test: /unauthori[sz]ed|\b401\b|not logged in|login required|auth(entication)? (failed|required|expired)|ai_account_not_connected/i,
-    code: "ai_not_connected",
-    message:
-      "AI 구독 연결을 다시 확인해야 해요. 설정에서 연결 상태를 확인해 주세요.",
-  },
-  {
     test: /document_changed|observe_again/i,
     code: "document_changed",
     message:
@@ -205,21 +184,44 @@ const failureRules: Array<{ test: RegExp; code: string; message: string }> = [
     message:
       "문서를 저장하는 중에 요청이 시작돼 멈췄어요. 저장이 끝난 뒤 다시 요청해 주세요.",
   },
-  {
-    test: /timeout|timed out|ETIMEDOUT|deadline/i,
-    code: "timeout",
-    message:
-      "AI 응답이 너무 오래 걸려 멈췄어요. 요청을 조금 나눠서 다시 보내 주세요.",
-  },
-  {
-    test: /dispatch_failed|native_ai_unavailable|ECONNREFUSED|fetch failed|unavailable/i,
-    code: "ai_unavailable",
-    message: "AI 작업기에 연결하지 못했어요. 잠시 뒤 다시 요청해 주세요.",
-  },
 ];
 
+const timeoutRule = {
+  test: /timeout|timed out|ETIMEDOUT|deadline/i,
+  code: "timeout",
+  message: aiFailureMessage("timeout"),
+};
+const unavailableRule = {
+  test: /dispatch_failed|native_ai_unavailable|ECONNREFUSED|fetch failed|unavailable/i,
+  code: "ai_unavailable",
+  message: "AI 작업기에 연결하지 못했어요. 잠시 뒤 다시 요청해 주세요.",
+};
+
+/** The card's failure code for a reason, as the result card groups them. */
+function failureCode(reason: AiFailureReason, provider?: string | null) {
+  switch (reason) {
+    case "auth_expired":
+      return provider === "codex" || provider === "claude_code" || !provider
+        ? "ai_not_connected"
+        : "api_key_invalid";
+    case "not_connected":
+      return "ai_not_connected";
+    case "failed":
+      return "unknown";
+    default:
+      return reason;
+  }
+}
+
+/**
+ * One Korean sentence for why a request failed, specific to the AI that
+ * ran it (`provider` from the request's model settings; unset is the
+ * server's ChatGPT subscription). The original text stays in `raw` for
+ * support and is never shown.
+ */
 export function nativeFailureReason(
   error: string | null | undefined,
+  provider?: string | null,
 ): TurnFailure {
   const text = (error ?? "").trim();
   if (!text) {
@@ -228,20 +230,24 @@ export function nativeFailureReason(
       message: "AI 작업이 비정상적으로 종료되었습니다.",
     };
   }
-  for (const rule of failureRules) {
-    if (rule.test.test(text)) {
-      return {
-        code: rule.code,
-        message: rule.message,
-        detail: text !== rule.message ? text : undefined,
-        raw: text,
-      };
-    }
-  }
+  const fromReason = (reason: AiFailureReason): TurnFailure => ({
+    code: failureCode(reason, provider),
+    message: aiFailureMessage(reason, provider),
+    raw: text,
+  });
+  const reported = reportedAiFailure(text);
+  if (reported) return fromReason(reported);
+  for (const rule of failureRules)
+    if (rule.test.test(text))
+      return { code: rule.code, message: rule.message, raw: text };
+  const classified = classifyAiFailure(text);
+  if (classified) return fromReason(classified);
+  for (const rule of [timeoutRule, unavailableRule])
+    if (rule.test.test(text))
+      return { code: rule.code, message: rule.message, raw: text };
   return {
     code: "unknown",
-    message: text,
-    detail: text,
+    message: isKoreanSentence(text) ? text : aiFailureMessage("failed"),
     raw: text,
   };
 }
@@ -795,7 +801,7 @@ export function summarizeTurn(
   else outcome = "unchanged";
   const failure =
     outcome === "failed" || outcome === "cancelled"
-      ? nativeFailureReason(turn.lastError)
+      ? nativeFailureReason(turn.lastError, turn.provider)
       : null;
   const undoSteps = appliedMutations.reduce((total, task) => {
     // A single edit records exactly one undo action (the editor refuses it
@@ -853,7 +859,8 @@ export async function loadTurnSummary(
   turnId: string,
 ): Promise<TurnSummary | null> {
   const [turn] = await sql`
-    select status, permission_mode, changed, reviewed, last_error
+    select status, permission_mode, changed, reviewed, last_error,
+      model_settings->>'provider' as provider
     from spellbook_native_turns where id=${turnId}
   `;
   if (!turn) return null;
@@ -868,6 +875,7 @@ export async function loadTurnSummary(
       changed: turn.changed,
       reviewed: turn.reviewed,
       lastError: turn.last_error,
+      provider: turn.provider ?? null,
     },
     tasks as TurnTaskRecord[],
   );

@@ -28,6 +28,7 @@ import {
   type PermissionMode,
 } from "../copy";
 import { runningStages } from "./running-stages";
+import { aiRequestError } from "@/lib/ai-errors";
 import type { UndoAction } from "./turn-timeline";
 
 export type CardTurn = {
@@ -455,10 +456,14 @@ export function ResultCard({
   ) : null;
 
   if (outcome === "failed" || outcome === "cancelled") {
+    // The worker's raw text stays in the record for support; the card
+    // shows only the Korean explanation.
     const message =
       summary?.failure?.message ??
-      turn.error ??
-      "AI가 요청을 끝내지 못했어요. 다시 요청해 주세요.";
+      aiRequestError(
+        turn.error,
+        "AI가 요청을 끝내지 못했어요. 다시 요청해 주세요.",
+      );
     const failureCode = summary?.failure?.code;
     const isRateLimit =
       failureCode === "usage_limit" ||
@@ -500,32 +505,6 @@ export function ResultCard({
           >
             {message}
           </Banner>
-          {summary?.failure?.detail && summary.failure.detail !== message ? (
-            <details
-              style={{
-                marginTop: "0.5rem",
-                fontSize: "12px",
-                opacity: 0.85,
-              }}
-            >
-              <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-                상세 에러 내용 (Technical Details)
-              </summary>
-              <pre
-                style={{
-                  margin: "0.25rem 0",
-                  padding: "0.5rem",
-                  borderRadius: "4px",
-                  fontSize: "11px",
-                  background: "var(--bg-subtle)",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-all",
-                }}
-              >
-                {summary.failure.detail}
-              </pre>
-            </details>
-          ) : null}
           {isRateLimit || isAuthError ? (
             <div style={{ marginTop: "0.5rem" }}>
               <ButtonLink size="sm" variant="primary" href="/settings#ai">
@@ -771,10 +750,13 @@ export function RunningCard({
   turn,
   lookingAt,
   onStop,
+  queuePosition = null,
 }: {
   turn: CardTurn;
   lookingAt: { slideIndex: number; url: string } | null;
   onStop: () => void;
+  /** Place in the shared AI queue while no worker has started the request. */
+  queuePosition?: number | null;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [activityExpanded, setActivityExpanded] = useState(false);
@@ -790,12 +772,20 @@ export function RunningCard({
   );
   const latestTool =
     turn.tools.length > 0 ? turn.tools[turn.tools.length - 1] : null;
+  const queueText =
+    !latestTool && !turn.thinking && queuePosition
+      ? queuePosition > 1
+        ? `대기 중 · 앞에 요청 ${queuePosition - 1}개가 있어요`
+        : "대기 중 · 곧 시작해요"
+      : null;
+  const waiting =
+    queueText !== null || Boolean(latestTool?.startsWith("대기 중"));
 
   return (
     <section className="run" aria-live="polite" aria-label="AI 작업 중">
       <header className="run-head">
         <span className="ds-spinner is-ai" aria-hidden="true" />
-        <span>작업 중</span>
+        <span>{waiting ? "대기 중" : "작업 중"}</span>
         <span className="ds-tabular">{elapsed(started, now)}</span>
       </header>
 
@@ -814,7 +804,9 @@ export function RunningCard({
       {!latestTool && !turn.thinking ? (
         <div className="run-active-action">
           <span className="run-pulse-dot" aria-hidden="true" />
-          <span className="run-active-text">슬라이드 상태 확인 및 분석 준비 중…</span>
+          <span className="run-active-text">
+            {queueText ?? "슬라이드 상태 확인 및 분석 준비 중…"}
+          </span>
         </div>
       ) : latestTool ? (
         <div className="run-active-action">

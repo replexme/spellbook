@@ -1,3 +1,5 @@
+import { aiFailureMessage, reportedAiFailure } from "./ai-errors";
+
 const messages: Record<string, string> = {
   ai_rate_limited:
     "AI 요청이 많아 잠시 쉬어 갑니다. 조금 뒤에 다시 요청해 주세요. 직접 편집과 저장은 계속할 수 있습니다.",
@@ -10,5 +12,7 @@ export function userFacingError(
   fallback: string,
 ): string {
   if (!error || error === "unexpected_error") return fallback;
+  const aiFailure = reportedAiFailure(error);
+  if (aiFailure) return aiFailureMessage(aiFailure);
   return messages[error] ?? error;
 }

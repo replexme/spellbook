@@ -46,6 +46,7 @@ import {
   completeNativeTurn,
   failNativeScan,
   failNativeTurn,
+  recordNativeTurnUsage,
   NativeScanValidationError,
 } from "./native-runtime";
 import {
@@ -720,6 +721,12 @@ export async function handleWorkerCallback(
   const jobs =
     await db()`select * from spellbook_jobs where id = ${callback.jobId} limit 1`;
   const job = jobs[0];
+  // What the AI used counts even for a request the person already stopped.
+  if (job?.job_type === "native_turn" && job.status === "failed")
+    await recordNativeTurnUsage(
+      job.id,
+      (callback.result as { modelInput?: unknown } | undefined)?.modelInput,
+    );
   if (!job || job.status === "failed") return;
   if (job.status === "succeeded") {
     // A prior callback may have committed its successor before the process died.
@@ -728,7 +735,11 @@ export async function handleWorkerCallback(
   }
   if (callback.status === "failed") {
     if (job.job_type === "native_turn") {
-      await failNativeTurn(job.id, callback.error ?? "native_worker_failed");
+      await failNativeTurn(
+        job.id,
+        callback.error ?? "native_worker_failed",
+        (callback.result as { modelInput?: unknown } | undefined)?.modelInput,
+      );
       return;
     }
     if (job.job_type === "scan_render" && job.payload?.nativeSessionId) {
