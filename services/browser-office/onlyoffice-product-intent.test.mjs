@@ -1389,3 +1389,33 @@ test("column sizing changes its authored grid and frame without losing other col
     /unrequested_change/,
   );
 });
+
+test("column grid totals retain fractions until the final physical outline", () => {
+  const before = document();
+  before.slides[0].elements[0].kind = "table";
+  before.slides[0].onlyoffice.drawings[0].tableLayout = {
+    computedHeight: 300,
+    computedWidth: 500,
+    authoredFrame: { extX: 500, extY: 300 },
+    columnWidths: [167, 167, 167],
+    columnWidthsEmu: [60000, 60000, 60000],
+    rowHeights: [{ value: 300, rule: 0, computedHeight: 300 }],
+  };
+  const after = structuredClone(before);
+  const layout = after.slides[0].onlyoffice.drawings[0].tableLayout;
+  layout.columnWidths[0] = 700;
+  layout.columnWidthsEmu[0] = 252000;
+  after.slides[0].elements[0].width = 1033;
+  layout.computedWidth = layout.authoredFrame.extX = 1033;
+  const commands = [
+    { op: "set_table_column_width", elementId: "0/0", index: 0, width: 700 },
+  ];
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, commands),
+  );
+  layout.columnWidthsEmu[1]--;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+});
