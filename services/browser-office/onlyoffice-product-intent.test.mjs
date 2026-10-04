@@ -1214,3 +1214,31 @@ test("table movement checks the requested authored position and preserves row ru
   layout.rowHeights[0].value = 400;
   assert.throws(() => verifyOnlyOfficeProductIntent(before, after, commands), /unrequested_change/);
 });
+
+for (const position of ["front", "forward", "back", "backward"])
+  test(`native stacking ${position} preserves the complete original objects`, () => {
+    const before = document();
+    const index = ["front", "forward"].includes(position) ? 0 : 1;
+    const after = structuredClone(before);
+    const slide = after.slides[0];
+    for (const values of [slide.elements, slide.onlyoffice.drawings,
+      slide.narrow.drawingStyle, slide.narrow.wordArt]) values.reverse();
+    slide.elements.forEach((e, i) => { e.elementId = "0/" + i; });
+    const commands = [{ op: "z_order", elementId: "0/" + index, position }];
+    assert.doesNotThrow(() => verifyOnlyOfficeProductIntent(before, after, commands));
+    slide.elements[0].onlyoffice.text = "unrequested text";
+    assert.throws(() => verifyOnlyOfficeProductIntent(before, after, commands), /unrequested_change/);
+  });
+
+test("stacking uses preflight identities across a batch and does not excuse a wrong order", () => {
+  const before = document(), after = structuredClone(before);
+  const commands = [
+    { op: "z_order", elementId: "0/0", position: "front" },
+    { op: "z_order", elementId: "0/1", position: "front" },
+    { op: "move", elementId: "0/0", x: 123, y: 456 },
+  ];
+  after.slides[0].elements[0].x = 123;
+  after.slides[0].elements[0].y = 456;
+  assert.doesNotThrow(() => verifyOnlyOfficeProductIntent(before, after, commands));
+  assert.throws(() => verifyOnlyOfficeProductIntent(before, before, [commands[0]]), /intent_mismatch|unrequested_change/);
+});

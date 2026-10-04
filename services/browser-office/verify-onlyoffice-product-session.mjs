@@ -1034,6 +1034,7 @@ try {
       resize: { width: target.width + 500, height: target.height + 500 },
       rotate: { degrees: 15 },
       flip: { axis: "horizontal" },
+      z_order: { position: flags("--position", "front") },
       set_shape_name: { name: "Verified title" },
       set_alt_text: {
         title: "Verified accessible title",
@@ -1141,6 +1142,19 @@ try {
       (e) => e.elementId !== target.elementId,
     )) {
       const expected = structuredClone(element);
+      if (operation === "z_order") {
+        const order = before.slides[selectedSlideIndex].elements.map((_, i) => i);
+        const originalIndex = Number(target.elementId.split("/")[1]);
+        const destination = {
+          front: order.length - 1, back: 0,
+          forward: Math.min(originalIndex + 1, order.length - 1),
+          backward: Math.max(originalIndex - 1, 0),
+        }[command.position];
+        order.splice(originalIndex, 1);
+        order.splice(destination, 0, originalIndex);
+        const index = Number(element.elementId.split("/")[1]);
+        expected.elementId = `${selectedSlideIndex}/${order.indexOf(index)}`;
+      }
       if (operation === "delete_element") {
         const index = Number(element.elementId.split("/")[1]);
         const removedIndex = Number(target.elementId.split("/")[1]);
@@ -1170,6 +1184,7 @@ try {
         "rename_slide",
         "set_slide_hidden",
         "set_speaker_notes",
+        "z_order",
       ].includes(operation)
     )
       assert.notEqual(

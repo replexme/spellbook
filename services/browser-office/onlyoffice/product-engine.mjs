@@ -235,6 +235,19 @@ export function createOnlyOfficeProductEngine({
               shape = m.Slides[slide]?.cSld.spTree[index];
             if (!shape || slide < 0 || index < 0)
               throw Error("onlyoffice_product_target_missing");
+            if (command.op === "z_order") {
+              const method = {
+                front: "bringToFront", forward: "bringForward",
+                back: "sendToBack", backward: "bringBackward",
+              }[command.position];
+              const controller = m.Slides[slide]?.graphicObjects;
+              if (!method || typeof controller?.[method] !== "function" ||
+                  typeof controller.resetSelection !== "function" ||
+                  typeof controller.selectObject !== "function")
+                throw Error("onlyoffice_product_z_order_unavailable");
+              if (commands.some((c) => ["delete_element"].includes(c.op)))
+                throw Error("onlyoffice_product_topology_requires_separate_request");
+            }
             if (command.op === "set_table_cell") {
               const cell =
                 shape.graphicObject?.Content?.[command.row]?.Content?.[
@@ -713,6 +726,18 @@ export function createOnlyOfficeProductEngine({
             return c;
           };
           switch (command.op) {
+            case "z_order": {
+              const controller = slide.Slide.graphicObjects;
+              controller.resetSelection();
+              controller.selectObject(native, command.slideIndex);
+              const method = {
+                front: "bringToFront", forward: "bringForward",
+                back: "sendToBack", backward: "bringBackward",
+              }[command.position];
+              try { controller[method](); }
+              finally { window.AscCommon.IsChangingDrawingZIndex = false; }
+              return true;
+            }
             case "move":
               return d.SetPosition(command.x * 360, command.y * 360);
             case "resize":

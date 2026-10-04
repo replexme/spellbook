@@ -22,6 +22,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "resize",
   "rotate",
   "flip",
+  "z_order",
   "set_shape_name",
   "set_alt_text",
   "set_object_lock",
@@ -69,6 +70,48 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
     right = structuredClone(after);
   delete left.revision;
   delete right.revision;
+  // Preflight binds every target to its original native object. Simulate the
+  // requested permutations, then undo that permutation in the observed model
+  // before comparing all object properties. No names or hashes are guessed.
+  const orders = new Map();
+  for (const command of commands.filter((c) => c.op === "z_order")) {
+    const [slideIndex, originalIndex] = command.elementId.split("/").map(Number);
+    const slide = left.slides[slideIndex];
+    if (!slide || !slide.elements[originalIndex])
+      throw Error("onlyoffice_product_intent_target_missing");
+    const order = orders.get(slideIndex) ?? slide.elements.map((_, i) => i);
+    const index = order.indexOf(originalIndex);
+    const destination = {
+      front: order.length - 1,
+      back: 0,
+      forward: Math.min(index + 1, order.length - 1),
+      backward: Math.max(index - 1, 0),
+    }[command.position];
+    if (destination === undefined)
+      throw Error("onlyoffice_product_intent_mismatch:z_order");
+    order.splice(index, 1);
+    order.splice(destination, 0, originalIndex);
+    orders.set(slideIndex, order);
+  }
+  for (const [slideIndex, order] of orders) {
+    const observed = right.slides[slideIndex];
+    if (observed.elements.length !== order.length)
+      throw Error("onlyoffice_product_intent_mismatch:z_order_count");
+    const restore = (values) => order.map((_, original) => values[order.indexOf(original)]);
+    const tableOrder = order.filter((i) => left.slides[slideIndex].elements[i].kind === "table");
+    observed.narrow.table = left.slides[slideIndex].elements
+      .map((e, i) => e.kind === "table" ? observed.narrow.table[tableOrder.indexOf(i)] : undefined)
+      .filter((e) => e !== undefined);
+    observed.elements = restore(observed.elements);
+    observed.onlyoffice.drawings = restore(observed.onlyoffice.drawings);
+    observed.narrow.drawingStyle = restore(observed.narrow.drawingStyle);
+    observed.narrow.wordArt = restore(observed.narrow.wordArt);
+    const renumber = (elements, prefix) => elements.forEach((e, i) => {
+      e.elementId = prefix + "/" + i;
+      renumber(e.elements, e.elementId);
+    });
+    renumber(observed.elements, String(slideIndex));
+  }
   const grouped = new Map();
   for (const command of commands) {
     if (!onlyOfficeIntentOperations.includes(command.op))
