@@ -23,8 +23,8 @@ export function materializeOnlyOfficeNativeGeometry(command) {
       for (const [key,value] of [['offX',shape.x],['offY',shape.y],['extX',shape.extX],['extY',shape.extY]])
         if (!Number.isFinite(transform[key])) transform['set'+key[0].toUpperCase()+key.slice(1)](value);
       if (transform.rot==null&&Number.isFinite(rotation)) transform.setRot(rotation);
-      if (transform.flipH==null&&typeof flipH==='boolean') transform.setFlipH(flipH);
-      if (transform.flipV==null&&typeof flipV==='boolean') transform.setFlipV(flipV);
+      if (transform.flipH==null&&flipH===true) transform.setFlipH(flipH);
+      if (transform.flipV==null&&flipV===true) transform.setFlipV(flipV);
     }
     return true;
   } finally { editor.executeGroupActionsEnd(); }

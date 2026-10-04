@@ -235,13 +235,21 @@ export function finalizeOnlyOfficeNativeGeometry({cropNativeIds = null} = {}) {
   };
   for (const slide of model.Slides)
     for (const shape of slide.cSld.spTree) visit(shape);
-  if (!pending.length) return false;
   const history = window.AscCommon.History;
-  if (!history.Points[history.Index]?.Items.length)
+  if (pending.length && !history.Points[history.Index]?.Items.length)
     throw Error("onlyoffice_product_geometry_history_required");
   for (const apply of pending) apply();
-  model.Recalculate(history.Get_RecalcData(null,history.getGroupChanges()));
-  return true;
+  // GroupChanges contains cancelled/undone groups, not newly authored points.
+  // Use typed pending changes too; the SDK bare-history path assumes every
+  // native class implements Refresh_RecalcData, which sections do not.
+  const changes=[...(history.getGroupChanges()??[])];
+  const start=Number.isSafeInteger(history.RecIndex)?Math.max(0,history.RecIndex+1):0;
+  const end=Number.isSafeInteger(history.Index)?history.Index+1:0;
+  for(const point of (history.Points??[]).slice(start,end))
+    for(const item of point.Items)if(item.NeedRecalc&&item.Data)changes.push(item.Data);
+  model.Recalculate(history.Get_RecalcData(null,changes));
+  model.RedrawCurSlide?.();
+  return pending.length>0;
 }
 
 export const onlyOfficeProductOperations = Object.freeze([...onlyOfficeIntentOperations,...onlyOfficeExtendedOperations]);
@@ -1715,8 +1723,7 @@ export function createOnlyOfficeProductEngine({
       ].includes(command.op);
       await frame.evaluate(
         ({ nativeId, op }) => {
-          const h = window.AscCommon.History,
-            m = window.Asc.editor.WordControl.m_oLogicDocument;
+          const m = window.Asc.editor.WordControl.m_oLogicDocument;
           const find=shapes=>{for(const shape of shapes){if(shape.Id===nativeId)return shape;const child=find(shape.spTree??[]);if(child)return child;}return null;};
           const target=find(m.Slides.flatMap(slide=>slide.cSld.spTree));
           target?.getDocContent?.()?.Recalc_AllParagraphs_CompiledPr?.();
@@ -1731,7 +1738,6 @@ export function createOnlyOfficeProductEngine({
           if (["move_slide", "delete_slide", "duplicate_slide","insert_slide"].includes(op)) {
             m.updateSlideIndexes?.();
           }
-          m.Recalculate(h.Get_RecalcData(null, h.getGroupChanges()));
           m.RedrawCurSlide();
           m.Document_UpdateInterfaceState();
         },

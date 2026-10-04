@@ -42,7 +42,7 @@ export function onlyOfficeExtendedCommandCase({operation, observation, schema, s
     add_text_box: {text: "검증용 텍스트\nSecond paragraph"}, add_shape: {geometry: "ellipse", color: 0x27b575},
     add_connector: {connectorKind: "standard", color: 0x2458ff},
     add_freeform: {points: [{x:0,y:0},{x:6000,y:0},{x:3000,y:3000}],closed:true,color:0x2458ff},
-    add_table: {cells:[["A","B"],["C","D"]]}, align: {alignment:"left"}, distribute: {axis:"horizontal"}, group: {}, ungroup: {},
+    add_table: {cells:[["A","B"],["C","D"]]}, align: {alignment:"right"}, distribute: {axis:"horizontal"}, group: {}, ungroup: {},
     duplicate_element: {name:"Verified duplicate", x:(selected?.element.x??0)+500,y:(selected?.element.y??0)+500},
     text_shadow:{shadow:true,color:0x2458ff,shadowOffsetX:100,shadowOffsetY:150,shadowBlur:75,opacity:70},
     set_shape_shadow:{shadow:true,color:0x2458ff,shadowOffsetX:100,shadowOffsetY:150,shadowBlur:75,opacity:70},

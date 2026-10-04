@@ -5,7 +5,9 @@ import { finalizeOnlyOfficeNativeGeometry } from "./onlyoffice/product-engine.mj
 test("human pixel movement keeps its existing native history point and exact serialized positions", () => {
   const changes = [];
   const groupChanges = [{ section: true }];
-  const recalcData = { typedChanges: groupChanges };
+  const authoredChange={sectionName:"typed-section-change"};
+  const expectedChanges=[...groupChanges,authoredChange];
+  const recalcData = { typedChanges: expectedChanges };
   const make = (value) => ({
     offX: value,
     setOffX(v) {
@@ -16,7 +18,7 @@ test("human pixel movement keeps its existing native history point and exact ser
   const positive = make(1567295.454545 / 36000),
     negative = make(-1567295.454545 / 36000);
   const authored = make(1524000 / 36000);
-  const point = { Items: [{ human: true }] };
+  const point = { Items: [{ human: true,NeedRecalc:true,Data:authoredChange }] };
   const model = {
     Slides: [
       {
@@ -38,7 +40,7 @@ test("human pixel movement keeps its existing native history point and exact ser
   };
   globalThis.window = {
     Asc: { editor: { WordControl: { m_oLogicDocument: model } } },
-    AscCommon: { History: { Points: [point], Index: 0, getGroupChanges:()=>groupChanges, Get_RecalcData:(index, values)=>{ assert.equal(index,null); assert.strictEqual(values,groupChanges); return recalcData; } } },
+    AscCommon: { History: { Points: [point], Index: 0, getGroupChanges:()=>groupChanges, Get_RecalcData:(index, values)=>{ assert.equal(index,null); assert.deepEqual(values,expectedChanges); return recalcData; } } },
   };
   try {
     assert.equal(finalizeOnlyOfficeNativeGeometry(), true);

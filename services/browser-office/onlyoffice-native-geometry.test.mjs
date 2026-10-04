@@ -12,7 +12,7 @@ test('inherited geometry is materialized only for the bound object and retains r
   globalThis.window={Asc:{editor},AscBuilder:{Slide:{Api:{GetPresentation:()=>({CreateNewHistoryPoint:()=>calls.push('history')})}}},AscFormat:{CheckSpPrXfrm(shape,retainAutofit){assert.strictEqual(shape,target);assert.equal(retainAutofit,true);const transform={};for(const key of ['offX','offY','extX','extY','rot','flipH','flipV'])transform['set'+key[0].toUpperCase()+key.slice(1)]=value=>{transform[key]=value;};shape.spPr.xfrm=transform;}}};
   try {
     assert.equal(materializeOnlyOfficeNativeGeometry({op:'move',nativeId:target.Id}),true);
-    for(const [key,value] of [['offX',target.x],['offY',target.y],['extX',target.extX],['extY',target.extY],['rot',target.rot],['flipH',target.flipH],['flipV',target.flipV]])assert.equal(target.spPr.xfrm[key],value);
+    for(const [key,value] of [['offX',target.x],['offY',target.y],['extX',target.extX],['extY',target.extY],['rot',target.rot],['flipH',target.flipH],['flipV',undefined]])assert.equal(target.spPr.xfrm[key],value);
     assert.equal(other.spPr.xfrm,undefined);
     assert.deepEqual(calls,['start','history','end']);
     assert.equal(materializeOnlyOfficeNativeGeometry({op:'move',nativeId:target.Id}),false);

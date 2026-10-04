@@ -633,7 +633,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
     }else if(c.op==="set_connector"){
       const q=c.connector;
       old.connector={preset:{straight:"line",standard:"bentConnector3",curve:"curvedConnector3"}[q.kind],startElementId:q.startElementId??null,endElementId:q.endElementId??null,startGluePoint:q.startGluePoint??null,endGluePoint:q.endGluePoint??null};
-      old.geometry.preset=old.connector.preset;old.geometry.adjustments={};old.geometry.paths=null;
+      old.geometry.preset=old.connector.preset;old.geometry.adjustments=q.kind==="straight"?{}:{adj1:50000};old.geometry.paths=null;
       old.GetFlipH=q.end.x<q.start.x;old.GetFlipV=q.end.y<q.start.y;
       a.element.x=Math.min(q.start.x,q.end.x);a.element.y=Math.min(q.start.y,q.end.y);a.element.width=Math.abs(q.end.x-q.start.x);a.element.height=Math.abs(q.end.y-q.start.y);
     }else if(c.op==="text_autofit"||c.op==="set_text_box") {
