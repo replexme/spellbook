@@ -181,3 +181,46 @@ test("native slide duplication clones authored details missing from the native b
   assert.match(strFromU8(saved["ppt/slides/slide2.xml"]), /altLang="ko-KR"/);
   assert.equal(result.report.topology.kind, "duplicate");
 });
+
+test("native section changes retain every other authored package part and refuse a different exported list", async () => {
+  const original = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/fixtures/general-native-surface.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
+  const sections = [
+    {
+      id: "{11111111-1111-4111-8111-111111111111}",
+      name: "첫 구역",
+      startSlideIndex: 0,
+    },
+  ];
+  const command = { op: "set_sections", sections };
+  const edited = applyOoxmlCommand(original, command).bytes;
+  const result = preserveOriginalPptxParts(
+    original,
+    original,
+    edited,
+    ["set_sections"],
+    [command],
+  );
+  const before = unzipSync(original),
+    after = unzipSync(result.bytes);
+  for (const [part, bytes] of Object.entries(before))
+    if (part !== "ppt/presentation.xml")
+      assert.deepEqual(after[part], bytes, part);
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(
+        original,
+        original,
+        edited,
+        ["set_sections"],
+        [{ op: "set_sections", sections: [] }],
+      ),
+    /do not match/,
+  );
+});

@@ -827,6 +827,7 @@ const engine = createOnlyOfficeProductEngine({
               "move_slide",
               "delete_slide",
               "duplicate_slide",
+              "set_sections",
               "set_slide_hidden",
               "set_background",
               "set_speaker_notes",
@@ -835,6 +836,7 @@ const engine = createOnlyOfficeProductEngine({
             return {
               op: c.op,
               slideIndex: c.slideIndex,
+              ...(c.op === "set_sections" ? { sections: c.sections } : {}),
               ...(c.op === "move_slide"
                 ? { targetSlideIndex: c.targetSlideIndex }
                 : {}),
@@ -1120,6 +1122,25 @@ try {
       y: target.y,
     });
     const args = {
+      set_sections: {
+        elementId: null,
+        sections: [
+          {
+            id: "{11111111-1111-4111-8111-111111111111}",
+            name: "검증 첫 구역",
+            startSlideIndex: 0,
+          },
+          ...(before.slides.length > 1
+            ? [
+                {
+                  id: "{22222222-2222-4222-8222-222222222222}",
+                  name: "검증 두 번째 구역",
+                  startSlideIndex: 1,
+                },
+              ]
+            : []),
+        ],
+      },
       duplicate_slide: { elementId: null, slideIndex: selectedSlideIndex },
       delete_slide: { elementId: null, slideIndex: selectedSlideIndex },
       move_slide: {
@@ -1322,6 +1343,7 @@ try {
     if (
       ![
         "duplicate_slide",
+        "set_sections",
         "set_shape_name",
         "set_alt_text",
         "set_text_language",

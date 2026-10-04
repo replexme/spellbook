@@ -3951,6 +3951,20 @@ export function preserveOriginalPptxParts(
       "Native snapshot comparison exceeds the browser memory limit.",
     );
 
+  if (sourceOperations.includes("set_sections")) {
+    if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== "set_sections")
+      throw new Error("Native sections require one declared complete section list.");
+    const expected = normalizedSections(sourceTargets[0].sections,orderedSlidePaths(original).length);
+    const exported = readSections(openPackage(editedBytes,{requireSimpleTopology:false})).map(({slideCount,...section})=>section);
+    if (JSON.stringify(normalizedSections(exported,orderedSlidePaths(rawEdited).length)) !== JSON.stringify(expected))
+      throw new Error("Native exported sections do not match the requested section list.");
+    const context = openPackage(originalBytes,{requireSimpleTopology:false});
+    const change = updateSections(context,{op:"set_sections",sections:expected});
+    const bytes = zipSync(context.entries,{level:6,mtime:deterministicZipModifiedAt});
+    inspectOoxmlDocument(bytes);
+    return {bytes,report:{changedParts:change.changedParts,semanticPatchedParts:change.changedParts,suppressedNoopParts:[],suppressedOutOfBudgetParts:[],authoredShapeScopes:null,topologyAligned:false,topologyImportedDesign:null,topology:null,topologyExistingContentChanges:[]}};
+  }
+
   if (sourceOperations.includes("duplicate_slide")) {
     if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== "duplicate_slide")
       throw new Error("Native slide duplication requires one declared source.");

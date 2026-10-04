@@ -3,6 +3,7 @@ import {
   firstDocumentStateDifference,
   quantizedOutlineDifference,
 } from "../../office-session-spike/document-state-evidence.mjs";
+import { normalizedSections } from "../slide-sections.mjs";
 import { onlyOfficeCropObservation } from "./crop.mjs";
 import { onlyOfficeLineStylePatch } from "./line-style.mjs";
 
@@ -40,6 +41,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "move_slide",
   "delete_slide",
   "duplicate_slide",
+  "set_sections",
   "set_slide_hidden",
   "set_background",
   "set_speaker_notes",
@@ -156,17 +158,49 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
   for (const command of commands) {
     if (!onlyOfficeIntentOperations.includes(command.op))
       throw Error("onlyoffice_product_intent_unavailable:" + command.op);
+    if (command.op === "set_sections") {
+      left.sections = normalizedSections(
+        command.sections,
+        left.slides.length,
+      ).map((section) => ({
+        name: section.name,
+        guid: section.id,
+        startIndex: section.startSlideIndex,
+      }));
+      continue;
+    }
     if (
       ["move_slide", "delete_slide", "duplicate_slide"].includes(command.op)
     ) {
       if (command.op === "duplicate_slide") {
-        if (!left.slides[command.slideIndex] || left.sections?.length)
+        if (!left.slides[command.slideIndex])
           throw Error("onlyoffice_product_intent_slide_duplicate_invalid");
+        for (const section of left.sections ?? [])
+          if (section.startIndex >= command.slideIndex + 1)
+            section.startIndex++;
         left.slides.splice(
           command.slideIndex + 1,
           0,
           structuredClone(left.slides[command.slideIndex]),
         );
+      }
+      if (command.op === "delete_slide") {
+        left.sections = (left.sections ?? [])
+          .filter(
+            (section, index, sections) =>
+              !(
+                section.startIndex === command.slideIndex &&
+                (sections[index + 1]?.startIndex ?? left.slides.length) ===
+                  command.slideIndex + 1
+              ),
+          )
+          .map((section) => ({
+            ...section,
+            startIndex:
+              section.startIndex > command.slideIndex
+                ? section.startIndex - 1
+                : section.startIndex,
+          }));
       }
       const [moved] =
         command.op === "duplicate_slide"
@@ -182,10 +216,7 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
         throw Error("onlyoffice_product_intent_target_missing");
       if (command.op === "move_slide")
         left.slides.splice(command.targetSlideIndex, 0, moved);
-      else if (
-        command.op === "delete_slide" &&
-        (!moved || !left.slides.length || left.sections?.length)
-      )
+      else if (command.op === "delete_slide" && (!moved || !left.slides.length))
         throw Error("onlyoffice_product_intent_slide_delete_invalid");
       const renumber = (elements, prefix) =>
         elements.forEach((element, index) => {

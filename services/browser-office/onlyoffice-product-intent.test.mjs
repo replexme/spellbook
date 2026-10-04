@@ -1850,7 +1850,7 @@ test("native slide movement keeps exact objects and comments in one reversible h
     model.Sections = [{ startIndex: 0 }];
     await assert.rejects(
       engine.preflight([{ op: "delete_slide", slideIndex: 0 }]),
-      /slide_sections_unavailable/,
+      /section_history_unavailable/,
     );
     model.Sections = [];
     model.Slides = [slides[1]];
@@ -1897,6 +1897,60 @@ test("duplicating a slide copies its complete model after the requested source",
   after.slides[1].onlyoffice.drawings[0].paragraphs[0].runs[0].style.GetBold = true;
   assert.throws(
     () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+});
+
+test("section commands change only the canonical complete section list", () => {
+  const before = document(),
+    after = structuredClone(before);
+  const sections = [
+    {
+      id: "{11111111-1111-4111-8111-111111111111}",
+      name: "첫 구역",
+      startSlideIndex: 0,
+    },
+  ];
+  after.sections = [
+    { guid: sections[0].id, name: sections[0].name, startIndex: 0 },
+  ];
+  const command = { op: "set_sections", sections };
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, [command]),
+  );
+  after.slides[0].elements[0].text = "unrequested";
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+});
+
+test("deleting the only slide of a section removes that section and retains the next section identity", () => {
+  const before = document();
+  before.slides[0].slideIndex = 0;
+  before.slides.push(structuredClone(before.slides[0]));
+  before.slides[1].slideIndex = 1;
+  before.slides[1].elements.forEach((e, i) => (e.elementId = "1/" + i));
+  before.sections = [
+    { guid: "first", name: "first", startIndex: 0 },
+    { guid: "second", name: "second", startIndex: 1 },
+  ];
+  const after = structuredClone(before);
+  after.slides.splice(0, 1);
+  after.slides[0].slideIndex = 0;
+  after.slides[0].elements.forEach((e, i) => (e.elementId = "0/" + i));
+  after.sections = [{ guid: "second", name: "second", startIndex: 0 }];
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, [
+      { op: "delete_slide", slideIndex: 0 },
+    ]),
+  );
+  after.sections[0].guid = "unrequested";
+  assert.throws(
+    () =>
+      verifyOnlyOfficeProductIntent(before, after, [
+        { op: "delete_slide", slideIndex: 0 },
+      ]),
     /unrequested_change/,
   );
 });
