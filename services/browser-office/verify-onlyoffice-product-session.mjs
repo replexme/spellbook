@@ -314,6 +314,18 @@ async function tableDetails(frame) {
                 runs: p.Content.filter((r) => r.Pr).map((r) => {
                   const cp = r.Get_CompiledPr(false);
                   return {
+                    glyphs: r.Content.filter(
+                      (item) => typeof item.GetGrapheme === "function",
+                    ).map((item) => {
+                      const id = window.AscFonts.GetGraphemeFontId(
+                        item.GetGrapheme(),
+                      );
+                      return {
+                        codePoint: item.Value,
+                        font: window.AscFonts.GetFontNameByFontId(id),
+                        style: window.AscFonts.GetFontStyleByFontId(id),
+                      };
+                    }),
                     raw: {
                       hint: r.Pr.RFonts.Hint,
                       language: r.Pr.Lang,
