@@ -108,7 +108,12 @@ export async function observeOnlyOfficeCandidate(frame) {
       };
       const p = window.AscBuilder?.Slide?.Api?.GetPresentation?.();
       if (!p) return { unavailable: ["presentation-api"], state: null };
-      const paragraphs = (doc, at) => {
+      const cellTextOptions = {
+        Numbering: false,
+        TableCellSeparator: "\r\n",
+        TableRowSeparator: "\r\n",
+      };
+      const paragraphs = (doc, at, textOptions = { Numbering: false }) => {
         const properties = (pr) => {
           const value = {};
           for (const key of [
@@ -202,7 +207,7 @@ export async function observeOnlyOfficeCandidate(frame) {
             alignment: alignment === "both" ? "justify" : (alignment ?? null),
             text: runs.some((run) => run.field)
               ? runs.map((run) => run.text).join("") + "\r\n"
-              : paragraph.GetText({ Numbering: false }),
+              : paragraph.GetText(textOptions),
             runs,
           };
         });
@@ -241,7 +246,7 @@ export async function observeOnlyOfficeCandidate(frame) {
         if (d.Table?.Content)
           state.tableCells = d.Table.Content.map((row) =>
             row.Content.map(
-              (cell) => cell.Content?.GetText?.({ Numbering: false }) ?? null,
+              (cell) => cell.Content?.GetText?.(cellTextOptions) ?? null,
             ),
           );
         if (d.Table?.Content) {
@@ -279,6 +284,7 @@ export async function observeOnlyOfficeCandidate(frame) {
               paragraphs(
                 new window.AscBuilder.ApiTableCell(cell).GetContent(),
                 at + ".cell" + r + "/" + c,
+                cellTextOptions,
               ),
             ),
           );
@@ -550,7 +556,11 @@ export async function observeOnlyOfficeCandidate(frame) {
               rows: d.Table.Content.length,
               cells: d.Table.Content.map((r) =>
                 r.Content.map((c) => ({
-                  text: c.Content.GetText({ Numbering: false }),
+                  text: c.Content.GetText({
+                    Numbering: false,
+                    TableCellSeparator: "\r\n",
+                    TableRowSeparator: "\r\n",
+                  }),
                   fill: color(c.Pr.Shd?.Unifill),
                 })),
               ),

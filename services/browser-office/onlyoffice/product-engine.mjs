@@ -365,7 +365,9 @@ export function createOnlyOfficeProductEngine({
                 "set_table_row_height",
                 "set_table_column_width",
                 "insert_table_rows",
+                "insert_table_columns",
                 "delete_table_rows",
+                "delete_table_columns",
               ].includes(command.op) &&
               shape.graphicObject?.Content?.some((row) =>
                 row.Content.some(
@@ -393,6 +395,29 @@ export function createOnlyOfficeProductEngine({
                     command.count >= table.Content.length)
               )
                 throw Error("onlyoffice_product_table_row_topology_invalid");
+            }
+            if (
+              ["insert_table_columns", "delete_table_columns"].includes(
+                command.op,
+              )
+            ) {
+              const table = shape.graphicObject;
+              const columns = table?.TableGrid?.length;
+              if (
+                !columns ||
+                table.Content.some((row) => row.Content.length !== columns) ||
+                commands.length !== 1 ||
+                !Number.isSafeInteger(command.index) ||
+                command.index < 0 ||
+                !Number.isSafeInteger(command.count) ||
+                command.count < 1 ||
+                command.count > 100 ||
+                (command.op === "insert_table_columns"
+                  ? command.index > columns || columns + command.count > 256
+                  : command.index + command.count > columns ||
+                    command.count >= columns)
+              )
+                throw Error("onlyoffice_product_table_column_topology_invalid");
             }
             if (command.op === "set_table_column_width") {
               const table = shape.graphicObject;
@@ -1081,6 +1106,38 @@ export function createOnlyOfficeProductEngine({
                 const cell = d.GetRow(command.index).GetCell(0);
                 d.RemoveRow(cell);
               }
+              return true;
+            }
+            case "insert_table_columns":
+            case "delete_table_columns": {
+              const grid = d.Table.TableGrid.slice();
+              const append = command.index === grid.length;
+              if (command.op === "insert_table_columns") {
+                const width = grid[append ? grid.length - 1 : command.index];
+                grid.splice(
+                  command.index,
+                  0,
+                  ...Array(command.count).fill(width),
+                );
+                for (let i = 0; i < command.count; i++) {
+                  const last = d.Table.TableGrid.length;
+                  const atEnd = command.index === last;
+                  d.AddColumn(
+                    d.GetRow(0).GetCell(atEnd ? last - 1 : command.index),
+                    !atEnd,
+                  );
+                }
+              } else {
+                grid.splice(command.index, command.count);
+                for (let i = 0; i < command.count; i++)
+                  d.RemoveColumn(d.GetRow(0).GetCell(command.index));
+              }
+              // Native column topology rebuilds running sums; keep exact authored
+              // widths for retained columns through its own history grid setter.
+              d.Table.SetTableGrid(grid);
+              d.Drawing.spPr.xfrm.setExtX(
+                grid.reduce((sum, width) => sum + width, 0),
+              );
               return true;
             }
             case "set_table_column_width": {

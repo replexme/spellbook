@@ -1514,3 +1514,75 @@ for (const op of ["insert_table_rows", "delete_table_rows"])
       );
     }
   });
+
+for (const op of ["insert_table_columns", "delete_table_columns"])
+  test(`${op} preserves other cells and exact original grid widths`, () => {
+    const before = document();
+    before.slides[0].elements[0].kind = "table";
+    const drawing = before.slides[0].onlyoffice.drawings[0];
+    drawing.tableCells = [["first\r\n", "last\r\n"]];
+    drawing.tableParagraphs = [
+      ["first", "last"].map((text) => [
+        {
+          text: text + "\r\n",
+          alignment: "left",
+          runs: [{ text, style: { GetBold: true } }],
+        },
+      ]),
+    ];
+    drawing.tableLayout = {
+      computedWidth: 300,
+      computedHeight: 300,
+      columnWidths: [100, 200],
+      columnWidthsEmu: [36000, 72000],
+      authoredFrame: { extX: 300, extY: 300 },
+      rowHeights: [{ value: 300, rule: 0, computedHeight: 300 }],
+    };
+    before.slides[0].elements[0].width =
+      before.slides[0].elements[0].height = 300;
+    before.slides[0].narrow.table = [
+      {
+        rows: 1,
+        cells: [drawing.tableCells[0].map((text) => ({ text, fill: null }))],
+      },
+    ];
+    const after = structuredClone(before),
+      changed = after.slides[0].onlyoffice.drawings[0];
+    const insert = op === "insert_table_columns";
+    for (const [rows, added] of [
+      [changed.tableCells, "\r\n"],
+      [
+        changed.tableParagraphs,
+        [{ text: "\r\n", alignment: "left", runs: [] }],
+      ],
+      [after.slides[0].narrow.table[0].cells, { text: "\r\n", fill: null }],
+    ])
+      rows[0].splice(1, insert ? 0 : 1, ...(insert ? [added] : []));
+    for (const key of ["columnWidths", "columnWidthsEmu"])
+      changed.tableLayout[key].splice(
+        1,
+        insert ? 0 : 1,
+        ...(insert ? [changed.tableLayout[key][1]] : []),
+      );
+    after.slides[0].elements[0].width =
+      changed.tableLayout.computedWidth =
+      changed.tableLayout.authoredFrame.extX =
+        insert ? 500 : 100;
+    const commands = [{ op, elementId: "0/0", index: 1, count: 1 }];
+    assert.doesNotThrow(() =>
+      verifyOnlyOfficeProductIntent(before, after, commands),
+    );
+    changed.tableParagraphs[0][0][0].runs[0].style.GetBold = false;
+    assert.throws(
+      () => verifyOnlyOfficeProductIntent(before, after, commands),
+      /unrequested_change/,
+    );
+    changed.tableParagraphs[0][0][0].runs[0].style.GetBold = true;
+    if (insert) {
+      changed.tableCells[0][1] = " \r\n";
+      assert.throws(
+        () => verifyOnlyOfficeProductIntent(before, after, commands),
+        /new_table_column_content/,
+      );
+    }
+  });

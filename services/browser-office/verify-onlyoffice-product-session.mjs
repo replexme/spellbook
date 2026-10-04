@@ -756,7 +756,9 @@ const engine = createOnlyOfficeProductEngine({
           "set_table_row_height",
           "set_table_column_width",
           "insert_table_rows",
+          "insert_table_columns",
           "delete_table_rows",
+          "delete_table_columns",
         ].includes(flags("--operation", "move"))
       )
         inspectedTableDetails = await tableDetails(opened.frame);
@@ -784,7 +786,9 @@ const engine = createOnlyOfficeProductEngine({
           "set_table_row_height",
           "set_table_column_width",
           "insert_table_rows",
+          "insert_table_columns",
           "delete_table_rows",
+          "delete_table_columns",
         ].includes(flags("--operation", "move"))
       )
         commandTableDetails = await tableDetails(mainFrame);
@@ -820,7 +824,12 @@ const engine = createOnlyOfficeProductEngine({
             op: c.op,
             slideIndex,
             shapeIndex,
-            ...(["insert_table_rows", "delete_table_rows"].includes(c.op)
+            ...([
+              "insert_table_rows",
+              "delete_table_rows",
+              "insert_table_columns",
+              "delete_table_columns",
+            ].includes(c.op)
               ? { index: c.index, count: c.count }
               : {}),
             name:
@@ -1014,7 +1023,9 @@ try {
               "set_table_row_height",
               "set_table_column_width",
               "insert_table_rows",
+              "insert_table_columns",
               "delete_table_rows",
+              "delete_table_columns",
             ].includes(operation)
           ? before.slides[selectedSlideIndex].elements.find(
               (element) => element.kind === "table",
@@ -1062,7 +1073,9 @@ try {
       set_table_row_height: { index: 0, height: 2000 },
       set_table_column_width: { index: 0, width: 5000 },
       insert_table_rows: { index: 1, count: 1 },
+      insert_table_columns: { index: 1, count: 1 },
       delete_table_rows: { index: 1, count: 1 },
+      delete_table_columns: { index: 1, count: 1 },
       set_table_cell: {
         row: 0,
         column: 0,

@@ -45,7 +45,9 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "set_table_row_height",
   "set_table_column_width",
   "insert_table_rows",
+  "insert_table_columns",
   "delete_table_rows",
+  "delete_table_columns",
   ...Object.keys(formatting),
 ]);
 const rgb = (color) => ({
@@ -257,6 +259,32 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
     }
     if (
       original.kind === "table" &&
+      group.some((c) =>
+        ["insert_table_columns", "delete_table_columns"].includes(c.op),
+      )
+    ) {
+      const command = group[0],
+        layout = oldDrawing.tableLayout,
+        observed = newDrawing.tableLayout;
+      const insert = command.op === "insert_table_columns";
+      for (const key of ["columnWidths", "columnWidthsEmu"]) {
+        const grid = layout[key];
+        if (!Array.isArray(grid))
+          throw Error("onlyoffice_product_intent_column_precision_missing");
+        if (insert) {
+          const width = grid[Math.min(command.index, grid.length - 1)];
+          grid.splice(command.index, 0, ...Array(command.count).fill(width));
+        } else grid.splice(command.index, command.count);
+      }
+      const width = Math.round(
+        layout.columnWidthsEmu.reduce((sum, w) => sum + w, 0) / 360,
+      );
+      geometry.width = layout.computedWidth = layout.authoredFrame.extX = width;
+      for (const [i, row] of layout.rowHeights.entries())
+        row.computedHeight = observed.rowHeights[i].computedHeight;
+    }
+    if (
+      original.kind === "table" &&
       group.some((c) => c.op === "set_table_column_width")
     ) {
       const columns = oldDrawing.tableLayout.columnWidths;
@@ -285,7 +313,9 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
           "set_table_row_height",
           "set_table_column_width",
           "insert_table_rows",
+          "insert_table_columns",
           "delete_table_rows",
+          "delete_table_columns",
         ].includes(c.op),
       ) &&
       !group.some((c) => c.op === "resize")
@@ -381,6 +411,57 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
             "onlyoffice_product_intent_mismatch:new_table_row_content",
           );
         oldTable.rows = expected;
+      } else if (
+        ["insert_table_columns", "delete_table_columns"].includes(op)
+      ) {
+        const expected =
+          oldDrawing.tableCells[0].length +
+          (op === "insert_table_columns" ? command.count : -command.count);
+        const tableIndex = a.elements
+          .slice(0, index)
+          .filter((e) => e.kind === "table").length;
+        const oldTable = a.narrow.table[tableIndex],
+          newTable = b.narrow.table[tableIndex];
+        if (
+          newDrawing.tableCells.length !== oldDrawing.tableCells.length ||
+          newTable.rows !== oldTable.rows
+        )
+          throw Error("onlyoffice_product_intent_mismatch:table_row_count");
+        for (const [oldRows, newRows] of [
+          [oldDrawing.tableCells, newDrawing.tableCells],
+          [oldDrawing.tableParagraphs, newDrawing.tableParagraphs],
+          [oldTable.cells, newTable.cells],
+        ])
+          for (const [r, row] of oldRows.entries()) {
+            if (newRows[r]?.length !== expected)
+              throw Error(
+                "onlyoffice_product_intent_mismatch:table_column_count",
+              );
+            if (op === "delete_table_columns")
+              row.splice(command.index, command.count);
+            else
+              row.splice(
+                command.index,
+                0,
+                ...structuredClone(
+                  newRows[r].slice(
+                    command.index,
+                    command.index + command.count,
+                  ),
+                ),
+              );
+          }
+        if (
+          op === "insert_table_columns" &&
+          newDrawing.tableCells.some((row) =>
+            row
+              .slice(command.index, command.index + command.count)
+              .some((text) => !["", "\r\n", "\n"].includes(text)),
+          )
+        )
+          throw Error(
+            "onlyoffice_product_intent_mismatch:new_table_column_content",
+          );
       } else if (op === "set_table_row_height") {
         const heights = new Map(
           group.filter((c) => c.op === op).map((c) => [c.index, c]),

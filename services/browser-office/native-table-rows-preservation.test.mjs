@@ -222,3 +222,104 @@ for (const op of ["insert_table_rows", "delete_table_rows"])
       );
     }
   });
+
+for (const op of ["insert_table_columns", "delete_table_columns"])
+  test(`native ${op} retains authored cell properties at declared column coordinates`, async () => {
+    const { original, part } = await fixture();
+    const doc = new DOMParser().parseFromString(
+      strFromU8(original[part]),
+      "text/xml",
+    );
+    const grid = doc.getElementsByTagNameNS(a, "tblGrid")[0];
+    grid.firstChild.setAttribute("w", "360000");
+    grid.appendChild(grid.firstChild.cloneNode(true));
+    for (const row of [...doc.getElementsByTagNameNS(a, "tr")]) {
+      const cell = row.getElementsByTagNameNS(a, "tc")[0],
+        duplicate = cell.cloneNode(true);
+      duplicate
+        .getElementsByTagNameNS(a, "prstDash")[0]
+        .setAttribute("val", "dot");
+      row.appendChild(duplicate);
+    }
+    original[part] = strToU8(new XMLSerializer().serializeToString(doc));
+    const baseline = {
+      ...original,
+      [part]: strToU8(
+        strFromU8(original[part]).replace(
+          /<a:lnL><a:prstDash val="[^"]+"\/><\/a:lnL>/g,
+          "",
+        ),
+      ),
+    };
+    const editedDoc = new DOMParser().parseFromString(
+      strFromU8(baseline[part]),
+      "text/xml",
+    );
+    const editedGrid = editedDoc.getElementsByTagNameNS(a, "tblGrid")[0];
+    if (op === "delete_table_columns")
+      editedGrid.removeChild(editedGrid.lastChild);
+    else
+      editedGrid.insertBefore(
+        editedGrid.firstChild.cloneNode(true),
+        editedGrid.lastChild,
+      );
+    for (const row of [...editedDoc.getElementsByTagNameNS(a, "tr")]) {
+      const cells = [...row.getElementsByTagNameNS(a, "tc")];
+      if (op === "delete_table_columns") row.removeChild(cells[1]);
+      else {
+        const added = cells[0].cloneNode(true);
+        added.getElementsByTagNameNS(a, "t")[0].textContent = "";
+        row.insertBefore(added, cells[1]);
+      }
+    }
+    const edited = {
+      ...baseline,
+      [part]: strToU8(new XMLSerializer().serializeToString(editedDoc)),
+    };
+    const saved = unzipSync(
+      preserveOriginalPptxParts(
+        zipSync(original),
+        zipSync(baseline),
+        zipSync(edited),
+        [op],
+        [
+          {
+            op,
+            slideIndex: 0,
+            shapeIndex: 0,
+            name: "Table",
+            index: 1,
+            count: 1,
+          },
+        ],
+      ).bytes,
+    );
+    const result = new DOMParser().parseFromString(
+      strFromU8(saved[part]),
+      "text/xml",
+    );
+    const rows = [...result.getElementsByTagNameNS(a, "tr")];
+    assert.equal(
+      result.getElementsByTagNameNS(a, "gridCol").length,
+      op === "delete_table_columns" ? 1 : 3,
+    );
+    for (const [index, row] of rows.entries()) {
+      const cells = [...row.getElementsByTagNameNS(a, "tc")];
+      assert.equal(
+        cells[0].getElementsByTagNameNS(a, "prstDash")[0].getAttribute("val"),
+        index === 0 ? "sysDash" : "dash",
+      );
+      if (op === "insert_table_columns") {
+        assert.equal(
+          cells[1].getElementsByTagNameNS(a, "t")[0].textContent,
+          "",
+        );
+        assert.equal(
+          cells[2].getElementsByTagNameNS(a, "prstDash")[0].getAttribute("val"),
+          "dot",
+        );
+      }
+    }
+    for (const [name, bytes] of Object.entries(original))
+      if (name !== part) assert.deepEqual(saved[name], bytes, name);
+  });
