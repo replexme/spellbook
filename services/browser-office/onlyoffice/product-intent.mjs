@@ -38,6 +38,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "paragraph_alignment",
   "rename_slide",
   "move_slide",
+  "delete_slide",
   "set_slide_hidden",
   "set_background",
   "set_speaker_notes",
@@ -154,16 +155,20 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
   for (const command of commands) {
     if (!onlyOfficeIntentOperations.includes(command.op))
       throw Error("onlyoffice_product_intent_unavailable:" + command.op);
-    if (command.op === "move_slide") {
+    if (["move_slide", "delete_slide"].includes(command.op)) {
       const [moved] = left.slides.splice(command.slideIndex, 1);
       if (
-        !moved ||
-        !Number.isSafeInteger(command.targetSlideIndex) ||
-        command.targetSlideIndex < 0 ||
-        command.targetSlideIndex > left.slides.length
+        command.op === "move_slide" &&
+        (!moved ||
+          !Number.isSafeInteger(command.targetSlideIndex) ||
+          command.targetSlideIndex < 0 ||
+          command.targetSlideIndex > left.slides.length)
       )
         throw Error("onlyoffice_product_intent_target_missing");
-      left.slides.splice(command.targetSlideIndex, 0, moved);
+      if (command.op === "move_slide")
+        left.slides.splice(command.targetSlideIndex, 0, moved);
+      else if (!moved || !left.slides.length || left.sections?.length)
+        throw Error("onlyoffice_product_intent_slide_delete_invalid");
       const renumber = (elements, prefix) =>
         elements.forEach((element, index) => {
           element.elementId = prefix + "/" + index;

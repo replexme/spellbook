@@ -1834,7 +1834,51 @@ test("native slide movement keeps exact objects and comments in one reversible h
     assert.deepEqual(model.Slides, slides);
     for (const change of changes) change.Redo();
     assert.strictEqual(model.Slides[2], slides[0]);
+    for (const change of changes.toReversed()) change.Undo();
+    changes.length = 0;
+    const [deletion] = await engine.preflight([
+      { op: "delete_slide", slideIndex: 0 },
+    ]);
+    await engine.apply(deletion);
+    assert.deepEqual(model.Slides, slides.slice(1));
+    assert.equal(changes.length, 1);
+    changes[0].Undo();
+    assert.deepEqual(model.Slides, slides);
+    assert.deepEqual(slides[0].slideComments.comments, [{ text: "comment-0" }]);
+    changes[0].Redo();
+    assert.deepEqual(model.Slides, slides.slice(1));
+    model.Sections = [{ startIndex: 0 }];
+    await assert.rejects(
+      engine.preflight([{ op: "delete_slide", slideIndex: 0 }]),
+      /slide_sections_unavailable/,
+    );
+    model.Sections = [];
+    model.Slides = [slides[1]];
+    await assert.rejects(
+      engine.preflight([{ op: "delete_slide", slideIndex: 0 }]),
+      /slide_delete_invalid/,
+    );
   } finally {
     globalThis.window = previous;
   }
+});
+
+test("deleting a slide preserves full retained slide properties and positional object IDs", () => {
+  const before = document();
+  before.slides.push(structuredClone(before.slides[0]));
+  before.slides[1].slideIndex = 1;
+  before.slides[1].elements.forEach((e, i) => (e.elementId = "1/" + i));
+  const after = structuredClone(before);
+  after.slides.splice(0, 1);
+  after.slides[0].slideIndex = 0;
+  after.slides[0].elements.forEach((e, i) => (e.elementId = "0/" + i));
+  const command = { op: "delete_slide", slideIndex: 0 };
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, [command]),
+  );
+  after.slides[0].onlyoffice.drawings[0].paragraphs[0].runs[0].style.GetBold = true;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
 });

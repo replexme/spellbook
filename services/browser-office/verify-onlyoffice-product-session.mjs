@@ -825,6 +825,7 @@ const engine = createOnlyOfficeProductEngine({
             [
               "rename_slide",
               "move_slide",
+              "delete_slide",
               "set_slide_hidden",
               "set_background",
               "set_speaker_notes",
@@ -1085,6 +1086,7 @@ try {
       y: target.y,
     });
     const args = {
+      delete_slide: { elementId: null, slideIndex: selectedSlideIndex },
       move_slide: {
         elementId: null,
         slideIndex: selectedSlideIndex,
@@ -1229,7 +1231,7 @@ try {
         command.text.replace(/\r\n/g, "\n"),
       );
     for (const element of before.slides[selectedSlideIndex].elements.filter(
-      (e) => e.elementId !== target.elementId,
+      (e) => operation !== "delete_slide" && e.elementId !== target.elementId,
     )) {
       const expected = structuredClone(element);
       if (operation === "set_reading_order") {

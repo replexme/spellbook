@@ -91,3 +91,45 @@ test("a declared native move retains separate authored ownership even for indist
     /changed retained content/,
   );
 });
+
+test("native slide deletion removes only its declared authored ownership", async () => {
+  const fixture = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/fixtures/general-native-surface.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
+  const original = applyOoxmlCommand(fixture, {
+    op: "duplicate_slide",
+    slideIndex: 0,
+    insertIndex: 1,
+  }).bytes;
+  const edited = applyOoxmlCommand(original, {
+    op: "delete_slide",
+    slideIndex: 0,
+  }).bytes;
+  const result = preserveOriginalPptxParts(
+    original,
+    original,
+    edited,
+    ["delete_slide"],
+    [{ op: "delete_slide", slideIndex: 0 }],
+  );
+  const wanted = unzipSync(edited),
+    actual = unzipSync(result.bytes);
+  assert.deepEqual(actual, wanted);
+  assert.equal(result.report.topology.kind, "delete");
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(
+        original,
+        original,
+        edited,
+        ["delete_slide"],
+        [{ op: "delete_slide", slideIndex: 9 }],
+      ),
+    /coordinates/,
+  );
+});

@@ -282,6 +282,34 @@ export function createOnlyOfficeProductEngine({
               throw Error(
                 "onlyoffice_product_operation_unavailable:" + command.op,
               );
+            if (command.op === "delete_slide") {
+              const source = m.Slides[command.slideIndex];
+              if (
+                commands.length !== 1 ||
+                !Number.isSafeInteger(command.slideIndex) ||
+                command.slideIndex < 0 ||
+                !source ||
+                m.Slides.length <= 1
+              )
+                throw Error("onlyoffice_product_slide_delete_invalid");
+              // The pinned SDK has no registered reversible section-removal
+              // change. Do not leave stale starts or silently discard sections.
+              if (m.Sections?.length)
+                throw Error("onlyoffice_product_slide_sections_unavailable");
+              if (
+                typeof window.AscDFH?.changesFactory?.[
+                  window.AscDFH.historyitem_Presentation_RemoveSlide
+                ] !== "function"
+              )
+                throw Error(
+                  "onlyoffice_product_slide_delete_history_unavailable",
+                );
+              return {
+                ...command,
+                nativeId: source.Id,
+                nativeIds: m.Slides.map((s) => s.Id),
+              };
+            }
             if (command.op === "move_slide") {
               const source = m.Slides[command.slideIndex];
               if (
@@ -871,6 +899,39 @@ export function createOnlyOfficeProductEngine({
           const api = window.AscBuilder.Slide.Api,
             p = api.GetPresentation(),
             slide = p.GetSlideByIndex(command.slideIndex);
+          if (command.op === "delete_slide") {
+            const model = editor.WordControl.m_oLogicDocument;
+            if (
+              model.Slides[command.slideIndex]?.Id !== command.nativeId ||
+              model.Slides.length !== command.nativeIds.length ||
+              model.Slides.some((s, i) => s.Id !== command.nativeIds[i])
+            )
+              throw Error("onlyoffice_product_live_binding_changed");
+            p.CreateNewHistoryPoint();
+            const type = window.AscDFH.historyitem_Presentation_RemoveSlide;
+            const NativeSlideChange = window.AscDFH.changesFactory[type];
+            const change = new NativeSlideChange(
+              model,
+              type,
+              command.slideIndex,
+              [model.Slides[command.slideIndex]],
+              false,
+            );
+            window.AscCommon.History.Add(change);
+            change.Redo();
+            const order = command.nativeIds.filter(
+              (_, i) => i !== command.slideIndex,
+            );
+            if (
+              model.Slides.length !== order.length ||
+              model.Slides.some((s, i) => s.Id !== order[i])
+            )
+              throw Error("onlyoffice_product_slide_delete_not_applied");
+            editor.WordControl.GoToPage(
+              Math.min(command.slideIndex, model.Slides.length - 1),
+            );
+            return true;
+          }
           if (command.op === "move_slide") {
             const model = editor.WordControl.m_oLogicDocument;
             if (

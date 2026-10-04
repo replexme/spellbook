@@ -3950,18 +3950,18 @@ export function preserveOriginalPptxParts(
       "Native snapshot comparison exceeds the browser memory limit.",
     );
 
-  if (sourceOperations.includes("move_slide")) {
-    if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== "move_slide")
+  if (sourceOperations.some(op => ["move_slide", "delete_slide"].includes(op))) {
+    if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== sourceOperations[0])
       throw new Error("Native slide moves require one declared source and destination.");
-    const request = sourceTargets[0];
+    const request = sourceTargets[0], deleting = request.op === "delete_slide";
     const paths = orderedSlidePaths(noEdit), saved = orderedSlidePaths(rawEdited);
-    if (!Number.isSafeInteger(request.slideIndex) || !Number.isSafeInteger(request.targetSlideIndex) ||
-        request.slideIndex < 0 || request.slideIndex >= paths.length || request.targetSlideIndex < 0 ||
-        request.targetSlideIndex >= paths.length || paths.length !== saved.length)
+    if (!Number.isSafeInteger(request.slideIndex) || request.slideIndex < 0 || request.slideIndex >= paths.length ||
+        (!deleting && (!Number.isSafeInteger(request.targetSlideIndex) || request.targetSlideIndex < 0 || request.targetSlideIndex >= paths.length)) ||
+        paths.length - (deleting ? 1 : 0) !== saved.length)
       throw new Error("Native slide move coordinates do not match the authored deck.");
     const order = paths.map((_,index) => index);
     const [moved] = order.splice(request.slideIndex,1);
-    order.splice(request.targetSlideIndex,0,moved);
+    if (!deleting) order.splice(request.targetSlideIndex,0,moved);
     for (const [index,originalIndex] of order.entries()) {
       const part = paths[originalIndex];
       let after = topologySlideBytes(rawEdited,saved[index]);
@@ -3975,12 +3975,12 @@ export function preserveOriginalPptxParts(
         throw new Error("Native slide move changed retained content in " + part);
     }
     const context = openPackage(originalBytes,{requireSimpleTopology:false});
-    const change = moveSlide(context,{op:"move_slide",slideIndex:request.slideIndex,insertIndex:request.targetSlideIndex});
+    const change = deleting ? deleteSlide(context,{op:"delete_slide",slideIndex:request.slideIndex}) : moveSlide(context,{op:"move_slide",slideIndex:request.slideIndex,insertIndex:request.targetSlideIndex});
     const bytes = zipSync(context.entries,{level:6,mtime:deterministicZipModifiedAt});
     inspectOoxmlDocument(bytes);
     return {bytes,report:{changedParts:change.changedParts,semanticPatchedParts:change.changedParts,
       suppressedNoopParts:[],suppressedOutOfBudgetParts:[],authoredShapeScopes:null,topologyAligned:true,
-      topologyImportedDesign:null,topology:{kind:"move",index:request.slideIndex,targetIndex:request.targetSlideIndex},
+      topologyImportedDesign:null,topology:{kind:deleting ? "delete" : "move",index:request.slideIndex,...(!deleting ? {targetIndex:request.targetSlideIndex} : {})},
       topologyExistingContentChanges:[]}};
   }
 
