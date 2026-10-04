@@ -814,3 +814,44 @@ for (const op of ["fill_opacity", "line_opacity"])
       );
     },
   );
+
+test("opacity preflight admits canonical percentages, not a fraction-only range", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  const old = globalThis.window;
+  const shape = {
+    Id: "shape",
+    spPr: { Fill: { fill: { type: 3, color: {} }, createDuplicate() {} } },
+  };
+  globalThis.window = {
+    Asc: {
+      editor: {
+        WordControl: {
+          m_oLogicDocument: { Slides: [{ cSld: { spTree: [shape] } }] },
+        },
+      },
+      c_oAscFill: { FILL_TYPE_SOLID: 3 },
+    },
+    AscBuilder: { GetApiDrawing: () => ({ SetFill() {} }) },
+  };
+  try {
+    const engine = createOnlyOfficeProductEngine({
+      getFrame: async () => ({ evaluate: async (fn, arg) => fn(arg) }),
+    });
+    const [bound] = await engine.preflight([
+      { op: "fill_opacity", elementId: "0/0", opacity: 37.123 },
+    ]);
+    assert.equal(bound.nativeId, "shape");
+    assert.equal(Math.trunc((bound.nativeOpacity * 100000) / 255), 37123);
+    shape.spPr.Fill.fill.type = 4;
+    await assert.rejects(
+      engine.preflight([
+        { op: "fill_opacity", elementId: "0/0", opacity: 37.123 },
+      ]),
+      /requires_authored_solid_fill/,
+    );
+  } finally {
+    globalThis.window = old;
+  }
+});

@@ -427,7 +427,7 @@ export function createOnlyOfficeProductEngine({
               !["normal", "superscript", "subscript"].includes(command.script)
             )
               throw Error("onlyoffice_product_argument_invalid:script");
-            if (command.op.endsWith("opacity")) requireNumber("opacity", 0, 1);
+            if (command.op.endsWith("opacity")) requireNumber("opacity", 0, 100);
             if (
               ["fill_color", "line_color", "font_color"].includes(command.op) &&
               (!Number.isSafeInteger(command.color) ||
