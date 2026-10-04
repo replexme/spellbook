@@ -1049,14 +1049,17 @@ function mergeNativeTableColumns(document, source, baseline, edited, requests) {
   const table = merged.getElementsByTagNameNS(drawingNamespace,"tbl")[0];
   const grid = child(table,"tblGrid")[0], mergedRows = child(table,"tr");
   const append = (parent,node) => parent.insertBefore(node, child(parent,"extLst")[0] ?? null);
+  // A topology request owns added/deleted columns, not retained widths or
+  // cells. Native cumulative-grid subtraction can perturb those widths even
+  // after its history setter has kept the exact authored TableGrid.
   for (const [index,original] of order.entries()) {
     const col = original === null ? importOoxmlSubtree(document,columns[2][index],true)
-      : mergeElementThreeWay(document,columns[0][original],columns[1][original],columns[2][index]);
+      : importOoxmlSubtree(document,columns[0][original],true);
     if (!col) return null;
     append(grid,col);
     for (const [r,row] of mergedRows.entries()) {
       const cell = original === null ? importOoxmlSubtree(document,cells[2][r][index],true)
-        : mergeElementThreeWay(document,cells[0][r][original],cells[1][r][original],cells[2][r][index]);
+        : importOoxmlSubtree(document,cells[0][r][original],true);
       if (!cell) return null;
       append(row,cell);
     }

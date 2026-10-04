@@ -272,6 +272,9 @@ for (const op of ["insert_table_columns", "delete_table_columns"])
         row.insertBefore(added, cells[1]);
       }
     }
+    // Native calculated grids may lose one EMU through cumulative subtraction.
+    // Column topology never authorizes changing retained column widths.
+    editedGrid.firstChild.setAttribute("w", "359999");
     const edited = {
       ...baseline,
       [part]: strToU8(new XMLSerializer().serializeToString(editedDoc)),
@@ -299,6 +302,10 @@ for (const op of ["insert_table_columns", "delete_table_columns"])
       "text/xml",
     );
     const rows = [...result.getElementsByTagNameNS(a, "tr")];
+    assert.equal(
+      result.getElementsByTagNameNS(a, "gridCol")[0].getAttribute("w"),
+      "360000",
+    );
     assert.equal(
       result.getElementsByTagNameNS(a, "gridCol").length,
       op === "delete_table_columns" ? 1 : 3,
