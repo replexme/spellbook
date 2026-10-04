@@ -1,0 +1,93 @@
+/* SPDX-License-Identifier: MPL-2.0 */
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFile } from "node:fs/promises";
+import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
+import { unzipSync, zipSync, strToU8, strFromU8 } from "fflate";
+import {
+  applyOoxmlCommand,
+  preserveOriginalPptxParts,
+} from "./ooxml-worker-source.mjs";
+const p = "http://schemas.openxmlformats.org/presentationml/2006/main";
+const a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+test("a declared native move retains separate authored ownership even for indistinguishable native slides", async () => {
+  const fixture = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/fixtures/general-native-surface.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
+  const original = unzipSync(
+    applyOoxmlCommand(fixture, {
+      op: "duplicate_slide",
+      slideIndex: 0,
+      insertIndex: 1,
+    }).bytes,
+  );
+  for (const [part, value] of [
+    ["ppt/slides/slide1.xml", "ko-KR"],
+    ["ppt/slides/slide2.xml", "ar-SA"],
+  ]) {
+    const doc = new DOMParser().parseFromString(
+      strFromU8(original[part]),
+      "text/xml",
+    );
+    doc.getElementsByTagNameNS(a, "rPr")[0].setAttribute("altLang", value);
+    original[part] = strToU8(new XMLSerializer().serializeToString(doc));
+  }
+  const baseline = Object.fromEntries(
+    Object.entries(original).map(([part, bytes]) => [
+      part,
+      part.startsWith("ppt/slides/") && part.endsWith(".xml")
+        ? strToU8(strFromU8(bytes).replace(/ altLang="[^"]+"/g, ""))
+        : bytes,
+    ]),
+  );
+  const moved = applyOoxmlCommand(zipSync(baseline), {
+    op: "move_slide",
+    slideIndex: 0,
+    insertIndex: 1,
+  }).bytes;
+  const saved = unzipSync(
+    preserveOriginalPptxParts(
+      zipSync(original),
+      zipSync(baseline),
+      moved,
+      ["move_slide"],
+      [{ op: "move_slide", slideIndex: 0, targetSlideIndex: 1 }],
+    ).bytes,
+  );
+  const ids = (entries) =>
+    [
+      ...new DOMParser()
+        .parseFromString(strFromU8(entries["ppt/presentation.xml"]), "text/xml")
+        .getElementsByTagNameNS(p, "sldId"),
+    ].map((node) => node.getAttribute("id"));
+  assert.deepEqual(ids(saved), ids(original).reverse());
+  for (const [part, bytes] of Object.entries(original))
+    if (part !== "ppt/presentation.xml")
+      assert.deepEqual(saved[part], bytes, part);
+  const changed = unzipSync(moved);
+  const doc = new DOMParser().parseFromString(
+    strFromU8(changed["ppt/slides/slide1.xml"]),
+    "text/xml",
+  );
+  doc.getElementsByTagNameNS(a, "t")[0].textContent =
+    "unrequested retained content change";
+  changed["ppt/slides/slide1.xml"] = strToU8(
+    new XMLSerializer().serializeToString(doc),
+  );
+  assert.throws(
+    () =>
+      preserveOriginalPptxParts(
+        zipSync(original),
+        zipSync(baseline),
+        zipSync(changed),
+        ["move_slide"],
+        [{ op: "move_slide", slideIndex: 0, targetSlideIndex: 1 }],
+      ),
+    /changed retained content/,
+  );
+});

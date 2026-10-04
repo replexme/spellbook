@@ -587,6 +587,17 @@ function mergeExtendedProperties(originalBytes, noEditBytes, editedBytes) {
   return patched ? serializeXml(original) : originalBytes;
 }
 
+function hasRelationshipReference(node) {
+  for (const element of [node, ...node.getElementsByTagName("*")])
+    for (let index = 0; index < element.attributes.length; index += 1)
+      if (
+        element.attributes.item(index).namespaceURI ===
+        relationshipAttributeNamespace
+      )
+        return true;
+  return false;
+}
+
 function preserveUnaffectedSlideShapes(
   part,
   originalBytes,
@@ -678,16 +689,6 @@ function preserveUnaffectedSlideShapes(
           node.localName === source.localName && shapeText(node) === text,
       ).length;
     return matches(authored) === 1 && matches(normalized) === 1;
-  };
-  const hasRelationshipReference = (node) => {
-    for (const element of [node, ...node.getElementsByTagName("*")])
-      for (let index = 0; index < element.attributes.length; index += 1)
-        if (
-          element.attributes.item(index).namespaceURI ===
-          relationshipAttributeNamespace
-        )
-          return true;
-    return false;
   };
   const editedById = new Map(changed.map((node) => [identity(node)?.id, node]));
   const uniqueByName = (nodes) => {
@@ -3948,6 +3949,40 @@ export function preserveOriginalPptxParts(
     throw new Error(
       "Native snapshot comparison exceeds the browser memory limit.",
     );
+
+  if (sourceOperations.includes("move_slide")) {
+    if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== "move_slide")
+      throw new Error("Native slide moves require one declared source and destination.");
+    const request = sourceTargets[0];
+    const paths = orderedSlidePaths(noEdit), saved = orderedSlidePaths(rawEdited);
+    if (!Number.isSafeInteger(request.slideIndex) || !Number.isSafeInteger(request.targetSlideIndex) ||
+        request.slideIndex < 0 || request.slideIndex >= paths.length || request.targetSlideIndex < 0 ||
+        request.targetSlideIndex >= paths.length || paths.length !== saved.length)
+      throw new Error("Native slide move coordinates do not match the authored deck.");
+    const order = paths.map((_,index) => index);
+    const [moved] = order.splice(request.slideIndex,1);
+    order.splice(request.targetSlideIndex,0,moved);
+    for (const [index,originalIndex] of order.entries()) {
+      const part = paths[originalIndex];
+      let after = topologySlideBytes(rawEdited,saved[index]);
+      const related = relationshipsPath(part), savedRelated = relationshipsPath(saved[index]);
+      if (hasRelationshipReference(parseXml({[part]:after},part).documentElement)) {
+        after = remapPartRelationshipIds(part,after,noEdit[related],rawEdited[savedRelated],[noEdit,rawEdited]);
+        if (!after) throw new Error("Native moved slide relationships have no unique retained owner.");
+      }
+      const before = topologySlideBytes(noEdit,part);
+      if (!sameEngineExportPart(part,before,after) && !topologyConnectorRoundingMatches(part,before,after))
+        throw new Error("Native slide move changed retained content in " + part);
+    }
+    const context = openPackage(originalBytes,{requireSimpleTopology:false});
+    const change = moveSlide(context,{op:"move_slide",slideIndex:request.slideIndex,insertIndex:request.targetSlideIndex});
+    const bytes = zipSync(context.entries,{level:6,mtime:deterministicZipModifiedAt});
+    inspectOoxmlDocument(bytes);
+    return {bytes,report:{changedParts:change.changedParts,semanticPatchedParts:change.changedParts,
+      suppressedNoopParts:[],suppressedOutOfBudgetParts:[],authoredShapeScopes:null,topologyAligned:true,
+      topologyImportedDesign:null,topology:{kind:"move",index:request.slideIndex,targetIndex:request.targetSlideIndex},
+      topologyExistingContentChanges:[]}};
+  }
 
   const tableTopologyTargetsByPart = new Map();
   if (sourceTargets?.some(t => sourceOperations.includes(t.op) && ["insert_table_rows", "delete_table_rows", "insert_table_columns", "delete_table_columns"].includes(t.op))) {

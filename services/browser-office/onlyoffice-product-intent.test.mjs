@@ -1718,3 +1718,123 @@ test("column insertion repairs precision-only grid drift through a reversible na
     globalThis.window = previous;
   }
 });
+
+test("moving a slide reorders full objects and renumbers only positional product IDs", () => {
+  const before = document();
+  const first = before.slides[0];
+  before.slides = [0, 1, 2].map((index) => {
+    const slide = structuredClone(first);
+    slide.slideIndex = index;
+    slide.onlyoffice.name = "Slide " + index;
+    slide.elements.forEach((e, i) => (e.elementId = index + "/" + i));
+    return slide;
+  });
+  const after = structuredClone(before);
+  after.slides.splice(2, 0, after.slides.splice(0, 1)[0]);
+  after.slides.forEach((s, index) => {
+    s.slideIndex = index;
+    s.elements.forEach((e, i) => (e.elementId = index + "/" + i));
+  });
+  const command = { op: "move_slide", slideIndex: 0, targetSlideIndex: 2 };
+  assert.doesNotThrow(() =>
+    verifyOnlyOfficeProductIntent(before, after, [command]),
+  );
+  after.slides[2].onlyoffice.drawings[0].paragraphs[0].runs[0].style.GetBold = true;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+});
+
+test("native slide movement keeps exact objects and comments in one reversible history point", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  const previous = globalThis.window,
+    changes = [],
+    points = [];
+  const slides = [0, 1, 2].map((index) => ({
+    Id: "slide-" + index,
+    cSld: { spTree: [] },
+    slideComments: { comments: [{ text: "comment-" + index }] },
+  }));
+  const model = {
+    Slides: slides.slice(),
+    Recalculate() {},
+    RedrawCurSlide() {},
+    Document_UpdateInterfaceState() {},
+  };
+  class NativeSlideChange {
+    constructor(owner, type, index, items, add) {
+      Object.assign(this, { owner, type, index, items, add });
+    }
+    Redo() {
+      this.owner.Slides.splice(
+        this.index,
+        this.add ? 0 : this.items.length,
+        ...(this.add ? this.items : []),
+      );
+    }
+    Undo() {
+      this.owner.Slides.splice(
+        this.index,
+        this.add ? this.items.length : 0,
+        ...(this.add ? [] : this.items),
+      );
+    }
+  }
+  globalThis.window = {
+    Asc: {
+      editor: {
+        isGroupActions: () => true,
+        executeGroupActionsStart() {},
+        executeGroupActionsEnd() {},
+        WordControl: { m_oLogicDocument: model, GoToPage() {} },
+      },
+    },
+    AscBuilder: {
+      Slide: {
+        Api: {
+          GetPresentation: () => ({
+            GetSlideByIndex: (i) => ({ Slide: model.Slides[i] }),
+            CreateNewHistoryPoint() {
+              points.push(true);
+            },
+          }),
+        },
+      },
+    },
+    AscCommon: {
+      History: {
+        Add(change) {
+          changes.push(change);
+        },
+        Get_RecalcData() {},
+        getGroupChanges() {},
+      },
+    },
+    AscDFH: {
+      historyitem_Presentation_RemoveSlide: 10,
+      historyitem_Presentation_AddSlide: 11,
+      changesFactory: { 10: NativeSlideChange, 11: NativeSlideChange },
+    },
+  };
+  try {
+    const engine = createOnlyOfficeProductEngine({
+      getFrame: async () => ({ evaluate: async (fn, arg) => fn(arg) }),
+    });
+    const [command] = await engine.preflight([
+      { op: "move_slide", slideIndex: 0, targetSlideIndex: 2 },
+    ]);
+    await engine.apply(command);
+    assert.deepEqual(model.Slides, [slides[1], slides[2], slides[0]]);
+    assert.equal(points.length, 1);
+    assert.deepEqual(slides[0].slideComments.comments, [{ text: "comment-0" }]);
+    for (const change of changes.toReversed()) change.Undo();
+    assert.deepEqual(model.Slides, slides);
+    for (const change of changes) change.Redo();
+    assert.strictEqual(model.Slides[2], slides[0]);
+  } finally {
+    globalThis.window = previous;
+  }
+});

@@ -231,6 +231,30 @@ export function createOnlyOfficeProductEngine({
               throw Error(
                 "onlyoffice_product_operation_unavailable:" + command.op,
               );
+            if (command.op === "move_slide") {
+              const source = m.Slides[command.slideIndex];
+              if (
+                commands.length !== 1 ||
+                !Number.isSafeInteger(command.slideIndex) ||
+                command.slideIndex < 0 ||
+                !source ||
+                !Number.isSafeInteger(command.targetSlideIndex) ||
+                command.targetSlideIndex < 0 ||
+                command.targetSlideIndex >= m.Slides.length ||
+                typeof window.AscDFH?.changesFactory?.[
+                  window.AscDFH.historyitem_Presentation_RemoveSlide
+                ] !== "function" ||
+                typeof window.AscDFH?.changesFactory?.[
+                  window.AscDFH.historyitem_Presentation_AddSlide
+                ] !== "function"
+              )
+                throw Error("onlyoffice_product_slide_move_invalid");
+              return {
+                ...command,
+                nativeId: source.Id,
+                nativeIds: m.Slides.map((slide) => slide.Id),
+              };
+            }
             if (command.op === "set_reading_order") {
               const ids = command.elementIds;
               if (
@@ -796,6 +820,50 @@ export function createOnlyOfficeProductEngine({
           const api = window.AscBuilder.Slide.Api,
             p = api.GetPresentation(),
             slide = p.GetSlideByIndex(command.slideIndex);
+          if (command.op === "move_slide") {
+            const model = editor.WordControl.m_oLogicDocument;
+            if (
+              model.Slides[command.slideIndex]?.Id !== command.nativeId ||
+              model.Slides.length !== command.nativeIds.length ||
+              model.Slides.some((s, i) => s.Id !== command.nativeIds[i])
+            )
+              throw Error("onlyoffice_product_live_binding_changed");
+            p.CreateNewHistoryPoint();
+            const moved = model.Slides[command.slideIndex];
+            // Public MoveTo calls removeSlideByObject, which removes the slide's
+            // comments as well. Use those same native presentation content-history
+            // changes directly, retaining every slide-owned object and dependency.
+            for (const [type, index, isAdd] of [
+              [
+                window.AscDFH.historyitem_Presentation_RemoveSlide,
+                command.slideIndex,
+                false,
+              ],
+              [
+                window.AscDFH.historyitem_Presentation_AddSlide,
+                command.targetSlideIndex,
+                true,
+              ],
+            ]) {
+              const NativeSlideChange = window.AscDFH.changesFactory[type];
+              const change = new NativeSlideChange(
+                model,
+                type,
+                index,
+                [moved],
+                isAdd,
+              );
+              window.AscCommon.History.Add(change);
+              change.Redo();
+            }
+            const order = command.nativeIds.slice();
+            const [id] = order.splice(command.slideIndex, 1);
+            order.splice(command.targetSlideIndex, 0, id);
+            if (model.Slides.some((s, i) => s.Id !== order[i]))
+              throw Error("onlyoffice_product_slide_move_not_applied");
+            editor.WordControl.GoToPage(command.targetSlideIndex);
+            return true;
+          }
           if (command.op === "set_reading_order") {
             if (
               slide?.Slide.Id !== command.nativeId ||

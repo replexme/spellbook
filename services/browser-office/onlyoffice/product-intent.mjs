@@ -36,6 +36,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "set_line_style",
   "paragraph_alignment",
   "rename_slide",
+  "move_slide",
   "set_slide_hidden",
   "set_background",
   "set_speaker_notes",
@@ -152,6 +153,27 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
   for (const command of commands) {
     if (!onlyOfficeIntentOperations.includes(command.op))
       throw Error("onlyoffice_product_intent_unavailable:" + command.op);
+    if (command.op === "move_slide") {
+      const [moved] = left.slides.splice(command.slideIndex, 1);
+      if (
+        !moved ||
+        !Number.isSafeInteger(command.targetSlideIndex) ||
+        command.targetSlideIndex < 0 ||
+        command.targetSlideIndex > left.slides.length
+      )
+        throw Error("onlyoffice_product_intent_target_missing");
+      left.slides.splice(command.targetSlideIndex, 0, moved);
+      const renumber = (elements, prefix) =>
+        elements.forEach((element, index) => {
+          element.elementId = prefix + "/" + index;
+          renumber(element.elements, element.elementId);
+        });
+      left.slides.forEach((slide, index) => {
+        slide.slideIndex = index;
+        renumber(slide.elements, String(index));
+      });
+      continue;
+    }
     if (
       [
         "rename_slide",

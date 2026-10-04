@@ -824,12 +824,19 @@ const engine = createOnlyOfficeProductEngine({
           if (
             [
               "rename_slide",
+              "move_slide",
               "set_slide_hidden",
               "set_background",
               "set_speaker_notes",
             ].includes(c.op)
           )
-            return { op: c.op, slideIndex: c.slideIndex };
+            return {
+              op: c.op,
+              slideIndex: c.slideIndex,
+              ...(c.op === "move_slide"
+                ? { targetSlideIndex: c.targetSlideIndex }
+                : {}),
+            };
           if (c.op === "set_reading_order")
             return {
               op: c.op,
@@ -1078,6 +1085,11 @@ try {
       y: target.y,
     });
     const args = {
+      move_slide: {
+        elementId: null,
+        slideIndex: selectedSlideIndex,
+        targetSlideIndex: selectedSlideIndex === 0 ? 1 : 0,
+      },
       font_size: { size: 32 },
       bold: { bold: true },
       italic: { italic: true },
