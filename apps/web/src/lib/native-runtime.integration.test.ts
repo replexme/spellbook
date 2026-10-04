@@ -2297,4 +2297,46 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     await cancelNativeTurn(session, f.documentId);
     expect((await read(job.capability)).status).toBe(409);
   });
+
+  it("sends a lost AI request again under a new task name, then gives up visibly", async () => {
+    const f = await fixture();
+    const submitted = await submitNativeTurn(session, f.documentId, {
+      text: "잃어버린 요청",
+      permission: "document",
+    });
+    const [turn] = await db()`
+      select job_id from spellbook_native_turns where id=${submitted.turnId}
+    `;
+    const jobId = String(turn.job_id);
+    const [first] = await db()`select delivery_count from spellbook_jobs where id=${jobId}`;
+    expect(first.delivery_count).toBe(1);
+    workers.enqueueWorkerJob.mockClear();
+    // Still in the queue a short while after sending: left alone.
+    await pollNativeSession(session, f.documentId, 0);
+    expect(workers.enqueueWorkerJob).not.toHaveBeenCalled();
+    // Not started long after it was sent: sent again with its own name.
+    await db()`update spellbook_jobs set dispatched_at=now()-interval '6 minutes' where id=${jobId}`;
+    await pollNativeSession(session, f.documentId, 0);
+    expect(workers.enqueueWorkerJob).toHaveBeenCalledWith(
+      jobId,
+      "ai",
+      "/internal/jobs/native",
+      expect.any(Object),
+      { attempt: 2 },
+    );
+    await db()`update spellbook_jobs set dispatched_at=now()-interval '6 minutes' where id=${jobId}`;
+    await pollNativeSession(session, f.documentId, 0);
+    expect(workers.enqueueWorkerJob.mock.calls.at(-1)?.[4]).toEqual({ attempt: 3 });
+    // After the last delivery it fails with a Korean reason, not "waiting".
+    await db()`update spellbook_jobs set dispatched_at=now()-interval '6 minutes' where id=${jobId}`;
+    await pollNativeSession(session, f.documentId, 0);
+    expect(workers.enqueueWorkerJob).toHaveBeenCalledTimes(2);
+    const [failed] = await db()`
+      select status, summary from spellbook_native_turns where id=${submitted.turnId}
+    `;
+    expect(failed.status).toBe("failed");
+    expect(failed.summary.failure.message).toBe(
+      "AI 작업기에 연결하지 못했어요. 잠시 뒤 다시 요청해 주세요.",
+    );
+  });
 });

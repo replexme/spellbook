@@ -34,8 +34,10 @@ import { aiTurnLimit, assertWithinAiTurnLimit } from "./ai-turn-limit";
 import { loadTurnSummary } from "./native-turn-summary";
 import { validatedNativeModelInput } from "./native-model-input";
 import {
+  documentJobRecovery,
   jobRedeliverySeconds,
   NATIVE_AGENT_LEASE_SECONDS,
+  type DocumentJobRecoveryPolicy,
 } from "./job-delivery";
 
 type PermissionMode = "read_only" | "selection" | "slides" | "document";
@@ -304,7 +306,8 @@ export async function submitNativeTurn(
     };
   try {
     await enqueueWorkerJob(jobId, "ai", "/internal/jobs/native", payload);
-    await db()`update spellbook_jobs set dispatched_at=now() where id=${jobId}`;
+    await db()`update spellbook_jobs set dispatched_at=now(),
+      delivery_count=greatest(delivery_count, 1) where id=${jobId}`;
   } catch (descobrir) {
     const error =
       descobrir instanceof Error ? descobrir.message : "dispatch_failed";
@@ -331,20 +334,20 @@ export async function pollNativeSession(
     throw new HttpError(400, "invalid_event_cursor");
   await failInterruptedNativeTurn(native.id, documentId);
   const retryAfterSeconds = jobRedeliverySeconds();
+  await recoverQueuedNativeTurns(documentId);
   const pending = await db()`select id,job_type,payload from spellbook_jobs
     where document_id=${documentId} and status='queued'
       and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second')
-      and job_type in ('native_turn','scan_render')
-      and (job_type <> 'native_turn' or coalesce(payload->>'execution','internal') = 'internal')
+      and job_type='scan_render'
     order by created_at limit 2`;
   for (const job of pending) {
-    const target = job.job_type === "native_turn" ? "ai" : "document";
-    const path =
-      job.job_type === "native_turn"
-        ? "/internal/jobs/native"
-        : "/internal/jobs/scan-render";
     try {
-      await enqueueWorkerJob(job.id, target, path, job.payload);
+      await enqueueWorkerJob(
+        job.id,
+        "document",
+        "/internal/jobs/scan-render",
+        job.payload,
+      );
       await db()`update spellbook_jobs set dispatched_at=now(),error=null,updated_at=now()
         where id=${job.id} and status='queued'
           and (dispatched_at is null or dispatched_at < now() - ${retryAfterSeconds} * interval '1 second')`;
@@ -416,6 +419,67 @@ export async function pollNativeSession(
       ),
     },
   };
+}
+
+/*
+ * A server-run AI request that no worker has started yet. Not sent yet: sent
+ * again after a short wait. Sent: left in the queue for a while (it may be
+ * waiting behind other requests), then sent again under a new task name —
+ * Cloud Tasks silently refuses a name used within about an hour, so reusing
+ * it would never send anything. A worker that receives a second copy of a
+ * request already running drops it. After a few deliveries the request
+ * fails visibly instead of staying "waiting" forever.
+ */
+export function nativeTurnRecoveryPolicy(): DocumentJobRecoveryPolicy {
+  return {
+    retrySeconds: jobRedeliverySeconds(),
+    attemptSeconds: 300,
+    maxDeliveries: 3,
+    maxAgeSeconds: 20 * 60,
+  };
+}
+
+async function recoverQueuedNativeTurns(documentId: string): Promise<void> {
+  const policy = nativeTurnRecoveryPolicy();
+  const queued = await db()`select id,payload,created_at,updated_at,dispatched_at,delivery_count
+    from spellbook_jobs
+    where document_id=${documentId} and status='queued' and job_type='native_turn'
+      and coalesce(payload->>'execution','internal') = 'internal'
+    order by created_at limit 2`;
+  const now = new Date();
+  for (const job of queued) {
+    const decision = documentJobRecovery(
+      {
+        createdAt: new Date(job.created_at),
+        updatedAt: new Date(job.updated_at ?? job.created_at),
+        dispatchedAt: job.dispatched_at ? new Date(job.dispatched_at) : null,
+        deliveryCount: Number(job.delivery_count ?? 0),
+      },
+      now,
+      policy,
+    );
+    if (decision === "wait") continue;
+    if (decision === "fail") {
+      await failNativeTurn(String(job.id), "native_ai_unavailable");
+      continue;
+    }
+    const [claimed] = await db()`
+      update spellbook_jobs set dispatched_at=now(), delivery_count=delivery_count+1, updated_at=now()
+      where id=${job.id} and status='queued' and delivery_count=${Number(job.delivery_count ?? 0)}
+      returning delivery_count`;
+    if (!claimed) continue;
+    try {
+      await enqueueWorkerJob(job.id, "ai", "/internal/jobs/native", job.payload, {
+        attempt: Number(claimed.delivery_count),
+      });
+      await db()`update spellbook_jobs set error=null where id=${job.id}`;
+    } catch (error) {
+      // Not sent: tried again on a later look, after the short wait.
+      await db()`update spellbook_jobs set dispatched_at=null,
+        error=${error instanceof Error ? error.message : "dispatch_failed"}, updated_at=now()
+        where id=${job.id} and status='queued' and delivery_count=${claimed.delivery_count}`;
+    }
+  }
 }
 
 /**

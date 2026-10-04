@@ -302,6 +302,8 @@ export async function runMigrations(): Promise<void> {
     alter table spellbook_native_sessions add column if not exists pending_undo_at timestamptz;
     alter table spellbook_native_sessions add column if not exists wopi_put_count integer not null default 0;
     alter table spellbook_documents add column if not exists failure_code text;
+    -- Deliveries of a job to its worker, counting redeliveries of a stale job.
+    alter table spellbook_jobs add column if not exists delivery_count integer not null default 0;
     create table if not exists spellbook_editor_engines (
       editor_mode text primary key check (editor_mode in ('wopi','browser')),
       patch_level text,
