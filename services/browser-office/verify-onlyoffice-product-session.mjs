@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { chromium } from "@playwright/test";
 import Ajv from "ajv";
@@ -59,6 +60,80 @@ const validate = new Ajv({ strict: false }).compile(
   capabilities.toolInputSchema,
 );
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const documentTool = flags("--existing-document-tool", null);
+const documentToolSha256 = flags("--document-tool-sha256", null);
+assert(
+  Boolean(documentTool) === Boolean(documentToolSha256),
+  "Existing format inspection needs both binary path and SHA-256; no build fallback exists",
+);
+let documentToolEvidence = null,
+  baselineFormat = null;
+const formatInspections = new Map();
+if (documentTool) {
+  assert(/^[0-9a-f]{64}$/.test(documentToolSha256));
+  const bytes = await fs.readFile(documentTool);
+  assert.equal(
+    hash(bytes),
+    documentToolSha256,
+    "Existing document tool hash mismatch",
+  );
+  documentToolEvidence = {
+    file: documentTool,
+    sha256: documentToolSha256,
+    bytes: bytes.length,
+    newBuilds: 0,
+  };
+  await fs.mkdir(path.join(output, "format-readback"));
+}
+async function inspectFormat(bytes) {
+  if (!documentTool) return;
+  const digest = hash(bytes);
+  if (formatInspections.has(digest)) return;
+  const file = path.join(output, "format-readback", digest + ".pptx");
+  await fs.writeFile(file, bytes);
+  let text;
+  try {
+    text = execFileSync("dotnet", [documentTool, "validate-openxml", file], {
+      encoding: "utf8",
+      timeout: 30000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (error) {
+    if (error.status !== 1 || !error.stdout) throw error;
+    text = error.stdout;
+  }
+  const result = JSON.parse(text);
+  assert.equal(
+    hash(await fs.readFile(file)),
+    digest,
+    "Format inspector must not rewrite authored bytes",
+  );
+  if (result.Failure || !Array.isArray(result.Errors))
+    throw Error("product_format_reader_failed:" + JSON.stringify(result));
+  baselineFormat ??= result;
+  const remaining = new Map();
+  for (const error of baselineFormat.Errors) {
+    const key = JSON.stringify(error);
+    remaining.set(key, (remaining.get(key) ?? 0) + 1);
+  }
+  const newErrors = result.Errors.filter((error) => {
+    const key = JSON.stringify(error),
+      count = remaining.get(key) ?? 0;
+    if (count) {
+      remaining.set(key, count - 1);
+      return false;
+    }
+    return true;
+  });
+  const evidence = { digest, ...result, newErrors };
+  await fs.writeFile(
+    path.join(output, "format-readback", digest + ".json"),
+    JSON.stringify(evidence, null, 2),
+  );
+  formatInspections.set(digest, evidence);
+  if (newErrors.length)
+    throw Error("product_format_new_errors:" + JSON.stringify(newErrors));
+}
 const documents = new Map();
 let candidateOrigin;
 const worker = await fs.readFile(
@@ -174,6 +249,7 @@ const report = {
   distribution,
   inputSha256: hash(input),
   preservationWorkerSha256: hash(worker),
+  documentToolEvidence,
   startedAt: new Date().toISOString(),
   newBuilds: 0,
   productionPromoted: false,
@@ -506,6 +582,7 @@ const engine = createOnlyOfficeProductEngine({
     await captureStableOnlyOfficeBaseline(mainPage, save);
   },
   inspect: async (bytes) => {
+    await inspectFormat(bytes);
     const opened = await open(bytes);
     try {
       return await opened.page.evaluate(() =>
@@ -1086,6 +1163,15 @@ try {
   if (!report.sourceStable) {
     report.status = "failed";
     report.errors.push("source_changed_during_trial");
+    process.exitCode = 1;
+  }
+  report.formatInspections = [...formatInspections.values()];
+  if (
+    documentTool &&
+    hash(await fs.readFile(documentTool)) !== documentToolSha256
+  ) {
+    report.status = "failed";
+    report.errors.push("format_inspector_changed_during_trial");
     process.exitCode = 1;
   }
   report.finishedAt = new Date().toISOString();
