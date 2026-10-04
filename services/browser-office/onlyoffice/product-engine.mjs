@@ -171,7 +171,11 @@ export function createOnlyOfficeProductEngine({
               throw Error(
                 "onlyoffice_product_operation_unavailable:" + command.op,
               );
-            if (["rename_slide", "set_slide_hidden"].includes(command.op)) {
+            if (
+              ["rename_slide", "set_slide_hidden", "set_background"].includes(
+                command.op,
+              )
+            ) {
               const index = command.slideIndex;
               const slide = m.Slides[index];
               if (!Number.isSafeInteger(index) || index < 0 || !slide)
@@ -189,6 +193,13 @@ export function createOnlyOfficeProductEngine({
                 typeof command.hidden !== "boolean"
               )
                 throw Error("onlyoffice_product_argument_invalid:hidden");
+              if (
+                command.op === "set_background" &&
+                (!Number.isSafeInteger(command.color) ||
+                  command.color < 0 ||
+                  command.color > 0xffffff)
+              )
+                throw Error("onlyoffice_product_color_invalid");
               return { ...command, nativeId: slide.Id };
             }
             if (
@@ -399,12 +410,26 @@ export function createOnlyOfficeProductEngine({
           const api = window.AscBuilder.Slide.Api,
             p = api.GetPresentation(),
             slide = p.GetSlideByIndex(command.slideIndex);
-          if (["rename_slide", "set_slide_hidden"].includes(command.op)) {
+          if (
+            ["rename_slide", "set_slide_hidden", "set_background"].includes(
+              command.op,
+            )
+          ) {
             if (slide?.Slide.Id !== command.nativeId)
               throw Error("onlyoffice_product_live_binding_changed");
             p.CreateNewHistoryPoint();
             if (command.op === "set_slide_hidden")
               return slide.SetVisible(!command.hidden);
+            if (command.op === "set_background")
+              return slide.SetBackground(
+                api.CreateSolidFill(
+                  api.CreateRGBColor(
+                    (command.color >>> 16) & 255,
+                    (command.color >>> 8) & 255,
+                    command.color & 255,
+                  ),
+                ),
+              );
             slide.Slide.setCSldName(command.name);
             return true;
           }

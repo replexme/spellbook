@@ -407,6 +407,31 @@ test("image cropping verifies all edges and preserves picture geometry and other
   );
 });
 
+test("slide background replaces its fill while preserving every drawing and other slide", () => {
+  const before = document();
+  before.slides[0].onlyoffice.background = null;
+  before.slides[0].narrow.background = null;
+  before.slides.push(structuredClone(before.slides[0]));
+  const after = structuredClone(before);
+  const color = { R: 39, G: 181, B: 117, A: 255 };
+  after.slides[0].onlyoffice.background = {
+    reference: null,
+    solid: { type: 1, id: null, rgb: color, modifiers: [] },
+    transparency: null,
+  };
+  after.slides[0].narrow.background = color;
+  const commands = [
+    { op: "set_background", slideIndex: 0, color: 0xff0000 },
+    { op: "set_background", slideIndex: 0, color: 0x27b575 },
+  ];
+  verifyOnlyOfficeProductIntent(before, after, commands);
+  after.slides[1].narrow.background = color;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, commands),
+    /unrequested_change/,
+  );
+});
+
 test("slide metadata commands verify the requested slide and preserve every drawing and other slide", () => {
   const before = document();
   before.slides[0].onlyoffice.name = "original";

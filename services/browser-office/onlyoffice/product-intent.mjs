@@ -29,6 +29,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "paragraph_alignment",
   "rename_slide",
   "set_slide_hidden",
+  "set_background",
   "delete_element",
   "replace_text",
   ...Object.keys(formatting),
@@ -64,11 +65,26 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
   for (const command of commands) {
     if (!onlyOfficeIntentOperations.includes(command.op))
       throw Error("onlyoffice_product_intent_unavailable:" + command.op);
-    if (["rename_slide", "set_slide_hidden"].includes(command.op)) {
+    if (
+      ["rename_slide", "set_slide_hidden", "set_background"].includes(
+        command.op,
+      )
+    ) {
       const slide = left.slides[command.slideIndex];
       if (!slide) throw Error("onlyoffice_product_intent_target_missing");
       if (command.op === "rename_slide") slide.onlyoffice.name = command.name;
-      else slide.onlyoffice.visible = !command.hidden;
+      else if (command.op === "set_slide_hidden")
+        slide.onlyoffice.visible = !command.hidden;
+      else {
+        const color = rgb(command.color);
+        const desired = { R: color.r, G: color.g, B: color.b, A: 255 };
+        slide.onlyoffice.background = {
+          reference: null,
+          solid: { type: 1, id: null, rgb: desired, modifiers: [] },
+          transparency: null,
+        };
+        slide.narrow.background = desired;
+      }
       continue;
     }
     const group = grouped.get(command.elementId) ?? [];

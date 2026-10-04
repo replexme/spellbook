@@ -399,6 +399,7 @@ export async function observeOnlyOfficeCandidate(frame) {
             const state = {
               visible: read(s, "GetVisible", at),
               name: s.Slide.cSld.name ?? "",
+              background: background(s.Slide),
             };
             // Notes getters can create a missing body; inspect existing notes without writes.
             const noteBody = s.Slide?.notes?.getBodyShape?.();

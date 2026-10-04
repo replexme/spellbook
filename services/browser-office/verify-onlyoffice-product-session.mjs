@@ -25,6 +25,11 @@ const flags = (name, fallback) => {
   const i = process.argv.indexOf(name);
   return i < 0 ? fallback : process.argv[i + 1];
 };
+const selectedSlideIndex = Number(flags("--slide-index", "0"));
+assert(
+  Number.isSafeInteger(selectedSlideIndex) && selectedSlideIndex >= 0,
+  "Invalid target slide index",
+);
 const candidate = path.resolve(
   flags(
     "--candidate-root",
@@ -366,42 +371,51 @@ async function save(page) {
 }
 const pixelStates = new Map();
 async function pixels(frame) {
-  const result = await frame.evaluate(async (codecUrl) => {
-    const codec = await import(codecUrl);
-    // Compare document rendering in the same view state. Native selection
-    // handles are transient UI, not saved document content.
-    const editor = window.Asc.editor;
-    const model = editor.WordControl.m_oLogicDocument;
-    model.Slides[model.CurPage]?.graphicObjects.resetSelection();
-    model.Document_UpdateSelectionState();
-    model.RedrawCurSlide();
-    const canvas = document.getElementById("id_viewer");
-    if (!canvas?.width) throw Error("canvas_missing");
-    let previous = null,
-      stable = 0;
-    for (let i = 0; i < 120; i++) {
-      await new Promise(requestAnimationFrame);
-      const bytes = canvas
-        .getContext("2d")
-        .getImageData(0, 0, canvas.width, canvas.height).data;
-      const digest = Array.from(
-        new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
-        (n) => n.toString(16).padStart(2, "0"),
-      ).join("");
-      stable = digest === previous ? stable + 1 : 0;
-      if (stable >= 3)
-        return {
-          width: canvas.width,
-          height: canvas.height,
-          sha256: digest,
-          base64: codec.encodeBinary(
-            new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
-          ),
-        };
-      previous = digest;
-    }
-    throw Error("canvas_not_stable");
-  }, origin + "/repo/browser-office/binary-codec.mjs");
+  const result = await frame.evaluate(
+    async ({ codecUrl, slideIndex }) => {
+      const codec = await import(codecUrl);
+      // Compare document rendering in the same view state. Native selection
+      // handles are transient UI, not saved document content.
+      const editor = window.Asc.editor;
+      const model = editor.WordControl.m_oLogicDocument;
+      if (!model.Slides[slideIndex])
+        throw Error("diagnostic_target_slide_missing");
+      editor.WordControl.Thumbnails.SelectPage(slideIndex);
+      model.Slides[model.CurPage]?.graphicObjects.resetSelection();
+      model.Document_UpdateSelectionState();
+      model.RedrawCurSlide();
+      const canvas = document.getElementById("id_viewer");
+      if (!canvas?.width) throw Error("canvas_missing");
+      let previous = null,
+        stable = 0;
+      for (let i = 0; i < 120; i++) {
+        await new Promise(requestAnimationFrame);
+        const bytes = canvas
+          .getContext("2d")
+          .getImageData(0, 0, canvas.width, canvas.height).data;
+        const digest = Array.from(
+          new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)),
+          (n) => n.toString(16).padStart(2, "0"),
+        ).join("");
+        stable = digest === previous ? stable + 1 : 0;
+        if (stable >= 3)
+          return {
+            width: canvas.width,
+            height: canvas.height,
+            sha256: digest,
+            base64: codec.encodeBinary(
+              new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength),
+            ),
+          };
+        previous = digest;
+      }
+      throw Error("canvas_not_stable");
+    },
+    {
+      codecUrl: origin + "/repo/browser-office/binary-codec.mjs",
+      slideIndex: selectedSlideIndex,
+    },
+  );
   const bytes = Buffer.from(result.base64, "base64");
   delete result.base64;
   pixelStates.set(result.sha256, bytes);
@@ -624,7 +638,11 @@ const engine = createOnlyOfficeProductEngine({
       sourceOperations: commands?.map((c) => c.op) ?? null,
       sourceTargets:
         commands?.map((c) => {
-          if (["rename_slide", "set_slide_hidden"].includes(c.op))
+          if (
+            ["rename_slide", "set_slide_hidden", "set_background"].includes(
+              c.op,
+            )
+          )
             return { op: c.op, slideIndex: c.slideIndex };
           const [slideIndex, shapeIndex] = c.elementId.split("/").map(Number);
           return {
@@ -666,7 +684,7 @@ if (flags("--operation", "move") === "font_color") {
   const applyNative = engine.apply;
   engine.apply = async (command) => {
     const value = await applyNative(command);
-    report.nativeColorReadback = await mainFrame.evaluate(() => {
+    report.nativeColorReadback = await mainFrame.evaluate((slideIndex) => {
       const m = window.Asc.editor.WordControl.m_oLogicDocument;
       const pr = (p) => ({
         color: p?.Color ? { r: p.Color.r, g: p.Color.g, b: p.Color.b } : null,
@@ -681,11 +699,13 @@ if (flags("--operation", "move") === "font_color") {
             }
           : null,
       });
-      return m.Slides[0].cSld.spTree[0].getDocContent().Content.map((p) => ({
-        end: pr(p.TextPr?.Value),
-        runs: p.Content.map((r) => pr(r.Pr)),
-      }));
-    });
+      return m.Slides[slideIndex].cSld.spTree[0]
+        .getDocContent()
+        .Content.map((p) => ({
+          end: pr(p.TextPr?.Value),
+          runs: p.Content.map((r) => pr(r.Pr)),
+        }));
+    }, selectedSlideIndex);
     return value;
   };
 }
@@ -725,23 +745,28 @@ const session = createProductSession({
 try {
   let phaseStarted = performance.now();
   const before = await session.open(input);
+  assert(
+    before.slides[selectedSlideIndex],
+    "Target slide missing from actual document",
+  );
   report.timings.openWithBaselineAndAdmissionMs =
     performance.now() - phaseStarted;
   report.stages.push("original-open-and-file-admission");
   if (process.argv.includes("--unobserved-native-probe")) {
     const originalToken = await engine.changeToken();
     const token = await engine.begin();
-    await mainFrame.evaluate(() => {
+    await mainFrame.evaluate((slideIndex) => {
       const editor = window.Asc.editor;
       editor.executeGroupActionsStart();
       try {
         const model = editor.WordControl.m_oLogicDocument;
-        const properties = model.Slides[0].cSld.spTree[0].getCNvProps();
+        const properties =
+          model.Slides[slideIndex].cSld.spTree[0].getCNvProps();
         properties.setId(properties.id + 1000000);
       } finally {
         editor.executeGroupActionsEnd();
       }
-    });
+    }, selectedSlideIndex);
     await engine.finish(token, true);
     assert.notEqual(await engine.changeToken(), originalToken);
     // This property has not yet been admitted by the candidate observation.
@@ -763,9 +788,9 @@ try {
     );
     Object.assign(ignoredCommand, {
       op: "move",
-      elementId: "0/0",
-      x: before.slides[0].elements[0].x + 500,
-      y: before.slides[0].elements[0].y,
+      elementId: `${selectedSlideIndex}/0`,
+      x: before.slides[selectedSlideIndex].elements[0].x + 500,
+      y: before.slides[selectedSlideIndex].elements[0].y,
     });
     await assert.rejects(
       session.apply({
@@ -784,12 +809,14 @@ try {
   }
   report.rendering = { before: await pixels(mainFrame) };
   const operation = flags("--operation", "move");
-  const targets = before.slides[0].elements.filter(
+  const targets = before.slides[selectedSlideIndex].elements.filter(
     (x) => x.kind === "shape" && Number.isFinite(x.x),
   );
   const target =
     operation === "crop_image"
-      ? before.slides[0].elements.find((element) => element.kind === "image")
+      ? before.slides[selectedSlideIndex].elements.find(
+          (element) => element.kind === "image",
+        )
       : ["resize", "fill_color", "line_color", "line_width", "flip"].includes(
             operation,
           )
@@ -803,6 +830,7 @@ try {
     ]),
   );
   report.operation = operation;
+  report.selectedSlideIndex = selectedSlideIndex;
   Object.assign(command, {
     op: operation,
     elementId: target.elementId,
@@ -833,8 +861,21 @@ try {
     paragraph_alignment: { alignment: "right" },
     set_character_spacing: { spacing: 2 },
     set_script_position: { script: "superscript" },
-    rename_slide: { slideIndex: 0, elementId: null, name: "Verified slide" },
-    set_slide_hidden: { slideIndex: 0, elementId: null, hidden: true },
+    rename_slide: {
+      slideIndex: selectedSlideIndex,
+      elementId: null,
+      name: "Verified slide",
+    },
+    set_slide_hidden: {
+      slideIndex: selectedSlideIndex,
+      elementId: null,
+      hidden: true,
+    },
+    set_background: {
+      slideIndex: selectedSlideIndex,
+      elementId: null,
+      color: 0x27b575,
+    },
   };
   Object.assign(command, args[operation]);
   let finalExpected;
@@ -853,11 +894,11 @@ try {
   );
   assert.notEqual(applied.observation.revision, before.revision);
   const afterTarget =
-    applied.observation.slides[0].elements[
+    applied.observation.slides[selectedSlideIndex].elements[
       Number(target.elementId.split("/")[1])
     ];
   const drawing =
-    applied.observation.slides[0].onlyoffice.drawings[
+    applied.observation.slides[selectedSlideIndex].onlyoffice.drawings[
       Number(target.elementId.split("/")[1])
     ];
   const styles = drawing.paragraphs?.flatMap((p) => p.runs.map((r) => r.style));
@@ -896,17 +937,17 @@ try {
   }
   if (operation === "replace_text")
     assert.equal(afterTarget.text.trim(), command.text);
-  for (const element of before.slides[0].elements.filter(
+  for (const element of before.slides[selectedSlideIndex].elements.filter(
     (e) => e.elementId !== target.elementId,
   )) {
     const expected = structuredClone(element);
     if (operation === "delete_element") {
       const index = Number(element.elementId.split("/")[1]);
       const removedIndex = Number(target.elementId.split("/")[1]);
-      expected.elementId = `0/${index > removedIndex ? index - 1 : index}`;
+      expected.elementId = `${selectedSlideIndex}/${index > removedIndex ? index - 1 : index}`;
     }
     assert.deepEqual(
-      applied.observation.slides[0].elements.find(
+      applied.observation.slides[selectedSlideIndex].elements.find(
         (e) => e.elementId === expected.elementId,
       ),
       expected,
@@ -1002,29 +1043,36 @@ try {
   report.stages.push("redo-exact-approved-package");
   finalExpected = applied.observation;
   if (manualFlow) {
-    const textIndex = finalExpected.slides[0].elements.findIndex(
+    const textIndex = finalExpected.slides[
+      selectedSlideIndex
+    ].elements.findIndex(
       (element) => typeof element.text === "string" && element.text.length,
     );
     const manualIndex =
       textIndex >= 0 ? textIndex : Number(target.elementId.split("/")[1]);
-    const manualBefore = finalExpected.slides[0].elements[manualIndex];
+    const manualBefore =
+      finalExpected.slides[selectedSlideIndex].elements[manualIndex];
     assert(manualBefore, "Manual edit needs an existing native object");
     // Select only; typing or image movement comes through real browser keys.
     await mainFrame.evaluate(
-      ({ index, text }) => {
+      ({ index, text, slideIndex }) => {
         const a = window.Asc.editor,
           m = a.WordControl.m_oLogicDocument,
-          c = m.Slides[0].graphicObjects;
-        a.WordControl.Thumbnails.SelectPage(0);
+          c = m.Slides[slideIndex].graphicObjects;
+        a.WordControl.Thumbnails.SelectPage(slideIndex);
         c.resetSelection();
-        c.selectObject(m.Slides[0].cSld.spTree[index], 0);
+        c.selectObject(m.Slides[slideIndex].cSld.spTree[index], slideIndex);
         m.Document_UpdateSelectionState();
         if (text) {
           c.startEditTextCurrentShape();
           a.WordControl.m_oDrawingDocument.TargetStart();
         }
       },
-      { index: manualIndex, text: textIndex >= 0 },
+      {
+        index: manualIndex,
+        text: textIndex >= 0,
+        slideIndex: selectedSlideIndex,
+      },
     );
     const area = mainFrame.locator("#area_id");
     if (await area.count()) await area.focus();
@@ -1039,12 +1087,15 @@ try {
       performance.now() - phaseStarted;
     if (textIndex >= 0)
       assert(
-        finalExpected.slides[0].elements[manualIndex].text.includes(
-          "HUMAN_VERIFIED",
-        ),
+        finalExpected.slides[selectedSlideIndex].elements[
+          manualIndex
+        ].text.includes("HUMAN_VERIFIED"),
       );
     else
-      assert(finalExpected.slides[0].elements[manualIndex].x > manualBefore.x);
+      assert(
+        finalExpected.slides[selectedSlideIndex].elements[manualIndex].x >
+          manualBefore.x,
+      );
     assert.equal(session.status().undo, 2);
     // Use the editor's own buttons, independent of the product history API.
     const manualRevision = finalExpected.revision;
