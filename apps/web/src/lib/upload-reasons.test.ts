@@ -47,4 +47,11 @@ describe("upload reasons", () => {
     );
     expect(precheckUpload({ name: "A.PPTX", size: 10 }, MAX)).toBeNull();
   });
+
+  it("names the browsers that can edit when this one cannot", () => {
+    const failure = uploadFailure("browser_unsupported", "a.pptx", MAX);
+    expect(failure.reason).toContain("이 브라우저");
+    expect(failure.fix).toContain("Chrome");
+    expect(failure.fix).toContain("iPhone");
+  });
 });

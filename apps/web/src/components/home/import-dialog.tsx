@@ -13,6 +13,7 @@ import {
   SlideImage,
   type CheckItem,
 } from "@/design-system";
+import { browserEngineSupported } from "@/lib/browser-engine-support";
 import type { DocumentSummary } from "@/lib/history-types";
 import { UploadError, uploadDocumentFile } from "@/lib/upload-document";
 import {
@@ -27,7 +28,7 @@ type Step =
   | { kind: "uploading"; loaded: number; total: number }
   | { kind: "checking"; id: string }
   | { kind: "done"; id: string; summary: DocumentSummary }
-  | { kind: "failed"; failure: UploadFailure };
+  | { kind: "failed"; failure: UploadFailure; code?: string };
 
 /**
  * Upload, check, summary, open. The summary says what the server found
@@ -55,11 +56,15 @@ export function ImportDialog({
       setStep(null);
       return;
     }
-    const rejected = precheckUpload(file, maxBytes);
+    // Nothing is uploaded from a browser that cannot open the editor.
+    const rejected = browserEngineSupported()
+      ? precheckUpload(file, maxBytes)
+      : "browser_unsupported";
     if (rejected) {
       setStep({
         kind: "failed",
         failure: uploadFailure(rejected, file.name, maxBytes),
+        code: rejected,
       });
       return;
     }
@@ -248,9 +253,15 @@ export function ImportDialog({
       }
       onClose={onClose}
       footer={
-        <Button variant="primary" icon="upload" onClick={onPickAnother}>
-          다른 파일 선택
-        </Button>
+        step.code === "browser_unsupported" ? (
+          <Button variant="primary" onClick={onClose}>
+            닫기
+          </Button>
+        ) : (
+          <Button variant="primary" icon="upload" onClick={onPickAnother}>
+            다른 파일 선택
+          </Button>
+        )
       }
     >
       <div className="file-line">
