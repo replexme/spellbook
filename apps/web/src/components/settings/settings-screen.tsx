@@ -9,10 +9,14 @@ import {
   Icon,
   Spinner,
 } from "@/design-system";
+import type { AccountClosureInfo } from "@/lib/account-closure";
 import type { AiConnectorConfig } from "@/lib/ai-connector-config";
+import { serviceLinks } from "@/lib/service-links";
 import { useAiAccount } from "@/lib/use-ai-account";
 import { AppTop } from "../app-top";
+import { SupportLink } from "../status-screen";
 import { ConnectSteps } from "../workspace/connect-steps";
+import { AccountDeletion } from "./account-deletion";
 
 const connectedDay = new Intl.DateTimeFormat("ko-KR", {
   month: "long",
@@ -43,9 +47,12 @@ function formatReset(resetAt: number | null | undefined) {
 export function SettingsScreen({
   email,
   aiConnector,
+  accountClosure = null,
 }: {
   email: string;
   aiConnector: AiConnectorConfig;
+  /** Present when this deployment lets people close their account here. */
+  accountClosure?: AccountClosureInfo | null;
 }) {
   const ai = useAiAccount(aiConnector);
 
@@ -956,10 +963,28 @@ export function SettingsScreen({
                   </ButtonLink>
                 </div>
               </div>
-              <p style={{ marginTop: "1rem" }}>
+              {accountClosure ? (
+                <AccountDeletion info={accountClosure} />
+              ) : null}
+              <p className="legal-links settings-links">
+                {serviceLinks.terms ? (
+                  <a href={serviceLinks.terms} target="_blank" rel="noreferrer">
+                    이용약관
+                  </a>
+                ) : null}
+                {serviceLinks.privacy ? (
+                  <a
+                    href={serviceLinks.privacy}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    개인정보처리방침
+                  </a>
+                ) : null}
                 <a href="/licenses" target="_blank" rel="noreferrer">
                   오픈소스 라이선스
                 </a>
+                <SupportLink context={{ place: "설정" }} />
               </p>
             </section>
           </div>

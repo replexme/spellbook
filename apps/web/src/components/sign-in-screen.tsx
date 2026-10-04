@@ -1,5 +1,7 @@
 import { Banner, Brand, Button, ButtonLink, TextField } from "@/design-system";
+import { serviceLinks } from "@/lib/service-links";
 import { SignInScene } from "./sign-in-scene";
+import { SupportLink } from "./status-screen";
 
 /**
  * Sign-in for both deployments: an external account (managed) or the local
@@ -41,10 +43,17 @@ export function SignInScreen({
               연결된 계정으로 로그인해요. 문서와 작업 기록은 계정마다 따로
               보관해요.
             </p>
-            <p className="signin-note">
-              <a href="https://spellbook.my/terms/">이용약관</a> ·{" "}
-              <a href="https://spellbook.my/privacy/">개인정보처리방침</a>
-            </p>
+            {serviceLinks.terms || serviceLinks.privacy ? (
+              <p className="legal-links">
+                {serviceLinks.terms ? (
+                  <a href={serviceLinks.terms}>이용약관</a>
+                ) : null}
+                {serviceLinks.privacy ? (
+                  <a href={serviceLinks.privacy}>개인정보처리방침</a>
+                ) : null}
+                <SupportLink context={{ place: "로그인" }}>문의</SupportLink>
+              </p>
+            ) : null}
           </div>
         ) : (
           <form className="signin-form" action="/auth/login" method="post">
