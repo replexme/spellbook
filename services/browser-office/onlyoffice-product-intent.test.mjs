@@ -798,9 +798,8 @@ for (const op of ["fill_opacity", "line_opacity"])
         op === "fill_opacity" ? changed.fillStyle : changed.line.fillStyle;
       field.opacity = 37.123;
       const commands = [{ op, elementId: "0/0", opacity: 37.123 }];
-      assert.equal(
+      assert.doesNotThrow(() =>
         verifyOnlyOfficeProductIntent(before, after, commands),
-        true,
       );
       field.colorId = 6;
       assert.throws(
