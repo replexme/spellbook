@@ -1595,9 +1595,18 @@ test("column insertion repairs precision-only grid drift through a reversible na
     changes = [],
     points = [];
   const width = 1016000 / 36000;
+  const cell = () => ({
+    preferred: { Type: 1, W: width },
+    Get_W() {
+      return { ...this.preferred };
+    },
+    Set_W(value) {
+      this.preferred = { ...value };
+    },
+  });
   const table = {
     TableGrid: [width, width],
-    Content: [],
+    Content: [{ Content: [cell(), cell()] }],
     SetTableGrid(grid) {
       if (
         this.TableGrid.some(
@@ -1637,6 +1646,8 @@ test("column insertion repairs precision-only grid drift through a reversible na
     AddColumn() {
       table.TableGrid.splice(1, 0, width);
       table.TableGrid[2] -= Number.EPSILON * width;
+      table.Content[0].Content.splice(1, 0, cell());
+      table.Content[0].Content[2].preferred.W = table.TableGrid[2];
     },
   };
   const model = {
@@ -1693,6 +1704,10 @@ test("column insertion repairs precision-only grid drift through a reversible na
       count: 1,
     });
     assert.deepEqual(table.TableGrid, [width, width, width]);
+    assert.deepEqual(
+      table.Content[0].Content.map((c) => c.preferred.W),
+      [width, width, width],
+    );
     assert.equal(changes.length, 1);
     assert.equal(points.length, 1);
     changes[0].Undo();
