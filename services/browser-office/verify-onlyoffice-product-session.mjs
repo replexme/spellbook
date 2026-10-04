@@ -875,6 +875,11 @@ if (flags("--operation", "move") === "font_color") {
     return value;
   };
 }
+const nativeVerifyIntent = engine.verifyIntent;
+engine.verifyIntent = (before, after, commands) => {
+  lastCommandObservation = structuredClone(after);
+  return nativeVerifyIntent(before, after, commands);
+};
 const nativeBegin = engine.begin,
   nativeFinish = engine.finish;
 engine.begin = async () => {

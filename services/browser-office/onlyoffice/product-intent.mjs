@@ -304,7 +304,10 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
           const initial = oldDrawing.tableLayout?.rowHeights[c.index];
           const observed = newDrawing.tableLayout?.rowHeights[c.index];
           if (!initial || !observed || observed.computedHeight !== c.height)
-            throw Error("onlyoffice_product_intent_mismatch:table_row_height");
+            throw Error(
+              "onlyoffice_product_intent_mismatch:table_row_height:" +
+                JSON.stringify({ requested: c.height, initial, observed }),
+            );
           initial.value = Math.round(
             Math.max(100, c.height - initial.outerInsets),
           );
