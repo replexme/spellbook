@@ -826,6 +826,36 @@ try {
 } catch (error) {
   report.status = "failed";
   report.error = error.stack;
+  if (mainPage && !mainPage.isClosed()) {
+    const diagnostic = await mainPage
+      .evaluate(() => {
+        const snapshot = window.__comparisonLastSnapshot;
+        if (!snapshot) return null;
+        return Object.fromEntries(
+          Object.entries(snapshot).map(([key, value]) => [
+            key,
+            value instanceof Uint8Array ? Array.from(value) : value,
+          ]),
+        );
+      })
+      .catch(() => null);
+    if (diagnostic) {
+      for (const key of [
+        "original",
+        "noEditBytes",
+        "rawBytes",
+        "candidateBytes",
+      ])
+        if (diagnostic[key]) {
+          await fs.writeFile(
+            path.join(output, `failure-${key}.pptx`),
+            Uint8Array.from(diagnostic[key]),
+          );
+          delete diagnostic[key];
+        }
+      report.failedSnapshot = diagnostic;
+    }
+  }
   process.exitCode = 1;
 } finally {
   await browser.close();
