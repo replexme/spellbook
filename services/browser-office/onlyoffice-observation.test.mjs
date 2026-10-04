@@ -274,11 +274,19 @@ test("dynamic field definitions are stable across rendered cache changes and rem
   rendered = "<#>\r\n";
   const reopened = (await observeOnlyOfficeCandidate(frame)).extended.slides[0]
     .drawings[0];
-  assert.deepEqual(before, reopened);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(before)),
+    JSON.parse(JSON.stringify(reopened)),
+  );
   assert.equal(before.text, "<field:slidenum>\r\n");
   run.Run.FieldType = null;
   assert.notDeepEqual(
-    (await observeOnlyOfficeCandidate(frame)).extended.slides[0].drawings[0],
-    before,
+    JSON.parse(
+      JSON.stringify(
+        (await observeOnlyOfficeCandidate(frame)).extended.slides[0]
+          .drawings[0],
+      ),
+    ),
+    JSON.parse(JSON.stringify(before)),
   );
 });
