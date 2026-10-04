@@ -1586,3 +1586,119 @@ for (const op of ["insert_table_columns", "delete_table_columns"])
       );
     }
   });
+
+test("column insertion repairs precision-only grid drift through a reversible native history change", async () => {
+  const { createOnlyOfficeProductEngine } = await import(
+    "./onlyoffice/product-engine.mjs"
+  );
+  const previous = globalThis.window,
+    changes = [],
+    points = [];
+  const width = 1016000 / 36000;
+  const table = {
+    TableGrid: [width, width],
+    SetTableGrid(grid) {
+      if (
+        this.TableGrid.some(
+          (value, index) => Math.abs(value - grid[index]) > 0.001,
+        )
+      )
+        this.TableGrid = grid;
+    },
+  };
+  class NativeGridChange {
+    constructor(owner, old, value) {
+      this.owner = owner;
+      this.old = old;
+      this.value = value;
+    }
+    Redo() {
+      this.owner.TableGrid = this.value.slice();
+    }
+    Undo() {
+      this.owner.TableGrid = this.old.slice();
+    }
+  }
+  const shape = {
+    Id: "table",
+    spPr: {
+      xfrm: {
+        setExtX(value) {
+          this.extX = value;
+        },
+      },
+    },
+  };
+  const drawing = {
+    Drawing: shape,
+    Table: table,
+    GetRow: () => ({ GetCell: (index) => index }),
+    AddColumn() {
+      table.TableGrid.splice(1, 0, width);
+      table.TableGrid[2] -= Number.EPSILON * width;
+    },
+  };
+  const model = {
+    Slides: [{ cSld: { spTree: [shape] } }],
+    Recalculate() {},
+    RedrawCurSlide() {},
+    Document_UpdateInterfaceState() {},
+  };
+  globalThis.window = {
+    Asc: {
+      editor: {
+        isGroupActions: () => true,
+        executeGroupActionsStart() {},
+        executeGroupActionsEnd() {},
+        WordControl: { m_oLogicDocument: model, GoToPage() {} },
+      },
+    },
+    AscBuilder: {
+      GetApiDrawing: () => drawing,
+      Slide: {
+        Api: {
+          GetPresentation: () => ({
+            GetSlideByIndex: () => ({ Slide: model.Slides[0] }),
+            CreateNewHistoryPoint() {
+              points.push(true);
+            },
+          }),
+        },
+      },
+    },
+    AscCommon: {
+      History: {
+        Add(change) {
+          changes.push(change);
+        },
+        Get_RecalcData() {},
+        getGroupChanges() {},
+      },
+    },
+    AscDFH: {
+      historyitem_Table_TableGrid: 42,
+      changesFactory: { 42: NativeGridChange },
+    },
+  };
+  try {
+    const engine = createOnlyOfficeProductEngine({
+      getFrame: async () => ({ evaluate: async (fn, arg) => fn(arg) }),
+    });
+    await engine.apply({
+      op: "insert_table_columns",
+      nativeId: "table",
+      slideIndex: 0,
+      index: 1,
+      count: 1,
+    });
+    assert.deepEqual(table.TableGrid, [width, width, width]);
+    assert.equal(changes.length, 1);
+    assert.equal(points.length, 1);
+    changes[0].Undo();
+    assert.notEqual(table.TableGrid[2], width);
+    changes[0].Redo();
+    assert.deepEqual(table.TableGrid, [width, width, width]);
+  } finally {
+    globalThis.window = previous;
+  }
+});
