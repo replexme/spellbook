@@ -335,7 +335,13 @@ export function createOnlyOfficeProductEngine({
           case "font_color":
             return content()
               .GetAllParagraphs()
-              .forEach((p) => p.SetColor(color()));
+              .forEach((p) =>
+                p.SetColor(
+                  (command.color >>> 16) & 255,
+                  (command.color >>> 8) & 255,
+                  command.color & 255,
+                ),
+              );
           default:
             throw Error(
               "onlyoffice_product_operation_unavailable:" + command.op,

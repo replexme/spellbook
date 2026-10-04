@@ -518,6 +518,17 @@ try {
     assert(styles?.length);
     assert(styles.every((s) => s[property] === command[operation]));
   }
+  if (operation === "font_color") {
+    assert(styles?.length);
+    assert(
+      styles.every(
+        (s) =>
+          s.color?.rgb.r === ((command.color >>> 16) & 255) &&
+          s.color.rgb.g === ((command.color >>> 8) & 255) &&
+          s.color.rgb.b === (command.color & 255),
+      ),
+    );
+  }
   if (operation === "font_size") {
     assert(styles?.length);
     assert(styles.every((s) => s.GetFontSize === command.size * 2));
