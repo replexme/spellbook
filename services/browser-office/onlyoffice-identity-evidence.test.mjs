@@ -46,3 +46,19 @@ test("approval covers captured identity changes; later mixed edits refuse until 
     globalThis.window = previous;
   }
 });
+
+
+test("generated field rendering keeps native history while ordinary changes of the same type remain authored",()=>{
+  const previous=globalThis.window,history={Points:[],Index:0},derived=new WeakSet();
+  globalThis.window={AscCommon:{History:history},AscDFH:{historyitem_CNvPr_SetId:7},Asc:{editor:{WordControl:{m_oLogicDocument:{}}}},[Symbol.for("spellbook.onlyoffice.derivedFieldHistory/v1")]:derived};
+  const item=(position,type)=>({Data:{Type:type},Binary:{Pos:position,Len:1}});
+  try {
+    const authored=item(0,9),generated=item(1,55);derived.add(generated.Data);history.Points.push({Items:[authored,generated]});
+    const before=capture();assert.equal(before,"[1,0,1]");
+    const painted=item(2,55);derived.add(painted.Data);history.Points[0].Items.push(painted);
+    assert.equal(capture(),before);assert.equal(history.Points[0].Items.length,3);
+    history.Points[0].Items.push(item(3,55));assert.notEqual(capture(),before);
+    const unobserved=item(4,7);history.Points[0].Items.push(unobserved);approve(before);
+    assert.throws(verify,/product_unobserved_native_edit/);
+  } finally {globalThis.window=previous;}
+});

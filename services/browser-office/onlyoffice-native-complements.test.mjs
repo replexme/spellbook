@@ -18,10 +18,51 @@ for(const deferred of [false,true])test(`native effect import and ${deferred?"de
   class Loader{}
   class Xfrm{setOffX(value){this.calls=(this.calls??0)+1;this.offX=value;}}
   class Memory{Init(){}WriteLong(value){this.value=value;}sha256(){return String(this.value);}}
-  globalThis.window={Asc:{CAscSlideTransition:Transition,c_oAscSlideTransitionParams:{}},AscCommon:{CMemory:Memory,CBinaryFileWriter:Writer,BinaryPPTYLoader:Loader,CComment:Comment,CCommentData:CommentData},AscCommonWord:{CTextPr:TextPr},AscWord:{Run,ParagraphContentDrawState:deferred?ContentDraw:undefined,g_textPrCache:{getKey:pr=>pr.font??"default"}},AscCommonSlide:{CPresentation:Presentation,fLoadComments(){}},AscFormat:{CXfrm:Xfrm,CEffectProperties:class {}},AscDFH:{historyitem_type_Presentation:65536,historyitem_type_Comment:131072,historyitem_type_ParaRun:196608,changesFactory:{},drawingsChangesMap:{},drawingContentChanges:{},drawingsConstructorsMap:{}}};
+  const history=Object.assign(Object.create({Add(change){this.events.push(change);return change;}}),{TurnOffHistory:0,events:[]}), table={m_bTurnOff:false};
+  // Match the pinned SDK's missing finally, including nested TableId state.
+  const nativeNoHistory=function(callback,thisArg,args,keepTableIds) {
+    history.TurnOffHistory++;const toggled=!keepTableIds&&!table.m_bTurnOff;
+    if(toggled)table.m_bTurnOff=true;
+    const result=callback.apply(thisArg,args);history.TurnOffHistory--;
+    if(toggled)table.m_bTurnOff=false;return result;
+  };
+  class Field {
+    private_CalculateContent(fail=false){
+      this.generated={Class:this,Type:55};history.Add(this.generated);
+      this.style={Class:this,Type:77};history.Add(this.style);
+      this.foreign={Class:{},Type:55};history.Add(this.foreign);
+      if(fail)throw Error("field calculation failed");return "computed display";
+    }
+  }
+  const restoreField=(object,value)=>{object.lastRecalcSlideIndex=value;};
+  const fieldContext=(object,value)=>{
+    const d=window.AscDFH,type=object.getObjectType()|65500;
+    d.changesFactory[type]=d.CChangesDrawingsDouble2;d.drawingsChangesMap[type]=restoreField;
+    object.generatedContext={Class:object,Type:type};history.Add(object.generatedContext);
+    restoreField(object,value);return value;
+  };
+  globalThis.window={Asc:{CAscSlideTransition:Transition,c_oAscSlideTransitionParams:{}},AscCommon:{History:history,g_oTableId:table,CMemory:Memory,CBinaryFileWriter:Writer,BinaryPPTYLoader:Loader,CComment:Comment,CCommentData:CommentData},AscCommonWord:{CTextPr:TextPr,CPresentationField:Field},AscWord:{Run,ParagraphContentDrawState:deferred?ContentDraw:undefined,g_textPrCache:{getKey:pr=>pr.font??"default"}},AscCommonSlide:{CPresentation:Presentation,fLoadComments(){}},AscFormat:{ExecuteNoHistory:nativeNoHistory,spellbookSetFieldContext:fieldContext,spellbookRestoreFieldContext:restoreField,CXfrm:Xfrm,CEffectProperties:class {}},AscDFH:{historyitem_ParaRun_AddItem:55,historyitem_ParaRun_RemoveItem:56,CChangesDrawingsDouble2:class {},historyitem_type_Presentation:65536,historyitem_type_Comment:131072,historyitem_type_ParaRun:196608,changesFactory:{},drawingsChangesMap:{},drawingContentChanges:{},drawingsConstructorsMap:{}}};
   const effect=value=>({value,Write_ToBinary(memory){memory.WriteLong(this.value);},createDuplicate(){return effect(this.value);}});
   try{
     installOnlyOfficeNativeComplements();
+    const noHistory=window.AscFormat.ExecuteNoHistory, failedClone=Error("native clone failed");
+    for(const keep of [false,true]) {
+      assert.equal(noHistory(function(value){assert.equal(this.answer,41);assert.equal(history.TurnOffHistory,1);assert.equal(table.m_bTurnOff,!keep);return value+this.answer;},{answer:41},[1],keep),42);
+      assert.throws(()=>noHistory(()=>{throw failedClone;},null,[],keep),error=>error===failedClone);
+      assert.equal(history.TurnOffHistory,0);assert.equal(table.m_bTurnOff,false);
+    }
+    assert.throws(()=>noHistory(()=>noHistory(()=>{throw failedClone;},null,[],true),null,[],false),error=>error===failedClone);
+    assert.equal(history.TurnOffHistory,0);assert.equal(table.m_bTurnOff,false);
+    history.TurnOffHistory=2;table.m_bTurnOff=true;
+    assert.throws(()=>noHistory(()=>{throw failedClone;},null,[],false),error=>error===failedClone);
+    assert.equal(history.TurnOffHistory,2);assert.equal(table.m_bTurnOff,true);
+    history.TurnOffHistory=0;table.m_bTurnOff=false;
+    const originalAdd=history.Add,field=new Field(),derived=window[Symbol.for("spellbook.onlyoffice.derivedFieldHistory/v1")];
+    assert.equal(field.private_CalculateContent(),"computed display");assert(derived.has(field.generated));assert(!derived.has(field.style));assert(!derived.has(field.foreign));
+    assert.strictEqual(history.Add,originalAdd);assert(!Object.hasOwn(history,"Add"));
+    assert.throws(()=>field.private_CalculateContent(true),/field calculation failed/);assert.strictEqual(history.Add,originalAdd);assert(!Object.hasOwn(history,"Add"));
+    const contextOwner={getObjectType:()=>65536,lastRecalcSlideIndex:0};
+    assert.equal(window.AscFormat.spellbookSetFieldContext(contextOwner,2),2);assert.equal(contextOwner.lastRecalcSlideIndex,2);assert(derived.has(contextOwner.generatedContext));assert.strictEqual(history.Add,originalAdd);assert(!Object.hasOwn(history,"Add"));
     const transform=new Xfrm();transform.setOffX(12);transform.setOffX(12);assert.equal(transform.calls,1);transform.setOffX(13);assert.equal(transform.calls,2);transform.setOffX(13+Number.EPSILON*8);assert.equal(transform.calls,2);transform.setOffX(13+1e-8);assert.equal(transform.calls,3);
     const decoded={font:"Arial",spellbookEffects:effect(75)};
     const cache=window.AscWord.g_textPrCache;

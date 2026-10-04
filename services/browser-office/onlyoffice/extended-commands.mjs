@@ -366,7 +366,7 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
     }
     case "set_text_case": need(["none", "uppercase", "lowercase", "title", "small_caps"].includes(c.textCase), "text_case_invalid"); break;
     case "set_fontwork": need(c.fontwork && typeof c.fontwork.preset === "string" && f.CreatePrstTxWarpGeometry(c.fontwork.preset)?.pathLst?.length>0, "fontwork_invalid"); need(source.txBody?.bodyPr, "text_body_unavailable"); break;
-    case "set_paragraph_format": need(c.paragraphFormat, "paragraph_format_invalid"); break;
+    case "set_paragraph_format": need(c.paragraphFormat && c.nativeParagraphFormat?.indent && c.nativeParagraphFormat?.spacing && typeof paragraph.GetParaPr()?.private_OnChange === "function", "paragraph_format_invalid"); break;
     case "set_paragraph_list": {
       const q=c.paragraphList;need(q&&["none","bullet","number"].includes(q.type)&&integer(q.level,0,8),"paragraph_list_invalid");
       if(q.type==="number")need(integer(q.startWith,1,32767)&&[["(",")"],["",")"],["","."],["",""]].some(([prefix,suffix])=>(q.prefix??"")===prefix&&(q.suffix??"")===suffix),"paragraph_number_format_unavailable");
@@ -660,7 +660,7 @@ export function executeOnlyOfficeExtendedCommand({command: c, phase, batchSize})
           }
         }return true;
       }
-      case "set_paragraph_format": { const q = c.paragraphFormat, pr = paragraph.GetParaPr(); for (const [key, method] of [["leftMargin","SetIndLeft"],["rightMargin","SetIndRight"],["firstLineIndent","SetIndFirstLine"]]) if (q[key] != null) pr[method](q[key] * 1440 / 2540); if (q.topMargin != null) pr.SetSpacingBefore(q.topMargin * 1440 / 2540); if (q.bottomMargin != null) pr.SetSpacingAfter(q.bottomMargin * 1440 / 2540); if (q.direction != null) { const native = paragraph.Paragraph; if (q.direction === "top-to-bottom") { const b = body(); b.vert = f.nVertTTvert; source.txBody.setBodyPr(b); } else native.SetParagraphBidi(q.direction === "right-to-left"); } return true; }
+      case "set_paragraph_format": { const q = c.paragraphFormat, pr = paragraph.GetParaPr(); Object.assign(pr.ParaPr.Ind,c.nativeParagraphFormat.indent); Object.assign(pr.ParaPr.Spacing,c.nativeParagraphFormat.spacing); pr.private_OnChange(); if (q.direction != null) { const native = paragraph.Paragraph; if (q.direction === "top-to-bottom") { const b = body(); b.vert = f.nVertTTvert; source.txBody.setBodyPr(b); } else native.SetParagraphBidi(q.direction === "right-to-left"); } return true; }
       case "set_paragraph_list": { const q = c.paragraphList, bullet = new f.CBullet(); bullet.bulletType = new f.CBulletType(); if (q.type === "none") bullet.bulletType.type = f.BULLET_TYPE_BULLET_NONE; else if (q.type === "bullet") { bullet.bulletType.type = f.BULLET_TYPE_BULLET_CHAR; bullet.bulletType.Char = q.bulletCharacter; } else { bullet.bulletType.type = f.BULLET_TYPE_BULLET_AUTONUM; bullet.bulletType.AutoNumType = q.prefix === "(" ? f.numbering_presentationnumfrmt_ArabicParenBoth : q.suffix === ")" ? f.numbering_presentationnumfrmt_ArabicParenR : q.suffix === "." ? f.numbering_presentationnumfrmt_ArabicPeriod : f.numbering_presentationnumfrmt_ArabicPlain; bullet.bulletType.startAt = q.startWith; } paragraph.Paragraph.Set_Bullet(bullet); paragraph.Paragraph.Set_PresentationLevel(q.level); return true; }
       case "replace_text_range": {
         const runs=textRuns(paragraph);need(runs.length,"empty_range_style");

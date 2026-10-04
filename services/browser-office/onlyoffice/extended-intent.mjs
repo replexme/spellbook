@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import { firstDocumentStateDifference } from "../../office-session-spike/document-state-evidence.mjs";
 import { rebaseOnlyOfficeIntentIdentities } from "./intent-identities.mjs";
+import { onlyOfficeParagraphFormat } from "./paragraph-format.mjs";
 
 const copy = value => structuredClone(value);
 const need = (condition, path) => { if (!condition) throw Error("onlyoffice_product_intent_mismatch:" + path); };
@@ -697,8 +698,9 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
       if(c.interaction==="none")delete old.hyperlink;else old.hyperlink={link,tooltip:c.description??""};
     }else if(c.op==="set_paragraph_format"){
       const index=Number(c.paragraphId.slice((c.elementId+":p").length)),format=old.paragraphs[index]?.format,q=c.paragraphFormat;need(format,"paragraph_target");
-      for(const [key,field] of [["leftMargin","Left"],["rightMargin","Right"],["firstLineIndent","FirstLine"]])if(q[key]!=null){format.indent??={Left:null,Right:null,FirstLine:null};format.indent[field]=q[key]/100;}
-      for(const [key,field] of [["topMargin","Before"],["bottomMargin","After"]])if(q[key]!=null){format.spacing??={Before:null,After:null,Line:null,LineRule:null};format.spacing[field]=q[key]/100;}
+      const native=onlyOfficeParagraphFormat(q);
+      for(const [key,field] of [["leftMargin","Left"],["rightMargin","Right"],["firstLineIndent","FirstLine"]])if(q[key]!=null){format.indent??={Left:null,Right:null,FirstLine:null};format.indent[field]=Math.round(native.indent[field]*36000)/36000;}
+      for(const [key,field] of [["topMargin","Before"],["bottomMargin","After"]])if(q[key]!=null){format.spacing??={Before:null,After:null,Line:null,LineRule:null};format.spacing[field]=Math.round(native.spacing[field]*36000)/36000;}
       if(q.direction==="top-to-bottom")old.bodyProperties.vert=3;else if(q.direction!=null)format.bidi=q.direction==="right-to-left";
     }else if(c.op==="set_paragraph_list"){
       const index=Number(c.paragraphId.slice((c.elementId+":p").length)),format=old.paragraphs[index]?.format,q=c.paragraphList;need(format,"paragraph_target");

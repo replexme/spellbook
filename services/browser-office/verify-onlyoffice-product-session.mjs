@@ -1369,6 +1369,13 @@ try {
         };
         renumber(expected);
       }
+      // Root stacking/deletion also rebases canonical paths of every nested
+      // group child. Keep their full authored values strict while comparing
+      // those new paths; retaining the old prefix invents a false regression.
+      const rebaseChildren=(children,prefix)=>children.forEach((child,index)=>{
+        child.elementId=prefix+"/"+index;rebaseChildren(child.elements,child.elementId);
+      });
+      rebaseChildren(expected.elements,expected.elementId);
       assert.deepEqual(
         applied.observation.slides[expectedSlide].elements.find(
           (e) => e.elementId === expected.elementId,
@@ -1411,6 +1418,44 @@ try {
     report.rendering.undo = await pixels(mainFrame);
     assertSameCanvas(report.rendering.undo, report.rendering.before);
     report.stages.push("undo-exact-approved-package");
+    if (["set_smartart_node","add_smartart_node","delete_smartart_node","add_animation_effect","replace_animation_effect"].includes(operation)) {
+      const baseline = await mainFrame.evaluate(({operation,elementId}) => {
+        const h=window.AscCommon.History,table=window.AscCommon.g_oTableId;
+        let owner,method;
+        if(operation.includes("smartart")) {
+          const [si,...path]=elementId.split("/").map(Number);owner=window.Asc.editor.WordControl.m_oLogicDocument.Slides[si];
+          for(const index of path)owner=(owner.cSld?.spTree??owner.spTree)[index];method="copy2";
+        } else {owner=window.AscFormat.CTiming.prototype;method="createEffect";}
+        const state={counter:h.TurnOffHistory,tableDisabled:table.m_bTurnOff,index:h.Index,points:h.Points.length,canRedo:h.Can_Redo(),group:window.Asc.editor.groupActionsCounter,lock:window.AscCommon.CollaborativeEditing.Get_GlobalLock()};
+        const original=owner[method],own=Object.hasOwn(owner,method);
+        window.__spellbookNativeFailureProbe={owner,method,original,own};
+        owner[method]=function(...args){
+          original.apply(this,args);
+          window.__spellbookNativeFailureProbe.insideHistory=window.AscCommon.History.TurnOffHistory;
+          throw Error("injected_native_construction_failure");
+        };
+        return state;
+      },{operation,elementId:command.elementId});
+      let insideHistory;
+      try {
+        await assert.rejects(session.apply({expectedRevision:before.revision,commands:[command]}),/injected_native_construction_failure/);
+      } finally {
+        insideHistory=await mainFrame.evaluate(()=>{
+          const probe=window.__spellbookNativeFailureProbe;
+          if(probe.own)probe.owner[probe.method]=probe.original;else delete probe.owner[probe.method];
+          delete window.__spellbookNativeFailureProbe;return probe.insideHistory;
+        });
+      }
+      assert(insideHistory>baseline.counter,"Failure must originate inside native ExecuteNoHistory");
+      const restored=await mainFrame.evaluate(()=>{
+        const h=window.AscCommon.History;
+        return {counter:h.TurnOffHistory,tableDisabled:window.AscCommon.g_oTableId.m_bTurnOff,index:h.Index,points:h.Points.length,canRedo:h.Can_Redo(),group:window.Asc.editor.groupActionsCounter,lock:window.AscCommon.CollaborativeEditing.Get_GlobalLock()};
+      });
+      assert.deepEqual(restored,baseline);
+      assertSameCanvas(await pixels(mainFrame),report.rendering.before);
+      assert.equal(session.status().redo,1);
+      report.stages.push("native-construction-failure-unwinds-history-and-retains-redo");
+    }
     const originalApply = engine.apply;
     engine.apply = async (command) => {
       await originalApply(command);

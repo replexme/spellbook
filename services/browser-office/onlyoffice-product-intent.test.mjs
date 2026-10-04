@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { verifyOnlyOfficeProductIntent } from "./onlyoffice/product-intent.mjs";
+import { onlyOfficeParagraphFormat } from "./onlyoffice/paragraph-format.mjs";
 function document() {
   const elements = [0, 1].map((i) => ({
     elementId: "0/" + i,
@@ -1978,4 +1979,48 @@ test("diagram text fitting preserves authored font and inset overrides",()=>{
   inset.slides[0].elements[0].onlyoffice.diagram.points[0].textBodyInsets.lIns=.5;
   insetAfter.slides[0].elements[0].onlyoffice.diagram.points[0].textBodyInsets.lIns=.5;
   assert.throws(()=>verifyOnlyOfficeProductIntent(inset,insetAfter,[command],[command]),/bodyProperties.lIns/);
+});
+
+
+test("paragraph format intent requires prescribed native precision without admitting unrelated changes",()=>{
+  const before=document(),format={indent:{Left:null,Right:null,FirstLine:null},spacing:{Before:null,After:null,Line:null,LineRule:null},bidi:null};
+  before.slides[0].onlyoffice.drawings[0].paragraphs[0].format=format;
+  const q={leftMargin:200,rightMargin:null,firstLineIndent:-50,topMargin:100,bottomMargin:null,direction:null},native=onlyOfficeParagraphFormat(q);
+  const command={op:"set_paragraph_format",elementId:"0/0",paragraphId:"0/0:p0",paragraphFormat:q},after=structuredClone(before);
+  const changed=after.slides[0].onlyoffice.drawings[0].paragraphs[0].format;
+  for(const [group,fields] of Object.entries(native))for(const [key,value] of Object.entries(fields))changed[group][key]=Math.round(value*36000)/36000;
+  assert.doesNotThrow(()=>verifyOnlyOfficeProductIntent(before,after,[command],[command]));
+  const lost=structuredClone(after);lost.slides[0].onlyoffice.drawings[0].paragraphs[0].format.indent.Left=71999/36000;
+  assert.throws(()=>verifyOnlyOfficeProductIntent(before,lost,[command],[command]),/unrequested_change/);
+  const wrongSpacing=structuredClone(after);wrongSpacing.slides[0].onlyoffice.drawings[0].paragraphs[0].format.spacing.Before=1;
+  assert.throws(()=>verifyOnlyOfficeProductIntent(before,wrongSpacing,[command],[command]),/unrequested_change/);
+  const unrequested=structuredClone(after);unrequested.slides[0].onlyoffice.drawings[0].paragraphs[0].format.indent.Right=20;
+  assert.throws(()=>verifyOnlyOfficeProductIntent(before,unrequested,[command],[command]),/unrequested_change/);
+});
+
+for(const op of ["insert_table_rows","delete_table_rows"])test(`${op} checks native preflight style prediction rather than trusting changed row shading`,()=>{
+  const before=document();before.slides[0].elements[0].kind="table";
+  const old=before.slides[0].onlyoffice.drawings[0];
+  old.tableCells=[["first\r\n"],["second\r\n"]];old.tableParagraphs=[[],[]];
+  const cell=fill=>({fill:{color:fill},margins:{Left:2.54},borders:{Bottom:1},column:0,gridSpan:1});
+  old.tableCellProperties=[[cell("header")],[cell("band1")]];
+  old.tableLayout={authoredFrame:{extY:300},computedHeight:300,rowHeights:[{value:150,rule:0,computedHeight:150},{value:150,rule:0,computedHeight:150}]};
+  before.slides[0].narrow.table=[{rows:2,cells:old.tableCells.map(row=>row.map(text=>({text,fill:null})))}];
+  const command={op,elementId:"0/0",index:0,count:1},after=structuredClone(before),changed=after.slides[0].onlyoffice.drawings[0],table=after.slides[0].narrow.table[0];
+  const insert=op==="insert_table_rows";
+  for(const rows of [changed.tableCells,changed.tableParagraphs,changed.tableCellProperties,changed.tableLayout.rowHeights,table.cells]) {
+    if(insert)rows.splice(0,0,rows===changed.tableCells?["\r\n"]:rows===changed.tableParagraphs?[]:rows===changed.tableCellProperties?[cell("header")]:rows===changed.tableLayout.rowHeights?{value:150,rule:0,computedHeight:150}:[{text:"\r\n",fill:null}]);
+    else rows.splice(0,1);
+  }
+  const length=insert?3:1;table.rows=length;changed.tableLayout.computedHeight=after.slides[0].elements[0].height=length*150;
+  changed.tableCellProperties[insert?1:0][0].fill.color=insert?"band1":"header";
+  if(insert)changed.tableCellProperties[2][0].fill.color="band2";
+  const predicted={...command,nativeTableRows:{retained:changed.tableCellProperties.map((properties,index)=>({index,properties:structuredClone(properties)})).filter(row=>!insert||row.index!==0)}};
+  assert.throws(()=>verifyOnlyOfficeProductIntent(before,after,[command]),/table_row_authority_missing/);
+  assert.doesNotThrow(()=>verifyOnlyOfficeProductIntent(before,after,[command],[predicted]));
+  changed.tableCellProperties[insert?2:0][0].fill.color="unrequested";
+  assert.throws(()=>verifyOnlyOfficeProductIntent(before,after,[command],[predicted]),/unrequested_change/);
+  changed.tableCellProperties[insert?2:0][0].fill.color=insert?"band2":"header";
+  changed.tableCellProperties[insert?2:0][0].margins.Left=7;
+  assert.throws(()=>verifyOnlyOfficeProductIntent(before,after,[command],[predicted]),/unrequested_change/);
 });

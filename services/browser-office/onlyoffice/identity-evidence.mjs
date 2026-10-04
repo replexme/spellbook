@@ -19,6 +19,7 @@ export function captureOnlyOfficeNativeChanges() {
   let count = 0,
     last = null;
   const identities = [];
+  const derived=window[Symbol.for("spellbook.onlyoffice.derivedFieldHistory/v1")];
   for (const point of history.Points.slice(0, history.Index + 1))
     for (const item of point.Items) {
       if (
@@ -26,6 +27,9 @@ export function captureOnlyOfficeNativeChanges() {
         !Number.isSafeInteger(item.Binary?.Len)
       )
         throw Error("onlyoffice_product_change_token_unavailable");
+      // Retain these items in native Undo/Redo; exclude only provider-generated
+      // display-cache changes marked by the trusted SDK derivation boundary.
+      if(derived?.has(item.Data))continue;
       count++;
       last = item.Binary;
       if (item.Data?.Type === window.AscDFH.historyitem_CNvPr_SetId)

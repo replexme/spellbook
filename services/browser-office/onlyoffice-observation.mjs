@@ -1,8 +1,9 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 // Read-only, version-pinned candidate observation shared by human and typed trials.
 // Missing fields are explicit; this is not the complete production observation contract.
-export async function observeOnlyOfficeCandidate(frame) {
-  return frame.evaluate(() => {
+export async function observeOnlyOfficeCandidate(frame, tableRows = null) {
+  return frame.evaluate((tableRows) => {
+    let tableRowEvidence = null;
     const wrap = (object) => {
       const existing = window.AscBuilder.GetApiDrawing(object);
       if (existing) return existing;
@@ -366,7 +367,8 @@ export async function observeOnlyOfficeCandidate(frame) {
             ),
           );
         if (d.Table?.Content) {
-          state.tableCellProperties = d.Table.Content.map(row => row.Content.map(cell => {
+          const cellProperties = cell => {
+            const row = cell.Row;
             const margins=cell.GetMargins(), borders=cell.GetBorders();
             return {
               gridSpan:cell.GetGridSpan(), verticalMerge:cell.GetVMerge(),
@@ -377,7 +379,42 @@ export async function observeOnlyOfficeCandidate(frame) {
                 size:borders[side].Size??null,value:borders[side].Value??null,fill:fillProperties(borders[side].Unifill),
               } : null])),
             };
-          }));
+          };
+          state.tableCellProperties = d.Table.Content.map(row => row.Content.map(cellProperties));
+          if (tableRows?.nativeId === native.Id) {
+            const authored = cell => {
+              const memory = new window.AscCommon.CMemory();
+              cell.Pr.Write_ToBinary(memory);
+              if(memory.GetCurPosition() > 1000000)throw Error("onlyoffice_product_cell_authority_limit");
+              return memory.GetBase64Memory2(0,memory.GetCurPosition());
+            };
+            const table = d.Table;
+            // Read-only views use the pinned native compiler, including direct
+            // overrides and header/corner precedence. No constructors, IDs,
+            // history records or live row indices are changed by prediction.
+            const view = Object.create(table);
+            const futureCount = table.Content.length + (tableRows.op === "insert_table_rows" ? tableRows.count : -tableRows.count);
+            view.Content = tableRows.predict ? new Array(futureCount) : table.Content;
+            const retained = [];
+            for(const [oldIndex,row] of table.Content.entries()) {
+              let index = oldIndex;
+              if(tableRows.predict) {
+                if(tableRows.op === "delete_table_rows" && oldIndex >= tableRows.index && oldIndex < tableRows.index + tableRows.count)continue;
+                if(oldIndex >= tableRows.index)index += tableRows.op === "insert_table_rows" ? tableRows.count : -tableRows.count;
+              }
+              const rowView = Object.create(row);
+              rowView.Table = view; rowView.Index = index;
+              const cells = row.Content.map(cell => {
+                const cellView = Object.create(cell);
+                cellView.Row = rowView;
+                cellView.CompiledPr = {NeedRecalc:true};
+                return cellView;
+              });
+              rowView.Content = cells;
+              retained.push({index,properties:cells.map(cellProperties),authored:row.Content.map(authored)});
+            }
+            tableRowEvidence = {nativeId:native.Id,retained};
+          }
           const bounds = d.Table.Get_PageBounds(0);
           const frame = d.Drawing.spPr?.xfrm;
           state.tableLayout = {
@@ -785,6 +822,7 @@ export async function observeOnlyOfficeCandidate(frame) {
       extended: extended.state,
       narrow,
       unavailable: extended.unavailable,
+      ...(tableRows ? {tableRowEvidence} : {}),
     };
-  });
+  }, tableRows);
 }

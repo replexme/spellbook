@@ -45,6 +45,48 @@ export function installOnlyOfficeNativeComplements() {
     throw Error("onlyoffice_product_native_complements_unavailable");
   if (!Number.isSafeInteger(d?.historyitem_type_ParaRun) || !Number.isSafeInteger(d.historyitem_type_Presentation))
     throw Error("onlyoffice_product_native_complement_history_unavailable");
+  // The pinned SDK omits finally in ExecuteNoHistory. A failed owned clone or
+  // preset construction must not leave history/TableId disabled and poison the
+  // next edit. Preserve nested caller state and the original return/error.
+  const noHistory = f.ExecuteNoHistory;
+  if (typeof noHistory === "function") {
+    f.ExecuteNoHistory = function(...args) {
+      const history = common.History, table = common.g_oTableId;
+      const counter = history.TurnOffHistory, tableDisabled = table?.m_bTurnOff;
+      try { return noHistory.apply(this,args); }
+      finally {
+        history.TurnOffHistory = counter;
+        if (table) table.m_bTurnOff = tableDisabled;
+      }
+    };
+  }
+  // Native rendering must retain its cache history for cancellation, but that
+  // generated display state is not a second authored edit. Mark only changes
+  // emitted by these exact SDK derivation functions; ordinary field editing,
+  // field definitions, styling and every unrelated history item stay authored.
+  const derived = window[Symbol.for("spellbook.onlyoffice.derivedFieldHistory/v1")] = new WeakSet();
+  const track = (callback, predicate) => {
+    const history=common.History, add=history.Add, ownsAdd=Object.hasOwn(history,"Add");
+    history.Add=function(change,...args) {
+      const result=add.call(this,change,...args);
+      if(predicate(change))derived.add(change);
+      return result;
+    };
+    try { return callback(); } finally { if(ownsAdd)history.Add=add;else delete history.Add; }
+  };
+  const field=word.CPresentationField?.prototype, calculateField=field?.private_CalculateContent;
+  if(typeof calculateField==="function")field.private_CalculateContent=function(...args) {
+    return track(()=>calculateField.apply(this,args),change=>change.Class===this&&Number.isSafeInteger(change.Type)&&
+      [d.historyitem_ParaRun_AddItem,d.historyitem_ParaRun_RemoveItem].includes(change.Type));
+  };
+  const setFieldContext=f.spellbookSetFieldContext;
+  if(typeof setFieldContext==="function")f.spellbookSetFieldContext=function(object,value) {
+    return track(()=>setFieldContext.call(this,object,value),change=>
+      typeof d.CChangesDrawingsDouble2==="function"&&typeof f.spellbookRestoreFieldContext==="function"&&
+      change.Class===object&&change.Type===(object.getObjectType()|65500)&&
+      d.changesFactory[change.Type]===d.CChangesDrawingsDouble2&&
+      d.drawingsChangesMap[change.Type]===f.spellbookRestoreFieldContext);
+  };
   // Native group normalization runs after keyboard movement as well as during
   // export. Equal transforms are recalculation, not a second authored change.
   for (const [name,field] of [["setOffX","offX"],["setOffY","offY"],["setExtX","extX"],["setExtY","extY"],["setChOffX","chOffX"],["setChOffY","chOffY"],["setChExtX","chExtX"],["setChExtY","chExtY"]]) {

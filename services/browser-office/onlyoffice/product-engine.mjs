@@ -22,6 +22,7 @@ import {
 import { firstDocumentStateDifference } from "../../office-session-spike/document-state-evidence.mjs";
 import { onlyOfficeDocumentFillCatalog } from "./document-fill-catalog.mjs";
 import { onlyOfficeExtendedOperations, executeOnlyOfficeExtendedCommand } from "./extended-commands.mjs";
+import { onlyOfficeParagraphFormat } from "./paragraph-format.mjs";
 import { installOnlyOfficeNativeComplements } from "./native-complements.mjs";
 import { prepareOnlyOfficeMediaReplacement } from "./product-resources.mjs";
 import { slideDateFieldType } from "../slide-date-format.mjs";
@@ -286,7 +287,18 @@ export function createOnlyOfficeProductEngine({
     open,
     inspect,
     persistenceState: onlyOfficePersistenceState,
-    verifyIntent: verifyOnlyOfficeProductIntent,
+    verifyIntent: async (before, after, commands, prepared) => {
+      for(const binding of prepared ?? []) {
+        if(!binding.nativeTableRows)continue;
+        const current = (await observeOnlyOfficeCandidate(await getFrame(), {nativeId:binding.nativeId,predict:false})).tableRowEvidence;
+        if(!current)throw Error("onlyoffice_product_table_row_authority_missing");
+        for(const row of binding.nativeTableRows.retained) {
+          if(JSON.stringify(current.retained[row.index]?.authored)!==JSON.stringify(row.authored))
+            throw Error("onlyoffice_product_unrequested_authored_cell_change");
+        }
+      }
+      return verifyOnlyOfficeProductIntent(before,after,commands,prepared);
+    },
     // Private live-session evidence only. It is not a persisted semantic hash.
     // Empty points, selection and save indices do not represent authored edits.
     changeToken: async () =>
@@ -326,6 +338,7 @@ export function createOnlyOfficeProductEngine({
       for(const [index,command] of commands.entries()){
         if(!onlyOfficeExtendedOperations.includes(command.op))continue;
         let bound={...command};
+        if(command.op==="set_paragraph_format")bound.nativeParagraphFormat=onlyOfficeParagraphFormat(command.paragraphFormat);
         if(command.op==="set_table_cell_format"&&command.tableCellFormat?.characterSpacing!=null)
           bound.nativeSpacingTwips=onlyOfficeCharacterSpacingTwips(command.tableCellFormat.characterSpacing);
         if(["insert_image","replace_image","insert_media","replace_media"].includes(command.op)){
@@ -964,6 +977,11 @@ export function createOnlyOfficeProductEngine({
       );
       let baseIndex=0;
       const prepared=originalCommands.map((_,index)=>extended.get(index)??basePrepared[baseIndex++]);
+      for(const binding of prepared) {
+        if(!["insert_table_rows","delete_table_rows"].includes(binding.op))continue;
+        binding.nativeTableRows = (await observeOnlyOfficeCandidate(frame, {...binding,predict:true})).tableRowEvidence;
+        if(!binding.nativeTableRows)throw Error("onlyoffice_product_table_row_authority_missing");
+      }
       const text=originalCommands.flatMap(command=>[
         command.text,command.smartartNode?.text,command.chartFormat?.title,
         command.slideMetadata?.footerText,command.slideMetadata?.dateTimeText,
