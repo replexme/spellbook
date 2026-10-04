@@ -1141,11 +1141,19 @@ test("whole-batch validation finishes before fallback-font loading and waits for
     AscBuilder: { GetApiDrawing: () => ({ Drawing: shape }) },
     AscFonts: {
       FontPickerByCharacter: {
-        checkText(text, editor, callback) {
+        getFontBySymbol(codepoint) {
+          assert.ok(["한".codePointAt(0), "글".codePointAt(0)].includes(codepoint));
+          return "Noto Sans KR";
+        },
+      },
+      g_map_font_index: { "Noto Sans KR": 5 },
+    },
+    AscCommon: {
+      g_font_loader: {
+        LoadFonts(fonts, callback) {
           loaded++;
-          assert.equal(text, "한글");
+          assert.deepEqual(fonts, ["Noto Sans KR"]);
           done = callback;
-          return true;
         },
       },
     },

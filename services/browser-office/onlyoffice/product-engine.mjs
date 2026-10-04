@@ -546,11 +546,22 @@ export function createOnlyOfficeProductEngine({
           (text) =>
             new Promise((resolve) => {
               const picker = window.AscFonts?.FontPickerByCharacter;
-              if (typeof picker?.checkText !== "function")
+              const loader = window.AscCommon?.g_font_loader;
+              if (typeof picker?.getFontBySymbol !== "function" ||
+                  typeof loader?.LoadFonts !== "function")
                 throw Error("onlyoffice_product_character_fonts_unavailable");
-              // Match normal native text entry: prepare script fallback fonts before
-              // authored changes, rather than measuring with a temporary fallback.
-              picker.checkText(text, window.Asc.editor, resolve);
+              // checkText only loads newly discovered character ranges. A range
+              // may already be known while its font bytes are still unavailable.
+              // Load the registered fallback faces independently of that cache;
+              // do not change the document's authored font family.
+              const fonts = new Set();
+              for (const character of text) {
+                const name = picker.getFontBySymbol(character.codePointAt(0));
+                if (name && window.AscFonts.g_map_font_index[name] !== undefined)
+                  fonts.add(name);
+              }
+              if (fonts.size) loader.LoadFonts([...fonts], resolve);
+              else resolve();
             }),
           text,
         );
