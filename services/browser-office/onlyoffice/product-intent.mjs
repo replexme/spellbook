@@ -22,6 +22,7 @@ export const onlyOfficeIntentOperations = Object.freeze([
   "flip",
   "set_shape_name",
   "set_alt_text",
+  "crop_image",
   "fill_color",
   "line_color",
   "line_width",
@@ -208,6 +209,13 @@ export function verifyOnlyOfficeProductIntent(before, after, commands) {
       } else if (op === "set_alt_text") {
         for (const key of ["title", "description"])
           if (command[key] != null) original.onlyoffice[key] = command[key];
+      } else if (op === "crop_image") {
+        original.onlyoffice.crop = {
+          l: command.left * 100,
+          t: command.top * 100,
+          r: (1 - command.right) * 100,
+          b: (1 - command.bottom) * 100,
+        };
       } else if (op === "paragraph_alignment") {
         if (
           !newDrawing.paragraphs.length ||

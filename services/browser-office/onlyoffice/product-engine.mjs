@@ -228,6 +228,22 @@ export function createOnlyOfficeProductEngine({
                   throw Error("onlyoffice_product_argument_invalid:" + key);
               return { ...command, slideIndex: slide, nativeId: shape.Id };
             }
+            if (command.op === "crop_image") {
+              if (!shape.isImage?.() || typeof shape.setSrcRect !== "function")
+                throw Error("onlyoffice_product_image_target_unavailable");
+              for (const key of ["left", "top", "right", "bottom"])
+                if (
+                  !Number.isFinite(command[key]) ||
+                  command[key] < 0 ||
+                  command[key] >= 1
+                )
+                  throw Error("onlyoffice_product_argument_invalid:" + key);
+              if (
+                command.left + command.right >= 1 ||
+                command.top + command.bottom >= 1
+              )
+                throw Error("onlyoffice_product_argument_invalid:crop_extent");
+            }
             const methods = {
               move: "SetPosition",
               resize: "SetSize",
@@ -486,6 +502,15 @@ export function createOnlyOfficeProductEngine({
             }
             case "delete_element":
               return d.Delete();
+            case "crop_image": {
+              const rectangle = new window.AscFormat.CSrcRect();
+              rectangle.l = command.left * 100;
+              rectangle.t = command.top * 100;
+              rectangle.r = (1 - command.right) * 100;
+              rectangle.b = (1 - command.bottom) * 100;
+              d.Drawing.setSrcRect(rectangle);
+              return true;
+            }
             case "replace_text": {
               const c = content(),
                 first = c.GetAllParagraphs()[0];

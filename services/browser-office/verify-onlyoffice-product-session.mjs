@@ -787,15 +787,14 @@ try {
   const targets = before.slides[0].elements.filter(
     (x) => x.kind === "shape" && Number.isFinite(x.x),
   );
-  const target = [
-    "resize",
-    "fill_color",
-    "line_color",
-    "line_width",
-    "flip",
-  ].includes(operation)
-    ? targets.at(-1)
-    : targets[0];
+  const target =
+    operation === "crop_image"
+      ? before.slides[0].elements.find((element) => element.kind === "image")
+      : ["resize", "fill_color", "line_color", "line_width", "flip"].includes(
+            operation,
+          )
+        ? targets.at(-1)
+        : targets[0];
   assert(target);
   const command = Object.fromEntries(
     Object.keys(capabilities.toolInputSchema.properties).map((key) => [
@@ -828,6 +827,7 @@ try {
       title: "Verified accessible title",
       description: "Verified accessible description",
     },
+    crop_image: { left: 0.15, top: 0.1, right: 0.08, bottom: 0.06 },
     line_color: { color: 0xff0000 },
     line_width: { size: 4 },
     paragraph_alignment: { alignment: "right" },
@@ -921,6 +921,7 @@ try {
   if (
     ![
       "set_shape_name",
+      "set_alt_text",
       "font_family",
       "flip",
       "rename_slide",
@@ -931,6 +932,8 @@ try {
       report.rendering.edited.sha256,
       report.rendering.before.sha256,
     );
+  if (operation === "set_alt_text")
+    assertSameCanvas(report.rendering.edited, report.rendering.before);
   await mainPage.screenshot({ path: path.join(output, "edited.png") });
   await session.undo();
   report.rendering.undo = await pixels(mainFrame);
@@ -999,28 +1002,49 @@ try {
   report.stages.push("redo-exact-approved-package");
   finalExpected = applied.observation;
   if (manualFlow) {
-    // SDK selects the text target only; actual text comes through browser keys.
-    await mainFrame.evaluate(() => {
-      const a = window.Asc.editor,
-        m = a.WordControl.m_oLogicDocument,
-        c = m.Slides[0].graphicObjects;
-      a.WordControl.Thumbnails.SelectPage(0);
-      c.resetSelection();
-      c.selectObject(m.Slides[0].cSld.spTree[0], 0);
-      m.Document_UpdateSelectionState();
-      c.startEditTextCurrentShape();
-      a.WordControl.m_oDrawingDocument.TargetStart();
-    });
+    const textIndex = finalExpected.slides[0].elements.findIndex(
+      (element) => typeof element.text === "string" && element.text.length,
+    );
+    const manualIndex =
+      textIndex >= 0 ? textIndex : Number(target.elementId.split("/")[1]);
+    const manualBefore = finalExpected.slides[0].elements[manualIndex];
+    assert(manualBefore, "Manual edit needs an existing native object");
+    // Select only; typing or image movement comes through real browser keys.
+    await mainFrame.evaluate(
+      ({ index, text }) => {
+        const a = window.Asc.editor,
+          m = a.WordControl.m_oLogicDocument,
+          c = m.Slides[0].graphicObjects;
+        a.WordControl.Thumbnails.SelectPage(0);
+        c.resetSelection();
+        c.selectObject(m.Slides[0].cSld.spTree[index], 0);
+        m.Document_UpdateSelectionState();
+        if (text) {
+          c.startEditTextCurrentShape();
+          a.WordControl.m_oDrawingDocument.TargetStart();
+        }
+      },
+      { index: manualIndex, text: textIndex >= 0 },
+    );
     const area = mainFrame.locator("#area_id");
     if (await area.count()) await area.focus();
-    await mainPage.keyboard.press("End");
-    await mainPage.keyboard.insertText(" HUMAN_VERIFIED");
+    if (textIndex >= 0) {
+      await mainPage.keyboard.press("End");
+      await mainPage.keyboard.insertText(" HUMAN_VERIFIED");
+    } else await mainPage.keyboard.press("ArrowRight");
     await mainPage.keyboard.press("Escape");
     phaseStarted = performance.now();
     finalExpected = await session.observe();
     report.timings.humanCheckpointWithFileAdmissionAndJournalMs =
       performance.now() - phaseStarted;
-    assert(finalExpected.slides[0].elements[0].text.includes("HUMAN_VERIFIED"));
+    if (textIndex >= 0)
+      assert(
+        finalExpected.slides[0].elements[manualIndex].text.includes(
+          "HUMAN_VERIFIED",
+        ),
+      );
+    else
+      assert(finalExpected.slides[0].elements[manualIndex].x > manualBefore.x);
     assert.equal(session.status().undo, 2);
     // Use the editor's own buttons, independent of the product history API.
     const manualRevision = finalExpected.revision;

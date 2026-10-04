@@ -379,6 +379,34 @@ test("rounded twips cannot hide a hundredth-point spacing loss", () => {
   );
 });
 
+test("image cropping verifies all edges and preserves picture geometry and other objects", () => {
+  const before = document();
+  before.slides[0].elements[0].kind = "image";
+  before.slides[0].elements[0].onlyoffice.crop = null;
+  const after = structuredClone(before);
+  const command = {
+    op: "crop_image",
+    elementId: "0/0",
+    left: 0.15,
+    top: 0.1,
+    right: 0.08,
+    bottom: 0.06,
+  };
+  after.slides[0].elements[0].onlyoffice.crop = { l: 15, t: 10, r: 92, b: 94 };
+  verifyOnlyOfficeProductIntent(before, after, [command]);
+  after.slides[0].elements[0].onlyoffice.crop.r = 90;
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+  after.slides[0].elements[0].onlyoffice.crop.r = 92;
+  after.slides[0].elements[1].onlyoffice.ownName = "changed";
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+});
+
 test("slide metadata commands verify the requested slide and preserve every drawing and other slide", () => {
   const before = document();
   before.slides[0].onlyoffice.name = "original";
