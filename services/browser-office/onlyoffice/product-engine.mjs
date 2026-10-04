@@ -35,8 +35,8 @@ export async function observeOnlyOfficeProduct(frame) {
     slides,
     masters: [],
     sections: [],
-    width: projection.extended.width,
-    height: projection.extended.height,
+    width: projection.extended.width * 100,
+    height: projection.extended.height * 100,
   };
   return {
     ...state,
@@ -131,12 +131,8 @@ export function createOnlyOfficeProductEngine({
               rotate: "SetRotation",
               flip: "SetFlipH",
               set_shape_name: "SetName",
-              set_alt_text: "SetDescription",
               fill_color: "SetFill",
               line_color: "SetOutLine",
-              line_width: "SetOutLine",
-              fill_opacity: "SetFill",
-              line_opacity: "SetOutLine",
               delete_element: "Delete",
             };
             const d = window.AscBuilder.Slide.Api.GetPresentation()
@@ -193,6 +189,23 @@ export function createOnlyOfficeProductEngine({
               typeof command.text !== "string"
             )
               throw Error("onlyoffice_product_text_invalid");
+            if (
+              ["bold", "italic", "underline", "strikethrough"].includes(
+                command.op,
+              ) &&
+              typeof command[command.op] !== "boolean"
+            )
+              throw Error("onlyoffice_product_argument_invalid:" + command.op);
+            if (
+              command.op === "font_family" &&
+              (typeof command.family !== "string" || !command.family.trim())
+            )
+              throw Error("onlyoffice_product_argument_invalid:family");
+            if (
+              command.op === "flip" &&
+              !["horizontal", "vertical"].includes(command.axis)
+            )
+              throw Error("onlyoffice_product_argument_invalid:axis");
             return { ...command, nativeId: shape.Id, slideIndex: slide, index };
           });
         },
@@ -245,10 +258,18 @@ export function createOnlyOfficeProductEngine({
             return d.SetName(command.name);
           case "fill_color":
             return d.SetFill(fill());
-          case "line_color":
-            return d.SetOutLine(
-              api.CreateStroke(d.Drawing.spPr?.ln?.w ?? 36000, fill()),
+          case "line_color": {
+            const stroke = api.CreateStroke(
+              d.Drawing.spPr?.ln?.w ?? 36000,
+              fill(),
             );
+            const original = d.Drawing.spPr?.ln;
+            if (original) {
+              stroke.Ln = original.createDuplicate();
+              stroke.Ln.setFill(fill().UniFill);
+            }
+            return d.SetOutLine(stroke);
+          }
           case "delete_element":
             return d.Delete();
           case "replace_text": {
@@ -259,7 +280,7 @@ export function createOnlyOfficeProductEngine({
           case "font_size":
             return content()
               .GetAllParagraphs()
-              .forEach((p) => p.SetFontSize(command.size));
+              .forEach((p) => p.SetFontSize(command.size * 2));
           case "font_family":
             return content()
               .GetAllParagraphs()
@@ -297,6 +318,8 @@ export function createOnlyOfficeProductEngine({
         const target = m.Slides.flatMap((s) => s.cSld.spTree).find(
           (x) => x.Id === nativeId,
         );
+        target?.getDocContent?.()?.Recalc_AllParagraphs_CompiledPr?.();
+        target?.recalcText?.();
         target?.recalculate?.();
         m.Recalculate(h.Get_RecalcData(null, h.getGroupChanges()));
         m.RedrawCurSlide();

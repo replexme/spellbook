@@ -26,6 +26,8 @@ function setup() {
   const engine = {
     open: async (bytes) => {
       value = bytes[2];
+      nativeUndo = [];
+      nativeRedo = [];
     },
     observe: async () => observation(value),
     inspect: async (bytes) => observation(bytes[2]),
@@ -74,6 +76,8 @@ function setup() {
       stored = structuredClone({
         metadata: {
           commands: record.commands,
+          commandGroups: record.commandGroups,
+          appliedGroups: record.appliedGroups,
           artifactReceipt: record.artifactReceipt,
         },
         baseBytes: record.baseBytes,
@@ -229,4 +233,69 @@ test("requests serialize and cannot both apply from one observed revision", asyn
   await a;
   await assert.rejects(b, /stale/);
   assert.equal(s.calls.filter((c) => c === "apply").length, 1);
+});
+
+test("recovery recreates batch boundaries and an existing Redo branch", async () => {
+  const s = setup();
+  await s.session.open(s.bytes(1));
+  await s.session.apply({
+    expectedRevision: "r1",
+    commands: [
+      { op: "set", value: 2 },
+      { op: "set", value: 3 },
+    ],
+  });
+  await s.session.apply({
+    expectedRevision: "r3",
+    commands: [{ op: "set", value: 4 }],
+  });
+  await s.session.undo();
+  await s.session.recover();
+  assert.deepEqual(s.session.status(), {
+    ready: true,
+    commands: 2,
+    undo: 1,
+    redo: 1,
+  });
+  await s.session.redo();
+  assert.equal((await s.session.observe()).revision, "r4");
+  await s.session.undo();
+  await s.session.undo();
+  assert.equal((await s.session.observe()).revision, "r1");
+});
+test("journal failure before native commit preserves the old Redo branch", async () => {
+  const s = setup();
+  await s.session.open(s.bytes(1));
+  await apply(s, 2);
+  await s.session.undo();
+  const old = s.record(),
+    save = s.journal.save;
+  s.journal.save = async () => {
+    throw Error("disk_full");
+  };
+  await assert.rejects(
+    s.session.apply({
+      expectedRevision: "r1",
+      commands: [{ op: "set", value: 3 }],
+    }),
+    /disk_full/,
+  );
+  assert.deepEqual(s.record(), old);
+  assert.equal(s.session.status().ready, true);
+  s.journal.save = save;
+  await s.session.redo();
+  assert.equal((await s.session.observe()).revision, "r2");
+});
+
+test("bounded history advances the recovery base without losing retained batches", async () => {
+  const s = setup();
+  await s.session.open(s.bytes(1));
+  for (let value = 2; value <= 36; value++) await apply(s, value);
+  assert.equal(s.session.status().undo, 32);
+  assert.equal(s.record().baseBytes[2], 4);
+  assert.equal(s.record().metadata.commands.length, 32);
+  await s.session.recover();
+  for (let index = 0; index < 32; index++) await s.session.undo();
+  assert.equal((await s.session.observe()).revision, "r4");
+  assert.equal(await s.session.undo(), false);
 });

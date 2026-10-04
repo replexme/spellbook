@@ -59,10 +59,17 @@ export async function openBrowserDocumentJournal({
       candidateBytes,
       commands,
       artifactReceipt = null,
+      commandGroups = null,
+      appliedGroups = null,
     }) {
       validateBytes(baseBytes, "baseBytes");
       validateBytes(candidateBytes, "candidateBytes");
       const safeCommands = cloneCommands(commands);
+      const history = validateCommandGroups(
+        commandGroups,
+        appliedGroups,
+        safeCommands,
+      );
       const previous = await load();
       const generation = (previous?.metadata.generation ?? 0) + 1;
       const slot = slots[generation % slots.length];
@@ -90,6 +97,7 @@ export async function openBrowserDocumentJournal({
         baseSha256,
         candidateSha256,
         commands: safeCommands,
+        ...(history ?? {}),
         ...(artifactReceipt
           ? { artifactReceipt: structuredClone(artifactReceipt) }
           : {}),
@@ -138,6 +146,11 @@ async function loadSlot(directory, slot, cryptoImpl) {
       metadata.commands.length > maximumCommands
     )
       return null;
+    validateCommandGroups(
+      metadata.commandGroups ?? null,
+      metadata.appliedGroups ?? null,
+      metadata.commands,
+    );
     validateBytes(baseBytes, "baseBytes");
     validateBytes(candidateBytes, "candidateBytes");
     if (
@@ -205,4 +218,27 @@ async function removeFile(directory, name) {
   } catch (error) {
     if (error?.name !== "NotFoundError") throw error;
   }
+}
+
+function validateCommandGroups(groups, appliedGroups, commands) {
+  if (groups === null) return null;
+  if (
+    !Array.isArray(groups) ||
+    groups.length > maximumCommands ||
+    !Number.isSafeInteger(appliedGroups) ||
+    appliedGroups < 0 ||
+    appliedGroups > groups.length ||
+    groups.some((g) => !Array.isArray(g) || !g.length)
+  )
+    throw Error("Browser recovery command groups are invalid.");
+  const safeGroups = JSON.parse(JSON.stringify(groups));
+  cloneCommands(safeGroups.flat());
+  if (
+    JSON.stringify(safeGroups.slice(0, appliedGroups).flat()) !==
+    JSON.stringify(commands)
+  )
+    throw Error(
+      "Browser recovery command groups do not match the applied commands.",
+    );
+  return { commandGroups: safeGroups, appliedGroups };
 }

@@ -96,6 +96,66 @@ async function extendedFeatures(frame) {
       // Public GetContent creates a missing text body; use the existing content only.
       const content = type === "table" ? null : d.Drawing?.getDocContent?.();
       state.text = content?.GetText?.({ Numbering: false }) ?? null;
+      // Observe actual character properties; plain text alone cannot distinguish
+      // a successful formatting edit from a setter that silently did nothing.
+      if (content) {
+        const properties = (pr) => {
+          const value = {};
+          for (const key of [
+            "GetBold",
+            "GetItalic",
+            "GetUnderline",
+            "GetStrikeout",
+            "GetFontSize",
+            "GetVertAlign",
+            "GetSpacing",
+            "GetCaps",
+            "GetSmallCaps",
+            "GetDoubleStrikeout",
+          ])
+            value[key] = read(pr, key, at + ".text") ?? null;
+          value.fonts = ["ascii", "eastAsia", "hAnsi", "cs"].map(
+            (slot) => read(pr, "GetFontFamily", at + ".text", slot) ?? null,
+          );
+          const color = read(pr, "GetColor", at + ".text");
+          value.color = color
+            ? {
+                rgb: color.GetRGB(),
+                theme: color.IsThemeColor(),
+                auto: color.IsAutoColor(),
+              }
+            : null;
+          return value;
+        };
+        state.paragraphs = d
+          .GetDocContent()
+          .GetAllParagraphs()
+          .map((paragraph) => {
+            const runs = [];
+            const visit = (element) => {
+              if (typeof element?.GetTextPr === "function") {
+                const text = element.GetText?.({ Numbering: false }) ?? "";
+                if (text && text !== "\r" && text !== "\n") {
+                  const style = properties(element.GetTextPr());
+                  const last = runs.at(-1);
+                  if (
+                    last &&
+                    JSON.stringify(last.style) === JSON.stringify(style)
+                  )
+                    last.text += text;
+                  else runs.push({ text, style });
+                }
+              } else if (typeof element?.GetElementsCount === "function") {
+                for (let i = 0; i < element.GetElementsCount(); i++)
+                  visit(element.GetElement(i));
+              }
+            };
+            for (let i = 0; i < paragraph.GetElementsCount(); i++)
+              visit(paragraph.GetElement(i));
+            return { text: paragraph.GetText({ Numbering: false }), runs };
+          });
+      }
+
       if (d.Table?.Content)
         state.tableCells = d.Table.Content.map((row) =>
           row.Content.map(
@@ -245,6 +305,14 @@ export async function observeOnlyOfficeCandidate(frame) {
         drawingStyle: drawings.map((d) => ({
           name: d.Drawing?.getOwnName?.() ?? null,
           fill: color(d.Drawing.spPr?.Fill),
+          line: d.Drawing.spPr?.ln
+            ? {
+                color: color(d.Drawing.spPr.ln.Fill),
+                width: d.Drawing.spPr.ln.w ?? null,
+                dash: d.Drawing.spPr.ln.prstDash ?? null,
+                cap: d.Drawing.spPr.ln.cap ?? null,
+              }
+            : null,
         })),
         wordArt: drawings.map((d) => ({
           name: d.Drawing?.getOwnName?.() ?? null,

@@ -12,6 +12,11 @@ import {
   observeOnlyOfficeProduct,
   verifyOnlyOfficeProductObservation,
 } from "./onlyoffice/product-engine.mjs";
+import {
+  readRepositoryIdentity,
+  repositoryIdentityStable,
+} from "./repository-identity.mjs";
+import { readOfficeDistributionEvidence } from "./distribution-check.mjs";
 import { createProductSession } from "./product-session.mjs";
 import { captureStableOnlyOfficeBaseline } from "./onlyoffice-baseline.mjs";
 const flags = (name, fallback) => {
@@ -27,6 +32,19 @@ const candidate = path.resolve(
 const output = path.resolve(
   flags("--output", "artifacts/onlyoffice-product-session"),
 );
+const integrationRoot = path.resolve(import.meta.dirname, "../..");
+const sourceIdentities = {
+  candidate: readRepositoryIdentity(candidate),
+  integration: readRepositoryIdentity(integrationRoot),
+};
+assert(
+  !sourceIdentities.candidate.dirty && !sourceIdentities.integration.dirty,
+  "Commit sources before recording product evidence",
+);
+const distribution = await readOfficeDistributionEvidence(
+  path.join(candidate, "dist"),
+);
+assert(distribution.valid, "Candidate distribution evidence invalid");
 const input = await fs.readFile(
   path.resolve(
     flags("--input", "eval/public/fixtures/general-native-surface.pptx"),
@@ -128,6 +146,9 @@ const browser = await chromium.launch({
   args: ["--use-gl=angle", "--use-angle=swiftshader"],
 });
 const report = {
+  sourceIdentities,
+  distribution,
+  inputSha256: hash(input),
   startedAt: new Date().toISOString(),
   newBuilds: 0,
   productionPromoted: false,
@@ -337,27 +358,94 @@ try {
       null,
     ]),
   );
+  const operation = flags("--operation", "move");
+  report.operation = operation;
   Object.assign(command, {
-    op: "move",
+    op: operation,
     elementId: target.elementId,
     x: target.x + 500,
     y: target.y,
   });
+  const args = {
+    font_size: { size: 32 },
+    bold: { bold: true },
+    italic: { italic: true },
+    underline: { underline: true },
+    strikethrough: { strikethrough: true },
+    font_family: { family: "Arial" },
+    font_color: { color: "#FF0000" },
+    replace_text: { text: "Verified product text" },
+    fill_color: { color: "#FFE600" },
+    resize: { width: target.width + 500, height: target.height + 500 },
+    rotate: { degrees: 15 },
+    flip: { axis: "horizontal" },
+    set_shape_name: { name: "Verified title" },
+    line_color: { color: "#FF0000" },
+  };
+  Object.assign(command, args[operation]);
   const applied = await session.apply({
     expectedRevision: before.revision,
     commands: [command],
   });
   report.stages.push("canonical-command-live-apply-file-reopen-journal");
+  await fs.writeFile(
+    path.join(output, "observations.json"),
+    JSON.stringify({ before, edited: applied.observation }, null, 2),
+  );
   assert.notEqual(applied.observation.revision, before.revision);
+  const afterTarget =
+    applied.observation.slides[0].elements[
+      Number(target.elementId.split("/")[1])
+    ];
+  const drawing =
+    applied.observation.slides[0].onlyoffice.drawings[
+      Number(target.elementId.split("/")[1])
+    ];
+  const styles = drawing.paragraphs?.flatMap((p) => p.runs.map((r) => r.style));
+  const property = {
+    bold: "GetBold",
+    italic: "GetItalic",
+    underline: "GetUnderline",
+    strikethrough: "GetStrikeout",
+  }[operation];
+  if (property) {
+    assert(styles?.length);
+    assert(styles.every((s) => s[property] === command[operation]));
+  }
+  if (operation === "font_size") {
+    assert(styles?.length);
+    assert(styles.every((s) => s.GetFontSize === command.size * 2));
+  }
+  if (operation === "font_family") {
+    assert(styles?.length);
+    assert(styles.every((s) => s.fonts.every((f) => f === command.family)));
+  }
+  if (operation === "move") {
+    assert(Math.abs(afterTarget.x - command.x) < 0.01);
+    assert(Math.abs(afterTarget.y - command.y) < 0.01);
+  }
+  if (operation === "replace_text")
+    assert.equal(afterTarget.text.trim(), command.text);
+  for (const element of before.slides[0].elements.filter(
+    (e) => e.elementId !== target.elementId,
+  ))
+    assert.deepEqual(
+      applied.observation.slides[0].elements.find(
+        (e) => e.elementId === element.elementId,
+      ),
+      element,
+    );
+
   await fs.writeFile(
     path.join(output, "edited.pptx"),
     persisted.candidateBytes,
   );
   report.rendering.edited = await pixels(mainFrame);
-  assert.notEqual(
-    report.rendering.edited.sha256,
-    report.rendering.before.sha256,
-  );
+  if (!["set_shape_name", "font_family", "flip"].includes(operation))
+    assert.notEqual(
+      report.rendering.edited.sha256,
+      report.rendering.before.sha256,
+    );
   await mainPage.screenshot({ path: path.join(output, "edited.png") });
   await session.undo();
   report.rendering.undo = await pixels(mainFrame);
@@ -368,7 +456,12 @@ try {
     await originalApply(command);
     throw Error("injected_after_native_change");
   };
-  const rollbackCommand = { ...command, x: command.x + 500 };
+  const rollbackCommand = {
+    ...command,
+    op: "move",
+    x: target.x + 1000,
+    y: target.y,
+  };
   await assert.rejects(
     session.apply({
       expectedRevision: before.revision,
@@ -409,6 +502,14 @@ try {
   const recovered = await session.recover();
   verifyOnlyOfficeProductObservation(applied.observation, recovered);
   report.stages.push("recovery-exact-file-readback");
+  assert.equal(session.status().undo, 1);
+  await session.undo();
+  assert.deepEqual(await pixels(mainFrame), report.rendering.before);
+  await session.recover();
+  assert.equal(session.status().redo, 1);
+  await session.redo();
+  assert.deepEqual(await pixels(mainFrame), report.rendering.edited);
+  report.stages.push("recovered-native-undo-and-redo-branch");
   report.rendering.recovered = await pixels(mainFrame);
   assert.deepEqual(report.rendering.recovered, report.rendering.edited);
   await mainPage.screenshot({ path: path.join(output, "recovered.png") });
@@ -437,6 +538,24 @@ try {
     new Promise((r) => server.close(r)),
     new Promise((r) => candidateServer.close(r)),
   ]);
+  report.finalSourceIdentities = {
+    candidate: readRepositoryIdentity(candidate),
+    integration: readRepositoryIdentity(integrationRoot),
+  };
+  report.sourceStable =
+    repositoryIdentityStable(
+      sourceIdentities.candidate,
+      report.finalSourceIdentities.candidate,
+    ) &&
+    repositoryIdentityStable(
+      sourceIdentities.integration,
+      report.finalSourceIdentities.integration,
+    );
+  if (!report.sourceStable) {
+    report.status = "failed";
+    report.errors.push("source_changed_during_trial");
+    process.exitCode = 1;
+  }
   report.finishedAt = new Date().toISOString();
   await fs.writeFile(
     path.join(output, "report.json"),

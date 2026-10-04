@@ -62,6 +62,12 @@ export function createProductSession({
     });
     return { bytes: owned, observation: structuredClone(expected), receipt };
   };
+  const boundHistory = () => {
+    if (trimSessionProductHistory(undo, redo)) {
+      base = undo[0]?.before ?? redo.at(-1)?.before ?? current;
+      commands = undo.flatMap((entry) => entry.commands);
+    }
+  };
   const checkpoint = async (state) =>
     journal.save({
       fileName: state.fileName ?? "document.pptx",
@@ -69,6 +75,11 @@ export function createProductSession({
       candidateBytes: state.bytes,
       commands,
       artifactReceipt: state.receipt,
+      commandGroups: [
+        ...undo.map((entry) => entry.commands),
+        ...redo.toReversed().map((entry) => entry.commands),
+      ],
+      appliedGroups: undo.length,
     });
   const liveMatches = async (expected) => {
     const live = await observe();
@@ -96,14 +107,16 @@ export function createProductSession({
           : [...commands, ...entry.commands];
       const previousCommands = commands;
       commands = nextCommands;
+      from.pop();
+      to.push(entry);
       try {
         await checkpoint(target);
       } catch (error) {
         commands = previousCommands;
+        to.pop();
+        from.push(entry);
         throw error;
       }
-      from.pop();
-      to.push(entry);
       current = target;
       return true;
     } catch (error) {
@@ -180,23 +193,45 @@ export function createProductSession({
           });
           const accepted = await admit(bytes, edited);
           await liveMatches(edited);
-          await engine.finish(token, true);
-          committed = true;
           const priorCommands = commands;
+          const entry = {
+            before: current,
+            after: accepted,
+            commands: input.commands,
+            beforeBytes: current.bytes,
+            afterBytes: accepted.bytes,
+          };
+          const priorUndo = undo,
+            priorRedo = redo,
+            priorBase = base;
+          undo = [...undo, entry];
+          redo = [];
           commands = [...commands, ...input.commands];
+          boundHistory();
           try {
             await checkpoint(accepted);
           } catch (error) {
             commands = priorCommands;
+            undo = priorUndo;
+            redo = priorRedo;
+            base = priorBase;
             throw error;
           }
-          undo.push({
-            before: current,
-            after: accepted,
-            commands: input.commands,
-            authorize: (bytes) => admit(bytes, edited),
-          });
-          redo = [];
+          try {
+            await engine.finish(token, true);
+            committed = true;
+          } catch (error) {
+            commands = priorCommands;
+            undo = priorUndo;
+            redo = priorRedo;
+            base = priorBase;
+            try {
+              await checkpoint(current);
+            } catch {
+              failed = true;
+            }
+            throw error;
+          }
           current = accepted;
           return {
             observation: structuredClone(edited),
@@ -260,17 +295,97 @@ export function createProductSession({
           inspected,
           receipt,
         );
-        await engine.open(accepted.bytes.slice());
-        const live = await observe();
-        await verifyObservation(inspected, live);
         const baseObservation = await engine.inspect(
           recovery.baseBytes.slice(),
         );
-        base = await admit(recovery.baseBytes, baseObservation);
-        current = accepted;
-        commands = structuredClone(recovery.metadata.commands);
-        undo = [];
-        redo = [];
+        const restoredBase = await admit(recovery.baseBytes, baseObservation);
+        const groups = recovery.metadata.commandGroups;
+        if (!groups) {
+          await engine.open(accepted.bytes.slice());
+          await verifyObservation(inspected, await observe());
+          base = accepted;
+          current = accepted;
+          commands = [];
+          undo = [];
+          redo = [];
+        } else {
+          // Recreate native transactions from the original, retaining request grouping.
+          // Verify the recorded candidate before replay and the final model after it.
+          const appliedGroups = recovery.metadata.appliedGroups;
+          if (
+            !Number.isSafeInteger(appliedGroups) ||
+            appliedGroups < 0 ||
+            appliedGroups > groups.length ||
+            JSON.stringify(groups.slice(0, appliedGroups).flat()) !==
+              JSON.stringify(recovery.metadata.commands)
+          )
+            throw Error("product_recovery_history_invalid");
+          const restoredUndo = [];
+          await engine.open(restoredBase.bytes.slice());
+          await verifyObservation(baseObservation, await observe());
+          let previous = restoredBase;
+          for (const group of groups) {
+            if (
+              !group.length ||
+              group.some(
+                (c) =>
+                  !Object.hasOwn(operationContracts, c.op) ||
+                  !validateCommand(c),
+              )
+            )
+              throw Error("product_recovery_command_invalid");
+            const prepared = await engine.preflight(
+              group,
+              previous.observation,
+            );
+            const token = await engine.begin();
+            try {
+              for (const command of prepared) await engine.apply(command);
+              const edited = await observe();
+              const bytes = await engine.snapshot({
+                before: previous.observation,
+                edited,
+                commands: group,
+                authorize: (bytes) => admit(bytes, edited),
+              });
+              const after = await admit(bytes, edited);
+              await liveMatches(edited);
+              await engine.finish(token, true);
+              restoredUndo.push({
+                before: previous,
+                after,
+                commands: group,
+                beforeBytes: previous.bytes,
+                afterBytes: after.bytes,
+              });
+              previous = after;
+            } catch (error) {
+              failed = true;
+              try {
+                await engine.finish(token, false);
+              } catch {}
+              throw error;
+            }
+          }
+          const restoredRedo = [];
+          while (restoredUndo.length > appliedGroups) {
+            await engine.undo();
+            const entry = restoredUndo.pop();
+            await verifyObservation(entry.before.observation, await observe());
+            restoredRedo.push(entry);
+          }
+          await verifyObservation(inspected, await observe());
+          // Reuse the exact retained package at the restored cursor.
+          if (restoredUndo.length) restoredUndo.at(-1).after = accepted;
+          if (restoredRedo.length) restoredRedo.at(-1).before = accepted;
+          base = restoredBase;
+          current = accepted;
+          commands = structuredClone(recovery.metadata.commands);
+          undo = restoredUndo;
+          redo = restoredRedo;
+          boundHistory();
+        }
+        const live = await observe();
         failed = false;
         return structuredClone(live);
       }),
