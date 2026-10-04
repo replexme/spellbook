@@ -230,9 +230,98 @@ async function extendedFeatures(frame) {
       return state;
     };
     const slides = read(p, "GetAllSlides", "presentation");
+    const model = window.Asc.editor.WordControl.m_oLogicDocument;
+    const nativeColor = (c) =>
+      c
+        ? {
+            type: c.color?.type ?? null,
+            id: c.color?.id ?? null,
+            rgb:
+              typeof window.AscFormat?.CRGBColor === "function" &&
+              c.color instanceof window.AscFormat.CRGBColor
+                ? {
+                    R: c.color.RGBA.R,
+                    G: c.color.RGBA.G,
+                    B: c.color.RGBA.B,
+                    A: c.color.RGBA.A,
+                  }
+                : null,
+            modifiers:
+              c.Mods?.Mods?.map((m) => ({ name: m.name, val: m.val })) ?? [],
+          }
+        : null;
+    const background = (source) =>
+      source?.cSld?.Bg
+        ? {
+            reference: source.cSld.Bg.bgRef
+              ? {
+                  index: source.cSld.Bg.bgRef.idx,
+                  color: nativeColor(source.cSld.Bg.bgRef.Color),
+                }
+              : null,
+            solid: nativeColor(source.cSld.Bg.bgPr?.Fill?.fill?.color),
+            transparency: source.cSld.Bg.bgPr?.Fill?.transparent ?? null,
+          }
+        : null;
+    const fontCollection = (f) =>
+      f ? { latin: f.latin, ea: f.ea, cs: f.cs } : null;
+    const masters = read(p, "GetAllSlideMasters", "presentation");
+    if (!Array.isArray(model.Sections))
+      unavailable.push("presentation.sections:missing");
+    const design = masters?.map((wrapper, index) => {
+      const master = wrapper.Master;
+      if (!master) {
+        unavailable.push(`master${index}:missing`);
+        return null;
+      }
+      const theme = master.Theme,
+        scheme = theme?.themeElements;
+      return {
+        name: master.cSld?.name ?? null,
+        background: background(master),
+        drawings: master.cSld.spTree.map((x, i) =>
+          drawing(
+            window.AscBuilder.GetApiDrawing(x),
+            `master${index}.drawing${i}`,
+          ),
+        ),
+        theme: theme
+          ? {
+              name: theme.name,
+              colors: {
+                name: scheme?.clrScheme?.name ?? null,
+                values: scheme?.clrScheme?.colors.map(nativeColor) ?? [],
+              },
+              fonts: {
+                name: scheme?.fontScheme?.name ?? null,
+                major: fontCollection(scheme?.fontScheme?.majorFont),
+                minor: fontCollection(scheme?.fontScheme?.minorFont),
+              },
+            }
+          : null,
+        layouts: (master.sldLayoutLst ?? []).map((layout, i) => ({
+          name: layout.cSld?.name ?? null,
+          type: layout.type,
+          background: background(layout),
+          drawings: layout.cSld.spTree.map((x, j) =>
+            drawing(
+              window.AscBuilder.GetApiDrawing(x),
+              `master${index}.layout${i}.drawing${j}`,
+            ),
+          ),
+        })),
+      };
+    });
     return {
       unavailable,
       state: {
+        masters: design,
+        sections:
+          model.Sections?.map((s) => ({
+            name: s.name,
+            startIndex: s.startIndex,
+            guid: s.guid,
+          })) ?? null,
         width: read(p, "GetWidth", "presentation") / 36000,
         height: read(p, "GetHeight", "presentation") / 36000,
         slides: slides?.map((s, i) => {

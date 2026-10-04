@@ -67,8 +67,15 @@ export async function observeOnlyOfficeProduct(frame) {
   }));
   const state = {
     slides,
-    masters: [],
-    sections: [],
+    masters: projection.extended.masters.map((master) => ({
+      ...master,
+      drawings: master.drawings.map(drawing),
+      layouts: master.layouts.map((layout) => ({
+        ...layout,
+        drawings: layout.drawings.map(drawing),
+      })),
+    })),
+    sections: projection.extended.sections,
     width: projection.extended.width * 100,
     height: projection.extended.height * 100,
   };

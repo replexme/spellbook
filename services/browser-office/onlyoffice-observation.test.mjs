@@ -20,6 +20,7 @@ function candidate() {
   }));
   const presentation = {
     GetAllSlides: () => slides,
+    GetAllSlideMasters: () => [],
     GetWidth: () => 7200000,
     GetHeight: () => 3600000,
   };
@@ -27,7 +28,10 @@ function candidate() {
     Asc: {
       editor: {
         WordControl: {
-          m_oLogicDocument: { Slides: slides.map((s) => s.Slide) },
+          m_oLogicDocument: {
+            Slides: slides.map((s) => s.Slide),
+            Sections: [],
+          },
         },
       },
     },
@@ -189,4 +193,42 @@ test("drawing RGB reads authored native channels while theme colors retain their
     B: 103,
     A: 255,
   });
+});
+
+test("master, layout, theme and section changes are included without creating absent content", async () => {
+  const { frame, presentation, window } = candidate();
+  const master = {
+    cSld: { name: "master", spTree: [] },
+    sldLayoutLst: [{ cSld: { name: "layout", spTree: [] }, type: 3 }],
+    Theme: {
+      name: "theme",
+      themeElements: {
+        clrScheme: { name: "palette", colors: [] },
+        fontScheme: {
+          name: "fonts",
+          majorFont: { latin: "Arial", ea: "", cs: "" },
+          minorFont: { latin: "Arial", ea: "", cs: "" },
+        },
+      },
+    },
+  };
+  presentation.GetAllSlideMasters = () => [{ Master: master }];
+  window.Asc.editor.WordControl.m_oLogicDocument.Sections = [
+    { name: "Section A", startIndex: 0, guid: "section-guid" },
+  ];
+  const before = await observeOnlyOfficeCandidate(frame);
+  assert.equal(before.extended.masters[0].layouts[0].name, "layout");
+  assert.equal(before.extended.masters[0].theme.fonts.major.latin, "Arial");
+  assert.equal(before.extended.sections[0].name, "Section A");
+  master.Theme.name = "modified theme";
+  assert.notDeepEqual(
+    (await observeOnlyOfficeCandidate(frame)).extended,
+    before.extended,
+  );
+  delete window.Asc.editor.WordControl.m_oLogicDocument.Sections;
+  assert.ok(
+    (await observeOnlyOfficeCandidate(frame)).unavailable.includes(
+      "presentation.sections:missing",
+    ),
+  );
 });
