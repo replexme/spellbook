@@ -217,6 +217,11 @@ async function open(bytes, providedContext) {
     () => window.__ONLYOFFICE_SAVE_E2E__?.getStatus().error,
   );
   assert(!error, error);
+  await page.evaluate(async () => {
+    window.__productBinaryCodec = await import(
+      "/repo/browser-office/binary-codec.mjs"
+    );
+  });
   const frame = page
     .frames()
     .find((f) => f.url().includes("/presentationeditor/"));
@@ -266,10 +271,10 @@ async function save(page) {
     const start = performance.now();
     await window.__ONLYOFFICE_SAVE_E2E__.save();
     const bytes = window.__comparisonSaved;
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 32768)
-      binary += String.fromCharCode(...bytes.slice(i, i + 32768));
-    return { ms: performance.now() - start, base64: btoa(binary) };
+    return {
+      ms: performance.now() - start,
+      base64: window.__productBinaryCodec.encodeBinary(bytes),
+    };
   });
 }
 async function pixels(frame) {
@@ -303,12 +308,16 @@ async function journalCall(operation, payload = null) {
         await import("/repo/browser-office/opfs-journal.mjs")
       ).openBrowserDocumentJournal({ identity });
       if (operation === "save") {
-        payload.baseBytes = Uint8Array.from(payload.baseBytes);
-        payload.candidateBytes = Uint8Array.from(payload.candidateBytes);
+        payload.baseBytes = window.__productBinaryCodec.decodeBinary(
+          payload.baseBytes,
+        );
+        payload.candidateBytes = window.__productBinaryCodec.decodeBinary(
+          payload.candidateBytes,
+        );
         if (payload.historyArtifacts)
           payload.historyArtifacts = payload.historyArtifacts.map((a) => ({
             ...a,
-            bytes: Uint8Array.from(a.bytes),
+            bytes: window.__productBinaryCodec.decodeBinary(a.bytes),
           }));
         return window.__productJournal.save(payload);
       }
@@ -317,11 +326,15 @@ async function journalCall(operation, payload = null) {
       return loaded
         ? {
             ...loaded,
-            baseBytes: Array.from(loaded.baseBytes),
-            candidateBytes: Array.from(loaded.candidateBytes),
+            baseBytes: window.__productBinaryCodec.encodeBinary(
+              loaded.baseBytes,
+            ),
+            candidateBytes: window.__productBinaryCodec.encodeBinary(
+              loaded.candidateBytes,
+            ),
             historyArtifacts: loaded.historyArtifacts.map((a) => ({
               ...a,
-              bytes: Array.from(a.bytes),
+              bytes: window.__productBinaryCodec.encodeBinary(a.bytes),
             })),
           }
         : null;
@@ -333,11 +346,11 @@ async function journalCall(operation, payload = null) {
     },
   );
   if (operation === "load" && result) {
-    result.baseBytes = Uint8Array.from(result.baseBytes);
-    result.candidateBytes = Uint8Array.from(result.candidateBytes);
+    result.baseBytes = Buffer.from(result.baseBytes, "base64");
+    result.candidateBytes = Buffer.from(result.candidateBytes, "base64");
     result.historyArtifacts = result.historyArtifacts.map((a) => ({
       ...a,
-      bytes: Uint8Array.from(a.bytes),
+      bytes: Buffer.from(a.bytes, "base64"),
     }));
   }
   return result;
@@ -346,11 +359,11 @@ const journal = {
   save: async (record) => {
     const metadata = await journalCall("save", {
       ...record,
-      baseBytes: Array.from(record.baseBytes),
-      candidateBytes: Array.from(record.candidateBytes),
+      baseBytes: Buffer.from(record.baseBytes).toString("base64"),
+      candidateBytes: Buffer.from(record.candidateBytes).toString("base64"),
       historyArtifacts: record.historyArtifacts?.map((a) => ({
         ...a,
-        bytes: Array.from(a.bytes),
+        bytes: Buffer.from(a.bytes).toString("base64"),
       })),
     });
     persisted = await journalCall("load");
@@ -384,15 +397,19 @@ const engine = createOnlyOfficeProductEngine({
     mainPage = opened.page;
     mainFrame = opened.frame;
     await mainPage.exposeFunction(
-      "__ONLYOFFICE_PRODUCT_ADMIT__",
+      "__ONLYOFFICE_PRODUCT_ADMIT_BINARY__",
       async (bytes) => {
         if (!pendingAuthorization)
           throw Error("snapshot_authorization_context_missing");
-        await pendingAuthorization(Uint8Array.from(bytes));
+        await pendingAuthorization(Buffer.from(bytes, "base64"));
         return true;
       },
     );
     await mainPage.evaluate(() => {
+      window.__ONLYOFFICE_PRODUCT_ADMIT__ = (bytes) =>
+        window.__ONLYOFFICE_PRODUCT_ADMIT_BINARY__(
+          window.__productBinaryCodec.encodeBinary(bytes),
+        );
       window.__comparisonIntent = {
         sourceOperations: null,
         sourceTargets: null,
@@ -412,8 +429,11 @@ const engine = createOnlyOfficeProductEngine({
   },
   bindArtifact: async (bytes) => {
     await mainPage.evaluate(
-      (bytes) => window.__ONLYOFFICE_PRODUCT_PRESERVATION__.bind(bytes),
-      Array.from(bytes),
+      (bytes) =>
+        window.__ONLYOFFICE_PRODUCT_PRESERVATION__.bind(
+          window.__productBinaryCodec.decodeBinary(bytes),
+        ),
+      Buffer.from(bytes).toString("base64"),
     );
     await captureStableOnlyOfficeBaseline(mainPage, save);
   },
@@ -886,7 +906,9 @@ try {
         return Object.fromEntries(
           Object.entries(snapshot).map(([key, value]) => [
             key,
-            value instanceof Uint8Array ? Array.from(value) : value,
+            value instanceof Uint8Array
+              ? window.__productBinaryCodec.encodeBinary(value)
+              : value,
           ]),
         );
       })
@@ -901,7 +923,7 @@ try {
         if (diagnostic[key]) {
           await fs.writeFile(
             path.join(output, `failure-${key}.pptx`),
-            Uint8Array.from(diagnostic[key]),
+            Buffer.from(diagnostic[key], "base64"),
           );
           delete diagnostic[key];
         }
