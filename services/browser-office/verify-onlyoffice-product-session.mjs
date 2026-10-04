@@ -7,7 +7,14 @@ import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { chromium } from "@playwright/test";
 import Ajv from "ajv";
-import { preserveOriginalPptxParts } from "./ooxml-worker-source.mjs";
+import {
+  serializeOnlyOfficeSections,
+  initializeOnlyOfficeSections,
+} from "./onlyoffice/section-artifact.mjs";
+import {
+  inspectOoxmlDocument,
+  preserveOriginalPptxParts,
+} from "./ooxml-worker-source.mjs";
 import { createOnlyOfficeComparisonHost } from "./onlyoffice/comparison-host.mjs";
 import {
   createOnlyOfficeProductEngine,
@@ -433,6 +440,10 @@ async function open(bytes, providedContext) {
     .frames()
     .find((f) => f.url().includes("/presentationeditor/"));
   assert(frame);
+  const originalSections = inspectOoxmlDocument(bytes).sections.map(
+    ({ slideCount, ...section }) => section,
+  );
+  await frame.evaluate(initializeOnlyOfficeSections, originalSections);
   const sessionId = crypto.randomUUID(),
     framePath = [];
   for (let child = frame; child.parentFrame(); child = child.parentFrame())
@@ -716,6 +727,10 @@ const engine = createOnlyOfficeProductEngine({
           payload.noEditBytes,
           payload.editedBytes,
         ].map((bytes) => Buffer.from(bytes, "base64"));
+        inputs[2] = serializeOnlyOfficeSections(
+          inputs[2],
+          payload.nativeSections,
+        );
         const result = preserveOriginalPptxParts(
           ...inputs,
           payload.sourceOperations,
@@ -744,6 +759,7 @@ const engine = createOnlyOfficeProductEngine({
           bytes: binary.encodeBinary(payload.bytes),
           noEditBytes: binary.encodeBinary(payload.noEditBytes),
           editedBytes: binary.encodeBinary(payload.editedBytes),
+          nativeSections: (await window.__productNativePort.observe()).sections,
         });
         return { ...result, bytes: binary.decodeBinary(result.bytes) };
       };
