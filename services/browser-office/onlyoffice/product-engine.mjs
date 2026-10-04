@@ -239,6 +239,7 @@ export function createOnlyOfficeProductEngine({
   snapshot,
   bindArtifact,
 }) {
+  let topologyPending = false;
   return {
     open,
     inspect,
@@ -904,8 +905,24 @@ export function createOnlyOfficeProductEngine({
       await frame.evaluate(() => window.Asc.editor.executeGroupActionsEnd());
       return { frame, checkpoint };
     },
-    finish: async (token, commit) =>
-      finishCandidateTransaction(token.frame, token.checkpoint, commit),
+    finish: async (token, commit) => {
+      const result = await finishCandidateTransaction(
+        token.frame,
+        token.checkpoint,
+        commit,
+      );
+      if (topologyPending) {
+        // Thumbnail rendering changes generated field caches. It must run after
+        // the authored group closes, so it cannot append edits during observation.
+        await token.frame.evaluate(() => {
+          const control = window.Asc.editor.WordControl;
+          control.m_oLogicDocument.updateSlideIndexes?.();
+          control.m_oDrawingDocument?.UpdateThumbnailsAttack?.();
+        });
+        topologyPending = false;
+      }
+      return result;
+    },
     apply: async (command) => {
       const frame = await getFrame();
       const result = await frame.evaluate((command) => {
@@ -1524,6 +1541,11 @@ export function createOnlyOfficeProductEngine({
         }
       }, command);
       if (result === false) throw Error("onlyoffice_product_native_rejected");
+      topologyPending ||= [
+        "move_slide",
+        "delete_slide",
+        "duplicate_slide",
+      ].includes(command.op);
       await frame.evaluate(
         ({ nativeId, op }) => {
           const h = window.AscCommon.History,
@@ -1542,7 +1564,6 @@ export function createOnlyOfficeProductEngine({
           target?.recalculate?.();
           if (["move_slide", "delete_slide", "duplicate_slide"].includes(op)) {
             m.updateSlideIndexes?.();
-            window.Asc.editor.WordControl.m_oDrawingDocument?.UpdateThumbnailsAttack?.();
           }
           m.Recalculate(h.Get_RecalcData(null, h.getGroupChanges()));
           m.RedrawCurSlide();
