@@ -136,6 +136,12 @@ public sealed class PptxUnsupportedFeaturePreserver
             EnsureContentTypes(baseline, output, copiedParts);
         }
 
+        // ZipArchive.Update rewrites central-directory metadata even when no
+        // entry payload changed (for example, a browser's DOS creator becomes
+        // Unix). Keep the exact submitted package when preservation was a no-op.
+        if (PackagePayloadsMatch(candidatePath, outputPath))
+            File.Copy(candidatePath, outputPath, overwrite: true);
+
         return new UnsupportedFeaturePreservationReport(
             ContractVersions.Current,
             Hashing.FileSha256(baselinePath),
@@ -143,6 +149,21 @@ public sealed class PptxUnsupportedFeaturePreserver
             Hashing.FileSha256(outputPath),
             restoredSlides,
             copiedParts.Order(StringComparer.Ordinal).ToList());
+    }
+
+    private static bool PackagePayloadsMatch(string candidatePath, string outputPath)
+    {
+        using var candidate = ZipFile.OpenRead(candidatePath);
+        using var output = ZipFile.OpenRead(outputPath);
+        if (candidate.Entries.Count != output.Entries.Count) return false;
+        foreach (var entry in candidate.Entries)
+        {
+            var other = output.GetEntry(entry.FullName);
+            if (other is null || entry.Length != other.Length
+                || !ReadBytes(entry).AsSpan().SequenceEqual(ReadBytes(other)))
+                return false;
+        }
+        return true;
     }
 
     private static void PreservePresentationPackageFeatures(

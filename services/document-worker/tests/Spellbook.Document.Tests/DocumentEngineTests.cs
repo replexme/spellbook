@@ -1113,6 +1113,22 @@ public sealed class DocumentEngineTests : IDisposable
     {
         var candidate = TestPresentationFactory.Create(directory);
         AddUnsupportedPresentationFeatureFixture(candidate);
+        // Browser ZIP writers mark DOS as the creator. Opening such a ZIP in
+        // Update mode on macOS changes this metadata without changing its files.
+        var bytes = File.ReadAllBytes(candidate);
+        var end = bytes.Length - 22;
+        while (BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(end, 4)) != 0x06054b50)
+            end--;
+        var offset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(end + 16, 4)));
+        while (BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, 4)) == 0x02014b50)
+        {
+            bytes[offset + 5] = 0;
+            offset += 46
+                + BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset + 28, 2))
+                + BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset + 30, 2))
+                + BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(offset + 32, 2));
+        }
+        File.WriteAllBytes(candidate, bytes);
         var output = Path.Combine(directory, "already-preserved.pptx");
 
         var report = new PptxUnsupportedFeaturePreserver().Preserve(candidate, candidate, output);
