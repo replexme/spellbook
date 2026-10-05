@@ -4887,12 +4887,21 @@ export function verifyPersistedElementMutation(
 }
 
 export function inspectOoxmlDocument(input) {
+  return packageObservation(openInspectionPackage(input));
+}
+
+// Section import/export needs presentation topology, not every slide's name.
+// This is not a saved-file admission check; callers retain independent reopen.
+export function inspectOoxmlSections(input) {
+  return packageSectionObservation(openInspectionPackage(input));
+}
+
+function openInspectionPackage(input) {
   if (!(input instanceof Uint8Array))
     throw new TypeError("PPTX input must be a Uint8Array.");
   if (input.byteLength > maximumInputBytes)
     throw new Error("PPTX exceeds the browser inspection limit.");
-  const context = openPackage(input, { requireSimpleTopology: false });
-  return packageObservation(context);
+  return openPackage(input, { requireSimpleTopology: false });
 }
 
 // Experimental candidate-output boundary. Production persistence does not
@@ -5278,10 +5287,16 @@ export function repairCandidatePptxStructure(originalInput, candidateInput) {
   };
 }
 
-function packageObservation(context) {
+function packageSectionObservation(context) {
   return {
     sections: readSections(context),
     slideIds: currentSlideIds(context).map((slide) => slide.getAttribute("id")),
+  };
+}
+
+function packageObservation(context) {
+  return {
+    ...packageSectionObservation(context),
     slideNames: orderedSlidePaths(context.entries).map((part) => {
       const document = parseXml(context.entries, part);
       const slide = document.getElementsByTagNameNS(presentationNamespace, "cSld")[0];

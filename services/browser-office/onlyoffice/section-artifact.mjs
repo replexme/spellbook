@@ -2,14 +2,14 @@
 import { normalizedSections } from "../slide-sections.mjs";
 import {
   applyOoxmlCommand,
-  inspectOoxmlDocument,
+  inspectOoxmlSections,
 } from "../ooxml-worker-source.mjs";
 
 // The pinned SDK's binary reader/writer omit presentation sections. Use the
 // shared OOXML contract for this part, with live native state as the save input.
 // The result still goes through intent checking and independent file reopen.
 export function serializeOnlyOfficeSections(bytes, nativeSections) {
-  const info = inspectOoxmlDocument(bytes);
+  const info = inspectOoxmlSections(bytes);
   const sections = normalizedSections(
     nativeSections.map(({ name, guid, startIndex }) => ({
       name,

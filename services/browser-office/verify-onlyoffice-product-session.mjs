@@ -12,7 +12,7 @@ import {
   initializeOnlyOfficeSections,
 } from "./onlyoffice/section-artifact.mjs";
 import {
-  inspectOoxmlDocument,
+  inspectOoxmlSections,
   preserveOriginalPptxParts,
   repairCandidatePptxStructure,
 } from "./ooxml-worker-source.mjs";
@@ -458,7 +458,7 @@ async function open(bytes, providedContext) {
     .frames()
     .find((f) => f.url().includes("/presentationeditor/"));
   assert(frame);
-  const originalSections = inspectOoxmlDocument(bytes).sections.map(
+  const originalSections = inspectOoxmlSections(bytes).sections.map(
     ({ slideCount, ...section }) => section,
   );
   await frame.evaluate(initializeOnlyOfficeSections, originalSections);
@@ -747,7 +747,7 @@ const engine = createOnlyOfficeProductEngine({
         ].map((bytes) => Buffer.from(bytes, "base64"));
         // The retained SDK baseline omits sections too. Its section state is
         // the current approved source package, not the next requested command.
-        const sourceSections = inspectOoxmlDocument(inputs[0]).sections.map(
+        const sourceSections = inspectOoxmlSections(inputs[0]).sections.map(
           ({ name, id, startSlideIndex }) => ({
             name,
             guid: id,

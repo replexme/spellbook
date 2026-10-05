@@ -7,6 +7,21 @@ import {
   reusableBrowserImage,
   withBrowserVisualEvidence,
 } from "./browser-visual-evidence.mjs";
+import { readOnlyAiObservationAfterMutation, reusableAiObservation } from "./ai-observation-view.mjs";
+
+test("reusing an exact model without pictures still requires fresh requested visual evidence", () => {
+  const current = { bytes: Uint8Array.of(1), revision: "r1", detailSlideIndex: null, documentChanges: 1, activeSlide: 0, selectedElementIds: [] };
+  const mutation = withBrowserVisualEvidence({ slides: [{}], activeSlide: 0, changedSlideIndexes: [0] }, []);
+  assert.equal(mutation.visualEvidenceComplete, false);
+  const cache = { ...current, observation: readOnlyAiObservationAfterMutation(mutation) };
+  const cached = reusableAiObservation(cache, current);
+  const targets = browserCaptureTargets({ operation: "observe" }, cached);
+  assert.deepEqual(targets, [0]);
+  assert.equal(reusableBrowserImage(cached, 0), null);
+  assert.equal(withBrowserVisualEvidence(cached, [], targets).visualEvidenceComplete, false);
+  assert.equal(withBrowserVisualEvidence(cached, [{ slideIndex: 0, pngBytes: [137] }], targets).visualEvidenceComplete, true);
+  assert.equal(reusableAiObservation(cache, { ...current, documentChanges: 2 }), null);
+});
 
 const observation = {
   slides: [{}, {}, {}],

@@ -3240,7 +3240,9 @@ async function handleProductHostMessage(message) {
         nativeResult?.documentChanges === status.documentChanges &&
         Number.isSafeInteger(status.documentChanges) &&
         value?.revision === reconciledModelRevision &&
-        value.visualEvidenceComplete === true &&
+        // The model is reusable without pictures when its live identity is
+        // exact. attachBrowserVisualEvidence still renders every requested
+        // missing image before a later AI read can be visually complete.
         !value.visualEvidenceError
       )
         aiObservationCache = {

@@ -9,6 +9,7 @@ import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 import {
   applyOoxmlCommand,
   inspectOoxmlDocument,
+  inspectOoxmlSections,
   inspectOoxmlDocumentWithAssets,
   preserveOriginalPptxParts,
   verifyPersistedElementMutation,
@@ -18,6 +19,33 @@ import {
   mergeNumericWorkbookDelta,
   assessHumanComparisonPreservation,
 } from "./ooxml-worker-source.mjs";
+
+test("section-only reads retain ZIP and presentation checks without parsing each slide name", async () => {
+  const bytes = new Uint8Array(await readFile(new URL("../../eval/public/fixtures/general-native-surface.pptx", import.meta.url)));
+  const full = inspectOoxmlDocument(bytes);
+  const original = DOMParser.prototype.parseFromString;
+  let parsed = 0;
+  DOMParser.prototype.parseFromString = function (...args) {
+    if (/<(?:[\w]+:)?sld[\s>]/u.test(args[0])) parsed++;
+    return original.apply(this, args);
+  };
+  try {
+    const sections = inspectOoxmlSections(bytes);
+    const sectionReads = parsed;
+    assert.deepEqual(sections, { sections: full.sections, slideIds: full.slideIds });
+    assert.equal(sections.slideNames, undefined);
+    parsed = 0;
+    assert.deepEqual(inspectOoxmlDocument(bytes), full);
+    assert.equal(parsed - sectionReads, full.slideIds.length);
+    assert.throws(() => inspectOoxmlSections([]), /Uint8Array/);
+    assert.throws(() => inspectOoxmlSections(Uint8Array.of(0)), /ZIP|zip|PPTX|package/);
+    const entries = unzipSync(bytes);
+    delete entries["ppt/presentation.xml"];
+    assert.throws(() => inspectOoxmlSections(zipSync(entries)), /presentation|Missing|missing/);
+  } finally {
+    DOMParser.prototype.parseFromString = original;
+  }
+});
 
 test("human comparison preservation rejects collateral payload changes even when XML is valid", async () => {
   const source = new Uint8Array(await readFile(new URL("../../eval/public/fixtures/general-native-surface.pptx", import.meta.url)));
