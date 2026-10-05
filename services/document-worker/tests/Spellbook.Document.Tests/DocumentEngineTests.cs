@@ -1109,6 +1109,39 @@ public sealed class DocumentEngineTests : IDisposable
     }
 
     [Fact]
+    public void UnsupportedFeaturePreserverKeepsAlreadyPreservedCandidateBytesExact()
+    {
+        var candidate = TestPresentationFactory.Create(directory);
+        AddUnsupportedPresentationFeatureFixture(candidate);
+        var output = Path.Combine(directory, "already-preserved.pptx");
+
+        var report = new PptxUnsupportedFeaturePreserver().Preserve(candidate, candidate, output);
+
+        Assert.Equal(File.ReadAllBytes(candidate), File.ReadAllBytes(output));
+        Assert.Equal(report.CandidateDocumentSha256, report.OutputDocumentSha256);
+        Assert.Empty(report.RestoredSlideIndexes);
+    }
+
+    [Fact]
+    public void UnsupportedFeaturePreserverIsByteStableAfterRestoringMissingFeatures()
+    {
+        var baseline = TestPresentationFactory.Create(directory);
+        AddUnsupportedPresentationFeatureFixture(baseline);
+        var candidate = Path.Combine(directory, "missing-features.pptx");
+        File.Copy(baseline, candidate);
+        StripUnsupportedPresentationFeatureFixture(candidate);
+        var first = Path.Combine(directory, "first-preservation.pptx");
+        var second = Path.Combine(directory, "second-preservation.pptx");
+        var preserver = new PptxUnsupportedFeaturePreserver();
+        preserver.Preserve(baseline, candidate, first);
+
+        var report = preserver.Preserve(baseline, first, second);
+
+        Assert.Equal(File.ReadAllBytes(first), File.ReadAllBytes(second));
+        Assert.Equal(report.CandidateDocumentSha256, report.OutputDocumentSha256);
+    }
+
+    [Fact]
     public void UnsupportedFeaturePreserverRestoresUntouchedActiveXPackageClosure()
     {
         var baseline = TestPresentationFactory.Create(directory);

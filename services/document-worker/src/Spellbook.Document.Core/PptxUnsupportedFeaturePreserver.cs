@@ -297,6 +297,7 @@ public sealed class PptxUnsupportedFeaturePreserver
         var candidateOverrides = candidate.Root!.Elements(ContentTypesNamespace + "Override")
             .Where(element => !string.IsNullOrWhiteSpace((string?)element.Attribute("PartName")))
             .ToDictionary(element => ((string)element.Attribute("PartName")!).TrimStart('/'), StringComparer.Ordinal);
+        var changed = false;
 
         foreach (var part in copiedParts.Order(StringComparer.Ordinal))
         {
@@ -314,6 +315,7 @@ public sealed class PptxUnsupportedFeaturePreserver
                 {
                     candidate.Root.Add(new XElement(sourceOverride));
                     candidateOverrides[part] = sourceOverride;
+                    changed = true;
                 }
                 continue;
             }
@@ -325,6 +327,7 @@ public sealed class PptxUnsupportedFeaturePreserver
             {
                 candidate.Root.Add(new XElement(sourceDefault));
                 candidateDefaults[extension] = sourceDefault;
+                changed = true;
             }
             else if (!string.Equals((string?)candidateDefault.Attribute("ContentType"), sourceContentType, StringComparison.Ordinal))
             {
@@ -334,9 +337,13 @@ public sealed class PptxUnsupportedFeaturePreserver
                         ?? throw new InvalidDataException($"Preserved package part has an empty content type: {part}")));
                 candidate.Root.Add(added);
                 candidateOverrides[part] = added;
+                changed = true;
             }
         }
-        WriteXml(output, "[Content_Types].xml", candidate);
+        // A browser save may already retain all these declarations. Rewriting
+        // an unchanged manifest changes the submitted file's hash and causes
+        // the product's exact-artifact admission to reject a valid save.
+        if (changed) WriteXml(output, "[Content_Types].xml", candidate);
     }
 
     private static (string Path, XDocument Document) ReadRelationships(
