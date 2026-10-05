@@ -1,26 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0 */
-import { normalizedSections } from "../slide-sections.mjs";
-import {
-  applyOoxmlCommand,
-  inspectOoxmlSections,
-} from "../ooxml-worker-source.mjs";
-
-// The pinned SDK's binary reader/writer omit presentation sections. Use the
-// shared OOXML contract for this part, with live native state as the save input.
-// The result still goes through intent checking and independent file reopen.
-export function serializeOnlyOfficeSections(bytes, nativeSections) {
-  const info = inspectOoxmlSections(bytes);
-  const sections = normalizedSections(
-    nativeSections.map(({ name, guid, startIndex }) => ({
-      name,
-      id: guid,
-      startSlideIndex: startIndex,
-    })),
-    info.slideIds.length,
-  );
-  if (!sections.length && !info.sections.length) return bytes;
-  return applyOoxmlCommand(bytes, { op: "set_sections", sections }).bytes;
-}
+export { serializeNativePptxSections as serializeOnlyOfficeSections } from "../ooxml-worker-source.mjs";
 
 // Initialization only: restore original package sections before the first
 // observation or user history. Never use this to mutate an open session.

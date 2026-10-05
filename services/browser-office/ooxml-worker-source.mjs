@@ -7295,6 +7295,53 @@ function relativePart(source, target) {
   return `${"../".repeat(sourceSegments.length)}${targetSegments.join("/")}`;
 }
 
+export function serializeNativePptxSections(bytes, nativeSections) {
+  const info = inspectOoxmlSections(bytes);
+  const sections = normalizedSections(
+    nativeSections.map(({ name, guid, startIndex }) => ({
+      name,
+      id: guid,
+      startSlideIndex: startIndex,
+    })),
+    info.slideIds.length,
+  );
+  if (!sections.length && !info.sections.length) return bytes;
+  return applyOoxmlCommand(bytes, { op: "set_sections", sections }).bytes;
+}
+
+export function preserveNativeExportWithSections({
+  bytes,
+  noEditBytes,
+  editedBytes,
+  sourceOperations,
+  sourceTargets,
+  nativeSections,
+}) {
+  let baseline = new Uint8Array(noEditBytes),
+    edited = new Uint8Array(editedBytes);
+  const original = new Uint8Array(bytes);
+  if (nativeSections !== undefined) {
+    if (!Array.isArray(nativeSections))
+      throw Error("onlyoffice_native_sections_invalid");
+    const sourceSections = inspectOoxmlSections(original).sections.map(
+      ({ name, id, startSlideIndex }) => ({
+        name,
+        guid: id,
+        startIndex: startSlideIndex,
+      }),
+    );
+    baseline = serializeNativePptxSections(baseline, sourceSections);
+    edited = serializeNativePptxSections(edited, nativeSections);
+  }
+  return preserveOriginalPptxParts(
+    original,
+    baseline,
+    edited,
+    sourceOperations,
+    sourceTargets ?? null,
+  );
+}
+
 if (typeof self !== "undefined")
   self.onmessage = async (event) => {
     const {
@@ -7306,6 +7353,7 @@ if (typeof self !== "undefined")
       editedBytes,
       sourceOperations,
       sourceTargets,
+      nativeSections,
     } = event.data;
     try {
       if (operation === "inspect") {
@@ -7324,13 +7372,7 @@ if (typeof self !== "undefined")
           },
         });
       } else if (operation === "preserve-native") {
-        const result = preserveOriginalPptxParts(
-          new Uint8Array(bytes),
-          new Uint8Array(noEditBytes),
-          new Uint8Array(editedBytes),
-          sourceOperations,
-          sourceTargets ?? null,
-        );
+        const result = preserveNativeExportWithSections({ bytes, noEditBytes, editedBytes, sourceOperations, sourceTargets, nativeSections });
         self.postMessage(
           { requestId, bytes: result.bytes.buffer, report: result.report },
           [result.bytes.buffer],

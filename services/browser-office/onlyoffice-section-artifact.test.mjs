@@ -7,7 +7,10 @@ import {
   serializeOnlyOfficeSections,
   initializeOnlyOfficeSections,
 } from "./onlyoffice/section-artifact.mjs";
-import { inspectOoxmlDocument } from "./ooxml-worker-source.mjs";
+import {
+  preserveNativeExportWithSections,
+  inspectOoxmlDocument,
+} from "./ooxml-worker-source.mjs";
 
 test("section serialization uses actual native values and changes only presentation XML", async () => {
   const bytes = new Uint8Array(
@@ -96,4 +99,68 @@ test("original section import initializes once before edits and retains native h
   } finally {
     globalThis.window = previous;
   }
+});
+
+test("browser preservation restores SDK-omitted sections and admits actual native section edits", async () => {
+  const raw = new Uint8Array(
+    await readFile(
+      new URL(
+        "../../eval/public/fixtures/general-native-surface.pptx",
+        import.meta.url,
+      ),
+    ),
+  );
+  const section = {
+    name: "Original",
+    guid: "{11111111-1111-4111-8111-111111111111}",
+    startIndex: 0,
+  };
+  const original = serializeOnlyOfficeSections(raw, [section]);
+  const unchanged = preserveNativeExportWithSections({
+    bytes: original,
+    noEditBytes: raw,
+    editedBytes: raw,
+    sourceOperations: null,
+    nativeSections: [section],
+  });
+  assert.deepEqual(
+    inspectOoxmlDocument(unchanged.bytes).sections,
+    inspectOoxmlDocument(original).sections,
+  );
+  const native = [{ ...section, name: "Edited" }];
+  const saved = preserveNativeExportWithSections({
+    bytes: original,
+    noEditBytes: raw,
+    editedBytes: raw,
+    sourceOperations: ["set_sections"],
+    nativeSections: native,
+  });
+  assert.equal(inspectOoxmlDocument(saved.bytes).sections[0].name, "Edited");
+  const before = unzipSync(original),
+    after = unzipSync(saved.bytes);
+  for (const part of Object.keys(before))
+    if (part !== "ppt/presentation.xml")
+      assert.deepEqual(after[part], before[part], part);
+  const unrelated = preserveNativeExportWithSections({
+    bytes: original,
+    noEditBytes: raw,
+    editedBytes: raw,
+    sourceOperations: ["replace_text"],
+    nativeSections: native,
+  });
+  assert.deepEqual(
+    inspectOoxmlDocument(unrelated.bytes).sections,
+    inspectOoxmlDocument(original).sections,
+    "unrequested section edits cannot reach the saved artifact",
+  );
+  assert.throws(
+    () =>
+      preserveNativeExportWithSections({
+        bytes: original,
+        noEditBytes: raw,
+        editedBytes: raw,
+        nativeSections: null,
+      }),
+    /native_sections_invalid/,
+  );
 });

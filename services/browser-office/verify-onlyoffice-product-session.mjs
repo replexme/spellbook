@@ -8,13 +8,10 @@ import assert from "node:assert/strict";
 import { chromium } from "@playwright/test";
 import Ajv from "ajv";
 import {
-  serializeOnlyOfficeSections,
   initializeOnlyOfficeSections,
 } from "./onlyoffice/section-artifact.mjs";
 import {
   inspectOoxmlSections,
-  preserveOriginalPptxParts,
-  repairCandidatePptxStructure,
 } from "./ooxml-worker-source.mjs";
 import { onlyOfficeExtendedCommandCase } from "./onlyoffice/product-command-cases.mjs";
 import { createOnlyOfficeResourcePreparation } from "./onlyoffice/product-resource-preparation.mjs";
@@ -252,7 +249,7 @@ const server = createServer(async (req, res) => {
       preserveSource: true,
       repairStructure: true,
       authorizeArtifact: true,
-      preservationBridge: true,
+      preservationBridge: false,
     })
       .replaceAll(
         "'/compare.pptx'",
@@ -717,12 +714,12 @@ const journal = {
 };
 report.recoveryProvider = "existing-opfs-two-slot-journal";
 report.preservationExecution = {
-  mode: "current-source-direct-node-through-real-save-callback",
+  mode: "browser-worker-through-real-save-callback",
   sourceSha256: hash(
     await fs.readFile("services/browser-office/ooxml-worker-source.mjs"),
   ),
   newBuilds: 0,
-  limitation: "Diagnostic bridge; not production browser bundle admission",
+  limitation: "Real browser component and common session; web application integration is separate",
 };
 const engine = createOnlyOfficeProductEngine({
   getFrame: async () => mainFrame,
@@ -735,41 +732,6 @@ const engine = createOnlyOfficeProductEngine({
     const opened = await open(bytes, mainContext);
     mainPage = opened.page;
     mainFrame = opened.frame;
-    // Run the current preservation source directly. The retained bundle is
-    // used only for its unchanged final structure repair; never rebuild it.
-    await mainPage.exposeFunction(
-      "__ONLYOFFICE_PRODUCT_PRESERVE_BINARY__",
-      async (payload) => {
-        const inputs = [
-          payload.bytes,
-          payload.noEditBytes,
-          payload.editedBytes,
-        ].map((bytes) => Buffer.from(bytes, "base64"));
-        // The retained SDK baseline omits sections too. Its section state is
-        // the current approved source package, not the next requested command.
-        const sourceSections = inspectOoxmlSections(inputs[0]).sections.map(
-          ({ name, id, startSlideIndex }) => ({
-            name,
-            guid: id,
-            startIndex: startSlideIndex,
-          }),
-        );
-        inputs[1] = serializeOnlyOfficeSections(inputs[1], sourceSections);
-        inputs[2] = serializeOnlyOfficeSections(
-          inputs[2],
-          payload.nativeSections,
-        );
-        const result = preserveOriginalPptxParts(
-          ...inputs,
-          payload.sourceOperations,
-          payload.sourceTargets,
-        );
-        return {
-          bytes: Buffer.from(repairCandidatePptxStructure(inputs[0],result.bytes).bytes).toString("base64"),
-          report: result.report,
-        };
-      },
-    );
     await mainPage.exposeFunction(
       "__ONLYOFFICE_PRODUCT_ADMIT_BINARY__",
       async (bytes) => {
@@ -780,17 +742,7 @@ const engine = createOnlyOfficeProductEngine({
       },
     );
     await mainPage.evaluate(() => {
-      window.__ONLYOFFICE_PRODUCT_PRESERVE__ = async (payload) => {
-        const binary = window.__productBinaryCodec;
-        const result = await window.__ONLYOFFICE_PRODUCT_PRESERVE_BINARY__({
-          ...payload,
-          bytes: binary.encodeBinary(payload.bytes),
-          noEditBytes: binary.encodeBinary(payload.noEditBytes),
-          editedBytes: binary.encodeBinary(payload.editedBytes),
-          nativeSections: (await window.__productNativePort.observe()).sections,
-        });
-        return { ...result, bytes: binary.decodeBinary(result.bytes) };
-      };
+      window.__ONLYOFFICE_PRODUCT_PRESERVE__ = () => { throw Error("diagnostic_preservation_bridge_forbidden"); };
       window.__ONLYOFFICE_PRODUCT_ADMIT__ = (bytes) =>
         window.__ONLYOFFICE_PRODUCT_ADMIT_BINARY__(
           window.__productBinaryCodec.encodeBinary(bytes),
@@ -800,6 +752,8 @@ const engine = createOnlyOfficeProductEngine({
         sourceTargets: null,
       };
     });
+    assert.equal(mainPage.workers().filter(worker => worker.url().endsWith("/comparison-repair.js")).length, 1);
+    report.diagnosticPreservationBridgeDisabled = true;
     await captureStableOnlyOfficeBaseline(mainPage, save);
   },
   inspect: async (bytes) => {
