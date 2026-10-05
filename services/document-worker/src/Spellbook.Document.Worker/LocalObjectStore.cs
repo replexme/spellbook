@@ -54,6 +54,12 @@ public sealed class LocalObjectStore
         await UploadAsync(objectName, source, cancellationToken);
     }
 
+    public async Task CopyAsync(string sourceObject, string destinationObject, CancellationToken cancellationToken)
+    {
+        await using var source = File.OpenRead(Resolve(sourceObject));
+        await UploadAsync(destinationObject, source, cancellationToken);
+    }
+
     public async Task UploadJsonAsync<T>(string objectName, T value, CancellationToken cancellationToken)
     {
         await using var data = new MemoryStream();

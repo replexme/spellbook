@@ -27,6 +27,7 @@ app.MapPost("/internal/jobs/scan-render", (
     ScanRenderJob job,
     LocalObjectStore storage,
     IEnumerable<IDocumentFormatAdapter> adapters,
+    IPresentationRenderer renderer,
     IHttpClientFactory clients) =>
 {
     Authorize(request);
@@ -56,6 +57,7 @@ app.MapPost("/internal/jobs/scan-render", (
         }
         WorkerFailure.RejectCompoundFile(inputPath);
         string? validationObject = null;
+        PackageChangeBudgetReport? validation = null;
         if (baselinePath is not null)
         {
             if (job.ChangeBudget is null)
@@ -68,7 +70,7 @@ app.MapPost("/internal/jobs/scan-render", (
                     || job.ChangeBudget.TargetSlideIndexes is null
                     || job.ChangeBudget.TargetSlideIndexes.Count == 0))
                 throw new InvalidDataException("native_ai_change_evidence_missing");
-            var validation = new PptxPackageChangeBudgetValidator()
+            validation = new PptxPackageChangeBudgetValidator()
                 .Validate(baselinePath, inputPath, job.ChangeBudget);
             validationObject = $"{job.OutputPrefix}/validation.json";
             await storage.UploadJsonAsync(
@@ -83,14 +85,16 @@ app.MapPost("/internal/jobs/scan-render", (
         }
         var scan = adapter.Scan(inputPath);
         var graph = adapter.Inspect(inputPath, scan);
-        var images = await adapter.RenderAsync(inputPath, Path.Combine(workspace.Path, "slides"), cancellationToken);
-        var graphWithPreviews = AddPreviewObjects(graph, job.OutputPrefix, images.Count, adapter);
+        var (graphWithPreviews, renderedSlideCount) = await SavedPreviewRenderer.RenderAsync(
+            storage, adapter, renderer, inputPath, baselinePath, job.BaselineGraphObject,
+            validation, graph, Path.Combine(workspace.Path, "slides"), job.OutputPrefix, cancellationToken);
         var graphObject = $"{job.OutputPrefix}/element-graph.json";
         var scanObject = $"{job.OutputPrefix}/scan.json";
         await storage.UploadJsonAsync(graphObject, graphWithPreviews, DocumentJsonContext.Default.ElementGraph, cancellationToken);
         await storage.UploadJsonAsync(scanObject, scan, DocumentJsonContext.Default.DocumentScan, cancellationToken);
-        await UploadImagesAsync(storage, job.OutputPrefix, images, cancellationToken);
-        return new WorkerOutputs(graphObject, scanObject, validationObject, null, images.Count, scan.DocumentSha256);
+        Console.WriteLine(JsonSerializer.Serialize(new { eventType = "saved_preview_render", jobId = job.JobId,
+            slideCount = graph.Slides.Count, renderedSlideCount }));
+        return new WorkerOutputs(graphObject, scanObject, validationObject, null, graph.Slides.Count, scan.DocumentSha256);
     }));
     return Results.Accepted(value: new { status = "accepted", jobId = job.JobId });
 });
@@ -282,7 +286,8 @@ public sealed record ScanRenderJob(
     string? BaselineInputObject = null,
     string? ChangeOrigin = null,
     IReadOnlyList<string>? ChangeTaskIds = null,
-    PackageChangeBudgetRequest? ChangeBudget = null);
+    PackageChangeBudgetRequest? ChangeBudget = null,
+    string? BaselineGraphObject = null);
 public sealed record PatchRenderJob(string JobId, string CallbackUrl, string StorageNamespace, string FormatId, string InputObject, string OutputDocumentObject, string OutputPrefix, EditCommandBatch Command, Dictionary<string, string>? AssetObjects = null);
 public sealed record WorkerOutputs(string GraphObject, string? ScanObject, string? ValidationObject, string? DocumentObject, int SlideCount, string DocumentSha256);
 public sealed record WorkerCallback(string JobId, string Status, WorkerOutputs? Outputs, string? Error, string? ErrorCode = null);
