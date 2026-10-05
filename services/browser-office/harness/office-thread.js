@@ -166,8 +166,9 @@ function inspectSavedDocument(
   metadata,
 ) {
   const reuse = reusableSavedInspection(metadata);
-  const observation = withSavedDocumentModel(path, (created) =>
-    spellbookDocumentOperation({
+  const observation = withSavedDocumentModel(path, (created) => {
+    restoreSavedSlideNames(created, metadata?.slideNames);
+    return spellbookDocumentOperation({
       operation: "observe",
       packageSections: savedSections,
       packageAssetHashes: savedAssets,
@@ -178,8 +179,8 @@ function inspectSavedDocument(
       documentModel: created,
       inspectPersistedSnapshot: true,
       savedInspectionReuse: reuse,
-    }),
-  );
+    });
+  });
   // Failed reads leave the earlier verified cache intact. Copy the result
   // because the page may attach fields or mutate its returned observation.
   savedInspection = validInspectionMetadata(metadata) &&
@@ -189,13 +190,14 @@ function inspectSavedDocument(
   return observation;
 }
 
-function normalizeSavedDocument(path, outputPath) {
+function normalizeSavedDocument(path, outputPath, savedSlideNames) {
   if (
     typeof outputPath !== "string" ||
     !/^\/tmp\/spellbook\/normalized-[0-9]+\.pptx$/u.test(outputPath)
   )
     throw new Error("Invalid normalized-document output path.");
   withSavedDocumentModel(path, (created) => {
+    restoreSavedSlideNames(created, savedSlideNames);
     if (typeof created.storeToURL !== "function")
       throw new Error("Saved PPTX model cannot be normalized.");
     created.storeToURL(`file://${outputPath}`, [
@@ -582,9 +584,28 @@ function watchDocumentChanges() {
 const documentChangeCount = () =>
   documentChangesWatched ? documentChanges : null;
 
-function openDocument(path, requestId) {
+// Impress derives automatic page names from the title even when the PPTX
+// contains an explicit cSld name. Restore that saved value in the native
+// model before observation; absent names retain the engine's normal behavior.
+function restoreSavedSlideNames(document, names) {
+  if (names == null) return;
+  const pages = document.getDrawPages();
+  if (!Array.isArray(names) || names.length !== pages.getCount() ||
+      names.some(name => name !== null && typeof name !== "string"))
+    throw new Error("invalid_saved_slide_names");
+  for (let index = 0; index < names.length; index++) {
+    if (names[index] === null) continue;
+    const page = pages.getByIndex(index);
+    if (page.getName() !== names[index]) page.setName(names[index]);
+    if (page.getName() !== names[index])
+      throw new Error("saved_slide_name_not_restored");
+  }
+}
+
+function openDocument(path, requestId, savedSlideNames) {
   closeDocument();
   model = desktop.loadComponentFromURL(`file://${path}`, "_default", 0, []);
+  restoreSavedSlideNames(model, savedSlideNames);
   watchDocumentChanges();
   const controller = model.getCurrentController();
   // The shared operation program finds the document through the desktop's
@@ -638,7 +659,7 @@ function start() {
       switch (command) {
         case "open":
           savedInspection = null;
-          openDocument(event.data.path, requestId);
+          openDocument(event.data.path, requestId, event.data.savedSlideNames);
           break;
         case "dispatch":
           batchObservation = null;
@@ -875,7 +896,7 @@ function start() {
           break;
         case "normalize-saved":
           batchObservation = null;
-          normalizeSavedDocument(event.data.path, event.data.outputPath);
+          normalizeSavedDocument(event.data.path, event.data.outputPath, event.data.savedSlideNames);
           post("normalize-saved-complete", { requestId });
           break;
         case "mark-saved": {

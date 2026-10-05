@@ -5241,6 +5241,11 @@ function packageObservation(context) {
   return {
     sections: readSections(context),
     slideIds: currentSlideIds(context).map((slide) => slide.getAttribute("id")),
+    slideNames: orderedSlidePaths(context.entries).map((part) => {
+      const document = parseXml(context.entries, part);
+      const slide = document.getElementsByTagNameNS(presentationNamespace, "cSld")[0];
+      return slide?.getAttribute("name") || null;
+    }),
   };
 }
 

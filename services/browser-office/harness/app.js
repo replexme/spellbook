@@ -347,7 +347,11 @@ async function writeAndOpen(bytes, name = "document.pptx", recovery = {}) {
   } catch {}
   FS.writeFile(activePath, bytes);
   setState("opening", `Opening ${filename}`);
-  const result = await request("open", { path: activePath });
+  const metadata = await packageMetadataOf(bytes);
+  const result = await request("open", {
+    path: activePath,
+    savedSlideNames: metadata.slideNames,
+  });
   engineDocumentOpen = true;
   currentSlideCount = result.slideCount;
   await waitForUiPaint("document");
@@ -708,7 +712,11 @@ async function normalizeNativeDocumentBytes(bytes) {
   const outputPath = `/tmp/spellbook/normalized-${++requestSequence}.pptx`;
   try {
     FS.writeFile(inputPath, bytes);
-    await request("normalize-saved", { path: inputPath, outputPath });
+    await request("normalize-saved", {
+      path: inputPath,
+      outputPath,
+      savedSlideNames: (await packageMetadataOf(bytes)).slideNames,
+    });
     const normalized = FS.readFile(outputPath).slice();
     if (
       normalized.byteLength < 4 ||
@@ -742,6 +750,7 @@ async function inspectNativeDocumentBytes(bytes, detailSlideIndex) {
       packageInspection: {
         slidePaths: metadata.slidePaths,
         partHashes: metadata.partHashes,
+        slideNames: metadata.slideNames,
       },
     });
     return observed.value;
@@ -1798,7 +1807,10 @@ async function commitProductPackageMutation(prepared, nativeValue) {
   const afterBytes = new Uint8Array(prepared.mutation.bytes);
   const packageAuthoritative =
     prepared.command.explicitScriptFormatting === true ||
-    productSlideOperations.has(prepared.nativeCommand.op);
+    productSlideOperations.has(prepared.nativeCommand.op) ||
+    // Native metadata Undo/Redo redraws master footer/date text after its
+    // revision has settled. Use the approved package for this history too.
+    prepared.nativeCommand.op === "set_slide_metadata";
   if (packageAuthoritative) {
     // Slide topology can change names, and native export can omit dormant
     // Asian/complex-script fonts. Reopen the exact authored package used by
