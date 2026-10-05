@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import { admitCandidateRuntime } from "./candidate-runtime.mjs";
 import { readRepositoryIdentity } from "./repository-identity.mjs";
 import { buildRoutes } from "./server.mjs";
+import { FRAME_ISOLATION } from "./frame-isolation.mjs";
+export { FRAME_ISOLATION } from "./frame-isolation.mjs";
 
 /*
  * Writes the browser Office editor as a static Firebase Hosting site: the
@@ -30,10 +32,6 @@ const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
 const RUNTIME_PREFIX = "/runtime/";
 const IMMUTABLE = "public, max-age=31536000, immutable";
-
-export const FRAME_ISOLATION = Object.freeze({
-  "Document-Isolation-Policy": "isolate-and-require-corp",
-});
 
 // The product opens only the workspace; the conformance shell and its
 // fixtures stay on the development server.

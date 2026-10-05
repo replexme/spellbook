@@ -15,6 +15,7 @@ import {
   applyZetaByteSequenceOverlay,
 } from "./zetajs-overlay.mjs";
 import { applyZetaProxyMetadataOverlay } from "./zetajs-proxy-overlay.mjs";
+import { FRAME_ISOLATION } from "./frame-isolation.mjs";
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
@@ -374,6 +375,9 @@ export function createHarnessServer(options = {}) {
       upstream.requiredDocumentHeaders,
     ))
       response.setHeader(name, value);
+    if (pathname === "/workspace")
+      for (const [name, value] of Object.entries(FRAME_ISOLATION))
+        response.setHeader(name, value);
     if (pathname === "/workspace" && hostOrigin)
       response.setHeader(
         "Content-Security-Policy",

@@ -176,6 +176,11 @@ test("browser Office server emits the required cross-origin isolation headers", 
     const workspace = await fetch(`http://127.0.0.1:${address.port}/workspace`);
     assert.equal(workspace.status, 200);
     assert.equal(
+      workspace.headers.get("document-isolation-policy"),
+      "isolate-and-require-corp",
+    );
+    assert.equal(response.headers.get("document-isolation-policy"), null);
+    assert.equal(
       workspace.headers.get("content-security-policy"),
       "frame-ancestors 'self' https://present.example",
     );
