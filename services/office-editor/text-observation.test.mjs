@@ -25,6 +25,34 @@ const wholeTextFormatting = helper(
   },
 );
 
+test("outline formatting is observed after text portions initialize inheritance", () => {
+  const state = { fontSize: 24, family: "Master default", reads: 0 };
+  const observe = helper(
+    "  const shapeTextFormatting =",
+    "  // The public command contract",
+    "shapeTextFormatting",
+    {
+      runFormatting: () => {
+        state.reads++;
+        state.fontSize = 18;
+        state.family = "Authored body";
+        return { languages: ["ko-KR"] };
+      },
+      shapePropertyStates: () => ({ fontSize: "DEFAULT_VALUE" }),
+      wholeTextFormatting: () => ({
+        fontSize: state.fontSize,
+        fontFamily: state.family,
+      }),
+    },
+  );
+  const observation = observe({}, "본문", null);
+  assert.equal(observation.wholeTextFormatting.fontSize, 18);
+  assert.equal(observation.wholeTextFormatting.fontFamily, "Authored body");
+  assert.equal(observation.propertyStates.fontSize, "DEFAULT_VALUE");
+  assert.deepEqual([...observation.runFormatting.languages], ["ko-KR"]);
+  assert.equal(state.reads, 1);
+});
+
 function textShape(bulk) {
   const state = {
     family: "Before",
@@ -132,16 +160,31 @@ test("one observation shares separate collapsed and whole ranges, then discards 
   assert.equal(state.created, 4);
 });
 
-const capabilitySource = source.slice(source.indexOf("  let propertyCapabilityCache ="), source.indexOf("  const safeProperty =", source.indexOf("  let propertyCapabilityCache =")));
+const capabilitySource = source.slice(
+  source.indexOf("  let propertyCapabilityCache ="),
+  source.indexOf(
+    "  const safeProperty =",
+    source.indexOf("  let propertyCapabilityCache ="),
+  ),
+);
 function capabilityRead() {
-  return runInNewContext(capabilitySource + "\npropertyInfoCapabilities = [];\npropertyIsSupported;", {
-    uno: { sameUnoObject: (left, right) => left.identity === right.identity },
-  });
+  return runInNewContext(
+    capabilitySource + "\npropertyInfoCapabilities = [];\npropertyIsSupported;",
+    {
+      uno: { sameUnoObject: (left, right) => left.identity === right.identity },
+    },
+  );
 }
 
 test("property capabilities share only exact UNO info identity within one read", () => {
   let calls = 0;
-  const info = (identity, names) => ({ identity, hasPropertyByName(name) { calls++; return names.includes(name); } });
+  const info = (identity, names) => ({
+    identity,
+    hasPropertyByName(name) {
+      calls++;
+      return names.includes(name);
+    },
+  });
   const read = capabilityRead();
   const a = { getPropertySetInfo: () => info(1, ["CharHeight"]) };
   const b = { getPropertySetInfo: () => info(1, ["CharHeight"]) };

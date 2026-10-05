@@ -650,6 +650,17 @@ function spellbookDocumentOperation(request) {
       return null;
     }
   };
+  const shapeTextFormatting = (shape, text, textCursor) => {
+    // Reading text portions initializes inherited outline formatting in
+    // Impress. Read them before the whole-text cursor: otherwise the first
+    // observation can report the master default instead of the body's font.
+    const runs = runFormatting(shape, text);
+    return {
+      propertyStates: shapePropertyStates(shape, text, textCursor),
+      wholeTextFormatting: wholeTextFormatting(shape, text, textCursor),
+      runFormatting: runs,
+    };
+  };
   // The public command contract follows PowerPoint and expresses character
   // spacing in points. Impress CharKerning is 1/100 mm: PPTX import converts
   // a:rPr/@spc (1/100 pt) to 1/100 mm and export converts it back. Treating
@@ -2316,11 +2327,9 @@ function spellbookDocumentOperation(request) {
               "IsEmptyPresentationObject",
             ),
             geometryType: shapeGeometryType(shape, shapeKind),
-            propertyStates: shapePropertyStates(shape, text, textCursor),
+            ...shapeTextFormatting(shape, text, textCursor),
             text,
             paragraphFormats,
-            wholeTextFormatting: wholeTextFormatting(shape, text, textCursor),
-            runFormatting: runFormatting(shape, text),
             x: position.X,
             y: position.Y,
             width: size.Width,
@@ -8897,6 +8906,7 @@ function spellbookDocumentOperation(request) {
       "z_order",
       "ungroup",
     ].includes(command.op);
+    let unrelatedDifference = null;
     const unrelatedChanged = structural
       ? false
       : before.slides.some((slide, index) =>
@@ -8909,7 +8919,17 @@ function spellbookDocumentOperation(request) {
             const next = after.slides[index]?.elements.find(
               (value) => value.elementId === candidate.elementId,
             );
-            return !next || intrinsic(candidate) !== intrinsic(next);
+            if (!next) {
+              unrelatedDifference = `slides.${index}.elements.${candidate.elementId}`;
+              return true;
+            }
+            if (intrinsic(candidate) === intrinsic(next)) return false;
+            unrelatedDifference = firstDifferencePath(
+              JSON.parse(intrinsic(candidate)),
+              JSON.parse(intrinsic(next)),
+              `slides.${index}.elements.${candidate.elementId}`,
+            );
+            return true;
           }),
         );
     if (
@@ -8921,7 +8941,7 @@ function spellbookDocumentOperation(request) {
       if (undo.getAllUndoActionTitles().length > undoCount) undo.undo();
       throw new Error(
         unrelatedChanged
-          ? "unexpected_edit_scope"
+          ? `unexpected_edit_scope:${unrelatedDifference ?? "unknown"}`
           : !applied
             ? "native_command_not_applied"
             : "native_undo_not_recorded",
