@@ -46,6 +46,7 @@ const processTimeoutMs = 5_400_000;
 const candidateRuntimePath = path.resolve(
   requiredFlagValue("--candidate-runtime"),
 );
+const runtimeManifestPath = optionalFlagValue("--runtime-manifest");
 const outputRoot = path.resolve(
   optionalFlagValue("--output") ??
     path.join(repositoryRoot, "artifacts/browser-office/native-conformance"),
@@ -55,7 +56,12 @@ await ensureNewDirectory(outputRoot);
 const [capabilities, conformance, candidateRuntime] = await Promise.all([
   readJson(capabilitiesPath),
   readJson(conformancePath),
-  admitCandidateRuntime({ runtimeDirectory: candidateRuntimePath }),
+  admitCandidateRuntime({
+    runtimeDirectory: candidateRuntimePath,
+    ...(runtimeManifestPath
+      ? { manifest: await readJson(path.resolve(runtimeManifestPath)) }
+      : {}),
+  }),
 ]);
 const plan = buildConformancePlan(capabilities, conformance, {
   enginePatchLevel: conformance.enginePatchLevel,

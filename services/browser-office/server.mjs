@@ -375,7 +375,11 @@ export function createHarnessServer(options = {}) {
       upstream.requiredDocumentHeaders,
     ))
       response.setHeader(name, value);
-    if (pathname === "/workspace")
+    if (
+      pathname === "/workspace" ||
+      (options.browserProbeSource &&
+        pathname === "/extensions/org.spellbook.editor/browser-probe.html")
+    )
       for (const [name, value] of Object.entries(FRAME_ISOLATION))
         response.setHeader(name, value);
     if (pathname === "/workspace" && hostOrigin)

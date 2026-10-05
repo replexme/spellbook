@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { chromium } from "@playwright/test";
 
 import {
   buildRoutes,
@@ -18,6 +19,42 @@ import {
 const upstream = JSON.parse(
   readFileSync(new URL("./upstream.json", import.meta.url), "utf8"),
 );
+
+test("isolated workspace can call its native history probe frame", async () => {
+  const server = createHarnessServer({
+    browserProbeSource: "eval/public/fixtures/general-native-surface.pptx",
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.route("**/workspace", async (route) => {
+      const response = await route.fetch();
+      await route.fulfill({
+        response,
+        body: '<!doctype html><script>globalThis.spellbookBrowserOffice={probeHistory:async direction=>({direction,undo:["edit"],redo:[]})}</script><iframe src="/extensions/org.spellbook.editor/browser-probe.html"></iframe>',
+      });
+    });
+    await page.goto(`${origin}/workspace`);
+    const frame = page
+      .frames()
+      .find((frame) => frame.url().includes("/extensions/"));
+    assert.ok(frame);
+    assert.deepEqual(
+      await frame.evaluate(() => cool.callRemote(null, "undo")),
+      {
+        direction: "undo",
+        undo: ["edit"],
+        redo: [],
+      },
+    );
+  } finally {
+    await browser.close();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
 
 test("browser Office routes preserve isolation, asset identity and encodings", () => {
   const routes = buildRoutes();
@@ -225,6 +262,10 @@ test("browser conformance reuses an exact fixture and captures one PPTX save", a
       `${origin}/extensions/org.spellbook.editor/browser-probe.html`,
     );
     assert.equal(bridge.status, 200);
+    assert.equal(
+      bridge.headers.get("document-isolation-policy"),
+      "isolate-and-require-corp",
+    );
     assert.match(await bridge.text(), /probeHistory/u);
 
     const saved = await fetch(`${origin}/browser-probe/save`, {
