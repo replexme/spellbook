@@ -93,6 +93,7 @@ async function run(operation) {
     "--document-tool-sha256":manifest.documentToolSha256,
   };
   for (const [name,value] of Object.entries(options)) if (value != null) args.push(name,String(value));
+  if (entry.requireVisibleChange === true) args.push("--require-visible-change");
   // Resource/case paths and original input hashes remain reviewable alongside
   // evidence. No implicit fixture creation or build fallback exists here.
   let inputHash;

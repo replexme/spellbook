@@ -2,11 +2,12 @@
 import { installOnlyOfficeNativeComplements, bootstrapOnlyOfficeNativeComplements } from "./native-complements.mjs";
 import { attachOnlyOfficeResourceHost } from "./product-resources.mjs";
 
+import { installOnlyOfficeShapeEffects } from "./shape-effects.mjs";
 // Source-pinned interpreted additions; no rebuild or generated vendor files.
 // Hosts must record these served overlays along with the retained distribution.
 export function addOnlyOfficeProductBootstrap(html) {
   if(typeof html!=="string"||!html.includes("<head>"))throw Error("onlyoffice_product_bootstrap_html_invalid");
-  return html.replace("<head>","<head><script>"+"("+bootstrapOnlyOfficeNativeComplements.toString()+")("+installOnlyOfficeNativeComplements.toString()+");</script>");
+  return html.replace("<head>","<head><script>"+"("+bootstrapOnlyOfficeNativeComplements.toString()+")("+"function(){("+installOnlyOfficeNativeComplements.toString()+")();("+installOnlyOfficeShapeEffects.toString()+")();});</script>");
 }
 export function addOnlyOfficeProductResourceHost(source) {
   const anchor="G=await Tn(An,r),tr(),cr(`READY`,G.getState())";

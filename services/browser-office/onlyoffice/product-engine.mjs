@@ -26,6 +26,7 @@ import { onlyOfficeParagraphFormat } from "./paragraph-format.mjs";
 import { installOnlyOfficeNativeComplements } from "./native-complements.mjs";
 import { prepareOnlyOfficeMediaReplacement } from "./product-resources.mjs";
 import { slideDateFieldType } from "../slide-date-format.mjs";
+import { installOnlyOfficeShapeEffects } from "./shape-effects.mjs";
 import { materializeOnlyOfficeNativeGeometry } from "./native-geometry.mjs";
 
 // Commands use the canonical product registry. Native bindings stay private to
@@ -312,6 +313,8 @@ export function createOnlyOfficeProductEngine({
     observe: async () => observeOnlyOfficeProduct(await getFrame()),
     preflight: async (commands, before) => {
       const frame = await getFrame();
+      if(commands.some(command=>["set_shape_effects","set_shape_shadow"].includes(command.op)))
+        await frame.evaluate(installOnlyOfficeShapeEffects);
       if(commands.some(command=>onlyOfficeExtendedOperations.includes(command.op)))
         await frame.evaluate(installOnlyOfficeNativeComplements);
       if (

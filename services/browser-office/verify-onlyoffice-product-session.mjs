@@ -1391,7 +1391,7 @@ try {
     report.rendering.edited = await pixels(mainFrame);
     report.editedTableDetails = await tableDetails(mainFrame);
     if (
-      !extendedCase && ![
+      ((!extendedCase && ![
         "duplicate_slide",
         "set_sections",
         "set_shape_name",
@@ -1405,7 +1405,8 @@ try {
         "set_speaker_notes",
         "z_order",
         "set_reading_order",
-      ].includes(operation)
+      ].includes(operation)) ||
+        process.argv.includes("--require-visible-change"))
     )
       assert.notEqual(
         report.rendering.edited.sha256,
