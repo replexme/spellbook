@@ -386,6 +386,32 @@ function topLevel(elements: unknown) {
   ) as Json[];
 }
 
+// UNO value provenance and derived overlap/identity fields are observations,
+// not edits. Keep every authored value, including paragraph spacing and all
+// nested shape/table formatting, in the content comparison.
+function comparableContent(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(comparableContent);
+  if (value && typeof value === "object")
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(
+          ([key]) =>
+            ![
+              "propertyStates",
+              "stableId",
+              "elementId",
+              "parentElementId",
+              "childElementIds",
+              "alignedWith",
+              "overlapsWith",
+            ].includes(key),
+        )
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, child]) => [key, comparableContent(child)]),
+    );
+  return value;
+}
+
 export function diffSlides(
   beforeSlides: Json[],
   afterSlides: Json[],
@@ -453,7 +479,8 @@ export function diffSlides(
       const details = describeElementChange(previous, element);
       if (
         !details.length &&
-        JSON.stringify(previous) !== JSON.stringify(element)
+        JSON.stringify(comparableContent(previous)) !==
+          JSON.stringify(comparableContent(element))
       )
         details.push("서식 바꿈");
       if (details.length)
@@ -506,25 +533,21 @@ function comparableSlide(slide: Json) {
     elements,
     ...rest
   } = slide ?? {};
-  return JSON.stringify({
-    ...rest,
-    elements: (Array.isArray(elements) ? elements : []).map(
-      ({
-        stableId: _stable,
-        elementId: _id,
-        parentElementId: _parent,
-        childElementIds: _children,
-        ...element
-      }: Json) => element,
-    ),
-  });
+  return JSON.stringify(
+    comparableContent({
+      ...rest,
+      elements: Array.isArray(elements) ? elements : [],
+    }),
+  );
 }
 
 /** Masters without the diagnostic shape count the editor itself excludes. */
 function comparableMasters(masters: unknown) {
   return JSON.stringify(
-    (Array.isArray(masters) ? masters : []).map(
-      ({ shapeCount: _count, ...master }: Json) => master,
+    comparableContent(
+      (Array.isArray(masters) ? masters : []).map(
+        ({ shapeCount: _count, ...master }: Json) => master,
+      ),
     ),
   );
 }

@@ -94,6 +94,47 @@ const completed: TurnRecord = {
 };
 
 describe("summarizeTurn", () => {
+  it("keeps observation provenance and derived overlaps out of the change card", () => {
+    const background = {
+      ...body,
+      text: "",
+      elementId: "0/0",
+      stableId: "background",
+      paragraphFormats: [
+        { topMargin: 0, propertyStates: { topMargin: "DIRECT_VALUE" } },
+      ],
+      overlapsWith: ["0/1"],
+    };
+    const before = [slide(0, [background]), ...baseSlides.slice(1)];
+    const after = [
+      slide(0, [
+        {
+          ...background,
+          paragraphFormats: [
+            { topMargin: 0, propertyStates: { topMargin: "DEFAULT_VALUE" } },
+          ],
+          overlapsWith: [],
+        },
+      ]),
+      ...editedSlides.slice(1),
+    ];
+    const summary = summarizeTurn(completed, [
+      observe("before", before),
+      batch("edit", { slides: after }),
+    ]);
+    expect(summary.changedSlides).toEqual([2]);
+    expect(summary.unchangedSlides).toBe(2);
+    expect(summary.changes).toHaveLength(1);
+    after[0]!.elements = [
+      { ...background, paragraphFormats: [{ topMargin: 100 }] },
+    ];
+    const spacing = summarizeTurn(completed, [
+      observe("before", before),
+      batch("edit", { slides: after }),
+    ]);
+    expect(spacing.changedSlides).toEqual([0, 2]);
+    expect(spacing.unchangedSlides).toBe(1);
+  });
   it("summarizes a reviewed change from the editor records", () => {
     const summary = summarizeTurn(completed, [
       observe("t1"),
