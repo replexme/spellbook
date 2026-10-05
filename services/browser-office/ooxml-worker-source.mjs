@@ -3170,7 +3170,7 @@ function remapAuthoredRelationships(
     // of guessing among same-named LibreOffice-normalized layouts.
     const sourceSlideIndex=orderedSlidePaths(original).indexOf(sourcePart);
     const declaration=sourceTargets?.find(target=>target.op==="set_slide_layout"&&target.slideIndex===sourceSlideIndex);
-    const ownedLayout=declaration?authoredMasterLayout(original,declaration):null;
+    const ownedLayout=hasAuthoredMasterLayoutBinding(declaration)?authoredMasterLayout(original,declaration):null;
     const remapped =
       ownedLayout ? relativePart(sourcePart,ownedLayout.layout) :
       originalLayout.length === 1
@@ -3515,6 +3515,14 @@ function setRelationshipTarget(entries, sourcePart, type, target) {
 
 // A selected master/layout is an ordered package relationship, not a unique
 // display name. Bind it before the edit; same-named layouts remain distinct.
+function hasAuthoredMasterLayoutBinding(target) {
+  // ONLYOFFICE observes package-ordered masters/layouts. Impress observes
+  // an expanded master per layout; its adapter uses the existing unique
+  // relationship mapping instead. A partial explicit binding stays strict.
+  return target && (Object.hasOwn(target, "sourceMasterCount") ||
+    Object.hasOwn(target, "sourceLayoutCount"));
+}
+
 function authoredMasterLayout(entries,target) {
   const presentation=parseXml(entries,presentationPath);
   const relations=new Map(relationshipsOfType(entries,presentationPath,"slideMaster").map(item=>[item.id,item.target]));
@@ -3558,7 +3566,7 @@ function mergeMasterThemeIntoOriginal(original, noEdit, edited, sourceTarget = n
   const originalLayouts = Object.keys(original).filter((part) =>
     /^ppt\/slideLayouts\/slideLayout[^/]+\.xml$/u.test(part),
   );
-  const owned=sourceTarget?authoredMasterLayout(original,sourceTarget):null;
+  const owned=hasAuthoredMasterLayoutBinding(sourceTarget)?authoredMasterLayout(original,sourceTarget):null;
   const selected = owned ? new Set(owned.layouts) : new Set(
     sourceLayouts.map((source) => {
       const identity = slideLayoutIdentity(noEdit, source);

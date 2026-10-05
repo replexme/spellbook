@@ -76,3 +76,27 @@ test("a native name setter that does not preserve the saved value is refused", (
     /saved_slide_name_not_restored/,
   );
 });
+
+test("native save ownership carries the observed top-level shape index when an export renames a placeholder", async () => {
+  const source = await fs.readFile(
+    new URL("./harness/app.js", import.meta.url),
+    "utf8",
+  );
+  const program = source.slice(
+    source.indexOf("function nativeSnapshotTargets("),
+    source.indexOf("function preserveNativeSnapshot("),
+  );
+  const context = vm.createContext({
+    before: {
+      slides: [{ elements: [{ elementId: "0/4", name: "object 6" }] }],
+    },
+    commands: [{ op: "replace_text", elementId: "0/4", text: "Changed title" }],
+  });
+  const targets = vm.runInContext(
+    program + "nativeSnapshotTargets(before,commands)",
+    context,
+  );
+  assert.deepEqual(JSON.parse(JSON.stringify(targets)), [
+    { op: "replace_text", slideIndex: 0, shapeIndex: 4, name: "object 6" },
+  ]);
+});

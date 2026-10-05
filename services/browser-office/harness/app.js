@@ -546,7 +546,7 @@ function nativeSnapshotTargets(observation, commands) {
         (candidate) => candidate.elementId === `${slide}/${shape}`,
       );
       if (!Number.isSafeInteger(slideIndex) || !element?.name) return null;
-      targets.push({ op, slideIndex, name: element.name });
+      targets.push({ op, slideIndex, shapeIndex: Number(shape), name: element.name });
     }
   }
   return targets;
