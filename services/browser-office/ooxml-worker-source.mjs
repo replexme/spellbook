@@ -1602,10 +1602,27 @@ export function remapPartRelationshipIds(
       )
         continue;
       const item = engineById.get(attribute.value);
-      const originalId =
+      let originalId =
         item && originalByKey.has(item.key)
           ? originalByKey.get(item.key)
           : equivalentImageId(item);
+      if (imageSources && item?.relationship.getAttribute("Type") ===
+          `${relationshipAttributeNamespace}/image` &&
+          item.relationship.getAttribute("TargetMode") !== "External") {
+        imageTypes ??= imageSources.map((entries) =>
+          contentTypeDeclarations(parseXml(entries, contentTypesPath)),
+        );
+        const source = imageResource(item.relationship, imageSources[1], imageTypes[1]);
+        const candidate = originals.find((entry) => entry.id === originalId);
+        const destination = candidate && imageResource(
+          candidate.relationship, imageSources[0], imageTypes[0],
+        );
+        // Topology exports can reuse an old filename for a different image.
+        // A path match is safe only when its exact resource still matches.
+        if (source && (destination?.contentType !== source.contentType ||
+            !samePartBytes(destination.bytes, source.bytes)))
+          originalId = equivalentImageId(item);
+      }
       if (!originalId) return null;
       if (originalId !== attribute.value) {
         attribute.value = originalId;

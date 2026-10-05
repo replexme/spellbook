@@ -5340,3 +5340,18 @@ test("native title replacement stores its admitted automatic slide name for exac
     for (const [name, bytes] of Object.entries(original)) if (name !== part) assert.deepEqual(saved[name], bytes, name);
   }
 });
+
+test("image remapping verifies payload when topology reuses an existing filename", () => {
+  const part = "ppt/slides/slide1.xml";
+  const rels = (targets) => strToU8(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${targets.map(([id, name]) => `<Relationship Id="${id}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${name}.png"/>`).join("")}</Relationships>`);
+  const types = strToU8('<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="png" ContentType="image/png"/></Types>');
+  const slide = strToU8('<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:pic><p:blipFill><a:blip r:embed="rId3"/></p:blipFill></p:pic></p:spTree></p:cSld></p:sld>');
+  const original = { "[Content_Types].xml": types, "ppt/media/image13.png": strToU8("first"), "ppt/media/image14.png": strToU8("second") };
+  const edited = { "[Content_Types].xml": types, "ppt/media/image13.png": original["ppt/media/image14.png"] };
+  const beforeRels = rels([["rId3", "image13"], ["rId4", "image14"]]);
+  const afterRels = rels([["rId3", "image13"]]);
+  assert.match(strFromU8(remapPartRelationshipIds(part, slide, beforeRels, afterRels, [original, edited])), /r:embed="rId4"/u);
+  assert.match(strFromU8(remapPartRelationshipIds(part, slide, beforeRels, afterRels, [original, original])), /r:embed="rId3"/u);
+  assert.equal(remapPartRelationshipIds(part, slide, beforeRels, afterRels, [original, { ...edited, "ppt/media/image13.png": strToU8("changed") }]), null);
+  assert.equal(remapPartRelationshipIds(part, slide, rels([["rId4", "image14"], ["rId5", "copy"]]), afterRels, [{ ...original, "ppt/media/copy.png": original["ppt/media/image14.png"] }, edited]), null);
+});
