@@ -816,6 +816,16 @@ function preserveUnaffectedSlideShapes(
           !applyAuthoredGeometryDelta(source, prior, baseline, editedShape,
             sourceOperations, geometrySources)) return null;
     }
+    if (sourceOperations.includes("replace_text") && geometrySources?.sourceTargets?.some(
+      target => target.sourceEngine === "libreoffice")) {
+      const sourceSlide = optionalDirectXmlChild(documents[0].documentElement, presentationNamespace, "cSld");
+      const baselineSlide = optionalDirectXmlChild(documents[1].documentElement, presentationNamespace, "cSld");
+      // A title edit leaves Impress's live automatic page name unchanged.
+      // Store that admitted pre-edit name so a full reopen preserves the
+      // same document/element identity, including originally unnamed slides.
+      if (!sourceSlide?.getAttribute("name") && baselineSlide?.getAttribute("name"))
+        sourceSlide.setAttribute("name", baselineSlide.getAttribute("name"));
+    }
     return serializeXml(documents[0]);
   }
   // An engine element as the author would name it: its references to other
@@ -838,6 +848,7 @@ function preserveUnaffectedSlideShapes(
     let { source, baseline } = pair;
     const { editedShape, index } = pair;
     const topologyRequests = geometrySources?.targets?.filter(target =>
+      target.sourceEngine !== "libreoffice" &&
       ["insert_table_rows", "delete_table_rows", "insert_table_columns", "delete_table_columns"].includes(target.op) &&
       Number.isSafeInteger(target.index) && Number.isSafeInteger(target.count) &&
       target.shapeIndex === index);
@@ -4218,7 +4229,11 @@ export function preserveOriginalPptxParts(
     return {bytes,report:{changedParts:changed,semanticPatchedParts:changed,suppressedNoopParts:[],suppressedOutOfBudgetParts:[],authoredShapeScopes:null,topologyAligned:true,topologyImportedDesign:null,topology:{kind:"duplicate",index:sourceIndex+1,sourceIndex},topologyExistingContentChanges:[]}};
   }
 
-  if (sourceOperations.some(op => ["move_slide", "delete_slide"].includes(op))) {
+  const nativeMoveBatch = sourceOperations.length > 1 &&
+    sourceOperations.every(op => op === "move_slide") &&
+    sourceTargets?.length === sourceOperations.length &&
+    sourceTargets.every(target => target.sourceEngine === "libreoffice");
+  if (!nativeMoveBatch && sourceOperations.some(op => ["move_slide", "delete_slide"].includes(op))) {
     if (sourceOperations.length !== 1 || sourceTargets?.length !== 1 || sourceTargets[0].op !== sourceOperations[0])
       throw new Error("Native slide moves require one declared source and destination.");
     const request = sourceTargets[0], deleting = request.op === "delete_slide";
@@ -4446,7 +4461,7 @@ export function preserveOriginalPptxParts(
             sourceOperations,
             targetNamesBySlide?.get(part) ?? null,
             targetIndexesBySlide?.get(part) ?? null,
-            { part, entries: [original, noEdit, edited], targets: tableTopologyTargetsByPart.get(part) },
+            { part, entries: [original, noEdit, edited], targets: tableTopologyTargetsByPart.get(part), sourceTargets },
           )
       : null;
     if (targetIndexesBySlide?.has(part) && semanticShapePatch === null)

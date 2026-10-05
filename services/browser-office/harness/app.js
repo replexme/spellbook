@@ -539,7 +539,7 @@ function nativeSnapshotTargets(observation, commands) {
     ];
     if (!elementIds.length) {
       if (!Number.isSafeInteger(command?.slideIndex)) return null;
-      targets.push({ ...canonical, op, slideIndex: command.slideIndex });
+      targets.push({ ...canonical, sourceEngine: "libreoffice", op, slideIndex: command.slideIndex });
       continue;
     }
     for (const elementId of elementIds) {
@@ -549,7 +549,7 @@ function nativeSnapshotTargets(observation, commands) {
         (candidate) => candidate.elementId === `${slide}/${shape}`,
       );
       if (!Number.isSafeInteger(slideIndex) || !element?.name) return null;
-      targets.push({ ...canonical, op, slideIndex, shapeIndex: Number(shape), name: element.name });
+      targets.push({ ...canonical, sourceEngine: "libreoffice", op, slideIndex, shapeIndex: Number(shape), name: element.name });
     }
   }
   return targets;

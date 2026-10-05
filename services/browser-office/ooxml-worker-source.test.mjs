@@ -5277,3 +5277,24 @@ test("direct text persistence keeps native run-language changes while retaining 
   assert.equal(result.getElementsByTagNameNS(namespaces.a, "latin")[0].getAttribute("typeface"), first.getElementsByTagNameNS(namespaces.a, "latin")[0].getAttribute("typeface"));
   for (const [name, bytes] of Object.entries(original)) if (name !== part) assert.deepEqual(saved[name], bytes, name);
 });
+
+test("native title replacement stores its admitted automatic slide name for exact reopen", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml";
+  const p = "http://schemas.openxmlformats.org/presentationml/2006/main", a = "http://schemas.openxmlformats.org/drawingml/2006/main";
+  const document = new DOMParser().parseFromString(strFromU8(original[part]), "text/xml");
+  document.getElementsByTagNameNS(p, "cSld")[0].removeAttribute("name");
+  original[part] = strToU8(new XMLSerializer().serializeToString(document));
+  const baseline = withEngineSave(original, { shadow: false, keepRectangleAlignment: false });
+  const before = new DOMParser().parseFromString(strFromU8(baseline[part]), "text/xml");
+  before.getElementsByTagNameNS(p, "cSld")[0].setAttribute("name", "Pre-edit title");
+  baseline[part] = strToU8(new XMLSerializer().serializeToString(before));
+  before.getElementsByTagNameNS(a, "t")[0].textContent = "Changed title";
+  const candidate = { ...baseline, [part]: strToU8(new XMLSerializer().serializeToString(before)) };
+  for (const native of [false, true]) {
+    const saved = unzipSync(preserveOriginalPptxParts(zipSync(original), zipSync(baseline), zipSync(candidate), ["replace_text"], [{ op: "replace_text", slideIndex: 0, shapeIndex: 0, name: "TextBox 1", ...(native ? {sourceEngine: "libreoffice"} : {}) }]).bytes);
+    const result = new DOMParser().parseFromString(strFromU8(saved[part]), "text/xml");
+    assert.equal(result.getElementsByTagNameNS(p, "cSld")[0].getAttribute("name"), native ? "Pre-edit title" : null);
+    for (const [name, bytes] of Object.entries(original)) if (name !== part) assert.deepEqual(saved[name], bytes, name);
+  }
+});

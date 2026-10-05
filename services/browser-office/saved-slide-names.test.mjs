@@ -99,6 +99,7 @@ test("native save ownership carries the observed top-level shape index when an e
   assert.deepEqual(JSON.parse(JSON.stringify(targets)), [
     {
       op: "replace_text",
+      sourceEngine: "libreoffice",
       elementId: "0/4",
       text: "Changed title",
       slideIndex: 0,
