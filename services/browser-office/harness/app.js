@@ -530,13 +530,16 @@ function nativeSnapshotTargets(observation, commands) {
   const targets = [];
   for (const command of commands) {
     const op = command?.op;
+    const canonical = Object.fromEntries(Object.entries(command).filter(
+      ([key]) => !key.startsWith("native"),
+    ));
     const elementIds = [
       ...(typeof command?.elementId === "string" ? [command.elementId] : []),
       ...(Array.isArray(command?.elementIds) ? command.elementIds : []),
     ];
     if (!elementIds.length) {
       if (!Number.isSafeInteger(command?.slideIndex)) return null;
-      targets.push({ op, slideIndex: command.slideIndex });
+      targets.push({ ...canonical, op, slideIndex: command.slideIndex });
       continue;
     }
     for (const elementId of elementIds) {
@@ -546,7 +549,7 @@ function nativeSnapshotTargets(observation, commands) {
         (candidate) => candidate.elementId === `${slide}/${shape}`,
       );
       if (!Number.isSafeInteger(slideIndex) || !element?.name) return null;
-      targets.push({ op, slideIndex, shapeIndex: Number(shape), name: element.name });
+      targets.push({ ...canonical, op, slideIndex, shapeIndex: Number(shape), name: element.name });
     }
   }
   return targets;

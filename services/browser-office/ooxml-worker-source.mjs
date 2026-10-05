@@ -786,6 +786,24 @@ function preserveUnaffectedSlideShapes(
           const text = readShapeText(editedShape);
           replaceNativeShapeText(source, text);
           if (readShapeText(source) !== text) return null;
+          // Replacing Korean text with Latin text changes the engine's
+          // run language. Retain authored formatting where both exports
+          // agree, but preserve the actual text/run-formatting delta too.
+          const paragraphs = [source, baseline, editedShape].map(shape =>
+            [...shape.getElementsByTagNameNS(drawingNamespace, "p")]);
+          for (let index = 0; index < paragraphs[0].length; index++) {
+            const beforeIndex = paragraphs[1].length === paragraphs[2].length ? index : 0;
+            const runs = [paragraphs[0][index], paragraphs[1][beforeIndex], paragraphs[2][index]]
+              .map(paragraph => paragraph?.getElementsByTagNameNS(drawingNamespace, "r")[0]);
+            if (!runs[0]) continue;
+            if (!runs.every(Boolean)) continue;
+            const formatting = runs.map(run => optionalDirectXmlChild(run, drawingNamespace, "rPr"));
+            if (!formatting[1] && !formatting[2]) continue;
+            if (!formatting.every(Boolean)) continue;
+            const mergedFormatting = mergeElementThreeWay(documents[0], ...formatting);
+            if (!mergedFormatting) return null;
+            runs[0].replaceChild(mergedFormatting, formatting[0]);
+          }
         } catch { return null; }
         const properties = [source, baseline, editedShape].map(shape =>
           optionalDirectXmlChild(shape, presentationNamespace, "spPr"));

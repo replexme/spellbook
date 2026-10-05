@@ -5256,3 +5256,24 @@ test("declared media replacement keeps native relationships when only referenced
   assert.deepEqual(merged[native],edited[native]);
   assert.deepEqual(merged["ppt/media/image2.jpeg"],original["ppt/media/image2.jpeg"]);
 });
+
+test("direct text persistence keeps native run-language changes while retaining unmodified authored fonts", async () => {
+  const original = unzipSync(new Uint8Array(await readFile(fixtureUrl)));
+  const part = "ppt/slides/slide1.xml";
+  const namespaces = { p: "http://schemas.openxmlformats.org/presentationml/2006/main", a: "http://schemas.openxmlformats.org/drawingml/2006/main" };
+  const source = new DOMParser().parseFromString(strFromU8(original[part]), "text/xml");
+  const first = source.getElementsByTagNameNS(namespaces.p, "txBody")[0];
+  first.getElementsByTagNameNS(namespaces.a, "rPr")[0].setAttribute("lang", "ko-KR");
+  original[part] = strToU8(new XMLSerializer().serializeToString(source));
+  const baseline = withEngineSave(original, { shadow: false, keepRectangleAlignment: false });
+  const edited = new DOMParser().parseFromString(strFromU8(baseline[part]), "text/xml");
+  const body = edited.getElementsByTagNameNS(namespaces.p, "txBody")[0];
+  body.getElementsByTagNameNS(namespaces.a, "t")[0].textContent = "English title";
+  body.getElementsByTagNameNS(namespaces.a, "rPr")[0].setAttribute("lang", "en-US");
+  const candidate = { ...baseline, [part]: strToU8(new XMLSerializer().serializeToString(edited)) };
+  const saved = unzipSync(preserveOriginalPptxParts(zipSync(original), zipSync(baseline), zipSync(candidate), ["replace_text"], [{ op: "replace_text", slideIndex: 0, shapeIndex: 0, name: "TextBox 1" }]).bytes);
+  const result = new DOMParser().parseFromString(strFromU8(saved[part]), "text/xml").getElementsByTagNameNS(namespaces.p, "txBody")[0];
+  assert.equal(result.getElementsByTagNameNS(namespaces.a, "rPr")[0].getAttribute("lang"), "en-US");
+  assert.equal(result.getElementsByTagNameNS(namespaces.a, "latin")[0].getAttribute("typeface"), first.getElementsByTagNameNS(namespaces.a, "latin")[0].getAttribute("typeface"));
+  for (const [name, bytes] of Object.entries(original)) if (name !== part) assert.deepEqual(saved[name], bytes, name);
+});

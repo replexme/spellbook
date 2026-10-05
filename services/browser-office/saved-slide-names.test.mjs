@@ -97,6 +97,13 @@ test("native save ownership carries the observed top-level shape index when an e
     context,
   );
   assert.deepEqual(JSON.parse(JSON.stringify(targets)), [
-    { op: "replace_text", slideIndex: 0, shapeIndex: 4, name: "object 6" },
+    {
+      op: "replace_text",
+      elementId: "0/4",
+      text: "Changed title",
+      slideIndex: 0,
+      shapeIndex: 4,
+      name: "object 6",
+    },
   ]);
 });
