@@ -3,10 +3,60 @@ import test from "node:test";
 
 import {
   reconcileNativeHistoryRevision,
+  rebindRecoveredProductRevision,
   recordManualProductCheckpoint,
   snapshotProductEditState,
   trimSessionProductHistory,
 } from "./product-history.mjs";
+
+test("recovery rebinds an imported revision only with exact file and state evidence", () => {
+  const saved = {
+    schemaVersion: 1,
+    modelRevision: "exported",
+    candidateSha256: "file",
+    persistedStateSha256: "state",
+  };
+  const reopened = { ...saved, modelRevision: "imported" };
+  const command = {
+    reconciliation: { beforeRevision: "base", afterRevision: "exported" },
+  };
+  const history = { afterRevision: "exported", nativeUndoAvailable: false };
+  for (const change of [
+    { candidateSha256: "wrong" },
+    { persistedStateSha256: "wrong" },
+    { schemaVersion: 2 },
+    { modelRevision: "" },
+  ]) {
+    assert.throws(
+      () =>
+        rebindRecoveredProductRevision(command, history, saved, {
+          ...reopened,
+          ...change,
+        }),
+      /differs/,
+    );
+    assert.equal(command.reconciliation.afterRevision, "exported");
+  }
+  assert.throws(
+    () => rebindRecoveredProductRevision(command, history, null, reopened),
+    /differs/,
+  );
+  assert.throws(
+    () =>
+      rebindRecoveredProductRevision(
+        command,
+        history,
+        { ...saved, modelRevision: "wrong" },
+        reopened,
+      ),
+    /differs/,
+  );
+  rebindRecoveredProductRevision(command, history, saved, reopened);
+  assert.equal(command.reconciliation.beforeRevision, "base");
+  assert.equal(command.reconciliation.afterRevision, "imported");
+  assert.equal(history.afterRevision, "imported");
+  assert.equal(history.nativeUndoAvailable, false);
+});
 
 test("native Undo and Redo reuse exact journaled PPTX bytes", () => {
   const base = Uint8Array.of(1);

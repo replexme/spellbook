@@ -39,6 +39,7 @@ import {
 } from "/harness/product-persistence.mjs";
 import {
   reconcileNativeHistoryRevision,
+  rebindRecoveredProductRevision,
   recordManualProductCheckpoint,
   snapshotProductEditState,
   trimSessionProductHistory,
@@ -2761,15 +2762,18 @@ async function openProductDocument(message) {
   }
   await writeAndOpen(candidate, message.fileName);
   const live = await observeNativeDocument();
-  await admitProductArtifact(
+  const reopenedReceipt = await admitProductArtifact(
     currentBytes,
     live,
     undefined,
     recovered?.metadata.artifactReceipt ?? null,
   );
-  const recoveredRevision = commands.at(-1)?.reconciliation?.afterRevision;
-  if (recoveredRevision && live.revision !== recoveredRevision)
-    throw new Error("Browser recovery model differs from the package journal.");
+  rebindRecoveredProductRevision(
+    commands.at(-1),
+    recoveredSnapshotHistory ?? productUndoHistory.at(-1),
+    recovered?.metadata.artifactReceipt,
+    reopenedReceipt,
+  );
   if (recoveredSnapshotHistory)
     productUndoHistory.push(recoveredSnapshotHistory);
   reconciledModelRevision = live.revision;

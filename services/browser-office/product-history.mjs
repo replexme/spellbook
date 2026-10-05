@@ -4,6 +4,35 @@ export const productHistoryLimits = Object.freeze({
   maxEntries: 32,
   maxBytes: 256 * 1024 * 1024,
 });
+
+// Importing an exact, independently verified package can normalize the live
+// model differently from the session that exported it. Rebind only after the
+// original file and persisted-state evidence have both survived readback.
+export function rebindRecoveredProductRevision(
+  command,
+  history,
+  saved,
+  reopened,
+) {
+  if (!command) return;
+  const previous = command.reconciliation?.afterRevision;
+  if (previous === reopened?.modelRevision) return;
+  if (
+    !previous ||
+    saved?.modelRevision !== previous ||
+    saved.schemaVersion !== 1 ||
+    reopened?.schemaVersion !== 1 ||
+    saved.candidateSha256 !== reopened.candidateSha256 ||
+    saved.persistedStateSha256 !== reopened.persistedStateSha256 ||
+    !reopened.modelRevision
+  )
+    throw new Error("Browser recovery model differs from the package journal.");
+  command.reconciliation = {
+    ...command.reconciliation,
+    afterRevision: reopened.modelRevision,
+  };
+  if (history) history.afterRevision = reopened.modelRevision;
+}
 const maximumEntries = productHistoryLimits.maxEntries;
 const maximumRetainedBytes = productHistoryLimits.maxBytes;
 
