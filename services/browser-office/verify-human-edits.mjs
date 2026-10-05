@@ -69,7 +69,10 @@ const diagnosticRaw = process.argv.includes("--diagnostic-raw")
 const input = new Uint8Array(await readFile(inputPath));
 assertComparisonMarkerAbsent(input);
 
-const runtime = await admitCandidateRuntime({ runtimeDirectory });
+const runtimeManifest = process.argv.includes("--runtime-manifest")
+  ? JSON.parse(await readFile(path.resolve(arg("--runtime-manifest")), "utf8"))
+  : undefined;
+const runtime = await admitCandidateRuntime({ runtimeDirectory, manifest: runtimeManifest });
 await prepareHarness();
 const server = createHarnessServer({
   runtimeRoot: runtime.runtimeDirectory,

@@ -19,7 +19,7 @@ import { createServer } from "node:http";
 import { chromium } from "@playwright/test";
 import { unzipSync, strFromU8 } from "fflate";
 import { readRepositoryIdentity, readRepositoryEvidence, repositoryIdentityStable } from "./repository-identity.mjs";
-import { buildHarness } from "./build-harness.mjs";
+import { prepareHarness } from "./build-harness.mjs";
 
 const flag = (name, fallback) => {
   const i = process.argv.indexOf(name);
@@ -70,7 +70,7 @@ if (preserveSource) {
   );
 }
 await mkdir(outputRoot, { recursive: true, mode: 0o700 });
-if (repairStructure) await buildHarness();
+if (repairStructure) await prepareHarness();
 const source = await readFile(inputPath);
 if (!readbackStatePath) assertComparisonMarkerAbsent(source);
 const expectedStateBytes = readbackStatePath

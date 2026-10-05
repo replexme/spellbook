@@ -31,6 +31,14 @@ const preserveSource = process.argv.includes("--preserve-source");
 const repairStructure =
   preserveSource || process.argv.includes("--repair-structure");
 const engines = flag("--engines", "native,onlyoffice").split(",");
+const existingWorkerSha256 = flag("--existing-harness-worker-sha256", null);
+const existingWorkerArgs = existingWorkerSha256
+  ? ["--existing-harness-worker-sha256", existingWorkerSha256]
+  : [];
+const runtimeManifest = flag("--runtime-manifest", null);
+const runtimeManifestArgs = runtimeManifest
+  ? ["--runtime-manifest", path.resolve(runtimeManifest)]
+  : [];
 assert(
   engines.every((e) => ["native", "onlyoffice"].includes(e)) &&
     new Set(engines).size === engines.length,
@@ -272,6 +280,7 @@ try {
             origin,
             "--scenarios",
             input.scenarios.join(","),
+            ...existingWorkerArgs,
             ...(preserveSource
               ? ["--preserve-source"]
               : repairStructure
@@ -334,6 +343,8 @@ try {
               input.path,
               "--runtime",
               runtime,
+              ...runtimeManifestArgs,
+              ...existingWorkerArgs,
               "--label",
               input.label,
               "--scenario",
