@@ -476,13 +476,13 @@ export function diffSlides(
         });
         continue;
       }
-      const details = describeElementChange(previous, element);
       if (
-        !details.length &&
-        JSON.stringify(comparableContent(previous)) !==
-          JSON.stringify(comparableContent(element))
+        JSON.stringify(comparableContent(previous)) ===
+        JSON.stringify(comparableContent(element))
       )
-        details.push("서식 바꿈");
+        continue;
+      const details = describeElementChange(previous, element);
+      if (!details.length) details.push("서식 바꿈");
       if (details.length)
         changes.push({
           slideIndex,

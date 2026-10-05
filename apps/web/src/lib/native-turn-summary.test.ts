@@ -118,6 +118,19 @@ describe("summarizeTurn", () => {
       ]),
       ...editedSlides.slice(1),
     ];
+    const table = {
+      ...body,
+      elementId: "2/2",
+      stableId: "table",
+      text: null,
+      table: {
+        cells: [[{ text: "A", propertyStates: { margin: "DIRECT_VALUE" } }]],
+      },
+    };
+    const afterTable = structuredClone(table);
+    afterTable.table.cells[0]![0]!.propertyStates.margin = "DEFAULT_VALUE";
+    before[2]!.elements.push(table);
+    after[2]!.elements.push(afterTable);
     const summary = summarizeTurn(completed, [
       observe("before", before),
       batch("edit", { slides: after }),
