@@ -7342,7 +7342,7 @@ export function preserveNativeExportWithSections({
   );
 }
 
-if (typeof self !== "undefined")
+if (typeof DedicatedWorkerGlobalScope !== "undefined" && self instanceof DedicatedWorkerGlobalScope)
   self.onmessage = async (event) => {
     const {
       requestId,
