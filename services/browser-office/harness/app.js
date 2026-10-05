@@ -2960,7 +2960,19 @@ async function handleProductHostMessage(message) {
       // The server has already accepted this version. Even if local
       // reconciliation fails, the next save must not use the previous ETag.
       hostRevision = message.revision;
-      const acknowledgedRead = await observeNativeDocumentChanges();
+      // Saving has not changed the document. Reuse only a model whose bytes,
+      // revision, selection and live event counter were just checked; later
+      // edits still force the ordinary read and acknowledgement reconciliation.
+      const cachedAcknowledgement = await cachedAiObservation({
+        operation: "observe",
+        detailSlideIndex: aiObservationCache?.detailSlideIndex,
+      });
+      const acknowledgedRead = cachedAcknowledgement
+        ? {
+            value: cachedAcknowledgement,
+            documentChanges: nativeVersionsByObservation.get(cachedAcknowledgement),
+          }
+        : await observeNativeDocumentChanges();
       const live = acknowledgedRead.value;
       await checkpointLiveNativeState(live, "manual_after_save_request");
       const hasLaterChanges = acknowledgedSaveHasLaterChanges(
@@ -3409,10 +3421,12 @@ async function cachedAiObservation(requested) {
   const sameSlide = reusableAiObservation(observedCache, current);
   if (sameSlide) {
     if (navigated) aiObservationCache = observedCache;
-    return {
+    const observation = {
       ...sameSlide,
       images: observedCache.capturedImages ?? sameSlide.images,
     };
+    nativeVersionsByObservation.set(observation, current.documentChanges);
+    return observation;
   }
   const slideIndex = current.detailSlideIndex ?? current.activeSlide;
   const slide = observedCache.observation.slides?.[slideIndex];
@@ -3473,10 +3487,12 @@ async function cachedAiObservation(requested) {
       observation,
     };
     noteAiObservationCache("detail-hit");
-    return {
+    const versionedObservation = {
       ...observation,
       images: observedCache.capturedImages ?? observation.images,
     };
+    nativeVersionsByObservation.set(versionedObservation, current.documentChanges);
+    return versionedObservation;
   } catch (error) {
     const code = error instanceof Error ? error.message : "unknown";
     noteAiObservationCache(

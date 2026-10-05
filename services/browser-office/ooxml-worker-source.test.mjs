@@ -40,6 +40,20 @@ test("section-only reads retain ZIP and presentation checks without parsing each
     assert.throws(() => inspectOoxmlSections([]), /Uint8Array/);
     assert.throws(() => inspectOoxmlSections(Uint8Array.of(0)), /ZIP|zip|PPTX|package/);
     const entries = unzipSync(bytes);
+    const oversized = zipSync({ ...entries, "ppt/media/oversized.bin": Uint8Array.of(0) });
+    const view = new DataView(oversized.buffer, oversized.byteOffset, oversized.byteLength);
+    let offset = view.getUint32(oversized.byteLength - 22 + 16, true);
+    while (offset < oversized.byteLength - 22) {
+      const nameLength = view.getUint16(offset + 28, true);
+      const name = strFromU8(oversized.subarray(offset + 46, offset + 46 + nameLength));
+      if (name === "ppt/media/oversized.bin") {
+        view.setUint32(offset + 24, 513 * 1024 * 1024, true);
+        break;
+      }
+      offset += 46 + nameLength + view.getUint16(offset + 30, true) + view.getUint16(offset + 32, true);
+    }
+    // Even an entry excluded from metadata decompression must obey the global limit.
+    assert.throws(() => inspectOoxmlSections(oversized), /Expanded PPTX/);
     delete entries["ppt/presentation.xml"];
     assert.throws(() => inspectOoxmlSections(zipSync(entries)), /presentation|Missing|missing/);
   } finally {

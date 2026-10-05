@@ -4893,15 +4893,15 @@ export function inspectOoxmlDocument(input) {
 // Section import/export needs presentation topology, not every slide's name.
 // This is not a saved-file admission check; callers retain independent reopen.
 export function inspectOoxmlSections(input) {
-  return packageSectionObservation(openInspectionPackage(input));
+  return packageSectionObservation(openInspectionPackage(input, true));
 }
 
-function openInspectionPackage(input) {
+function openInspectionPackage(input, presentationOnly = false) {
   if (!(input instanceof Uint8Array))
     throw new TypeError("PPTX input must be a Uint8Array.");
   if (input.byteLength > maximumInputBytes)
     throw new Error("PPTX exceeds the browser inspection limit.");
-  return openPackage(input, { requireSimpleTopology: false });
+  return openPackage(input, { requireSimpleTopology: false, presentationOnly });
 }
 
 // Experimental candidate-output boundary. Production persistence does not
@@ -5336,9 +5336,14 @@ export async function inspectOoxmlDocumentWithAssets(input) {
   };
 }
 
-function openPackage(input, { requireSimpleTopology }) {
+function openPackage(input, { requireSimpleTopology, presentationOnly = false }) {
   inspectZipPackage(input);
-  const entries = unzipSync(input);
+  // Check every ZIP entry's name, compression, count and expanded size first.
+  // Section metadata does not need to inflate media. Full file inspection
+  // and artifact admission still decode and verify the complete package.
+  const entries = unzipSync(input, presentationOnly ? {
+    filter: ({ name }) => [presentationPath, presentationRelationshipsPath, contentTypesPath].includes(name),
+  } : undefined);
   const entryNames = Object.keys(entries);
   if (entryNames.length > maximumEntries)
     throw new Error("PPTX contains too many package entries.");
