@@ -149,9 +149,16 @@ function normalizeGeneratedPlaceholderDisplay(document, part, canonical) {
         text.parentNode?.namespaceURI === drawingNamespace &&
         text.parentNode?.localName === "fld" &&
         text.parentNode?.getAttribute("type") === "slidenum";
+      // ONLYOFFICE generates <#> when a layout/master has no active slide
+      // index; imported PowerPoint templates can carry its angle-quote form.
+      // This is only a cached display of an explicit slide-number field.
+      const templateNumberLabel =
+        /^ppt\/(slideMasters|slideLayouts)\//u.test(part) &&
+        ["<#>", "‹#›"].includes(value);
       if (
         (master && defaultLabel) ||
-        (slideNumberField && (defaultLabel || /^\d+$/u.test(value)))
+        (slideNumberField &&
+          (defaultLabel || /^\d+$/u.test(value) || templateNumberLabel))
       )
         text.textContent = `__office_placeholder_${type}__`;
     }

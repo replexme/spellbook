@@ -75,3 +75,49 @@ test("candidate serves local files, exact parent policy, source disclosure and r
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("offline program cache identity changes when auxiliary runtime identity changes", async () => {
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "spellbook-program-cache-"),
+  );
+  await writeFile(
+    path.join(directory, "sdk.bundle.js"),
+    "same SDK integration",
+  );
+  await writeFile(
+    path.join(directory, "onlyoffice-runtime-assets.json"),
+    JSON.stringify({ selected: 1681 }),
+  );
+  const manifest = (hash) =>
+    JSON.stringify({
+      files: [{ path: "sdkjs/common/libfont/engine/fonts.wasm", sha256: hash }],
+    });
+  await writeFile(
+    path.join(directory, "distribution-manifest.json"),
+    manifest("first compiled font"),
+  );
+  const server = createOnlyOfficeWorkspaceServer({
+    distributionDirectory: directory,
+    bundleDirectory: directory,
+    ...origins,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const first = await (await fetch(base + "/sw.js")).text();
+    await writeFile(
+      path.join(directory, "distribution-manifest.json"),
+      manifest("new compiled font"),
+    );
+    const second = await (await fetch(base + "/sw.js")).text();
+    assert.notEqual(second, first);
+    assert.equal(
+      second.replace(/spellbook-office-public-assets-[a-f0-9]{64}/gu, "cache"),
+      first.replace(/spellbook-office-public-assets-[a-f0-9]{64}/gu, "cache"),
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});

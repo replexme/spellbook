@@ -49,12 +49,18 @@ export async function verifyOfficeDistribution(root) {
   for (const name of expected.keys()) {
     if (!name.endsWith(".br")) continue;
     const plain = name.slice(0, -3);
-    if (!expected.has(plain)) throw new Error("Compressed asset lacks a listed counterpart: " + name);
+    if (!expected.has(plain))
+      throw new Error("Compressed asset lacks a listed counterpart: " + name);
     let decoded;
-    try { decoded = brotliDecompressSync(await readFile(resolve(name))); }
-    catch { throw new Error("Invalid compressed runtime asset: " + name); }
+    try {
+      decoded = brotliDecompressSync(await readFile(resolve(name)));
+    } catch {
+      throw new Error("Invalid compressed runtime asset: " + name);
+    }
     if (!decoded.equals(await readFile(resolve(plain))))
-      throw new Error("Compressed runtime content differs from plain asset: " + name);
+      throw new Error(
+        "Compressed runtime content differs from plain asset: " + name,
+      );
     runtimeCompressedPairsVerified++;
   }
   async function walk(relative = "") {
@@ -73,6 +79,76 @@ export async function verifyOfficeDistribution(root) {
   for (const source of manifest.sources) {
     if ((await hash("sources/" + source.archive)) !== source.archiveSha256)
       throw new Error("Source archive identity mismatch: " + source.id);
+  }
+  if (manifest.auxiliaryWasmRebuildVerified === true) {
+    const receiptPath = "sources/auxiliary-build-receipt.json";
+    if (!expected.has(receiptPath))
+      throw new Error("Auxiliary rebuild receipt is missing");
+    const receipt = JSON.parse(await readFile(resolve(receiptPath), "utf8"));
+    const source = manifest.sources.filter(
+      (entry) => entry.id === "onlyoffice-auxiliary",
+    );
+    if (
+      source.length !== 1 ||
+      receipt.schemaVersion !== 1 ||
+      receipt.cleanRebuildVerified !== true ||
+      receipt.reproductionStatus !== "exact-reproduction-verified" ||
+      receipt.sourceArchive !== source[0].archive ||
+      receipt.sourceArchiveSha256 !== source[0].archiveSha256 ||
+      !/^emscripten\/emsdk@sha256:[a-f0-9]{64}$/u.test(receipt.compilerImage) ||
+      receipt.platform !== "linux/amd64"
+    )
+      throw new Error(
+        "Auxiliary rebuild source/compiler evidence is incomplete",
+      );
+    const modules = {
+      zlib: "sdkjs/common/zlib/engine/zlib",
+      spell: "sdkjs/common/spell/spell/spell",
+      hash: "sdkjs/common/hash/hash/engine",
+      font: "sdkjs/common/libfont/engine/fonts",
+    };
+    if (!Array.isArray(receipt.outputs) || receipt.outputs.length !== 8)
+      throw new Error("Auxiliary rebuild must bind all four JS/WASM pairs");
+    if (
+      receipt.reproductionReport !== "auxiliary-reproduction.json" ||
+      expected.get("sources/" + receipt.reproductionReport) !==
+        receipt.reproductionReportSha256
+    )
+      throw new Error(
+        "Auxiliary clean reproduction report is missing or changed",
+      );
+    const reproduction = JSON.parse(
+      await readFile(resolve("sources/" + receipt.reproductionReport), "utf8"),
+    );
+    if (
+      reproduction.status !== receipt.reproductionStatus ||
+      reproduction.sourceArchiveSha256 !== receipt.sourceArchiveSha256 ||
+      reproduction.compilerImage !== receipt.compilerImage ||
+      reproduction.platform !== receipt.platform ||
+      !Array.isArray(reproduction.outputs) ||
+      reproduction.outputs.length !== 8
+    )
+      throw new Error("Auxiliary clean reproduction evidence is incomplete");
+    for (const [module, base] of Object.entries(modules))
+      for (const extension of ["js", "wasm"]) {
+        const name = base + "." + extension;
+        const rows = receipt.outputs.filter(
+          (row) => row.module === module && row.path === name,
+        );
+        const reproduced = reproduction.outputs.filter(
+          (row) => row.module === module && row.path === name,
+        );
+        if (
+          rows.length !== 1 ||
+          rows[0].sha256 !== expected.get(name) ||
+          reproduced.length !== 1 ||
+          reproduced[0].sha256 !== rows[0].sha256 ||
+          reproduced[0].reproduced !== true
+        )
+          throw new Error(
+            "Auxiliary rebuild output identity mismatch: " + name,
+          );
+      }
   }
   const license = "LICENSE-AGPL-3.0.txt";
   for (const name of [
@@ -122,6 +198,8 @@ export async function verifyOfficeDistribution(root) {
     fonts: fonts.fonts.length,
     sourceMaterialsPackaged: true,
     runtimeCompressedPairsVerified,
+    auxiliaryWasmRebuildVerified:
+      manifest.auxiliaryWasmRebuildVerified === true,
     upstreamEditorRebuildVerified:
       manifest.upstreamEditorRebuildVerified === true,
   };

@@ -586,3 +586,17 @@ repair. The old failures and all four exclusions remain in the ledger.
 Host source disclosure is implemented; auxiliary WASM source/build identity is
 not certified, so this candidate is still not admitted for public distribution.
 The completion report and source receipt identify the exact tested outputs.
+
+
+## Source-built auxiliary continuation (2026-10-06)
+
+The selected local candidate now uses source-built zlib, Hunspell, hash and font
+JS/WASM pairs. All eight files were reproduced byte for byte from a new directory
+with the compiler image pinned in `auxiliary-build-receipt.json`. The distribution
+provides the exact preferred source snapshot, the clean reproduction result and
+`rebuild-auxiliary.py`; see its `sources/auxiliary-BUILD.md`. The distribution
+checker requires matching source/compiler/output and clean reproduction evidence
+when `auxiliaryWasmRebuildVerified` is true. Historical unverified statements above
+describe earlier candidates. Full editor/x2t independent reproduction and public
+release admission remain separate. The continuation report is
+`docs/delivery/onlyoffice-auxiliary-source-rebuild-2026-10-06.md`.

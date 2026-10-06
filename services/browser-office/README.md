@@ -386,3 +386,11 @@ and build identity of all auxiliary WASM binaries.
 proceed; `--candidate` exports a local review artifact only. Existing production
 routing and release locks still refer to LibreOffice. A local default change
 is not a production deployment.
+
+
+The 2026-10-06 auxiliary-source continuation replaces the four prebuilt JS/WASM
+pairs in the selected local candidate with exact clean-reproduced outputs. The
+source snapshot, fixed compiler and output identities accompany the distribution.
+See `docs/delivery/onlyoffice-auxiliary-source-rebuild-2026-10-06.md`. Earlier
+auxiliary-unverified statements describe the previous candidate; full editor/x2t
+reproduction, licensing review and operational public-release gates remain open.

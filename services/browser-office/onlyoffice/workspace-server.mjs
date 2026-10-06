@@ -96,9 +96,7 @@ export function createOnlyOfficeWorkspaceServer({
         res.setHeader("Service-Worker-Allowed", "/");
         const identity = createHash("sha256")
           .update(
-            await fs.readFile(
-              path.join(dist, "onlyoffice-runtime-assets.json"),
-            ),
+            await fs.readFile(path.join(dist, "distribution-manifest.json")),
           )
           .update(await fs.readFile(path.join(base, "sdk.bundle.js")))
           .digest("hex");
@@ -115,7 +113,13 @@ export function createOnlyOfficeWorkspaceServer({
       if (pathname === "/licenses") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(
-          '<!doctype html><meta charset="utf-8"><title>Spellbook licenses and source</title><h1>Licenses and corresponding source</h1><p><a href="/licensing.html">Pinned ONLYOFFICE distribution licenses, fonts and upstream source archives</a></p><p><a href="/workspace-sources.tar.gz">Current host source archive</a> · <a href="/workspace-source-receipt.json">Bundle and source identity receipt</a></p><p>Host source carries MPL-2.0 notices. ONLYOFFICE distribution carries AGPL-3.0 notices. Auxiliary WASM reproduction remains unverified; this candidate is not admitted for public distribution.</p>',
+          '<!doctype html><meta charset="utf-8"><title>Spellbook licenses and source</title><h1>Licenses and corresponding source</h1><p><a href="/licensing.html">Pinned ONLYOFFICE distribution licenses, fonts and upstream source archives</a></p><p><a href="/workspace-sources.tar.gz">Current host source archive</a> · <a href="/workspace-source-receipt.json">Bundle and source identity receipt</a></p><p>Host source carries MPL-2.0 notices. ONLYOFFICE distribution carries AGPL-3.0 notices. ' +
+            (admission?.auxiliaryWasmRebuildVerified
+              ? '<a href="/sources/auxiliary-build-receipt.json">Four auxiliary JS/WASM pairs reproduced from the provided source.</a> '
+              : "Auxiliary WASM reproduction remains unverified. ") +
+            (publicReleaseAdmitted
+              ? "</p>"
+              : "This candidate is not admitted for public distribution.</p>"),
         );
         return;
       }

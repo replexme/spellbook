@@ -119,7 +119,7 @@ execFileSync("tar", [
 ], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
 const receipt = {
   scope:
-    "host integration source and bundles; pinned vendor distribution and its source archives are separately served; auxiliary WASM reproduction is not certified",
+    "host integration source and bundles; pinned vendor distribution, its source archives and auxiliary WASM reproduction evidence are separately served",
   bundles,
   sources: await Promise.all(
     unique.map(async (name) => ({

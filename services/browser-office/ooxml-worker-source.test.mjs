@@ -5355,3 +5355,19 @@ test("image remapping verifies payload when topology reuses an existing filename
   assert.equal(remapPartRelationshipIds(part, slide, beforeRels, afterRels, [original, { ...edited, "ppt/media/image13.png": strToU8("changed") }]), null);
   assert.equal(remapPartRelationshipIds(part, slide, rels([["rId4", "image14"], ["rId5", "copy"]]), afterRels, [{ ...original, "ppt/media/copy.png": original["ppt/media/image14.png"] }, edited]), null);
 });
+
+
+test("template slide-number generated hash labels match their numeric display without hiding authored content", () => {
+  for (const part of ["ppt/slideMasters/slideMaster1.xml", "ppt/slideLayouts/slideLayout1.xml"]) {
+    const pack = (text, options) => zipSync({[part]: strToU8(numberPlaceholder(text, options))});
+    for (const display of ["&lt;#&gt;", "‹#›"]) {
+      assert.deepEqual(nativeExportDifferences(pack("1"), pack(display)), []);
+      for (const options of [{field:false}, {type:"body"}, {fieldType:"datetime"}])
+        assert.deepEqual(nativeExportDifferences(pack("1", options), pack(display, options)), [part]);
+      assert.deepEqual(nativeExportDifferences(pack("1"), pack(display, {bold:"1"})), [part]);
+    }
+  }
+  const part = "ppt/slides/slide1.xml";
+  const pack = text => zipSync({[part]: strToU8(numberPlaceholder(text))});
+  assert.deepEqual(nativeExportDifferences(pack("1"), pack("&lt;#&gt;")), [part]);
+});

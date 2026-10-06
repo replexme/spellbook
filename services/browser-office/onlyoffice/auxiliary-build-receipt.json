@@ -1,0 +1,249 @@
+{
+  "schemaVersion": 1,
+  "status": "source-built",
+  "scope": "Four auxiliary JS/WASM pairs only; no full editor or x2t independent reproduction",
+  "compilerImage": "emscripten/emsdk@sha256:f8a157011b8fa61bdaab875bb1f0f08695229dffe086448d14b53538cae16bd3",
+  "compilerVersion": "4.0.11",
+  "platform": "linux/amd64",
+  "sourceArchive": "auxiliary-preferred-source.tar.gz",
+  "sourceArchiveSha256": "d1dda6ec815839d898375f7a91b0e87f9101b404d15957b58545274a017cd58c",
+  "upstreamSources": [
+    {
+      "id": "x2t",
+      "repository": "https://github.com/agentbridges-ai/onlyoffice-x2t-wasm",
+      "commit": "5790fda684ac1a837f1ab92fcaaf4a0de9ec4ec1",
+      "sourceUrl": "https://codeload.github.com/agentbridges-ai/onlyoffice-x2t-wasm/tar.gz/5790fda684ac1a837f1ab92fcaaf4a0de9ec4ec1",
+      "archive": "x2t-source.tar.gz",
+      "archiveSha256": "eadfe3aef842f780c124178d87886762ea6500c0cc5dbc61aed066d0e99c9410"
+    },
+    {
+      "id": "build-tools",
+      "repository": "https://github.com/ONLYOFFICE/build_tools",
+      "commit": "849d78fea08ff3bf1329e7a7f31def02f30d0918",
+      "sourceUrl": "https://codeload.github.com/ONLYOFFICE/build_tools/tar.gz/849d78fea08ff3bf1329e7a7f31def02f30d0918",
+      "archive": "build-tools-source.tar.gz",
+      "archiveSha256": "0d24b2bb1a39db5971b6c3643e79b72c2bae15cdeea44b4d888aa77a5059f34d"
+    },
+    {
+      "id": "sdkjs",
+      "repository": "https://github.com/ONLYOFFICE/sdkjs",
+      "commit": "33521f0ccfbf5f1ceb2a0e3db2b434d7c5bcd6ec",
+      "sourceUrl": "https://codeload.github.com/ONLYOFFICE/sdkjs/tar.gz/33521f0ccfbf5f1ceb2a0e3db2b434d7c5bcd6ec",
+      "archive": "sdkjs-source.tar.gz",
+      "archiveSha256": "706da1a3fc69230f1e0d632926c3f2a8c26538afe92c702357d5235edaa7171e"
+    }
+  ],
+  "dependencies": [
+    {
+      "id": "hunspell",
+      "repository": "https://github.com/hunspell/hunspell",
+      "commit": "8a2fdfe5a6bb1cbafc04b0c8486abcefd17ad903",
+      "archive": "hunspell-8a2fdfe5a6bb1cbafc04b0c8486abcefd17ad903.tar.gz",
+      "sha256": "787c6f81405060073a658b979238b3fc7e1073001e881da6ffb87986b7c00cd7"
+    },
+    {
+      "id": "harfbuzz",
+      "repository": "https://github.com/harfbuzz/harfbuzz",
+      "commit": "894a1f72ee93a1fd8dc1d9218cb3fd8f048be29a",
+      "archive": "harfbuzz-894a1f72ee93a1fd8dc1d9218cb3fd8f048be29a.tar.gz",
+      "sha256": "17eda8a9861d347a6e95cd2b3112301ce90dcc649b0e96623cc89c6ca4180e66"
+    },
+    {
+      "id": "brotli",
+      "repository": "https://github.com/google/brotli",
+      "commit": "a47d7475063eb223c87632eed806c0070e70da29",
+      "archive": "brotli-a47d7475063eb223c87632eed806c0070e70da29.tar.gz",
+      "sha256": "49b657a4321cb00e388863dec8d0558b94ec47100d619b837d570a58bba71379"
+    },
+    {
+      "id": "openssl",
+      "repository": "https://github.com/openssl/openssl",
+      "commit": "36eadf1f84daa965041cce410b4ff32cbda4ef08",
+      "archive": "openssl-36eadf1f84daa965041cce410b4ff32cbda4ef08.tar.gz",
+      "sha256": "1363fad0711483bd8ec1c1e3a4357bf00b39197da2dc04b1fa66b6a3605eb1f2"
+    },
+    {
+      "id": "hyphen",
+      "repository": "https://github.com/hunspell/hyphen",
+      "commit": "dcd90f0056cfbcbd2d389b7a13db45ddf5b0b98e",
+      "archive": "hyphen-dcd90f0056cfbcbd2d389b7a13db45ddf5b0b98e.tar.gz",
+      "sha256": "73b65e5b8e9243b13c8f82d719f95fd8f5924723587f5d1097b44c51b36db602"
+    }
+  ],
+  "outputs": [
+    {
+      "module": "zlib",
+      "path": "sdkjs/common/zlib/engine/zlib.js",
+      "sha256": "5be4bc56a2f75ee4bc0f75365500570f94c3110899f595a0cadd9f22d310be39"
+    },
+    {
+      "module": "zlib",
+      "path": "sdkjs/common/zlib/engine/zlib.wasm",
+      "sha256": "c27bb6f5e8eb58b3a72728767256be347804bbaafc4cbd5d3b6883c950e85fab"
+    },
+    {
+      "module": "spell",
+      "path": "sdkjs/common/spell/spell/spell.js",
+      "sha256": "54d16f44e14c19eda4ac72a233e07841f35018ace301901cd86f1c4de6352225"
+    },
+    {
+      "module": "spell",
+      "path": "sdkjs/common/spell/spell/spell.wasm",
+      "sha256": "48a988493f6e1a90064ae606bb401622b8c03f0a632867eede8027b90da3dfe4"
+    },
+    {
+      "module": "hash",
+      "path": "sdkjs/common/hash/hash/engine.js",
+      "sha256": "786e661246c54804ab13a9d96497f30c893e64e5fd8ad0a1369ae92fd21bbb5d"
+    },
+    {
+      "module": "hash",
+      "path": "sdkjs/common/hash/hash/engine.wasm",
+      "sha256": "721fb051d62f17bbf97eabfe6e2fb48648d89f53f5aee3c953d07d6131c4c802"
+    },
+    {
+      "module": "font",
+      "path": "sdkjs/common/libfont/engine/fonts.js",
+      "sha256": "d774dc935a7a1a14389843a119d65693be03ff5ebfb0be725379f0ba76c19242"
+    },
+    {
+      "module": "font",
+      "path": "sdkjs/common/libfont/engine/fonts.wasm",
+      "sha256": "e6e8fc0d1787e61789cfa9af4e7d85d3bf0d24fe4c53cbabe8876dc4876e79d3"
+    }
+  ],
+  "recipeChanges": {
+    "compilerVersion": "4.0.11",
+    "compilerImageDigest": "sha256:f8a157011b8fa61bdaab875bb1f0f08695229dffe086448d14b53538cae16bd3",
+    "modules": [
+      [
+        "zlib",
+        "OfficeUtils/js/zlib.json",
+        "OfficeUtils/js/wasm/js/zlib.js",
+        "window.onZlibEngineInit()"
+      ],
+      [
+        "spell",
+        "Common/3dParty/hunspell/hunspell.json",
+        "Common/3dParty/hunspell/wasm/js/spell.js",
+        "self.onEngineInit()"
+      ],
+      [
+        "hash",
+        "DesktopEditor/xmlsec/src/wasm/hash/hash.json",
+        "DesktopEditor/xmlsec/src/wasm/hash/hash_base.js",
+        "self.onEngineInit()"
+      ],
+      [
+        "font",
+        "DesktopEditor/fontengine/js/libfont.json",
+        "DesktopEditor/fontengine/js/engine/module_js.js",
+        "window[\"AscFonts\"].onLoadModule()"
+      ]
+    ],
+    "changes": [
+      "fixed compiler via existing emsdk symlink; no latest installer",
+      "WASM only; obsolete asm.js generation excluded",
+      "deprecated memory option names migrated",
+      "explicit heap exports for source wrapper",
+      "source wrapper initialization callbacks before generated module",
+      "commit-pinned dependencies and exact upstream source patches",
+      "use python3 explicitly for standalone source scripts",
+      "apply upstream openssl2.patch MD2 conditional after generated headers"
+    ]
+  },
+  "patches": [
+    {
+      "file": "freetype-2.10.4-cve-2025-27363.patch",
+      "sha256": "d6a1ffc5711aa935ebb0c99709b4c0f3180f2e23e6153e5cda2e38f01d331dba"
+    },
+    {
+      "file": "freetype-upstream-signedness.patch",
+      "sha256": "b885198fef439a6a559426c84450968afc5eac2ced5139ab91ff36dd47d29d94"
+    }
+  ],
+  "fontWrapperChange": "Bind exported font API inside runtime initialization callback, retaining both original loader signals.",
+  "buildLogs": [
+    "zlib-build.log",
+    "spell-build.log",
+    "hash-build-v2.log",
+    "font-build-v4.log"
+  ],
+  "cleanRebuildVerified": true,
+  "sourceSnapshotCleanup": {
+    "removedUnusedUpstreamBinaryEntries": 1473,
+    "removedEntryListSha256": "4d0c8aa8fa0dda07b5e689abc8b4742e5b68eeaaf153e03b0e7b250cd34956ed",
+    "compilerInputsChanged": false
+  },
+  "reproductionStatus": "exact-reproduction-verified",
+  "reproductionReport": "auxiliary-reproduction.json",
+  "reproductionReportSha256": "d1f21e9cb78c2501f147aec577b0392fbde310cc972e3769b243881975bd76e9",
+  "reproductionOutputs": [
+    {
+      "module": "zlib",
+      "path": "sdkjs/common/zlib/engine/zlib.js",
+      "sha256": "5be4bc56a2f75ee4bc0f75365500570f94c3110899f595a0cadd9f22d310be39",
+      "reproduced": true
+    },
+    {
+      "module": "zlib",
+      "path": "sdkjs/common/zlib/engine/zlib.wasm",
+      "sha256": "c27bb6f5e8eb58b3a72728767256be347804bbaafc4cbd5d3b6883c950e85fab",
+      "reproduced": true
+    },
+    {
+      "module": "spell",
+      "path": "sdkjs/common/spell/spell/spell.js",
+      "sha256": "54d16f44e14c19eda4ac72a233e07841f35018ace301901cd86f1c4de6352225",
+      "reproduced": true
+    },
+    {
+      "module": "spell",
+      "path": "sdkjs/common/spell/spell/spell.wasm",
+      "sha256": "48a988493f6e1a90064ae606bb401622b8c03f0a632867eede8027b90da3dfe4",
+      "reproduced": true
+    },
+    {
+      "module": "hash",
+      "path": "sdkjs/common/hash/hash/engine.js",
+      "sha256": "786e661246c54804ab13a9d96497f30c893e64e5fd8ad0a1369ae92fd21bbb5d",
+      "reproduced": true
+    },
+    {
+      "module": "hash",
+      "path": "sdkjs/common/hash/hash/engine.wasm",
+      "sha256": "721fb051d62f17bbf97eabfe6e2fb48648d89f53f5aee3c953d07d6131c4c802",
+      "reproduced": true
+    },
+    {
+      "module": "font",
+      "path": "sdkjs/common/libfont/engine/fonts.js",
+      "sha256": "d774dc935a7a1a14389843a119d65693be03ff5ebfb0be725379f0ba76c19242",
+      "reproduced": true
+    },
+    {
+      "module": "font",
+      "path": "sdkjs/common/libfont/engine/fonts.wasm",
+      "sha256": "e6e8fc0d1787e61789cfa9af4e7d85d3bf0d24fe4c53cbabe8876dc4876e79d3",
+      "reproduced": true
+    }
+  ],
+  "reproductionLogs": [
+    {
+      "file": "zlib.log",
+      "sha256": "90e72136d87edfa878da1f1f59304c3b5384fe9daf3b9faaa9ab3cf8c6a3819a"
+    },
+    {
+      "file": "spell.log",
+      "sha256": "be08dc1be3ead0785cd1785e44cf1a227b93699e8380d9e85d6df4126d71fa66"
+    },
+    {
+      "file": "hash.log",
+      "sha256": "be593540b159449246dbaa16c706bad8a9052eb1db21122ef37d98440aaea96f"
+    },
+    {
+      "file": "font.log",
+      "sha256": "95c3df0f7eee9504e4c2406adf28f8af30f87d4fb67910bb0207a038f615846c"
+    }
+  ]
+}
