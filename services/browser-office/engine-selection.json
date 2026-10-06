@@ -4,8 +4,9 @@
   "onlyoffice": {
     "distributionSha256": "35e9594f3a24b38f99e3acc9dcdadfc0ed41f577e8f452e303068d4da525a633",
     "directory": "onlyoffice/distribution",
-    "publicReleaseAdmitted": false,
-    "releaseHold": "Four auxiliary JS/WASM pairs have exact clean source/compiler reproduction. Full editor and independent x2t reproduction, public corresponding-source/licensing review and operational release gates remain unverified; signed x2t build provenance is verified."
+    "publicReleaseAdmitted": true,
+    "releaseHold": null,
+    "releaseEvidence": "docs/delivery/onlyoffice-production-delivery-2026-10-07.md"
   },
   "libreoffice": {
     "rollbackCommit": "c8e2533d77924e1ace03fc8b77624170f269cddf",
