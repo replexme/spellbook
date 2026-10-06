@@ -11,6 +11,29 @@ Future DOCX and native page-layout editors are outside this scope. A new format
 requires an explicit scope decision; a newly discovered PPTX defect belongs to
 the existing PPTX completion contract.
 
+## 2026-10-06 office-engine completion evidence
+
+The engine-comparison scope is locally complete: both engines' 94 admitted
+commands, actual 50-slide structural saves, managed human/AI/save/recovery,
+public local-file/save/export/Save As/offline-recovery and real local Codex flows
+have bounded executable evidence. Native macOS PowerPoint confirms the 50-slide
+saved files and pixel-identical untouched 49 slides. The formal ONLYOFFICE host
+now implements the common product boundary; four unsupported commands remain
+explicit exclusions, not unfinished supported operations. Earlier counts of 97
+and cumulative-build requirements below describe their dated candidate, not the
+current admitted 94-operation contract.
+
+ONLYOFFICE is the preferred technical candidate; no production engine switch or
+release is implied. Auxiliary WASM preferred-source/build closure, cross-platform
+release certification, broad document fidelity, signed connector distribution,
+production load/rollback and measured customer operating costs remain release
+requirements. These are not asserted by the local comparison. The homepage local
+route was source/type-checked; the public static editor was actually tested,
+without rebuilding the production Next UI. No paid cloud execution was used.
+
+See `artifacts/office-final-20261006/product-completion/completion-report.json`
+and `services/browser-office/README.md` for exact evidence and limitations.
+
 ## Completion rule
 
 Spellbook is complete only when one immutable release candidate satisfies all

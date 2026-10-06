@@ -442,6 +442,13 @@ export function createProductSession({
       }),
     undo: () => serial(() => history("undo")),
     redo: () => serial(() => history("redo")),
+    exportCurrentArtifact: () => serial(async () => {
+      ready();
+      await manualCheckpoint("before_product_export");
+      await liveMatches(current.observation);
+      await artifacts.require(current.bytes, current.observation.revision);
+      return current.bytes.slice();
+    }),
     save: (persist) =>
       serial(async () => {
         ready();

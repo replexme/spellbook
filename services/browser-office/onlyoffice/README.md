@@ -550,3 +550,39 @@ native transform, saved curve/font/bold properties and visible history and
 reopen. WordArt **creation still does not test `set_fontwork`**. Shape insertion
 also uses an explicit free area of the canonical fixture. No production engine
 or upstream distribution is changed by these diagnostic improvements.
+
+
+## Formal product host (2026-10-06)
+
+The candidate is now connected through `workspace-entry.mjs` to the shared
+product session, canonical operations, browser preservation Worker and OPFS.
+Its SDK and inspection frames require three distinct exact origins and an
+explicit parent allowlist. A private MessageChannel owns each document request;
+stale state, scope violations and duplicate request identities are bounded.
+Owned assets, detailed text observations, reveal, turn Undo, native image review,
+PPTX and PDF export use the real SDK. Selection/current-slide/document AI scope
+is enforced by the host rather than by a prompt alone.
+
+Run locally against an already verified pinned distribution:
+
+```sh
+SPELLBOOK_ONLYOFFICE_DISTRIBUTION=/absolute/path/to/pinned/dist pnpm browser-office:onlyoffice:serve
+```
+
+Default candidate URLs are `http://127.0.0.1:35602/local` (local file editor),
+`http://127.0.0.1:35602/workspace`, SDK `35616`, inspection `35617`.
+The command validates the vendor manifest, fonts, compressed pairs and source
+archives. It neither rebuilds an engine nor selects this engine in production.
+`pnpm browser-office:onlyoffice:bundle` bundles only the small integration modules.
+`node services/browser-office/onlyoffice/build-workspace.mjs --package-only`
+refreshes the source archive/receipt using existing bundles, without bundling.
+`/licenses` exposes vendor source and current host source/identity receipts.
+
+94/94 formal host commands passed; the subsequent populated-table merge guard
+fix was isolated by byte-exact reconstruction of the earlier bundle and verified
+with ten affected commands. Native PowerPoint table coverage uses an additional
+valid populated-table fixture because the original fixtures themselves require
+repair. The old failures and all four exclusions remain in the ledger.
+Host source disclosure is implemented; auxiliary WASM source/build identity is
+not certified, so this candidate is still not admitted for public distribution.
+The completion report and source receipt identify the exact tested outputs.

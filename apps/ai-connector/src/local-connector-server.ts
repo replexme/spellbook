@@ -5,6 +5,7 @@ import type {
   ServerResponse,
 } from "node:http";
 
+import type { LocalNativeTurns } from "./local-native-turns.js";
 import type { LocalPairingAuthority } from "./local-pairing.js";
 import type { LocalNativeJob, NativeJob } from "./types.js";
 
@@ -22,6 +23,7 @@ export interface LocalConnectorAccounts {
 
 export interface LocalConnectorOptions {
   authority: LocalPairingAuthority;
+  localTurns?: LocalNativeTurns;
   accounts: LocalConnectorAccounts;
   connectorOrigin: string;
   identity: string;
@@ -154,6 +156,7 @@ async function handle(
   const token = bearerToken(request);
   options.authority.verify(origin, token);
   if (url.pathname === "/v1/pairings/revoke") {
+    options.localTurns?.revoke(origin + ":" + token);
     options.authority.revoke(origin, token);
     return json(response, 200, { status: "disconnected" });
   }
@@ -182,6 +185,7 @@ async function handle(
   }
   if (url.pathname === "/v1/account/logout") {
     await options.accounts.logout(options.identity);
+    options.localTurns?.revoke(origin + ":" + token);
     options.authority.revoke(origin, token);
     return json(response, 200, { status: "disconnected" });
   }
@@ -189,6 +193,38 @@ async function handle(
     return json(response, 200, {
       models: await options.accounts.models(options.identity),
     });
+  }
+  if (url.pathname.startsWith("/v1/local-turns")) {
+    if (!options.localTurns) return json(response, 404, { error: "not_found" });
+    const body = await readJson(
+      request,
+      url.pathname.endsWith("/reply") ? 12_000_000 : MAX_BODY_BYTES,
+    );
+    const owner = origin + ":" + token;
+    if (url.pathname === "/v1/local-turns")
+      return json(response, 202, options.localTurns.start(owner, body));
+    const id = requiredString(body, "turnId");
+    if (url.pathname === "/v1/local-turns/poll")
+      return json(
+        response,
+        200,
+        options.localTurns.poll(owner, id, body.offset as number),
+      );
+    if (url.pathname === "/v1/local-turns/reply")
+      return json(
+        response,
+        200,
+        options.localTurns.reply(
+          owner,
+          id,
+          requiredString(body, "taskId"),
+          body.value,
+          body.error,
+        ),
+      );
+    if (url.pathname === "/v1/local-turns/cancel")
+      return json(response, 200, options.localTurns.cancel(owner, id));
+    return json(response, 404, { error: "not_found" });
   }
   if (url.pathname === "/v1/jobs/native") {
     const body = (await readJson(request)) as unknown as LocalNativeJob;
@@ -437,8 +473,9 @@ function setCors(response: ServerResponse, origin: string): void {
 
 async function readJson(
   request: IncomingMessage,
+  maxBytes = MAX_BODY_BYTES,
 ): Promise<Record<string, unknown>> {
-  const raw = await readBody(request);
+  const raw = await readBody(request, maxBytes);
   if (!request.headers["content-type"]?.startsWith("application/json"))
     throw new Error("content_type_required");
   try {
@@ -460,13 +497,16 @@ async function readForm(
   return Object.fromEntries(new URLSearchParams(await readBody(request)));
 }
 
-async function readBody(request: IncomingMessage): Promise<string> {
+async function readBody(
+  request: IncomingMessage,
+  maxBytes = MAX_BODY_BYTES,
+): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += bytes.length;
-    if (size > MAX_BODY_BYTES) throw new Error("request_too_large");
+    if (size > maxBytes) throw new Error("request_too_large");
     chunks.push(bytes);
   }
   return Buffer.concat(chunks).toString("utf8");

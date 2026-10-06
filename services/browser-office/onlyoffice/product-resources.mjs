@@ -7,6 +7,15 @@ export function attachOnlyOfficeResourceHost(editor,convertDocument) {
   window[key]?.dispose();
   const urls=new Set(),staged=new Map(),digests=new Map(),capture=editor.captureNativeSnapshot;
   const bridge={
+    async exportPdf(){
+      if(typeof editor.convertDownloadAsFile!=="function")throw Error("onlyoffice_native_pdf_export_unavailable");
+      bridge.sync();
+      const file=await editor.convertDownloadAsFile("pdf");
+      if(file.type!=="application/pdf")throw Error("pdf_export_invalid");
+      const bytes=new Uint8Array(await file.arrayBuffer());
+      if(bytes.length<5||new TextDecoder().decode(bytes.subarray(0,5))!=="%PDF-")throw Error("pdf_export_invalid");
+      return bytes.buffer;
+    },
     async read(reference){
       const media=editor.getMedia(),entries=[...Object.entries(media),...[...staged].map(([name,item])=>[name,item.url])];
       const url=entries.find(([name,value])=>name===reference||name==="media/"+reference||value===reference)?.[1];

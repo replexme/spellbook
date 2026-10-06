@@ -292,3 +292,50 @@ Upstream references:
 - <https://github.com/allotropia/zetajs>
 - <https://git.libreoffice.org/core/+/refs/heads/distro/allotropia/zeta-24-2>
 - <https://git.libreoffice.org/core/+/refs/heads/master/static/README.wasm.md>
+
+
+## Local-file product integration (2026-10-06)
+
+`/local` is the shared local-file editor. It opens a user-authorized PPTX handle,
+keeps recovery in OPFS, writes through File System Access, verifies the saved
+bytes, and acknowledges that exact revision. Save As moves the recovery identity
+with the selected file; the original gets a separate identity when reopened.
+PPTX/PDF export leaves original-file dirty state intact. An external file change
+refuses overwrite. File operations exclude document switches while a picker or
+write is pending. The static program cache excludes document and API data.
+The optional paired local connector runs Codex/Claude tools against the active
+browser document and cancels work when its identity changes. AI observations
+and images go to the selected AI provider; opening a local file does not upload
+it to Replex or the document server.
+
+The web `/local` route redirects to the configured browser Office origin. This
+route and homepage links are source/type-checked, not a new production web build
+or deployment. Chromium runtime tests use genuine browser file handles with an
+automated picker substitute; native OS dialogs and Safari/Windows certification
+are separate from this proof.
+
+ONLYOFFICE now has a formal candidate host; see [its instructions](onlyoffice/README.md#formal-product-host-2026-10-06).
+Both engines passed real local open/edit/save/PDF/offline-reload workflows,
+real local Codex edit/review/save, and 50-slide Save As/export/Undo/Redo flows.
+The formal ONLYOFFICE host passed all 94 admitted operations. A subsequent
+populated-table merge normalization fix is the only executable bundle difference;
+all ten affected table operations were rerun with exact Undo and independent
+validation. Four unsupported mutations remain explicit exclusions.
+
+Actual Microsoft PowerPoint 16.109.1 opened the managed and local 50-slide outputs;
+untouched 49 slides are pixel-identical to the original. Native command coverage
+uses 83 original rendered outputs, ten additional valid table fixtures, and one
+native hidden-slide state check. The original table fixtures trigger repair in
+PowerPoint before editing; those failures remain recorded. This is not universal
+corpus or Windows fidelity certification.
+
+The technical preference is ONLYOFFICE, based on the complete tested contract,
+local and managed workflows, native preservation and the matched 2.573x workflow
+speedup. Public distribution remains held: auxiliary WASM preferred-source
+revision/toolchain binding and full binary reproduction are unverified. Source
+archives and license links are available, but do not themselves certify that
+closure. Neither the production engine setting nor deployment was changed.
+
+Evidence: `artifacts/office-final-20261006/product-completion/completion-report.json`.
+Engine/WASM, .NET and production Next builds were not run in this completion;
+small host JavaScript bundles were refreshed while fixing actual integration bugs.

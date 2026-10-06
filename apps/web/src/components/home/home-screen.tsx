@@ -289,6 +289,9 @@ export function HomeScreen({
                 <Button variant="primary" onClick={pickFile}>
                   파일 선택
                 </Button>
+                <ButtonLink variant="quiet" href="/local">
+                  업로드 없이 로컬 파일 열기
+                </ButtonLink>
                 <small>
                   .pptx · {limit}까지 · 옛 형식(.ppt)은 PowerPoint에서 .pptx로
                   저장한 뒤 가져오세요
@@ -348,6 +351,9 @@ export function HomeScreen({
                   : `${visible.length}개 · 전체 ${documents.length}개`}
               </span>
               <div className="home-head-tools">
+                <ButtonLink variant="quiet" size="sm" href="/local">
+                  로컬 파일 열기
+                </ButtonLink>
                 <Menu
                   label="정렬"
                   placement="below-end"

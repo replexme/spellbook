@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createLocalConnectorHandler } from "./local-connector-server.js";
+import { LocalNativeTurns } from "./local-native-turns.js";
 import { LocalPairingAuthority } from "./local-pairing.js";
 
 const productOrigin = "https://spellbook.replex.me";
@@ -27,7 +28,7 @@ afterEach(async () => {
   );
 });
 
-async function harness() {
+async function harness(localTurns?: LocalNativeTurns) {
   let handler: RequestListener | undefined;
   const server = createServer((request, response) => {
     if (!handler) throw new Error("test_handler_not_ready");
@@ -58,6 +59,7 @@ async function harness() {
     connectorOrigin,
     identity: "local@spellbook",
     runNativeJob,
+    localTurns,
   });
   return { accounts, authority, connectorOrigin, models, runNativeJob };
 }
@@ -414,4 +416,70 @@ describe("local connector HTTP boundary", () => {
     expect(response.status).toBe(400);
     expect(h.runNativeJob).not.toHaveBeenCalled();
   });
+});
+
+it("local browser turns require paired origin and token for every document operation", async () => {
+  const turns = new LocalNativeTurns(async () => {
+    throw Error("not_used");
+  });
+  try {
+    const { connectorOrigin } = await harness(turns),
+      tokenA = await pair(connectorOrigin),
+      tokenB = await pair(connectorOrigin);
+    const post = (
+      path: string,
+      body: unknown,
+      token = tokenA,
+      origin = productOrigin,
+    ) =>
+      fetch(connectorOrigin + path, {
+        method: "POST",
+        headers: {
+          origin,
+          "content-type": "application/json",
+          ...(token ? { authorization: "Bearer " + token } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+    const body = { requestText: "inspect", permissionMode: "read_only" };
+    expect((await post("/v1/local-turns", body, "")).status).toBe(403);
+    expect(
+      (await post("/v1/local-turns", body, tokenA, "https://evil.example"))
+        .status,
+    ).toBe(403);
+    const created = await post("/v1/local-turns", body);
+    expect(created.status).toBe(202);
+    const { turnId } = (await created.json()) as { turnId: string };
+    expect(
+      (await post("/v1/local-turns/poll", { turnId, offset: 0 }, tokenB))
+        .status,
+    ).toBe(404);
+    const poll = await post("/v1/local-turns/poll", { turnId, offset: 0 });
+    expect(poll.status).toBe(200);
+    const value = (await poll.json()) as {
+      tasks: Array<{ id: string; request: { operation: string } }>;
+    };
+    expect(value.tasks[0].request.operation).toBe("observe");
+    expect(
+      (
+        await post(
+          "/v1/local-turns/reply",
+          { turnId, taskId: value.tasks[0].id, value: {} },
+          tokenB,
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (await post("/v1/local-turns/cancel", { turnId }, tokenB)).status,
+    ).toBe(404);
+    expect((await post("/v1/local-turns/cancel", { turnId })).status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const done = (await (
+      await post("/v1/local-turns/poll", { turnId, offset: 0 })
+    ).json()) as { done: boolean; tasks: unknown[] };
+    expect(done.done).toBe(true);
+    expect(done.tasks).toEqual([]);
+  } finally {
+    turns.dispose();
+  }
 });

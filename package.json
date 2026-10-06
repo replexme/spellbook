@@ -68,7 +68,9 @@
     "selfhost:restore": "node scripts/selfhost-restore.mjs",
     "selfhost:up": "node scripts/selfhost-up.mjs",
     "selfhost:down": "docker compose --profile wopi --profile browser down",
-    "browser-office:verify:distribution": "node services/browser-office/distribution-check.mjs"
+    "browser-office:verify:distribution": "node services/browser-office/distribution-check.mjs",
+    "browser-office:onlyoffice:bundle": "node services/browser-office/onlyoffice/build-workspace.mjs",
+    "browser-office:onlyoffice:serve": "node services/browser-office/onlyoffice/serve-workspace.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",

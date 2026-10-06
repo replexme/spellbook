@@ -543,3 +543,14 @@ test("manual artifact finalization is reobserved and never runs on known Undo or
   await s.session.redo();
   assert.equal(prepared, 1);
 });
+
+test('export retains dirty state, journal and undo history without an external ACK', async () => {
+  const {session} = setup();
+  await session.open(new Uint8Array([0x50,0x4b,1]));
+  await session.apply({expectedRevision:'r1',commands:[{op:'set',value:2}]});
+  const before=session.status();
+  const exported=await session.exportCurrentArtifact();
+  assert.equal(exported[2],2);
+  assert.deepEqual(session.status(),before);
+  assert.equal(session.status().modified,true);
+});

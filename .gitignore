@@ -20,6 +20,7 @@ apps/web/next-env.d.ts
 services/office-editor/extension.zip
 services/office-editor/workspace-dist/
 services/browser-office/runtime/
+services/browser-office/onlyoffice/workspace-dist/
 eval/corpus/
 eval/results/
 eval/public/downloads/

@@ -17,9 +17,8 @@ export async function retainNativeReferencePdf(pdfPath, directory) {
   await fs.copyFile(pdfPath, path.join(directory, "reference.pdf"));
 }
 
-// Launch Services opens the deck without activating PowerPoint (-g), so an
-// export never takes input focus from whoever is using the machine; a
-// PowerPoint that the export has to launch also starts hidden (-j).
+// Check OS process state without an AppleEvent. A tell-application count check
+// can cold-launch PowerPoint in front before hidden launch flags take effect.
 const EXPORT_APPLESCRIPT = String.raw`
 on run argv
   set sourcePath to item 1 of argv
@@ -28,7 +27,7 @@ on run argv
   tell application "Microsoft PowerPoint"
     if (count of presentations) is not 0 then error "PowerPoint has an open presentation. Close it before corpus export."
   end tell
-  do shell script "/usr/bin/open -g -j -a 'Microsoft PowerPoint' " & quoted form of sourcePath
+  tell application "Microsoft PowerPoint" to open (POSIX file sourcePath)
   tell application "Microsoft PowerPoint"
     try
       set waitedTenths to 0
@@ -87,147 +86,213 @@ export async function exportPowerPointReferences({
     );
 
   await fs.access(POWERPOINT_APP);
-  const openCount = Number(
-    requireCommand("osascript", [
-      "-e",
-      'tell application "Microsoft PowerPoint" to return (count of presentations)',
-    ]).stdout.trim(),
-  );
-  if (openCount !== 0)
-    throw new Error(
-      `PowerPoint has ${openCount} open presentation(s). Close them before corpus export.`,
+  const ownsPowerPoint = ensureHiddenPowerPoint();
+  try {
+    const openCount = Number(
+      requireCommand("osascript", [
+        "-e",
+        'tell application "Microsoft PowerPoint" to return (count of presentations)',
+      ]).stdout.trim(),
     );
-  requireCommand("pdftoppm", ["-v"]);
-
-  const absoluteManifest = path.resolve(manifestPath);
-  const manifestDirectory = path.dirname(absoluteManifest);
-  const manifest = JSON.parse(await fs.readFile(absoluteManifest, "utf8"));
-  validateManifest(manifest);
-  const absoluteReferencesRoot = referencesRoot
-    ? path.resolve(referencesRoot)
-    : path.join(manifestDirectory, "references-powerpoint-macos");
-  await fs.mkdir(absoluteReferencesRoot, { recursive: true, mode: 0o700 });
-
-  const powerPointVersion = requireCommand("mdls", [
-    "-name",
-    "kMDItemVersion",
-    "-raw",
-    POWERPOINT_APP,
-  ]).stdout.trim();
-  const macOsVersion = requireCommand("sw_vers", [
-    "-productVersion",
-  ]).stdout.trim();
-  const referenceRenderer = buildReferenceRenderer({
-    powerPointVersion,
-    macOsVersion,
-    dpi,
-  });
-  const exported = [];
-  const failures = [];
-
-  for (const [index, deck] of manifest.decks.entries()) {
-    const source = path.resolve(manifestDirectory, deck.source);
-    await fs.access(source);
-    const sourceSha256 = await sha256(source);
-    const finalDirectory = path.join(absoluteReferencesRoot, safeName(deck.id));
-    const reusable = await reusableReference(finalDirectory, {
-      sourceSha256,
-      referenceRenderer,
-    });
-    if (reusable) {
-      deck.references = relativePosix(manifestDirectory, finalDirectory);
-      exported.push({ id: deck.id, slides: reusable.slides, status: "reused" });
-      console.log(
-        `[powerpoint] ${index + 1}/${manifest.decks.length} ${deck.id}: reused ${reusable.slides} slide(s)`,
-      );
-      continue;
-    }
-    if (await exists(finalDirectory))
+    if (openCount !== 0)
       throw new Error(
-        `Reference directory already exists but is stale or incomplete: ${finalDirectory}`,
+        `PowerPoint has ${openCount} open presentation(s). Close them before corpus export.`,
       );
+    requireCommand("pdftoppm", ["-v"]);
 
-    const temporaryDirectory = await fs.mkdtemp(
-      path.join(absoluteReferencesRoot, `.${safeName(deck.id)}-`),
-    );
-    const powerPointStagingDirectory = await fs.mkdtemp(
-      path.join(POWERPOINT_CONTAINER_DOCUMENTS, "spellbook-reference-"),
-    );
-    try {
-      const stagedSource = path.join(powerPointStagingDirectory, "source.pptx");
-      const pdfPath = path.join(powerPointStagingDirectory, "reference.pdf");
-      await fs.copyFile(source, stagedSource);
-      runPowerPointExport(stagedSource, pdfPath, timeoutMs);
-      requireCommand("pdftoppm", [
-        "-png",
-        "-r",
-        String(dpi),
-        pdfPath,
-        path.join(temporaryDirectory, "slide"),
-      ]);
-      const slides = await normalizeRasterNames(temporaryDirectory);
-      if (slides === 0)
-        throw new Error(`PowerPoint exported no slides for ${deck.id}.`);
-      // Retain the native PDF for text-origin/font diagnostics; PNG alone
-      // cannot explain changes in shaping, tracking, or paragraph layout.
-      await retainNativeReferencePdf(pdfPath, temporaryDirectory);
-      await fs.rm(pdfPath);
-      await fs.rm(stagedSource);
-      await fs.writeFile(
-        path.join(temporaryDirectory, "reference-metadata.json"),
-        `${JSON.stringify(
-          { sourceSha256, referenceRenderer, slides },
-          null,
-          2,
-        )}\n`,
-        { mode: 0o600 },
+    const absoluteManifest = path.resolve(manifestPath);
+    const manifestDirectory = path.dirname(absoluteManifest);
+    const manifest = JSON.parse(await fs.readFile(absoluteManifest, "utf8"));
+    validateManifest(manifest);
+    const absoluteReferencesRoot = referencesRoot
+      ? path.resolve(referencesRoot)
+      : path.join(manifestDirectory, "references-powerpoint-macos");
+    await fs.mkdir(absoluteReferencesRoot, { recursive: true, mode: 0o700 });
+
+    const powerPointVersion = requireCommand("mdls", [
+      "-name",
+      "kMDItemVersion",
+      "-raw",
+      POWERPOINT_APP,
+    ]).stdout.trim();
+    const macOsVersion = requireCommand("sw_vers", [
+      "-productVersion",
+    ]).stdout.trim();
+    const referenceRenderer = buildReferenceRenderer({
+      powerPointVersion,
+      macOsVersion,
+      dpi,
+    });
+    const exported = [];
+    const failures = [];
+
+    for (const [index, deck] of manifest.decks.entries()) {
+      const source = path.resolve(manifestDirectory, deck.source);
+      await fs.access(source);
+      const sourceSha256 = await sha256(source);
+      const finalDirectory = path.join(
+        absoluteReferencesRoot,
+        safeName(deck.id),
       );
-      await fs.rename(temporaryDirectory, finalDirectory);
-      await fs.rm(powerPointStagingDirectory, { recursive: true, force: true });
-      deck.references = relativePosix(manifestDirectory, finalDirectory);
-      exported.push({ id: deck.id, slides, status: "exported" });
-      console.log(
-        `[powerpoint] ${index + 1}/${manifest.decks.length} ${deck.id}: exported ${slides} slide(s)`,
-      );
-    } catch (error) {
-      await fs.rm(temporaryDirectory, { recursive: true, force: true });
-      await fs.rm(powerPointStagingDirectory, {
-        recursive: true,
-        force: true,
+      const reusable = await reusableReference(finalDirectory, {
+        sourceSha256,
+        referenceRenderer,
       });
-      const message = error instanceof Error ? error.message : String(error);
-      delete deck.references;
-      failures.push({ id: deck.id, error: message });
-      console.error(
-        `[powerpoint] ${index + 1}/${manifest.decks.length} ${deck.id}: failed: ${message}`,
+      if (reusable) {
+        deck.references = relativePosix(manifestDirectory, finalDirectory);
+        exported.push({
+          id: deck.id,
+          slides: reusable.slides,
+          status: "reused",
+        });
+        console.log(
+          `[powerpoint] ${index + 1}/${manifest.decks.length} ${deck.id}: reused ${reusable.slides} slide(s)`,
+        );
+        continue;
+      }
+      if (await exists(finalDirectory))
+        throw new Error(
+          `Reference directory already exists but is stale or incomplete: ${finalDirectory}`,
+        );
+
+      const temporaryDirectory = await fs.mkdtemp(
+        path.join(absoluteReferencesRoot, `.${safeName(deck.id)}-`),
       );
-      recoverPowerPointAfterFailure();
+      const powerPointStagingDirectory = await fs.mkdtemp(
+        path.join(POWERPOINT_CONTAINER_DOCUMENTS, "spellbook-reference-"),
+      );
+      try {
+        const stagedSource = path.join(
+          powerPointStagingDirectory,
+          "source.pptx",
+        );
+        const pdfPath = path.join(powerPointStagingDirectory, "reference.pdf");
+        await fs.copyFile(source, stagedSource);
+        runPowerPointExport(stagedSource, pdfPath, timeoutMs);
+        requireCommand("pdftoppm", [
+          "-png",
+          "-r",
+          String(dpi),
+          pdfPath,
+          path.join(temporaryDirectory, "slide"),
+        ]);
+        const slides = await normalizeRasterNames(temporaryDirectory);
+        if (slides === 0)
+          throw new Error(`PowerPoint exported no slides for ${deck.id}.`);
+        // Retain the native PDF for text-origin/font diagnostics; PNG alone
+        // cannot explain changes in shaping, tracking, or paragraph layout.
+        await retainNativeReferencePdf(pdfPath, temporaryDirectory);
+        await fs.rm(pdfPath);
+        await fs.rm(stagedSource);
+        await fs.writeFile(
+          path.join(temporaryDirectory, "reference-metadata.json"),
+          `${JSON.stringify(
+            { sourceSha256, referenceRenderer, slides },
+            null,
+            2,
+          )}\n`,
+          { mode: 0o600 },
+        );
+        await fs.rename(temporaryDirectory, finalDirectory);
+        await fs.rm(powerPointStagingDirectory, {
+          recursive: true,
+          force: true,
+        });
+        deck.references = relativePosix(manifestDirectory, finalDirectory);
+        exported.push({ id: deck.id, slides, status: "exported" });
+        console.log(
+          `[powerpoint] ${index + 1}/${manifest.decks.length} ${deck.id}: exported ${slides} slide(s)`,
+        );
+      } catch (error) {
+        await fs.rm(temporaryDirectory, { recursive: true, force: true });
+        await fs.rm(powerPointStagingDirectory, {
+          recursive: true,
+          force: true,
+        });
+        const message = error instanceof Error ? error.message : String(error);
+        delete deck.references;
+        failures.push({ id: deck.id, error: message });
+        console.error(
+          `[powerpoint] ${index + 1}/${manifest.decks.length} ${deck.id}: failed: ${message}`,
+        );
+        if (ownsPowerPoint) recoverPowerPointAfterFailure();
+      }
+    }
+
+    manifest.referenceRenderer = referenceRenderer;
+    manifest.referenceFailures = failures;
+    const temporaryManifest = `${absoluteManifest}.tmp-${process.pid}`;
+    await fs.writeFile(
+      temporaryManifest,
+      `${JSON.stringify(manifest, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+    await fs.rename(temporaryManifest, absoluteManifest);
+
+    return {
+      manifest: absoluteManifest,
+      referencesRoot: absoluteReferencesRoot,
+      referenceRenderer,
+      decks: exported.length,
+      slides: exported.reduce((sum, item) => sum + item.slides, 0),
+      exported: exported.filter((item) => item.status === "exported").length,
+      reused: exported.filter((item) => item.status === "reused").length,
+      failures,
+    };
+  } finally {
+    if (ownsPowerPoint) {
+      const state = readPowerPointState();
+      if (state?.hidden && !state.active) {
+        const count = Number(
+          requireCommand("osascript", [
+            "-e",
+            'tell application "Microsoft PowerPoint" to return count of presentations',
+          ]).stdout.trim(),
+        );
+        if (count === 0)
+          requireCommand("osascript", [
+            "-e",
+            'tell application "Microsoft PowerPoint" to quit saving no',
+          ]);
+      }
     }
   }
+}
 
-  manifest.referenceRenderer = referenceRenderer;
-  manifest.referenceFailures = failures;
-  const temporaryManifest = `${absoluteManifest}.tmp-${process.pid}`;
-  await fs.writeFile(
-    temporaryManifest,
-    `${JSON.stringify(manifest, null, 2)}\n`,
-    { mode: 0o600 },
+const READ_POWERPOINT_STATE =
+  'ObjC.import("AppKit");const apps=$.NSRunningApplication.runningApplicationsWithBundleIdentifier("com.microsoft.Powerpoint");let result=[];for(let i=0;i<Number(apps.count);i++){const app=apps.objectAtIndex(i);result.push({pid:Number(app.processIdentifier),hidden:Boolean(app.hidden),active:Boolean(app.active)});}JSON.stringify(result)';
+function readPowerPointState(run = requireCommand) {
+  const states = JSON.parse(
+    run("osascript", ["-l", "JavaScript", "-e", READ_POWERPOINT_STATE]).stdout,
   );
-  await fs.rename(temporaryManifest, absoluteManifest);
-
-  return {
-    manifest: absoluteManifest,
-    referencesRoot: absoluteReferencesRoot,
-    referenceRenderer,
-    decks: exported.length,
-    slides: exported.reduce((sum, item) => sum + item.slides, 0),
-    exported: exported.filter((item) => item.status === "exported").length,
-    reused: exported.filter((item) => item.status === "reused").length,
-    failures,
-  };
+  if (!Array.isArray(states) || states.length > 1)
+    throw Error("Ambiguous PowerPoint process ownership");
+  return states[0] ?? null;
+}
+export function ensureHiddenPowerPoint(
+  run = requireCommand,
+  wait = (milliseconds) =>
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds),
+) {
+  let state = readPowerPointState(run);
+  const owned = !state;
+  if (owned) {
+    run("open", ["-g", "-j", "-a", POWERPOINT_APP]);
+    for (let n = 0; n < 30; n++) {
+      state = readPowerPointState(run);
+      if (state?.hidden && !state.active) break;
+      wait(100);
+    }
+  }
+  if (!state || !state.hidden || state.active)
+    throw Error(
+      "PowerPoint must remain hidden and inactive; refusing native automation",
+    );
+  return owned;
 }
 
 function runPowerPointExport(source, pdfPath, timeoutMs) {
+  ensureHiddenPowerPoint();
   const result = spawnSync("osascript", ["-", source, pdfPath], {
     encoding: "utf8",
     input: EXPORT_APPLESCRIPT,
@@ -238,6 +303,9 @@ function runPowerPointExport(source, pdfPath, timeoutMs) {
 }
 
 function recoverPowerPointAfterFailure() {
+  const state = readPowerPointState();
+  if (!state) return;
+  if (!state.hidden || state.active) throw Error("PowerPoint recovery refused: owner interaction detected");
   const stateResult = spawnSync(
     "osascript",
     [

@@ -46,6 +46,11 @@ export function browserOfficeWorkspaceUrl(): string {
   return workspace.toString();
 }
 
+/** Static local editing sends no document bytes to this application's API. */
+export function browserOfficeLocalUrl(): string {
+  return new URL("local", browserOfficeBase()).toString();
+}
+
 /** The browser editor's open-source notice, when the editor is configured. */
 export function browserOfficeLicensesUrl(): string | null {
   if (!process.env.SPELLBOOK_BROWSER_OFFICE_URL?.trim()) return null;

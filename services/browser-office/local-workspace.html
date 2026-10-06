@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Spellbook · 로컬 파일</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font:
+          14px system-ui,
+          sans-serif;
+        color: #26303d;
+        background: #f7f8fa;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+      }
+      header {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        padding: 12px 16px;
+        border-bottom: 1px solid #dce0e5;
+        background: white;
+      }
+      button,
+      a {
+        font: inherit;
+        padding: 8px 12px;
+        border: 1px solid #d5dce2;
+        border-radius: 8px;
+        background: white;
+        color: inherit;
+      }
+      button:disabled {
+        opacity: 0.45;
+      }
+      #file-name {
+        flex: 1;
+        min-width: 160px;
+        overflow-wrap: anywhere;
+      }
+      #status {
+        padding: 8px 16px;
+        background: #eef3f5;
+      }
+      #empty {
+        padding: 48px 24px;
+        text-align: center;
+        max-width: 640px;
+        margin: auto;
+        line-height: 1.7;
+      }
+      iframe {
+        border: 0;
+        flex: 1;
+        width: 100%;
+        min-height: 0;
+      }
+      #storage {
+        font-size: 12px;
+        padding: 6px 16px;
+        color: #586474;
+      }
+      #error {
+        padding: 8px 16px;
+        color: #ae2424;
+      }
+      a {
+        text-decoration: none;
+      }
+      @media (max-width: 600px) {
+        header {
+          padding: 8px;
+        }
+        button,
+        a {
+          padding: 7px;
+        }
+        #file-name {
+          flex-basis: 100%;
+        }
+      }
+      details {
+        background: white;
+        border-top: 1px solid #dce0e5;
+        padding: 8px 16px;
+      }
+      summary {
+        cursor: pointer;
+      }
+      .ai-controls {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding: 8px 0;
+        max-height: 35vh;
+        overflow: auto;
+      }
+      .ai-controls textarea {
+        width: 100%;
+        min-height: 60px;
+        font: inherit;
+      }
+      .ai-controls p,
+      .ai-controls pre {
+        flex-basis: 100%;
+        white-space: pre-wrap;
+        margin: 4px 0;
+      }
+      .ai-controls p {
+        font-size: 12px;
+        color: #586474;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Spellbook</strong><span id="file-name">로컬 파일</span
+      ><button id="open">파일 열기</button
+      ><button id="save" disabled>저장</button
+      ><button id="save-as" disabled>다른 이름으로 저장</button
+      ><button id="export" disabled>PPTX 내보내기</button
+      ><button id="pdf-export" disabled>PDF 내보내기</button
+      ><button id="undo" disabled>되돌리기</button
+      ><button id="redo" disabled>다시 하기</button
+      ><a href="/licenses" target="_blank" rel="noopener">라이선스·소스</a>
+    </header>
+    <div id="status" role="status">
+      파일을 선택하면 이 브라우저에서 편집합니다.
+    </div>
+    <div id="error" role="alert" hidden></div>
+    <main id="empty">
+      <h1>내 파일에서 바로 작업하세요</h1>
+      <p>
+        PPTX는 문서 서버로 업로드하지 않습니다. 변경은 브라우저 복구본에 남고,
+        ‘저장’을 누르면 선택한 파일에 기록합니다.
+      </p>
+    </main>
+    <iframe id="editor" title="문서 편집기" hidden></iframe>
+    <details id="ai">
+      <summary>내 AI로 수정</summary>
+      <div class="ai-controls">
+        <select id="ai-provider" aria-label="AI 구독">
+          <option value="codex">Codex</option>
+          <option value="claude">Claude Code</option></select
+        ><button id="ai-connect">로컬 AI 연결</button
+        ><select id="ai-model" aria-label="AI 모델"></select
+        ><select id="ai-scope" aria-label="수정 범위">
+          <option value="selection">선택한 요소 / 현재 슬라이드</option>
+          <option value="document">문서 전체</option>
+          <option value="read_only">읽기만</option></select
+        ><textarea
+          id="ai-request"
+          aria-label="AI 요청"
+          placeholder="바꾸고 싶은 내용을 입력하세요"
+          maxlength="2000"
+        ></textarea
+        ><button id="ai-run" disabled>AI 수정 요청</button
+        ><button id="ai-cancel" disabled>중단</button>
+        <p>
+          AI 요청 시 선택한 문서의 문맥과 화면이 내 컴퓨터의 연결 프로그램을
+          거쳐 선택한 AI 제공자에게 전달됩니다.
+        </p>
+        <pre id="ai-result" role="status"></pre>
+      </div>
+    </details>
+    <div id="storage">
+      브라우저 복구본은 사이트 데이터 삭제나 저장 공간 부족으로 사라질 수
+      있습니다. 작업한 파일을 직접 저장하세요.
+    </div>
+    <script type="module" src="/local-workspace.mjs"></script>
+    <script type="module" src="/local-ai.bundle.js"></script>
+  </body>
+</html>

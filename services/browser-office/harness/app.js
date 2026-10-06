@@ -3052,6 +3052,13 @@ async function handleProductHostMessage(message) {
     }
     return;
   }
+  if (typeof message.id === "string" && message.request?.operation === "fit_view") {
+    try {
+      await request("dispatch", { unoCommand: "ZoomPage" });
+      postHost({ id: message.id, value: { fitted: true } });
+    } catch (error) { postHost({ id: message.id, error: error.message }); }
+    return;
+  }
   if (
     typeof message.id === "string" &&
     ["selection", "reveal"].includes(message.request?.operation)
@@ -3067,6 +3074,34 @@ async function handleProductHostMessage(message) {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+    return;
+  }
+  if (typeof message.id === "string" && message.request?.operation === "export_pptx") {
+    try {
+      const before = await observeNativeDocument();
+      if (message.request.expectedRevision !== before.revision) throw Error("document_changed_observe_again");
+      const bytes = await exportProductDocumentNow();
+      const after = await observeNativeDocument();
+      if (after.revision !== before.revision) throw Error("document_changed_during_export");
+      const owned = bytes.slice();
+      postHost({id:message.id,value:{bytes:owned.buffer,revision:after.revision}},[owned.buffer]);
+    } catch (error) {postHost({id:message.id,error:error.message});}
+    return;
+  }
+  if (typeof message.id === "string" && message.request?.operation === "export_pdf") {
+    const outputPath = `/tmp/spellbook/export-${++requestSequence}.pdf`;
+    try {
+      const before = await observeNativeDocument();
+      if (message.request.expectedRevision !== before.revision) throw Error("document_changed_observe_again");
+      const result = await request("store", {path: outputPath, format: "pdf"});
+      if (result.documentChangesBefore !== result.documentChangesAfter) throw Error("document_changed_during_export");
+      if ((await observeNativeDocument()).revision !== before.revision) throw Error("document_changed_during_export");
+      const bytes = FS.readFile(outputPath).slice();
+      if (new TextDecoder().decode(bytes.subarray(0,5)) !== "%PDF-") throw Error("pdf_export_invalid");
+      postHost({id:message.id,value:{bytes:bytes.buffer,mediaType:"application/pdf",revision:before.revision}},[bytes.buffer]);
+    } catch (error) {
+      postHost({id:message.id,error:error.message});
+    } finally { try {FS.unlink(outputPath);} catch {} }
     return;
   }
   if (

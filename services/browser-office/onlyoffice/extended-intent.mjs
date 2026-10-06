@@ -56,6 +56,19 @@ function updateText(element,drawing) {
   drawing.text=drawing.paragraphs.map(para=>para.text).join("");
   element.text=drawing.text;element.onlyoffice.text=drawing.text;
 }
+// GetText ends a table cell with a transport tab. When native merge moves that
+// cell before another cell's paragraphs, the terminator becomes a paragraph
+// newline. Authored run bytes and styles stay exact, including literal tabs.
+export function mergedOnlyOfficeTableParagraphs(cells) {
+  let content = [];
+  for (const cell of cells) {
+    if (content.length === 1 && !content[0].runs.length) content = [];
+    content.push(...copy(cell));
+  }
+  for (const paragraph of content.slice(0, -1))
+    paragraph.text = paragraph.text.replace(/\t$/, "\r\n");
+  return content;
+}
 function mergeRuns(runs) {
   const result=[];
   for(const run of runs){const previous=result.at(-1);if(previous&&!previous.field&&!run.field&&JSON.stringify(previous.style)===JSON.stringify(run.style))previous.text+=run.text;else result.push(copy(run));}
@@ -533,11 +546,7 @@ export function simulateOnlyOfficeExtendedIntent(left,right,commands,remainingCo
         need(indices.length&&rows[r][indices[0]].column===c.startColumn,"table_merge_rectangle");
         firstColumns.push(indices[0]);indices.forEach(col=>selected.push({row:r,col}));
       }
-      let content=[];
-      for(const {row,col} of selected){
-        if(content.length===1&&!content[0].runs.length)content=[];
-        content.push(...copy(old.tableParagraphs[row][col]));
-      }
+      const content=mergedOnlyOfficeTableParagraphs(selected.map(({row,col})=>old.tableParagraphs[row][col]));
       // Plan the physical row/cell topology using logical grid columns before
       // reading any result. A vertical continuation keeps a fresh empty body;
       // the authored paragraphs themselves move intact into the owner.

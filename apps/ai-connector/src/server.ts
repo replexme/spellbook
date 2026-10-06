@@ -11,6 +11,7 @@ import {
   NativeRemoteHost,
 } from "./native-remote-host.js";
 import { createLocalConnectorHandler } from "./local-connector-server.js";
+import { LocalNativeTurns } from "./local-native-turns.js";
 import { LocalPairingAuthority } from "./local-pairing.js";
 
 const sessions = new SessionManager();
@@ -28,6 +29,12 @@ const server = localMode
           optionalList("SPELLBOOK_CONNECTOR_ALLOWED_ORIGINS"),
         ),
         accounts: sessions,
+        localTurns: new LocalNativeTurns((settings) =>
+          sessions.client(
+            process.env.SPELLBOOK_LOCAL_EMAIL?.trim() || "local@spellbook",
+            settings,
+          ),
+        ),
         connectorOrigin: `http://127.0.0.1:${port}`,
         identity:
           process.env.SPELLBOOK_LOCAL_EMAIL?.trim() || "local@spellbook",
@@ -205,20 +212,18 @@ async function executeNativeJob(
       },
     );
     const initial: NativeObservation =
-      (job as any).initialObservation && typeof (job as any).initialObservation === "object"
+      (job as any).initialObservation &&
+      typeof (job as any).initialObservation === "object"
         ? ((job as any).initialObservation as NativeObservation)
         : await host.call({ operation: "observe" }, controller.signal);
     const effectiveMode =
-      job.permissionMode === "selection" && initial.selectedElementIds.length === 0
+      job.permissionMode === "selection" &&
+      initial.selectedElementIds.length === 0
         ? ("slides" as const)
         : job.permissionMode;
     const permission = {
-      mode:
-        effectiveMode === "slides"
-          ? ("slides" as const)
-          : effectiveMode,
-      slideIndexes:
-        effectiveMode === "slides" ? [initial.activeSlide] : [],
+      mode: effectiveMode === "slides" ? ("slides" as const) : effectiveMode,
+      slideIndexes: effectiveMode === "slides" ? [initial.activeSlide] : [],
       elementIds:
         effectiveMode === "selection" ? initial.selectedElementIds : [],
     };

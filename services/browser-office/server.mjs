@@ -32,6 +32,68 @@ export function buildRoutes(
   const runtimeIdentity = options.runtimeIdentity;
   const routes = new Map([
     [
+      "/workspace-sources.tar.gz",
+      route(
+        path.join(root, "onlyoffice/workspace-dist/workspace-sources.tar.gz"),
+        "application/gzip",
+      ),
+    ],
+    [
+      "/workspace-source-receipt.json",
+      route(
+        path.join(
+          root,
+          "onlyoffice/workspace-dist/workspace-source-receipt.json",
+        ),
+        "application/json",
+      ),
+    ],
+    ...[
+      "GPL-3.0.txt",
+      "LGPL-3.0.txt",
+      "NotoSansKR-OFL.txt",
+      "zetajs-LICENSE.txt",
+      "emscripten-LICENSE.txt",
+    ].map((name) => [
+      `/licenses/${name}`,
+      route(path.join(root, "licenses", name), "text/plain; charset=utf-8"),
+    ]),
+    [
+      "/sw.js",
+      route(
+        path.join(root, "local-program-worker.js"),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
+      "/local-ai.bundle.js",
+      route(
+        path.join(root, "onlyoffice/workspace-dist/local-ai.bundle.js"),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
+      "/local",
+      route(
+        path.join(root, "local-workspace.html"),
+        "text/html; charset=utf-8",
+      ),
+    ],
+    [
+      "/local-workspace.mjs",
+      route(
+        path.join(root, "local-workspace.mjs"),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
+      "/local-file.mjs",
+      route(
+        path.join(root, "local-file.mjs"),
+        "text/javascript; charset=utf-8",
+      ),
+    ],
+    [
       "/harness/product-artifact.mjs",
       route(
         path.join(root, "product-artifact.mjs"),
@@ -375,6 +437,12 @@ export function createHarnessServer(options = {}) {
       upstream.requiredDocumentHeaders,
     ))
       response.setHeader(name, value);
+    if (pathname === "/local") {
+      // Only the embedded engine needs isolation. The public page must retain
+      // its origin-bound pairing popup connection to the loopback connector.
+      response.removeHeader("Cross-Origin-Opener-Policy");
+      response.removeHeader("Cross-Origin-Embedder-Policy");
+    }
     if (
       pathname === "/workspace" ||
       (options.browserProbeSource &&
@@ -387,6 +455,20 @@ export function createHarnessServer(options = {}) {
         "Content-Security-Policy",
         `frame-ancestors 'self' ${hostOrigin}`,
       );
+    if (pathname === "/licenses") {
+      response.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      response.end(
+        '<!doctype html><meta charset="utf-8"><title>Spellbook licenses and source</title><h1>Licenses and source</h1><p><a href="/licenses/LGPL-3.0.txt">LibreOffice LGPL-3.0</a> · <a href="/licenses/GPL-3.0.txt">GPL-3.0</a> · <a href="/licenses/zetajs-LICENSE.txt">ZetaJS</a> · <a href="/licenses/emscripten-LICENSE.txt">Emscripten</a> · <a href="/licenses/NotoSansKR-OFL.txt">NotoSansKR</a></p><p><a href="/workspace-sources.tar.gz">Current host and patch source archive</a> · <a href="/workspace-source-receipt.json">Source identity receipt</a></p><p>Engine upstream: <a href="https://git.libreoffice.org/core/+/' +
+          upstream.source.buildCommit +
+          '">' +
+          upstream.source.buildCommit +
+          "</a>. This local candidate has not been admitted for public distribution.</p>",
+      );
+      return;
+    }
     if (pathname === "/readyz") {
       response.writeHead(200, {
         "Content-Type": "application/json; charset=utf-8",

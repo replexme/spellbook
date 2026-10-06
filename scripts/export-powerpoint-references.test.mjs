@@ -6,6 +6,7 @@ import path from "node:path";
 
 import {
   buildReferenceRenderer,
+  ensureHiddenPowerPoint,
   parseRasterSlideName,
   retainNativeReferencePdf,
 } from "./export-powerpoint-references.mjs";
@@ -50,4 +51,48 @@ test("records the exact PowerPoint and rasterization environment", () => {
         "PowerPoint AppleScript save as PDF, then Poppler pdftoppm 144 DPI PNG; one image per slide",
     },
   );
+});
+
+test("cold native automation launches hidden before any tell-application count", () => {
+  const calls = [];
+  let launched = false;
+  const run = (command, args) => {
+    calls.push({ command, args });
+    if (command === "open") {
+      launched = true;
+      return { stdout: "" };
+    }
+    return {
+      stdout: JSON.stringify(
+        launched ? [{ pid: 123, hidden: true, active: false }] : [],
+      ),
+    };
+  };
+  assert.equal(
+    ensureHiddenPowerPoint(run, () => {}),
+    true,
+  );
+  assert.equal(calls[0].command, "osascript");
+  assert(calls[0].args.includes("JavaScript"));
+  assert.deepEqual(calls[1].args.slice(0, 3), ["-g", "-j", "-a"]);
+  assert.equal(
+    calls.some((call) =>
+      call.args.some((value) => value.includes("tell application")),
+    ),
+    false,
+  );
+});
+test("existing visible PowerPoint is refused without hiding or launching it", () => {
+  const calls = [];
+  const run = (command, args) => {
+    calls.push(command);
+    return {
+      stdout: JSON.stringify([{ pid: 123, hidden: false, active: true }]),
+    };
+  };
+  assert.throws(
+    () => ensureHiddenPowerPoint(run, () => {}),
+    /hidden and inactive/,
+  );
+  assert.deepEqual(calls, ["osascript"]);
 });

@@ -507,11 +507,12 @@ function mutateAsset(request) {
   }
 }
 
-function storeDocument(path, requestId) {
+function storeDocument(path, requestId, format = "pptx") {
   if (!model) throw new Error("No browser Office document is open.");
+  if (!["pptx", "pdf"].includes(format)) throw Error("unsupported_export_format");
   const documentChangesBefore = documentChangeCount();
   model.storeToURL(`file://${path}`, [
-    property("FilterName", zetajs.type.string, "Impress Office Open XML"),
+    property("FilterName", zetajs.type.string, format === "pdf" ? "impress_pdf_Export" : "Impress Office Open XML"),
     property("Overwrite", zetajs.type.boolean, true),
   ]);
   post("store-complete", {
@@ -877,7 +878,7 @@ function start() {
           break;
         case "store":
           batchObservation = null;
-          storeDocument(event.data.path, requestId);
+          storeDocument(event.data.path, requestId, event.data.format);
           break;
         case "inspect-saved":
           batchObservation = null;

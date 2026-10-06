@@ -222,6 +222,10 @@ test("browser Office server emits the required cross-origin isolation headers", 
       "frame-ancestors 'self' https://present.example",
     );
 
+    const local = await fetch(`http://127.0.0.1:${address.port}/local`);
+    assert.equal(local.status, 200);
+    assert.equal(local.headers.get("cross-origin-opener-policy"), null);
+    assert.equal(local.headers.get("cross-origin-embedder-policy"), null);
     const ready = await fetch(`http://127.0.0.1:${address.port}/readyz`);
     assert.equal(ready.status, 200);
     assert.deepEqual(await ready.json(), {
