@@ -15,6 +15,8 @@ import {
   isClaudeModel,
   readClaudeAuthStatus,
   resolveClaudeBinary,
+  mcpToolResult,
+  claudeToolEvidenceTruncated,
 } from "./claude-code-client.js";
 
 const temporaryDirectories: string[] = [];
@@ -25,6 +27,88 @@ afterEach(() => {
 });
 
 describe("Claude Code subscription adapter", () => {
+  it("rejects a provider success event when its document tool evidence was truncated", async () => {
+    const directory = mkdtempSync(
+      path.join(os.tmpdir(), "spellbook-claude-truncated-"),
+    );
+    temporaryDirectories.push(directory);
+    const binary = path.join(directory, "claude");
+    const truncated = {
+      type: "user",
+      message: {
+        content: [
+          {
+            type: "tool_result",
+            content: "<persisted-output>Output too large",
+          },
+        ],
+      },
+    };
+    const success = {
+      type: "result",
+      subtype: "success",
+      result: "review complete",
+    };
+    writeFileSync(
+      binary,
+      `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(truncated)}' '${JSON.stringify(success)}'\n`,
+    );
+    chmodSync(binary, 0o700);
+    const client = new ClaudeCodeClient(binary);
+    await expect(
+      client.runStructuredTurn([{ type: "text", text: "review" }], {}, 1000),
+    ).rejects.toThrow("화면 검토는 완료되지 않았습니다");
+  });
+  it("refuses a completed visual review after Claude persisted or truncated document evidence", () => {
+    const event = (content: unknown) => ({
+      message: { content: [{ type: "tool_result", content }] },
+    });
+    expect(
+      claudeToolEvidenceTruncated(event("<persisted-output>Output too large")),
+    ).toBe(true);
+    expect(
+      claudeToolEvidenceTruncated(
+        event([
+          { type: "image", data: "png" },
+          {
+            type: "text",
+            text: "\n\n[OUTPUT TRUNCATED - exceeded 25000 token limit]",
+          },
+        ]),
+      ),
+    ).toBe(true);
+    expect(
+      claudeToolEvidenceTruncated(
+        event([
+          {
+            type: "text",
+            text: '{"title":"OUTPUT TRUNCATED quoted authored text"}',
+          },
+        ]),
+      ),
+    ).toBe(false);
+    expect(
+      claudeToolEvidenceTruncated(
+        event([
+          { type: "image", data: "png" },
+          { type: "text", text: "complete document evidence" },
+        ]),
+      ),
+    ).toBe(false);
+  });
+  it("delivers screenshot blocks before document text without losing either", () => {
+    const result = mcpToolResult({
+      success: true,
+      contentItems: [
+        { type: "inputText", text: "large document structure" },
+        { type: "inputImage", imageUrl: "data:image/png;base64,iVBORw0KGgo=" },
+      ],
+    });
+    expect(result.content).toEqual([
+      { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" },
+      { type: "text", text: "large document structure" },
+    ]);
+  });
   it("uses only the isolated Spellbook MCP tools", () => {
     const args = claudeTurnArguments({
       modelSettings: { model: "sonnet", effort: "high" },

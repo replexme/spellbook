@@ -305,6 +305,7 @@ function restrictedClaudeEnvironment(): NodeJS.ProcessEnv {
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     DISABLE_AUTOUPDATER: "1",
     DISABLE_TELEMETRY: "1",
+    MAX_MCP_OUTPUT_TOKENS: "131072",
   };
 }
 
@@ -357,6 +358,15 @@ async function runClaudeProcess(
           event = JSON.parse(line) as Record<string, any>;
         } catch {
           continue;
+        }
+        if (claudeToolEvidenceTruncated(event)) {
+          abort();
+          finish(
+            new Error(
+              "문서 검토 자료가 Claude의 전달 한도에서 잘렸습니다. 수정이 적용됐을 수 있지만 화면 검토는 완료되지 않았습니다.",
+            ),
+          );
+          return;
         }
         if (
           process.env.SPELLBOOK_CLAUDE_TRACE === "1" &&
@@ -526,23 +536,50 @@ async function createToolServer(
   };
 }
 
-function mcpToolResult(result: ToolResult) {
+export function claudeToolEvidenceTruncated(
+  event: Record<string, any>,
+): boolean {
+  const parts = event.message?.content;
+  if (!Array.isArray(parts)) return false;
+  const truncated = (text: unknown) =>
+    typeof text === "string" &&
+    (/^\s*\[OUTPUT TRUNCATED - exceeded \d+ token limit\]/u.test(text) ||
+      text.startsWith("<persisted-output>"));
+  return parts.some(
+    (part) =>
+      part?.type === "tool_result" &&
+      (truncated(part.content) ||
+        (Array.isArray(part.content) &&
+          part.content.some(
+            (item: any) => item?.type === "text" && truncated(item.text),
+          ))),
+  );
+}
+
+export function mcpToolResult(result: ToolResult) {
   return {
     isError: !result.success,
-    content: result.contentItems.map((item) => {
-      if (item.type === "inputText")
-        return { type: "text" as const, text: item.text };
-      const match =
-        /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/u.exec(
-          item.imageUrl,
-        );
-      if (!match)
-        return {
-          type: "text" as const,
-          text: "Invalid Spellbook image evidence.",
-        };
-      return { type: "image" as const, mimeType: match[1], data: match[2] };
-    }),
+    // Claude Code applies its MCP budget in content order. Reserve screenshots
+    // before long document text so review evidence cannot disappear behind it.
+    content: [...result.contentItems]
+      .sort(
+        (a, b) =>
+          Number(b.type === "inputImage") - Number(a.type === "inputImage"),
+      )
+      .map((item) => {
+        if (item.type === "inputText")
+          return { type: "text" as const, text: item.text };
+        const match =
+          /^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/u.exec(
+            item.imageUrl,
+          );
+        if (!match)
+          return {
+            type: "text" as const,
+            text: "Invalid Spellbook image evidence.",
+          };
+        return { type: "image" as const, mimeType: match[1], data: match[2] };
+      }),
   };
 }
 

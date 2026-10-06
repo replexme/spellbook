@@ -136,7 +136,8 @@ it("can reuse a standard Codex home without modifying its configuration", async 
     path.join(os.tmpdir(), "spellbook-shared-codex-test-"),
   );
   homes.push(home);
-  const existingConfig = 'model = "user-choice"\n';
+  const existingConfig =
+    'model = "user-choice"\n[mcp_servers.user_tool]\ncommand = "user-tool"\n';
   await fs.writeFile(path.join(home, "config.toml"), existingConfig);
   const child = Object.assign(new EventEmitter(), {
     stdin: new PassThrough(),
@@ -150,6 +151,12 @@ it("can reuse a standard Codex home without modifying its configuration", async 
     const message = JSON.parse(String(chunk));
     if (message.method === "initialize")
       child.stdout.write(`${JSON.stringify({ id: message.id, result: {} })}\n`);
+    if (message.method === "config/read") {
+      const args = mocks.spawn.mock.calls.at(-1)?.[1] as string[];
+      child.stdout.write(
+        `${JSON.stringify({ id: message.id, result: { config: { mcp_servers: { user_tool: { enabled: args.includes("mcp_servers.user_tool.enabled=false") ? false : true } } } } })}\n`,
+      );
+    }
   });
   mocks.spawn.mockReturnValue(child);
 
@@ -162,7 +169,19 @@ it("can reuse a standard Codex home without modifying its configuration", async 
   );
   expect(mocks.spawn).toHaveBeenLastCalledWith(
     expect.any(String),
-    ["app-server", "--listen", "stdio://"],
+    [
+      "app-server",
+      "--listen",
+      "stdio://",
+      "-c",
+      "features.plugins=false",
+      "-c",
+      "features.apps=false",
+      "-c",
+      "features.hooks=false",
+      "-c",
+      "mcp_servers.user_tool.enabled=false",
+    ],
     expect.objectContaining({
       env: expect.objectContaining({
         HOME: "/Users/example",

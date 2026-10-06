@@ -288,6 +288,7 @@ describe("local connector HTTP boundary", () => {
       headers,
     });
     expect(models.status).toBe(200);
+    expect((await models.json()).capabilities).toEqual({ localTurns: false });
     expect(h.models).toHaveBeenCalledOnce();
 
     const logout = await fetch(`${h.connectorOrigin}/v1/account/logout`, {
@@ -426,6 +427,8 @@ it("local browser turns require paired origin and token for every document opera
     const { connectorOrigin } = await harness(turns),
       tokenA = await pair(connectorOrigin),
       tokenB = await pair(connectorOrigin);
+    const health = await fetch(connectorOrigin + "/health");
+    expect((await health.json()).capabilities).toEqual({ localTurns: true });
     const post = (
       path: string,
       body: unknown,

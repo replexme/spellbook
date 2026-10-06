@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AgentTurnOptions, AppServerClient } from "./app-server-client.js";
 import {
   runNativeTurn,
+  nativeModelObservation,
   UNCONFIRMED_EDIT_NOTICE,
   UNREVIEWED_EDIT_NOTICE,
   type NativeObservation,
@@ -1324,4 +1325,61 @@ describe("shared open document agent", () => {
     expect(createImage).not.toHaveBeenCalled();
     expect(f.call).toHaveBeenCalledTimes(1);
   });
+});
+
+it("keeps theme and layout targets while excluding non-editable master drawings from model output", () => {
+  const full = {
+    ...state,
+    masters: [
+      {
+        masterIndex: 0,
+        theme: { name: "Theme", majorLatin: "Arial" },
+        drawings: [{ text: "x".repeat(100000) }],
+        layouts: [
+          { layoutIndex: 0, name: "Title", drawings: [{ text: "template" }] },
+        ],
+      },
+    ],
+  };
+  const model = nativeModelObservation(full);
+  expect(model.masters).toEqual([
+    {
+      masterIndex: 0,
+      theme: { name: "Theme", majorLatin: "Arial" },
+      layouts: [{ layoutIndex: 0, name: "Title" }],
+    },
+  ]);
+  expect(model.slides).toEqual(full.slides);
+  expect(full.masters[0].drawings[0].text.length).toBe(100000);
+  expect(full.images).toBe(state.images);
+  expect(model.images).toBeUndefined();
+});
+
+it("scopes detailed model data to observed slides while keeping the full host revision and document", () => {
+  const full = {
+    ...state,
+    slides: Array.from({ length: 50 }, (_, slideIndex) => ({
+      slideIndex,
+      elements: [
+        {
+          elementId: slideIndex + "/0",
+          text: "Long authored text " + "x".repeat(20000),
+        },
+      ],
+    })),
+    textDetails: { slideIndex: 2, elements: [] },
+    images: [{ slideIndex: 2, pngBase64: "iVBORw0KGgo=" }],
+  };
+  const model = nativeModelObservation(full);
+  expect(model.slides[0]).toBe(full.slides[0]);
+  expect(model.slides[2]).toBe(full.slides[2]);
+  expect(model.slides[49]).toEqual({
+    slideIndex: 49,
+    elementCount: 1,
+    previewText: full.slides[49].elements[0].text.slice(0, 200),
+    detailsAvailable: true,
+  });
+  expect(full.slides[49].elements[0].text.length).toBeGreaterThan(20000);
+  expect(model.revision).toBe(full.revision);
+  expect(JSON.stringify(model).length).toBeLessThan(100000);
 });

@@ -157,20 +157,76 @@ export class AppServerClient {
       LOG_FORMAT: "json",
       RUST_LOG: "warn",
     };
-    const child = spawn(binary, ["app-server", "--listen", "stdio://"], {
-      env: allowedEnvironment,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    const client = new AppServerClient(child);
-    await client.request("initialize", {
-      clientInfo: {
-        name: "replex_present",
-        title: "Replex Spellbook",
-        version: "0.1.0",
-      },
-      capabilities: { experimentalApi: true },
-    });
-    client.notify("initialized", {});
+    const args = [
+      "app-server",
+      "--listen",
+      "stdio://",
+      "-c",
+      "features.plugins=false",
+      "-c",
+      "features.apps=false",
+      "-c",
+      "features.hooks=false",
+    ];
+    const launch = async () => {
+      const child = spawn(binary, [...args], {
+        env: allowedEnvironment,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      const client = new AppServerClient(child);
+      try {
+        await client.request("initialize", {
+          clientInfo: {
+            name: "replex_present",
+            title: "Replex Spellbook",
+            version: "0.1.0",
+          },
+          capabilities: { experimentalApi: true },
+        });
+        client.notify("initialized", {});
+        return client;
+      } catch (error) {
+        client.close();
+        throw error;
+      }
+    };
+    let client = await launch();
+    if (options.createRestrictedConfig === false) {
+      try {
+        // Empty TOML tables merge with the user's config; mcp_servers={} does
+        // not remove inherited servers. Discover names without starting a turn,
+        // then disable them on our child process without editing user settings.
+        const effective = await client.request<{
+          config: { mcp_servers?: Record<string, { enabled?: boolean }> };
+        }>("config/read", { includeLayers: false });
+        const inherited = Object.keys(effective.config.mcp_servers ?? {});
+        if (inherited.length) {
+          client.close();
+          for (const name of inherited) {
+            if (!/^[A-Za-z0-9_-]+$/u.test(name))
+              throw new Error(
+                "Unsupported external Codex tool identifier; document editing refused.",
+              );
+            args.push("-c", `mcp_servers.${name}.enabled=false`);
+          }
+          client = await launch();
+          const restricted = await client.request<{
+            config: { mcp_servers?: Record<string, { enabled?: boolean }> };
+          }>("config/read", { includeLayers: false });
+          if (
+            Object.values(restricted.config.mcp_servers ?? {}).some(
+              (server) => server.enabled !== false,
+            )
+          )
+            throw new Error(
+              "External Codex tools could not be disabled for document editing.",
+            );
+        }
+      } catch (error) {
+        client.close();
+        throw error;
+      }
+    }
     return client;
   }
 

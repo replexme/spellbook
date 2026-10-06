@@ -58,6 +58,7 @@ async function handle(
       status: "ok",
       mode: "local",
       protocolVersion: 1,
+      capabilities: { localTurns: Boolean(options.localTurns) },
     });
   }
 
@@ -191,6 +192,7 @@ async function handle(
   }
   if (url.pathname === "/v1/models") {
     return json(response, 200, {
+      capabilities: { localTurns: Boolean(options.localTurns) },
       models: await options.accounts.models(options.identity),
     });
   }

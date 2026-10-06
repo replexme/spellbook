@@ -30,7 +30,11 @@ const fail = (error) => {
     "AI 작업을 완료하지 못했습니다: " + error.message;
 };
 async function models() {
+  el("ai-run").disabled = true;
+  el("ai-model").disabled = true;
   const value = await post("/v1/models", {});
+  if (value.capabilities?.localTurns !== true)
+    throw Error("설치된 AI 연결 프로그램을 최신 버전으로 업데이트해 주세요.");
   el("ai-model").replaceChildren(
     ...value.models.map((model) => {
       const option = document.createElement("option");

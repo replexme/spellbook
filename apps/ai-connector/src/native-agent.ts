@@ -29,6 +29,10 @@ export interface NativeObservation {
   }>;
   activeSlide: number;
   selectedElementIds: string[];
+  masters?: Array<{
+    layouts?: Array<Record<string, unknown>>;
+    [key: string]: unknown;
+  }>;
   assets?: Array<{
     assetId: string;
     fileName: string;
@@ -110,6 +114,61 @@ export const UNCONFIRMED_EDIT_NOTICE =
 export const UNREVIEWED_EDIT_NOTICE =
   "수정 뒤 화면 재검토가 끝나지 않아 이 결과는 아직 확인되지 않았습니다. 결과를 직접 확인해 주세요.";
 
+export function nativeModelObservation(state: NativeObservation) {
+  // Master/layout template drawings are preservation evidence, not editable
+  // targets. Sending all of them can consume the MCP budget before screenshots.
+  // Keep theme and layout metadata; the host still retains the complete state.
+  const detailedSlides = new Set([
+    state.activeSlide,
+    ...(state.textDetails ? [state.textDetails.slideIndex] : []),
+    ...state.images.map((image) => image.slideIndex),
+  ]);
+  const {
+    revision,
+    unit,
+    activeSlide,
+    changedSlideIndexes,
+    visualEvidenceComplete,
+    layoutAudit,
+    textDetails,
+    ...rest
+  } = state;
+  return {
+    revision,
+    unit,
+    activeSlide,
+    changedSlideIndexes,
+    visualEvidenceComplete,
+    layoutAudit,
+    textDetails,
+    ...rest,
+    images: undefined,
+    slides: state.slides.map((slide) =>
+      detailedSlides.has(slide.slideIndex)
+        ? slide
+        : {
+            slideIndex: slide.slideIndex,
+            elementCount: slide.elements.length,
+            previewText: slide.elements
+              .map((element) =>
+                typeof element.text === "string" ? element.text : "",
+              )
+              .join(" ")
+              .slice(0, 200),
+            detailsAvailable: true,
+          },
+    ),
+    masters: state.masters?.map(
+      ({ drawings: _drawings, layouts, ...master }) => ({
+        ...master,
+        layouts: layouts?.map(
+          ({ drawings: _layoutDrawings, ...layout }) => layout,
+        ),
+      }),
+    ),
+  };
+}
+
 export async function runNativeTurn(
   client: AgentTurnClient,
   input: {
@@ -158,8 +217,7 @@ export async function runNativeTurn(
       {
         type: "inputText",
         text: JSON.stringify({
-          ...state,
-          images: undefined,
+          ...nativeModelObservation(state),
           permission: input.permission,
         }),
       },
@@ -372,6 +430,7 @@ export async function runNativeTurn(
                 : "You are editing the SAME open PowerPoint document as the user. Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
             `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
             "Observe returns live element structure, a revision, deterministic layout findings, and slide screenshots. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Inspect introducedIssues and the fresh screenshot after edits, correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
+            "Other slides may be summaries marked detailsAvailable. Call native_observe with their detailSlideIndex before choosing their objects or evaluating their content. A summary is navigation, not the complete authored text.",
             WEB_TOOLS_INSTRUCTION,
             ...(reviewOnly
               ? []

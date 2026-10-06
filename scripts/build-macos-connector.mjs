@@ -212,6 +212,10 @@ async function smokeTest(binary) {
   child.stderr.on("data", (chunk) => (diagnostics += chunk.toString()));
   try {
     const health = await waitForHealth(port, child, () => diagnostics);
+    if (health.capabilities?.localTurns !== true)
+      throw new Error(
+        "Packaged connector does not support local document turns.",
+      );
     const origin = "https://package-smoke.spellbook.invalid";
     const response = await fetch(`http://127.0.0.1:${port}/v1/pairings`, {
       method: "POST",
@@ -234,6 +238,7 @@ async function smokeTest(binary) {
       health: health.status,
       mode: health.mode,
       protocolVersion: health.protocolVersion,
+      capabilities: health.capabilities,
       pairingStatus: response.status,
     };
   } finally {
