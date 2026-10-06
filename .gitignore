@@ -24,3 +24,5 @@ services/browser-office/onlyoffice/workspace-dist/
 eval/corpus/
 eval/results/
 eval/public/downloads/
+
+services/browser-office/onlyoffice/distribution/

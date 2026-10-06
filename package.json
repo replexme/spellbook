@@ -10,17 +10,17 @@
   },
   "scripts": {
     "build": "pnpm -r --if-present build",
-    "browser-office:fetch": "node services/browser-office/fetch-runtime.mjs",
-    "browser-office:build": "node services/browser-office/build-harness.mjs",
-    "browser-office:engine:verify": "node services/browser-office/libreoffice/verify-source.mjs",
-    "browser-office:prepare": "pnpm browser-office:fetch && pnpm browser-office:build",
-    "browser-office:serve": "pnpm browser-office:prepare && node services/browser-office/server.mjs",
-    "browser-office:verify": "pnpm browser-office:prepare && node services/browser-office/verify-harness.mjs",
-    "browser-office:verify:product": "pnpm browser-office:prepare && node services/browser-office/verify-product-bridge.mjs",
-    "browser-office:verify:native-conformance": "pnpm browser-office:prepare && node services/browser-office/verify-native-conformance.mjs",
+    "browser-office:fetch": "node services/browser-office/prepare-selected-runtime.mjs",
+    "browser-office:build": "node services/browser-office/onlyoffice/build-workspace.mjs",
+    "browser-office:engine:verify": "node services/browser-office/verify-selected.mjs",
+    "browser-office:prepare": "node services/browser-office/prepare-selected-runtime.mjs",
+    "browser-office:serve": "node services/browser-office/serve.mjs",
+    "browser-office:verify": "node services/browser-office/verify-selected.mjs",
+    "browser-office:verify:product": "node services/browser-office/verify-onlyoffice-product-session.mjs",
+    "browser-office:verify:native-conformance": "node services/browser-office/verify-onlyoffice-product-cohort.mjs",
     "browser-office:verify:candidate-powerpoint": "dotnet build services/document-worker/tools/Spellbook.Document.Tool/Spellbook.Document.Tool.csproj --configuration Release && node services/browser-office/verify-candidate-powerpoint.mjs",
     "browser-office:promote:candidate": "node services/browser-office/candidate-promotion.mjs",
-    "browser-office:verify:powerpoint": "pnpm browser-office:verify && node services/browser-office/verify-powerpoint.mjs",
+    "browser-office:verify:powerpoint": "node scripts/export-powerpoint-references.mjs",
     "corpus:discover": "node scripts/create-corpus-manifest.mjs",
     "corpus:fetch-public": "node scripts/fetch-public-corpus.mjs",
     "corpus:roundtrip-public": "node scripts/evaluate-public-roundtrip.mjs",
@@ -70,7 +70,16 @@
     "selfhost:down": "docker compose --profile wopi --profile browser down",
     "browser-office:verify:distribution": "node services/browser-office/distribution-check.mjs",
     "browser-office:onlyoffice:bundle": "node services/browser-office/onlyoffice/build-workspace.mjs",
-    "browser-office:onlyoffice:serve": "node services/browser-office/onlyoffice/serve-workspace.mjs"
+    "browser-office:onlyoffice:serve": "node services/browser-office/onlyoffice/serve-workspace.mjs",
+    "browser-office:serve:libreoffice": "SPELLBOOK_BROWSER_ENGINE=libreoffice node services/browser-office/serve.mjs",
+    "browser-office:fetch:libreoffice": "node services/browser-office/fetch-runtime.mjs",
+    "browser-office:build:libreoffice": "node services/browser-office/build-harness.mjs",
+    "browser-office:stage": "node services/browser-office/prepare-selected-runtime.mjs",
+    "browser-office:verify:libreoffice": "pnpm browser-office:fetch:libreoffice && pnpm browser-office:build:libreoffice && node services/browser-office/verify-harness.mjs",
+    "browser-office:verify:product:libreoffice": "pnpm browser-office:fetch:libreoffice && pnpm browser-office:build:libreoffice && node services/browser-office/verify-product-bridge.mjs",
+    "browser-office:verify:native-conformance:libreoffice": "pnpm browser-office:fetch:libreoffice && pnpm browser-office:build:libreoffice && node services/browser-office/verify-native-conformance.mjs",
+    "browser-office:verify:powerpoint:libreoffice": "pnpm browser-office:verify:libreoffice && node services/browser-office/verify-powerpoint.mjs",
+    "browser-office:engine:verify:libreoffice": "node services/browser-office/libreoffice/verify-source.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.62.1",
@@ -80,5 +89,13 @@
     "fflate": "0.8.3",
     "postject": "1.0.0-alpha.6",
     "prettier": "3.6.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "fast-uri": "3.1.8",
+      "ip-address": "10.7.1",
+      "source-map-js": "1.2.2",
+      "proxy-addr": "2.0.8"
+    }
   }
 }

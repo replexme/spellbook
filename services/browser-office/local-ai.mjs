@@ -45,6 +45,7 @@ async function models() {
       return option;
     }),
   );
+  el("ai-model").disabled = false;
   el("ai-run").disabled = false;
   el("ai-result").textContent = "로컬 AI 연결 완료";
 }

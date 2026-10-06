@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { selfhostUpPlan, runSelfhostUp } from "./selfhost-up.mjs";
+import { selfhostUpPlan, runSelfhostUp, configuredSelfhostEditorMode } from "./selfhost-up.mjs";
+
+test("missing editor setting defaults to the browser profile", () => {
+  assert.equal(configuredSelfhostEditorMode({}, new URL(import.meta.url)), "browser");
+  assert.equal(configuredSelfhostEditorMode({}, "/missing-spellbook-environment"), "browser");
+  assert.equal(configuredSelfhostEditorMode({SPELLBOOK_EDITOR_MODE: "wopi"}), "wopi");
+});
 
 test("builds, starts to health and retires only managed images", () => {
   const plan = selfhostUpPlan("node-test", "browser");

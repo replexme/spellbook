@@ -25,7 +25,7 @@ Open <http://localhost:3000> and sign in with the email and generated password p
 
 The Compose profile uses its private connector by default. The optional user-device flow used by hosted deployments is available with `SPELLBOOK_AI_CONNECTOR_MODE=local` and `pnpm connector:start`; see [self-hosting](docs/delivery/self-hosting.md) for the exact boundary and current verification status.
 
-The first build downloads pinned LibreOffice and Collabora images and can take several minutes. Subsequent starts reuse the images and persistent volumes. Run `pnpm selfhost:doctor` to validate configuration and service health.
+The browser editor defaults to the pinned ONLYOFFICE distribution. Stage that distribution with `pnpm browser-office:stage <distribution-directory>` before starting Compose; a missing or mismatched distribution stops startup. Host JavaScript is bundled locally without compiling the editor engine. LibreOffice remains the server-side renderer and an explicit browser rollback option. Public release of the selected browser distribution is still held pending auxiliary WASM source/build verification. See [the engine selection](services/browser-office/README.md#selected-browser-engine). Run `pnpm selfhost:doctor` to validate configuration and service health.
 
 `pnpm selfhost:up` builds the services, waits for their health checks and then
 removes unused Spellbook service images automatically, including after failed

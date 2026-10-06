@@ -100,6 +100,13 @@ window.addEventListener("message", async (event) => {
         if (data.method === "fit_view") {
           editor.WordControl.zoom_FitToPage();
           value = { fitted: true };
+        } else if (data.method === "set_file_name") {
+          if (typeof data.fileName !== "string" || !data.fileName.trim() || data.fileName.length > 255)
+            throw Error("document_file_name_invalid");
+          editor.documentTitle = data.fileName;
+          editor.DocInfo.put_Title(data.fileName);
+          editor.sendEvent("asc_onDocumentName", data.fileName);
+          value = { fileName: editor.asc_getDocumentName() };
         } else if (data.method === "export_pdf") {
           const authority =
             parent[Symbol.for("spellbook.onlyoffice.resourceHost/v1")];

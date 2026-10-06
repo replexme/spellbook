@@ -1,5 +1,10 @@
 # Browser Office runtime
 
+The local default is now pinned ONLYOFFICE. See the
+[2026-10-06 switch and release review](../../docs/delivery/onlyoffice-local-switch-2026-10-06.md)
+for restore evidence, UI corrections and the remaining public-release holds.
+The comparison sections below describe retained historical experiments.
+
 ## Local two-engine comparison
 
 `verify-engine-comparison.mjs` runs a single input/scenario matrix against the
@@ -339,3 +344,45 @@ closure. Neither the production engine setting nor deployment was changed.
 Evidence: `artifacts/office-final-20261006/product-completion/completion-report.json`.
 Engine/WASM, .NET and production Next builds were not run in this completion;
 small host JavaScript bundles were refreshed while fixing actual integration bugs.
+
+
+## Selected browser engine
+
+As of 2026-10-06, the local browser editor defaults to ONLYOFFICE.
+`engine-selection.json` pins the distribution manifest. Startup verifies every
+listed file and source archive, requires the host bundles and source-preservation
+Worker, and never falls back silently to LibreOffice.
+
+```bash
+pnpm browser-office:stage <verified-distribution-directory>
+pnpm browser-office:serve
+pnpm browser-office:verify
+```
+
+Direct local serving uses three different origins on ports 4173, 4174 and 4175
+for the workspace, native SDK and independent artifact inspection. HTTPS reverse
+proxies must retain three distinct origins. `SPELLBOOK_BROWSER_HOST_ORIGINS` is a
+comma-separated allowlist of embedding app origins.
+
+`browser-office:verify` checks the pinned distribution and host contract tests
+without rebuilding an engine. The explicit native cohort command takes a
+private `--cases <manifest>` and records all 94 supported operations; four
+format-excluded operations remain excluded. `browser-office:verify:product`
+takes the product-session runner's explicit fixture arguments. These are
+separate from a public release admission or native PowerPoint verification.
+
+The original implementation remains in Git and `Dockerfile.libreoffice`.
+For a verified archived runtime, set `SPELLBOOK_BROWSER_ENGINE=libreoffice`,
+`SPELLBOOK_LIBREOFFICE_RUNTIME_DIRECTORY` and
+`SPELLBOOK_LIBREOFFICE_MANIFEST` together before running
+`pnpm browser-office:serve`. Original preparation and verification commands
+have explicit `:libreoffice` aliases; they can fetch retained inputs and bundle
+host JavaScript, and are not required to restore an already verified backup.
+
+The current source offer includes host source, patches, recipes and license
+texts. SDK/UI reproducibility evidence does not prove the preferred source
+and build identity of all auxiliary WASM binaries.
+`publicReleaseAdmitted` remains false, and static public export refuses to
+proceed; `--candidate` exports a local review artifact only. Existing production
+routing and release locks still refer to LibreOffice. A local default change
+is not a production deployment.

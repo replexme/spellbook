@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "defaultEngine": "onlyoffice",
+  "onlyoffice": {
+    "distributionSha256": "54342878d7ce34a9661416ebe87567e34845c6fcc46e60c06d4e6bfbe7e93514",
+    "directory": "onlyoffice/distribution",
+    "publicReleaseAdmitted": false,
+    "releaseHold": "Auxiliary WASM preferred-source/build binding and full binary reproduction are not verified."
+  },
+  "libreoffice": {
+    "rollbackCommit": "c8e2533d77924e1ace03fc8b77624170f269cddf",
+    "policy": "Explicit rollback only; never silently substitute engines."
+  }
+}

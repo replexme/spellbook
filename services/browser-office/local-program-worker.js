@@ -8,6 +8,12 @@ const allowed = (url) =>
     url.pathname,
   ) ||
     [
+      "/local-workspace.css",
+      "/local-phone-view.mjs",
+      "/design-system/tokens.css",
+      "/design-system/base.css",
+      "/design-system/components.css",
+      "/design-system/patterns.css",
       "/workspace",
       "/local",
       "/local-workspace.mjs",

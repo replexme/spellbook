@@ -8,6 +8,12 @@ const allowed = (url) =>
   !url.searchParams.has("src") &&
   (/^\/(?:assets|npm|sdkjs|web-apps|wasm|fonts|libs)\//.test(url.pathname) ||
     [
+      "/local-workspace.css",
+      "/local-phone-view.mjs",
+      "/design-system/tokens.css",
+      "/design-system/base.css",
+      "/design-system/components.css",
+      "/design-system/patterns.css",
       "/local",
       "/local-workspace.mjs",
       "/local-file.mjs",
@@ -47,7 +53,20 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(CACHE);
-      await cache.addAll(requiredPrograms);
+      // Font previews can load before the first SDK page is controlled by
+      // this worker. Korean UI initialization checks the East Asian previews
+      // again on reopen, so caching only later observed requests is incomplete.
+      const fontManifestUrl = "/onlyoffice-browser-font-assets.json";
+      const response = await fetch(fontManifestUrl);
+      if (!response.ok) throw Error("offline_font_manifest_unavailable");
+      const fonts = await response.json();
+      const fontPrograms = [fonts.allFonts, fonts.fontSelection, fonts.fontSourceMap,
+        ...(fonts.fontThumbnails ?? []), ...(fonts.fonts ?? [])];
+      if (fontPrograms.some(path => typeof path !== "string" ||
+        !/^(?:sdkjs|server|fonts|onlyoffice-browser-font-source-map\.json)/.test(path) ||
+        path.startsWith("/") || path.split("/").includes("..") || /[?#\\]/.test(path)))
+        throw Error("offline_font_program_invalid");
+      await cache.addAll([...requiredPrograms, fontManifestUrl, ...fontPrograms.map(path => "/" + path)]);
       await self.skipWaiting();
     })(),
   );

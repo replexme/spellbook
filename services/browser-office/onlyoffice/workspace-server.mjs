@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { localUiFiles } from "../local-ui-assets.mjs";
 import {
   addOnlyOfficeProductBootstrap,
   addOnlyOfficeProductResourceHost,
@@ -30,6 +31,8 @@ export function createOnlyOfficeWorkspaceServer({
   sdkOrigin,
   inspectionOrigin,
   hostOrigins,
+  admission = null,
+  publicReleaseAdmitted = false,
 } = {}) {
   const dist = path.resolve(distributionDirectory),
     base = path.resolve(bundleDirectory);
@@ -51,9 +54,25 @@ export function createOnlyOfficeWorkspaceServer({
       const pathname = decodeURIComponent(
         new URL(req.url, "http://localhost").pathname,
       );
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Referrer-Policy", "no-referrer");
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
       res.setHeader("Cache-Control", "no-store");
+      if (pathname === "/readyz") {
+        res.writeHead(admission ? 200 : 503, {
+          "content-type": "application/json",
+        });
+        res.end(
+          JSON.stringify({
+            ready: !!admission,
+            engine: "onlyoffice",
+            admission,
+            publicReleaseAdmitted,
+          }),
+        );
+        return;
+      }
       if (pathname === "/workspace") {
         res.setHeader(
           "Content-Security-Policy",
@@ -102,6 +121,7 @@ export function createOnlyOfficeWorkspaceServer({
       }
       const localRoot = path.resolve(sourceRoot, "..");
       const names = {
+        ...localUiFiles,
         "/workspace-sources.tar.gz": path.join(
           base,
           "workspace-sources.tar.gz",
@@ -112,6 +132,7 @@ export function createOnlyOfficeWorkspaceServer({
         ),
         "/local": path.join(localRoot, "local-workspace.html"),
         "/local-workspace.mjs": path.join(localRoot, "local-workspace.mjs"),
+        "/local-phone-view.mjs": path.join(localRoot, "local-phone-view.mjs"),
         "/local-ai.bundle.js": path.join(base, "local-ai.bundle.js"),
         "/local-file.mjs": path.join(localRoot, "local-file.mjs"),
         "/workspace.bundle.js": path.join(base, "workspace.bundle.js"),

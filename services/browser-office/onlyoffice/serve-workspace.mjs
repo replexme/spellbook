@@ -29,6 +29,7 @@ try {
       sdkOrigin,
       inspectionOrigin,
       hostOrigins,
+      admission,
     });
     servers.push(server);
     await new Promise((resolve, reject) => {

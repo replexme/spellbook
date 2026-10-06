@@ -10,6 +10,20 @@ const root = path.dirname(fileURLToPath(import.meta.url)),
   out = path.join(root, "workspace-dist");
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 await fs.mkdir(out, { recursive: true });
+// The Docker context excludes retained LibreOffice runtime files. Build the
+// small source-preservation Worker independently from its engine; otherwise
+// source packaging and the SDK Worker URL fail in a clean container context.
+if (!process.argv.includes("--package-only")) {
+  await fs.mkdir(path.join(repo, "services/browser-office/runtime"), { recursive: true });
+  await build({
+    entryPoints: [path.join(repo, "services/browser-office/ooxml-worker-source.mjs")],
+    outfile: path.join(repo, "services/browser-office/runtime/ooxml-worker.js"),
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    legalComments: "eof",
+  });
+}
 const bundles = [];
 // Only small host modules are bundled. No vendor engine or WASM is rebuilt.
 for (const [input, output] of [
@@ -50,19 +64,33 @@ async function collect(directory) {
   })) {
     const name = directory + "/" + entry.name;
     if (entry.isDirectory()) {
-      if (!["runtime", "workspace-dist", "node_modules"].includes(entry.name))
+      if (
+        !["runtime", "workspace-dist", "node_modules", "distribution"].includes(
+          entry.name,
+        )
+      )
         await collect(name);
-    } else if (entry.isFile() && /\.(mjs|js|json|html|md|ts|txt)$/.test(name))
+    } else if (
+      entry.isFile() &&
+      (/\.(mjs|js|json|html|md|ts|txt|patch|sh|py|css)$/.test(name) ||
+        entry.name.startsWith("Dockerfile"))
+    )
       sources.push(name);
   }
 }
 await collect("services/browser-office");
 await collect("services/office-session-spike");
+await collect("contracts");
+await collect("LICENSES");
+await collect("apps/web/src/design-system");
 sources.push(
   "apps/web/src/lib/local-ai-connector.ts",
   "apps/web/src/lib/ai-connector-config.ts",
   "package.json",
   "pnpm-lock.yaml",
+  "pnpm-workspace.yaml",
+  "docker-compose.yml",
+  ".dockerignore",
   "services/browser-office/runtime/ooxml-worker.js",
 );
 for (const file of ["LICENSE", "LICENSE.txt", "LICENSE-MPL-2.0.txt"])
@@ -88,7 +116,7 @@ execFileSync("tar", [
   "-C",
   repo,
   ...unique,
-]);
+], { env: { ...process.env, COPYFILE_DISABLE: "1" } });
 const receipt = {
   scope:
     "host integration source and bundles; pinned vendor distribution and its source archives are separately served; auxiliary WASM reproduction is not certified",

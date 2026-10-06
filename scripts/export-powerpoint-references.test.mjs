@@ -96,3 +96,16 @@ test("existing visible PowerPoint is refused without hiding or launching it", ()
   );
   assert.deepEqual(calls, ["osascript"]);
 });
+test("a cold launched process whose hidden flag was ignored is hidden via AppKit before automation", () => {
+  let launched = false, hidden = false;
+  const calls = [];
+  const run = (command, args) => {
+    calls.push({command, args});
+    if (command === "open") launched = true;
+    if (args.some(arg => arg.includes("runningApplicationWithProcessIdentifier(123)"))) hidden = true;
+    return {stdout: JSON.stringify(launched ? [{pid: 123, hidden, active: !hidden}] : [])};
+  };
+  assert.equal(ensureHiddenPowerPoint(run, () => {}), true);
+  assert.equal(hidden, true);
+  assert.equal(calls.some(call => call.args.some(arg => arg.includes("tell application"))), false);
+});

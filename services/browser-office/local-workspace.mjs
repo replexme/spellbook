@@ -4,9 +4,24 @@ import {
   openLocalOfficeHandle,
   rememberLocalOfficeHandle,
 } from "./local-file.mjs";
+import { installLocalPhoneView } from "./local-phone-view.mjs";
 const element = (id) => document.getElementById(id);
 const editor = element("editor"),
   status = element("status");
+element("ai").addEventListener("toggle", () => {
+  document.body.classList.toggle("has-panel", element("ai").open);
+});
+element("ai-close").onclick = () => { element("ai").open = false; };
+const fileMenu = document.querySelector(".local-file-menu");
+fileMenu.addEventListener("click", (event) => {
+  if (event.target.closest("button, a")) fileMenu.open = false;
+});
+document.addEventListener("click", (event) => {
+  if (!fileMenu.contains(event.target)) fileMenu.open = false;
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") fileMenu.open = false;
+});
 let handle,
   port,
   current,
@@ -66,6 +81,7 @@ const call = async (request) => {
     port.postMessage({ id, request });
   });
 };
+const phoneView = installLocalPhoneView({call, isReady: () => !!port && !element("save").disabled, generation: () => generation, reportError: error => showError(error)});
 const showError = (error) => {
   const text = `작업을 완료하지 못했습니다: ${error.message}`;
   element("error").hidden = false;
@@ -110,6 +126,7 @@ async function receive(message) {
     );
   } else if (message.type === "open-complete") {
     buttons(true);
+    phoneView.opened();
     update(
       message.recovered
         ? "복구한 변경 있음 · 파일에 저장해 주세요"
@@ -117,6 +134,7 @@ async function receive(message) {
     );
   } else if (message.type === "modified") {
     modified = message.modified;
+    phoneView.refresh();
     if (modified) update("저장하지 않은 변경 · 브라우저 복구본에 기록 중");
   } else if (message.type === "save") {
     const savePort = port;
@@ -170,6 +188,7 @@ async function receive(message) {
   } else if (message.type === "save-response") {
     pendingHandle = null;
     if (!message.success) throw Error(message.error ?? "local_save_failed");
+    port.postMessage({type: "file-name", fileName: current.name});
     modified = !!message.modified;
     update(
       modified ? "이후 변경은 아직 저장하지 않았습니다" : "파일 저장 완료",
@@ -419,6 +438,12 @@ export const localProgramsReady =
           "office-runtime-config",
         );
         for (const url of [
+          "/local-workspace.css",
+          "/local-phone-view.mjs",
+          "/design-system/tokens.css",
+          "/design-system/base.css",
+          "/design-system/components.css",
+          "/design-system/patterns.css",
           "/local",
           "/local-workspace.mjs",
           "/local-file.mjs",

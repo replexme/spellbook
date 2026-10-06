@@ -93,6 +93,7 @@ function markdownFiles(directory) {
         entry.name === ".git" ||
         entry.name === ".spellbook" ||
         entry.name === "artifacts" ||
+        path.relative(root, path.join(directory, entry.name)) === "services/browser-office/onlyoffice/distribution" ||
         entry.name.startsWith(".tmp"))
     ) {
       continue;

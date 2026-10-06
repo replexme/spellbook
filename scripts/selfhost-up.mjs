@@ -52,10 +52,10 @@ export function configuredSelfhostEditorMode(
       .find((entry) => entry.startsWith("SPELLBOOK_EDITOR_MODE="));
     return (
       line?.slice("SPELLBOOK_EDITOR_MODE=".length).trim().toLowerCase() ||
-      "wopi"
+      "browser"
     );
   } catch {
-    return "wopi";
+    return "browser";
   }
 }
 

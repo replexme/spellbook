@@ -32,6 +32,7 @@ const runtime = JSON.parse(
 );
 const candidateOrigin = new URL(runtime.sdkOrigin).origin;
 const inspectionOrigin = new URL(runtime.inspectionOrigin).origin;
+let documentName = "문서.pptx";
 const origin = new URL(location.href).searchParams.get("hostOrigin");
 if (
   !origin ||
@@ -243,10 +244,11 @@ async function component(bytes, hidden = false) {
   try {
     value.editor = await createOfficeEditor(container, {
       hostUrl: engineOrigin + "/office-host.html",
-      file: new File([bytes], "service.pptx", {
+      file: new File([bytes], documentName, {
         type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       }),
-      fileName: "service.pptx",
+      fileName: documentName,
+      lang: "ko",
       mode: "edit",
       saveBehavior: "callback",
       onError: (e) => {
@@ -514,6 +516,16 @@ async function handle(message) {
     operation: message.request?.operation,
   });
   if (debugEvents.length > 100) debugEvents.shift();
+  if (message.type === "file-name") {
+    const name = message.fileName;
+    if (typeof name !== "string" || !name.trim() || name.length > 255 || /[\u0000-\u001f\u007f]/.test(name))
+      throw Error("document_file_name_invalid");
+    if (name !== documentName) {
+      await live.config.view("set_file_name", {fileName: name});
+      documentName = name;
+    }
+    return;
+  }
   if (message.type === "save-result") {
     if (!saveWaiter || message.requestId !== saveWaiter.requestId) return;
     const waiter = saveWaiter;
@@ -524,6 +536,9 @@ async function handle(message) {
     return;
   }
   if (message.type === "open") {
+    documentName = typeof message.fileName === "string" && message.fileName.trim()
+      ? message.fileName.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 255)
+      : "문서.pptx";
     opening = true;
     ownedAssets.clear();
     hostRevision = message.revision;

@@ -40,6 +40,7 @@ test("candidate serves local files, exact parent policy, source disclosure and r
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
+    assert.equal((await fetch(base + "/readyz")).status, 503);
     const workspace = await fetch(base + "/workspace");
     assert.equal(workspace.status, 200);
     assert.equal(

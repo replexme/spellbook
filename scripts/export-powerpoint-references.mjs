@@ -281,6 +281,14 @@ export function ensureHiddenPowerPoint(
     for (let n = 0; n < 30; n++) {
       state = readPowerPointState(run);
       if (state?.hidden && !state.active) break;
+      // Some macOS cold starts ignore the launcher's hidden flag. Hide only
+      // the process created above, using AppKit before any AppleEvent; never
+      // change the visibility of a pre-existing user application.
+      if (state?.pid && !state.hidden) {
+        run("osascript", ["-l", "JavaScript", "-e",
+          `ObjC.import("AppKit");const app=$.NSRunningApplication.runningApplicationWithProcessIdentifier(${state.pid});if(app)app.hide;`,
+        ]);
+      }
       wait(100);
     }
   }

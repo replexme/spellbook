@@ -16,6 +16,7 @@ import {
 } from "./zetajs-overlay.mjs";
 import { applyZetaProxyMetadataOverlay } from "./zetajs-proxy-overlay.mjs";
 import { FRAME_ISOLATION } from "./frame-isolation.mjs";
+import { localUiFiles } from "./local-ui-assets.mjs";
 
 const serviceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(serviceRoot, "../..");
@@ -31,6 +32,8 @@ export function buildRoutes(
   const runtimeRoot = options.runtimeRoot ?? path.join(root, "runtime");
   const runtimeIdentity = options.runtimeIdentity;
   const routes = new Map([
+    ["/local-phone-view.mjs", route(path.join(root, "local-phone-view.mjs"), "text/javascript; charset=utf-8")],
+    ...Object.entries(localUiFiles).map(([url, file]) => [url, route(file, "text/css; charset=utf-8")]),
     [
       "/workspace-sources.tar.gz",
       route(

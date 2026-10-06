@@ -12,7 +12,7 @@ const baseRequired = [
 
 const result = [];
 const environment = readEnvironment(".env");
-const editorMode = (environment.SPELLBOOK_EDITOR_MODE || "wopi")
+const editorMode = (environment.SPELLBOOK_EDITOR_MODE || "browser")
   .trim()
   .toLowerCase();
 const editorModeValid = editorMode === "wopi" || editorMode === "browser";

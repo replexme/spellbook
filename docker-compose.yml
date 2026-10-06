@@ -103,18 +103,25 @@ services:
       dockerfile: services/browser-office/Dockerfile
     restart: unless-stopped
     environment:
-      PORT: 8080
+      PORT: 4173
       HOST: 0.0.0.0
+      SPELLBOOK_BROWSER_ENGINE: onlyoffice
+      SPELLBOOK_ONLYOFFICE_DISTRIBUTION: /app/services/browser-office/onlyoffice/distribution
+      SPELLBOOK_BROWSER_OFFICE_PUBLIC_URL: ${SPELLBOOK_BROWSER_OFFICE_PUBLIC_URL:-http://localhost:4173}
+      SPELLBOOK_ONLYOFFICE_SDK_ORIGIN: ${SPELLBOOK_ONLYOFFICE_SDK_ORIGIN:-http://localhost:4174}
+      SPELLBOOK_ONLYOFFICE_INSPECTION_ORIGIN: ${SPELLBOOK_ONLYOFFICE_INSPECTION_ORIGIN:-http://localhost:4175}
       SPELLBOOK_BROWSER_HOST_ORIGIN: ${SPELLBOOK_PUBLIC_URL:-http://localhost:3000}
     ports:
-      - "4173:8080"
+      - "4173:4173"
+      - "4174:4174"
+      - "4175:4175"
     healthcheck:
       test:
         [
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:8080/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:4173/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
         ]
       interval: 10s
       timeout: 5s
@@ -143,7 +150,7 @@ services:
       SPELLBOOK_INTERNAL_APP_URL: http://web:3000
       SPELLBOOK_OFFICE_EDITOR_URL: ${SPELLBOOK_OFFICE_PUBLIC_URL:-http://localhost:9980}
       SPELLBOOK_OFFICE_EDITOR_INTERNAL_URL: http://office-editor:9980
-      SPELLBOOK_EDITOR_MODE: ${SPELLBOOK_EDITOR_MODE:-wopi}
+      SPELLBOOK_EDITOR_MODE: ${SPELLBOOK_EDITOR_MODE:-browser}
       SPELLBOOK_BROWSER_OFFICE_URL: ${SPELLBOOK_BROWSER_OFFICE_PUBLIC_URL:-http://localhost:4173}
       SPELLBOOK_INTERNAL_TOKEN: ${SPELLBOOK_INTERNAL_TOKEN}
       SPELLBOOK_SESSION_SECRET: ${SPELLBOOK_SESSION_SECRET}
