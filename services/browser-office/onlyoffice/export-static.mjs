@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import fs from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import { constants } from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
@@ -24,6 +25,9 @@ export async function exportOnlyOfficeStatic({
   if (!candidate && !selection.onlyoffice.publicReleaseAdmitted)
     throw Error("onlyoffice_public_release_not_admitted");
   const admission = await admitSelectedOnlyOffice(distributionDirectory);
+  const sourceRevision = execFileSync("git", ["rev-parse", "HEAD"], {
+    cwd: fileURLToPath(new URL("../../../", import.meta.url)), encoding: "utf8",
+  }).trim();
   await fs.mkdir(out, { recursive: false }); // Never overwrite an existing artifact.
   const manifest = JSON.parse(
     await fs.readFile(
@@ -89,7 +93,10 @@ export async function exportOnlyOfficeStatic({
     ]) {
       const response = await fetch(origin + route);
       if (!response.ok) throw Error("static_export_route_failed:" + route);
-      const bytes = Buffer.from(await response.arrayBuffer()),
+      const served = Buffer.from(await response.arrayBuffer());
+      const bytes = route === "/readyz"
+        ? Buffer.from(JSON.stringify({ ...JSON.parse(served), editorSourceRevision: sourceRevision, receiptSha256: admission.distributionSha256 }))
+        : served,
         file =
           route === "/"
             ? "index.html"
