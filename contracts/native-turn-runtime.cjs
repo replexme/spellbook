@@ -103,6 +103,43 @@ async function executeNativeTurn(model, input) {
     : null;
   let requestSatisfied = false;
   let toolTail = Promise.resolve();
+  const outputInfo = new WeakMap();
+  let deliveredRevision;
+  let deliveredSlides = new Set();
+  const observationOutput = (
+    text,
+    images,
+    fullText,
+    revision,
+    slideIndexes,
+  ) => {
+    const output = { ok: true, text, images };
+    outputInfo.set(output, { fullText, revision, slideIndexes });
+    return output;
+  };
+  const recordOutput = (output) => {
+    const info = outputInfo.get(output);
+    if (!info) return;
+    const bytes = new TextEncoder();
+    const images = model.supportsInputImages === false ? [] : output.images;
+    modelInput.calls++;
+    modelInput.fullTextBytes += bytes.encode(info.fullText).length;
+    modelInput.sentTextBytes += bytes.encode(output.text).length;
+    modelInput.imageCount += images.length;
+    modelInput.imageBytes += images.reduce(
+      (size, image) =>
+        size +
+        Math.floor((image.length * 3) / 4) -
+        (image.endsWith("==") ? 2 : image.endsWith("=") ? 1 : 0),
+      0,
+    );
+    if (deliveredRevision !== info.revision) {
+      deliveredRevision = info.revision;
+      deliveredSlides = new Set();
+    }
+    if (images.length)
+      for (const index of info.slideIndexes) deliveredSlides.add(index);
+  };
 
   const content = (state) => {
     const { modelView, ...complete } = state;
@@ -138,19 +175,13 @@ async function executeNativeTurn(model, input) {
         ? fullText
         : JSON.stringify({ ...focusedView, permission: input.permission });
     const images = state.images.map(screenshotBase64);
-    const bytes = new TextEncoder();
-    modelInput.calls += 1;
-    modelInput.fullTextBytes += bytes.encode(fullText).length;
-    modelInput.sentTextBytes += bytes.encode(text2).length;
-    modelInput.imageCount += images.length;
-    modelInput.imageBytes += images.reduce(
-      (size, image) =>
-        size +
-        Math.floor((image.length * 3) / 4) -
-        (image.endsWith("==") ? 2 : image.endsWith("=") ? 1 : 0),
-      0,
+    return observationOutput(
+      text2,
+      images,
+      fullText,
+      state.revision,
+      state.images.map((image) => image.slideIndex),
     );
-    return { ok: true, text: text2, images };
   };
   if (observed) {
     if (!checks.length)
@@ -205,16 +236,13 @@ async function executeNativeTurn(model, input) {
       })),
     });
     const images = pages.map(({ image }) => screenshotBase64(image));
-    const bytes = new TextEncoder().encode(text2).length;
-    modelInput.calls += 1;
-    modelInput.fullTextBytes += bytes;
-    modelInput.sentTextBytes += bytes;
-    modelInput.imageCount += images.length;
-    modelInput.imageBytes += images.reduce(
-      (size, image) => size + Math.floor((image.length * 3) / 4),
-      0,
+    return observationOutput(
+      text2,
+      images,
+      text2,
+      observed?.revision,
+      pages.map((page) => page.slideIndex),
     );
-    return { ok: true, text: text2, images };
   })();
   const registerMutationEvidence = (state) => {
     if (state.visualEvidenceComplete !== true)
@@ -654,6 +682,13 @@ async function executeNativeTurn(model, input) {
         throw new Error("Invalid review.");
       if (!pendingReview || observed.revision !== pendingReview.revision)
         throw new Error("The visual review evidence is stale.");
+      if (
+        deliveredRevision !== pendingReview.revision ||
+        pendingReview.slideIndexes.some((index) => !deliveredSlides.has(index))
+      )
+        throw Error(
+          "The model has not received every changed-slide screenshot.",
+        );
       const reviewedSlideIndexes = [
         ...new Set(result.reviewedSlideIndexes),
       ].sort((left, right) => left - right);
@@ -755,6 +790,7 @@ ${await input.web.readPage(url, signal)}`,
     const start = performance.now(),
       hostBefore = modelInput.hostMs;
     try {
+      if (initialPage) recordOutput(initialPage);
       return await model.run({
         allowImageGeneration:
           !reviewOnly &&
@@ -857,13 +893,18 @@ ${await input.web.readPage(url, signal)}`,
             });
           const work = toolTail.then(() => runTool(name, args, signal));
           toolTail = work.catch(() => void 0);
-          return work.catch((error) => ({
-            ok: false,
-            text:
-              error instanceof Error
-                ? error.message
-                : "Document operation failed.",
-          }));
+          return work
+            .then((output) => {
+              recordOutput(output);
+              return output;
+            })
+            .catch((error) => ({
+              ok: false,
+              text:
+                error instanceof Error
+                  ? error.message
+                  : "Document operation failed.",
+            }));
         },
         onText: () => {},
         // Buffer provisional claims until execution is adjudicated.

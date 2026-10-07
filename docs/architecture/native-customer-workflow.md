@@ -42,7 +42,9 @@ The result must contain fresh PNGs for every slide touched during the turn.
 Successive batches accumulate review coverage. The model returns its visual
 review and user message together. The runtime checks coverage, revision
 freshness, introduced layout issues and applicable customer-goal checks before
-reporting fulfilment. A circle requires both an ellipse and a square frame;
+reporting fulfilment. It also checks that every result image was offered to an
+image-capable model, including images inserted asynchronously by the provider.
+A circle requires both an ellipse and a square frame;
 when observed, the original media fingerprint must also match.
 
 Missing results can be repaired under the existing permission when a fresh
@@ -59,7 +61,9 @@ commands. Subjective visual quality still needs human evaluation.
 ## Measurement and evaluation
 
 The runtime records elapsed time, editor-host time, model time, host calls,
-sent/full observation bytes, images and provider-reported token use. Model time
+sent/full observation bytes, images and provider-reported token use. Prepared
+observations that were never passed to a model are not counted as deliveries.
+Model time
 excludes nested host work. Subscription providers report thread token totals;
 the adapter records growth from each turn's starting totals. Aborted and failed
 turns retain timing where the adapter publishes failure metrics.

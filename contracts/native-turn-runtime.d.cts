@@ -92,6 +92,7 @@ export interface ToolOutput {
 }
 
 export interface TurnModel {
+  supportsInputImages?: boolean;
   allowImageGeneration?: boolean;
   run(input: {
     instructions: string;

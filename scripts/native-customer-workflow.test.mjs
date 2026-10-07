@@ -648,3 +648,94 @@ test("repair removes introduced layout defects without hiding old document warni
   assert.equal(calls, 2);
   assert.equal(result.task.outcome, "fulfilled");
 });
+
+test("direct native execution counts only the result actually sent to the model", async () => {
+  let current = structuredClone(before);
+  const result = await runNativeTurn(
+    {
+      run: async (options) => {
+        assert.equal(JSON.parse(options.initialPage.text).revision, "r2");
+        assert.equal(options.initialPage.images.length, 1);
+        return completion();
+      },
+    },
+    {
+      ...input({
+        call: async (request) => {
+          if (request.operation === "edit_batch") {
+            current.revision = "r2";
+            current.changedSlideIndexes = [0];
+            current.slides[0].elements[0].onlyoffice.geometry.preset =
+              "ellipse";
+          }
+          return structuredClone(current);
+        },
+      }),
+      requestText: "사진을 원형으로 잘라줘",
+    },
+  );
+  assert.equal(result.task.outcome, "fulfilled");
+  assert.equal(result.modelInput.calls, 1);
+  assert.equal(result.modelInput.imageCount, 1);
+});
+
+test("an asynchronously inserted generated image is reviewed only after its slide image is delivered", async () => {
+  let current = structuredClone(before),
+    calls = 0;
+  const result = await runNativeTurn(
+    {
+      allowImageGeneration: true,
+      run: async (options) => {
+        calls++;
+        if (calls === 1) await options.onGeneratedImage({ bytes: [] });
+        else {
+          assert.equal(JSON.parse(options.initialPage.text).revision, "r2");
+          assert.equal(options.initialPage.images.length, 1);
+        }
+        return completion({ goal: "새 사진 추가" });
+      },
+    },
+    {
+      ...input({
+        createImage: async () => ({ assetId: "new-image" }),
+        call: async (request) => {
+          if (request.operation === "insert_image") {
+            current = structuredClone(current);
+            current.revision = "r2";
+            current.changedSlideIndexes = [0];
+            current.slides[0].elements.push({ ...image, elementId: "0/1" });
+          }
+          return structuredClone(current);
+        },
+      }),
+      requestText: "새 사진을 추가해줘",
+    },
+  );
+  assert.equal(calls, 2);
+  assert.equal(result.task.outcome, "fulfilled");
+  assert.equal(result.modelInput.imageCount, 2);
+});
+
+test("a provider that cannot receive images cannot approve an unseen slide", async () => {
+  let current = structuredClone(before);
+  const result = await runNativeTurn(
+    { supportsInputImages: false, run: async () => completion() },
+    {
+      ...input({
+        call: async (request) => {
+          if (request.operation === "edit_batch") {
+            current.revision = "r2";
+            current.changedSlideIndexes = [0];
+            current.slides[0].elements[0].onlyoffice.geometry.preset =
+              "ellipse";
+          }
+          return structuredClone(current);
+        },
+      }),
+      requestText: "사진을 원형으로 잘라줘",
+    },
+  );
+  assert.equal(result.task.outcome, "unverified");
+  assert.equal(result.reviewed, false);
+  assert.equal(result.modelInput.imageCount, 0);
+});

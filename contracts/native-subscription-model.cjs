@@ -16,6 +16,7 @@ function createSubscriptionModel(client, allowImageGeneration = false) {
     ],
   });
   return {
+    supportsInputImages: client.supportsInputImages !== false,
     allowImageGeneration,
     run: (options) =>
       client.runStructuredTurn(
