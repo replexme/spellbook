@@ -59,6 +59,10 @@ const candidate = path.resolve(
     "artifacts/office-audit-20261003/onlyoffice-cold-test-helper-candidate",
   ),
 );
+// Packaged distributions survive removal of the original engine worktree.
+// Host source identity and the distribution's hashed source materials remain
+// independent evidence; no new engine build is performed here.
+const distributionRoot = path.resolve(flags("--distribution-root", path.join(candidate,"dist")));
 const output = path.resolve(
   flags("--output", "artifacts/onlyoffice-product-session"),
 );
@@ -72,7 +76,7 @@ assert(
   "Commit sources before recording product evidence",
 );
 const distribution = await readOfficeDistributionEvidence(
-  path.join(candidate, "dist"),
+  distributionRoot,
 );
 assert(distribution.valid, "Candidate distribution evidence invalid");
 const input = await fs.readFile(
@@ -196,8 +200,8 @@ const candidateServer = createServer(async (req, res) => {
     const name = decodeURIComponent(
       new URL(req.url, "http://localhost").pathname,
     ).replace(/^\//, "");
-    const file = path.resolve(candidate, "dist", name || "index.html");
-    if (!file.startsWith(path.join(candidate, "dist") + path.sep))
+    const file = path.resolve(distributionRoot, name || "index.html");
+    if (!file.startsWith(distributionRoot + path.sep))
       throw Error("invalid_path");
     const bytes = await fs.readFile(file);
     let served=bytes;

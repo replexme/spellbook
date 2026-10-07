@@ -1,3 +1,8 @@
+import {
+  normalizeActiveGoal,
+  prepareActiveGoal,
+  nextActiveGoal,
+} from "../../../../contracts/native-goal.cjs";
 import { randomUUID } from "node:crypto";
 
 import { db, ensureSchema } from "./db";
@@ -237,11 +242,21 @@ export async function submitNativeTurn(
       : `${internalAppBaseUrl()}/api/internal/native/tools`,
   };
   let payload: typeof baseJobPayload & {
+    activeGoal?:
+      | import("../../../../contracts/native-goal.cjs").ActiveGoal
+      | null;
     conversationHistory?: NativeConversationTurn[];
   } = baseJobPayload;
   let replacedJobId: string | null = null;
   await db().begin(async (sql) => {
-    await sql`select id from spellbook_native_sessions where id=${native.id} for update`;
+    const [goalSession] =
+      await sql`select id, active_goal from spellbook_native_sessions where id=${native.id} for update`;
+    const activeGoal = prepareActiveGoal(
+      text,
+      goalSession?.active_goal,
+      native.id,
+    );
+    await sql`update spellbook_native_sessions set active_goal=${activeGoal ? sql.json(activeGoal as never) : null} where id=${native.id}`;
     const [active] = await sql`
       select id, job_id from spellbook_native_turns where session_id=${native.id}
         and status in ('queued','running') for update
@@ -265,8 +280,8 @@ export async function submitNativeTurn(
       `,
     );
     payload = history.length
-      ? { ...baseJobPayload, conversationHistory: history }
-      : baseJobPayload;
+      ? { ...baseJobPayload, activeGoal, conversationHistory: history }
+      : { ...baseJobPayload, activeGoal };
     replacedJobId = active?.job_id ?? null;
     await sql`
       insert into spellbook_jobs (id,job_type,document_id,version_id,status,payload)
@@ -976,7 +991,8 @@ export async function completeNativeTurn(
   )
     throw new Error("invalid_native_completion");
   await db().begin(async (sql) => {
-    const [record] = await sql`select t.id, t.request_text, t.permission_mode,
+    const [record] =
+      await sql`select t.id,t.session_id, t.request_text, t.permission_mode,
       t.model_settings->>'provider' as provider
       from spellbook_native_turns t join spellbook_jobs j on j.id=t.job_id
       where j.id=${job.id} and j.status in ('queued','running') and j.execution_token=${executionToken}
@@ -1022,13 +1038,38 @@ export async function completeNativeTurn(
         unconfirmedMutation: changed !== applied,
       },
     );
+    const [goalSession] =
+      await sql`select active_goal from spellbook_native_sessions where id=${record.session_id} for update`;
+    const priorGoal = normalizeActiveGoal(
+      goalSession?.active_goal,
+      record.session_id,
+    );
+    const returnedGoal = normalizeActiveGoal(
+      result?.activeGoal,
+      record.session_id,
+    );
+    const activeGoal = nextActiveGoal(
+      priorGoal,
+      record.session_id,
+      completion.task.goal,
+      completion,
+      returnedGoal?.checks ?? priorGoal?.checks ?? [],
+    );
+    await sql`update spellbook_native_sessions set active_goal=${activeGoal ? sql.json(activeGoal as never) : null} where id=${record.session_id}`;
     // Old workers can still answer read-only questions; their edit claims are unverified.
     text = completion.text;
     changed = applied;
     reviewed = applied && reviewed;
     const storedCallback = {
       ...callback,
-      result: { ...result, text, changed, reviewed, task: completion.task },
+      result: {
+        ...result,
+        text,
+        changed,
+        reviewed,
+        task: completion.task,
+        activeGoal,
+      },
     };
     const [claimed] =
       await sql`update spellbook_jobs set status='succeeded', outputs=${sql.json(storedCallback as any)}, updated_at=now()

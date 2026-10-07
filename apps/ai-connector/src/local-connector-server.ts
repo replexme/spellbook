@@ -1,3 +1,4 @@
+import { normalizeActiveGoal } from "../../../contracts/native-goal.cjs";
 import { randomBytes } from "node:crypto";
 import type {
   IncomingMessage,
@@ -284,6 +285,7 @@ function validateLocalNativeJob(
     turnId: input.turnId,
     requestText: input.requestText,
     ...localConversationHistory(input.conversationHistory),
+    activeGoal: normalizeActiveGoal(input.activeGoal, input.sessionId),
     permissionMode: input.permissionMode,
     ...(input.modelSettings ? { modelSettings: input.modelSettings } : {}),
   };

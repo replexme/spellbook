@@ -1,3 +1,4 @@
+import { requestedSlideIndexes } from "../../../../../contracts/native-turn-runtime.cjs";
 import type { ModelSettings } from "../ai-models";
 import { loadEditorAsset } from "../editor-asset";
 import type { BrowserKeyProvider } from "./key-store";
@@ -17,6 +18,9 @@ import { browserWebTools } from "./web-tools";
  */
 
 export interface BrowserJob {
+  activeGoal?:
+    | import("../../../../../contracts/native-goal.cjs").ActiveGoal
+    | null;
   jobId: string;
   sessionId: string;
   turnId: string;
@@ -43,55 +47,7 @@ const HEARTBEAT_MS = 15_000;
 // Longer than an observed edit batch (p90 17 s) with headroom for a slow machine.
 const EDITOR_CALL_TIMEOUT_MS = 300_000;
 
-export function requestedSlideIndexes(
-  requestText: string,
-  slideCount: number,
-  activeSlide: number,
-): number[] {
-  const candidates: Array<{ position: number; number: number }> = [];
-  const add = (match: RegExpExecArray, number: number, end: number) => {
-    // "3장 추가" is a quantity of new slides, not the existing third slide.
-    const tail = requestText.slice(end);
-    if (
-      /^(?:을|를)?\s*(?:추가|삽입|만들|생성)/u.test(tail) ||
-      (match[0].startsWith("슬라이드") && /^\s*(?:장|개)/u.test(tail)) ||
-      /^의\s*슬라이드/u.test(tail)
-    )
-      return;
-    candidates.push({ position: match.index, number });
-  };
-  for (const match of requestText.matchAll(/슬라이드\s*(\d+)\s*(?:번)?/gu))
-    add(match, Number(match[1]), match.index + match[0].length);
-  for (const match of requestText.matchAll(
-    /(\d+)\s*(?:번\s*)?(?:장|슬라이드)/gu,
-  ))
-    add(match, Number(match[1]), match.index + match[0].length);
-  const ordinals: Record<string, number> = {
-    첫: 1,
-    한: 1,
-    두: 2,
-    세: 3,
-    네: 4,
-    다섯: 5,
-    여섯: 6,
-    일곱: 7,
-    여덟: 8,
-    아홉: 9,
-    열: 10,
-  };
-  for (const match of requestText.matchAll(
-    /(첫|한|두|세|네|다섯|여섯|일곱|여덟|아홉|열)\s*번째\s*(?:장|슬라이드)/gu,
-  ))
-    add(match, ordinals[match[1]], match.index + match[0].length);
-  const named = candidates
-    .sort((left, right) => left.position - right.position)
-    .map(({ number }) => number - 1)
-    .filter(
-      (index) =>
-        Number.isSafeInteger(index) && index >= 0 && index < slideCount,
-    );
-  return [...new Set(named.length ? named : [activeSlide])].slice(0, 8);
-}
+export { requestedSlideIndexes } from "../../../../../contracts/native-turn-runtime.cjs";
 
 export async function initialPageObservations(
   requestText: string,
@@ -280,6 +236,8 @@ export async function runBrowserTurn(
       {
         requestText: job.requestText,
         conversationHistory: job.conversationHistory,
+        activeGoal: job.activeGoal,
+        documentScope: job.sessionId,
         modelSettings: job.modelSettings,
         permission: {
           mode,

@@ -155,6 +155,26 @@ it("passes only bounded document conversation into a paired local continuation",
       null,
     );
     await pause();
+    const pageTask = store.poll("paired-owner", turnId, 0).tasks[0];
+    if (pageTask)
+      store.reply(
+        "paired-owner",
+        turnId,
+        pageTask.id,
+        {
+          unit: "1/100mm",
+          revision: "r1",
+          activeSlide: 0,
+          selectedElementIds: [],
+          slides: [{ slideIndex: 0, elements: [] }],
+          textDetails: { slideIndex: 0, elements: [] },
+          images: [],
+          changedSlideIndexes: [],
+          visualEvidenceComplete: true,
+        },
+        null,
+      );
+    await pause();
     expect(runStructuredTurn).toHaveBeenCalledTimes(1);
     expect(store.poll("paired-owner", turnId, 0).result).toMatchObject({
       changed: false,

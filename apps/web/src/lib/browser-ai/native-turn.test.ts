@@ -374,7 +374,11 @@ describe("browser-run AI request", () => {
       elementIds: ["0/0"],
     });
     expect(host.call).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ changed: false, status: "completed" });
+    expect(result).toMatchObject({
+      changed: false,
+      status: "needs_review",
+      task: { outcome: "unverified" },
+    });
   });
 
   it("does not accept an edit result without a fresh screenshot of the changed slide", async () => {

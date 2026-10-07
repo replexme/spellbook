@@ -1,3 +1,13 @@
+import {
+  ZERO_TOKENS,
+  tokenTotals,
+  tokenUsageGrowth,
+  type TokenTotals,
+} from "../../../contracts/native-provider-usage.cjs";
+export {
+  tokenTotals,
+  tokenUsageGrowth,
+} from "../../../contracts/native-provider-usage.cjs";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
@@ -46,6 +56,13 @@ export interface GeneratedImage {
   transparentBackground?: boolean;
 }
 export interface AgentTurnOptions {
+  onUsage?: (usage: {
+    calls: number;
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+  }) => void;
   modelSettings?: ModelSettings;
   tools: DynamicTool[];
   onTool: (
@@ -73,6 +90,7 @@ export interface AppServerStartOptions {
 
 export interface AgentTurnClient {
   readonly supportsImageGeneration?: boolean;
+  readonly supportsInputImages?: boolean;
   supportsImageGenerationForModel?(settings?: ModelSettings): Promise<boolean>;
   runStructuredTurn(
     input: Array<Record<string, unknown>>,
@@ -95,6 +113,8 @@ export class AppServerClient {
     (params: Record<string, unknown>) => Promise<ToolResult>
   >();
   private readonly conversationThreads = new Map<string, string>();
+
+  private readonly threadTokens = new Map<string, TokenTotals>();
 
   get isRunning(): boolean {
     return (
@@ -377,7 +397,7 @@ export class AppServerClient {
         approvalPolicy: "never",
         sandbox: "read-only",
         personality: "pragmatic",
-        ephemeral: !options,
+        ephemeral: !options || (!resumeId && !options.conversationKey),
         ...(options
           ? {
               dynamicTools: options.tools,
@@ -411,8 +431,28 @@ export class AppServerClient {
       },
     );
     const threadId = thread.thread.id;
+    const keptThread = Boolean(
+      options?.threadId || (options?.conversationKey && !elevatedImageThread),
+    );
     if (options?.conversationKey && !elevatedImageThread)
       this.conversationThreads.set(options.conversationKey, threadId);
+    // Codex reports the thread's running totals; this turn used the growth
+    // from the totals it started with.
+    const startTokens = this.threadTokens.get(threadId) ?? ZERO_TOKENS;
+    let latestTokens = startTokens;
+    let providerCalls = 0;
+    let usageReported = false;
+    const reportUsage = () => {
+      if (usageReported) return;
+      usageReported = true;
+      if (keptThread) this.threadTokens.set(threadId, latestTokens);
+      else this.threadTokens.delete(threadId);
+      if (providerCalls === 0) return;
+      options?.onUsage?.(
+        tokenUsageGrowth(startTokens, latestTokens, providerCalls),
+      );
+    };
+
     options?.onThread?.(threadId);
     const abort = new AbortController();
     let finalMessage = "";
@@ -445,6 +485,16 @@ export class AppServerClient {
           | undefined;
         if (params?.threadId !== threadId) return;
         if (turnId && params.turnId && params.turnId !== turnId) return;
+        if (notification.method === "thread/tokenUsage/updated") {
+          const total = tokenTotals(
+            (params.tokenUsage as { total?: unknown } | undefined)?.total,
+          );
+          if (total && total.totalTokens !== latestTokens.totalTokens) {
+            providerCalls += 1;
+            latestTokens = total;
+          }
+          return;
+        }
         options?.onEvent?.(notification);
         if (notification.method === "item/completed") {
           if (turnId && params.turnId !== turnId) return;
@@ -518,6 +568,7 @@ export class AppServerClient {
         }
       };
       const cleanup = () => {
+        reportUsage();
         abort.abort();
         this.toolHandlers.delete(threadId);
         options?.signal?.removeEventListener("abort", cancel);

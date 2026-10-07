@@ -656,12 +656,34 @@ export function verifyOnlyOfficeProductIntent(before, after, commands, prepared)
             original.onlyoffice.locks.noResize = value.lockSize;
         }
       } else if (op === "crop_image") {
-        original.onlyoffice.crop = onlyOfficeCropObservation({
-          l: command.left * 100,
-          t: command.top * 100,
-          r: (1 - command.right) * 100,
-          b: (1 - command.bottom) * 100,
-        });
+        if (command.geometry != null) {
+          if (!["rectangle", "ellipse"].includes(command.geometry))
+            throw Error("onlyoffice_product_argument_invalid:image_shape");
+          const preset = command.geometry === "rectangle" ? "rect" : "ellipse";
+          if (newDrawing.geometry?.preset !== preset)
+            throw Error("onlyoffice_product_intent_mismatch:image_shape");
+          oldDrawing.geometry = { preset, adjustments: {}, paths: null };
+        }
+        if (
+          ["left", "top", "right", "bottom"].some((key) => command[key] != null)
+        ) {
+          const requestedCrop = onlyOfficeCropObservation({
+            l: command.left * 100,
+            t: command.top * 100,
+            r: (1 - command.right) * 100,
+            b: (1 - command.bottom) * 100,
+          });
+          // Native setSrcRect preserves an absent source rectangle for full
+          // image bounds. A shape-only crop must model that native no-op.
+          if (
+            original.onlyoffice.crop != null ||
+            requestedCrop.l !== 0 ||
+            requestedCrop.t !== 0 ||
+            requestedCrop.r !== 100 ||
+            requestedCrop.b !== 100
+          )
+            original.onlyoffice.crop = requestedCrop;
+        }
       } else if (op === "paragraph_alignment") {
         if (
           !newDrawing.paragraphs.length ||

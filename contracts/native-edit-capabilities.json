@@ -329,7 +329,8 @@
         "execution": "native_transform",
         "identityEffect": "create",
         "availability": "runtime_verified",
-        "minEnginePatch": 9
+        "minEnginePatch": 9,
+        "arguments": ["slideIndex", "masterIndex", "layout", "name"]
       },
       "duplicate_slide": {
         "family": "slide_structure",
@@ -337,7 +338,8 @@
         "execution": "native_transform",
         "identityEffect": "create",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["slideIndex"]
       },
       "delete_slide": {
         "family": "slide_structure",
@@ -345,7 +347,8 @@
         "execution": "native_transform",
         "identityEffect": "delete",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["slideIndex"]
       },
       "move_slide": {
         "family": "slide_structure",
@@ -353,7 +356,8 @@
         "execution": "native_transform",
         "identityEffect": "reorder",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["slideIndex", "targetSlideIndex"]
       },
       "set_sections": {
         "family": "slide_structure",
@@ -361,7 +365,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 20
+        "minEnginePatch": 20,
+        "arguments": ["sections"]
       },
       "set_slide_size": {
         "family": "document_design",
@@ -370,7 +375,8 @@
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
         "minEnginePatch": 22,
-        "changeBudget": ["presentation", "slide_parts"]
+        "changeBudget": ["presentation", "slide_parts"],
+        "arguments": ["width", "height", "scaleContent"]
       },
       "set_master_theme": {
         "family": "document_design",
@@ -388,7 +394,8 @@
           "slide_master_relationships",
           "slide_layout_relationships",
           "theme_parts"
-        ]
+        ],
+        "arguments": ["masterIndex", "theme"]
       },
       "set_speaker_notes": {
         "family": "speaker_notes",
@@ -396,7 +403,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["slideIndex", "text"]
       },
       "add_text_box": {
         "family": "object_creation",
@@ -404,7 +412,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "create",
         "availability": "runtime_verified",
-        "minEnginePatch": 14
+        "minEnginePatch": 14,
+        "arguments": ["slideIndex", "x", "y", "width", "height", "text", "name"]
       },
       "add_shape": {
         "family": "object_creation",
@@ -412,7 +421,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "create",
         "availability": "runtime_verified",
-        "minEnginePatch": 14
+        "minEnginePatch": 14,
+        "arguments": ["slideIndex", "x", "y", "width", "height", "geometry", "color", "name"]
       },
       "add_connector": {
         "family": "object_creation",
@@ -420,7 +430,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "create",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 23
+        "minEnginePatch": 23,
+        "arguments": ["slideIndex", "x", "y", "width", "height", "connectorKind", "color", "name"]
       },
       "add_freeform": {
         "family": "object_creation",
@@ -428,7 +439,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "create",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 31
+        "minEnginePatch": 31,
+        "arguments": ["slideIndex", "x", "y", "width", "height", "points", "closed", "color", "name"]
       },
       "add_table": {
         "family": "object_creation",
@@ -436,7 +448,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "create",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["slideIndex", "x", "y", "width", "height", "cells", "name"]
       },
       "align": {
         "family": "object_geometry",
@@ -444,7 +457,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementIds", "alignment"]
       },
       "distribute": {
         "family": "object_geometry",
@@ -452,7 +466,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementIds", "axis"]
       },
       "set_connector": {
         "family": "object_geometry",
@@ -460,7 +475,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 23
+        "minEnginePatch": 23,
+        "arguments": ["elementId", "connector"]
       },
       "group": {
         "family": "object_topology",
@@ -468,7 +484,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "reparent",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementIds"]
       },
       "replace_text": {
         "family": "object_text",
@@ -476,7 +493,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "text"]
       },
       "move": {
         "family": "object_geometry",
@@ -484,7 +502,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "x", "y"]
       },
       "resize": {
         "family": "object_geometry",
@@ -492,7 +511,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "width", "height"]
       },
       "font_size": {
         "family": "object_text",
@@ -500,7 +520,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 14
+        "minEnginePatch": 14,
+        "arguments": ["elementId", "size"]
       },
       "bold": {
         "family": "object_text",
@@ -508,7 +529,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 14
+        "minEnginePatch": 14,
+        "arguments": ["elementId", "bold"]
       },
       "italic": {
         "family": "object_text",
@@ -516,7 +538,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 14
+        "minEnginePatch": 14,
+        "arguments": ["elementId", "italic"]
       },
       "underline": {
         "family": "object_text",
@@ -524,7 +547,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "underline"]
       },
       "strikethrough": {
         "family": "object_text",
@@ -532,7 +556,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "strikethrough"]
       },
       "text_shadow": {
         "family": "object_text",
@@ -540,7 +565,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 9
+        "minEnginePatch": 9,
+        "arguments": ["elementId", "shadow", "color", "shadowOffsetX", "shadowOffsetY", "shadowBlur", "opacity"]
       },
       "font_family": {
         "family": "object_text",
@@ -548,7 +574,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 14
+        "minEnginePatch": 14,
+        "arguments": ["elementId", "family"]
       },
       "font_color": {
         "family": "object_text",
@@ -556,7 +583,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "color"]
       },
       "fill_color": {
         "family": "object_style",
@@ -564,7 +592,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "color"]
       },
       "set_shape_fill": {
         "family": "object_style",
@@ -572,7 +601,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 23
+        "minEnginePatch": 23,
+        "arguments": ["elementId", "shapeFill"]
       },
       "set_shape_effects": {
         "family": "object_style",
@@ -580,7 +610,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 23
+        "minEnginePatch": 23,
+        "arguments": ["elementId", "shapeEffects"]
       },
       "line_color": {
         "family": "object_style",
@@ -588,7 +619,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "color"]
       },
       "line_width": {
         "family": "object_style",
@@ -596,7 +628,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "size"]
       },
       "fill_opacity": {
         "family": "object_style",
@@ -604,7 +637,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "opacity"]
       },
       "line_opacity": {
         "family": "object_style",
@@ -612,7 +646,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "opacity"]
       },
       "text_autofit": {
         "family": "object_text",
@@ -620,7 +655,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "autofit"]
       },
       "rotate": {
         "family": "object_geometry",
@@ -628,7 +664,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "degrees"]
       },
       "z_order": {
         "family": "object_topology",
@@ -636,7 +673,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "reorder",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "position"]
       },
       "paragraph_alignment": {
         "family": "object_text",
@@ -644,7 +682,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "alignment"]
       },
       "flip": {
         "family": "object_geometry",
@@ -652,7 +691,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "axis"]
       },
       "ungroup": {
         "family": "object_topology",
@@ -660,7 +700,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "reparent",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId"]
       },
       "duplicate_element": {
         "family": "object_creation",
@@ -668,7 +709,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "create",
         "availability": "runtime_verified",
-        "minEnginePatch": 14
+        "minEnginePatch": 14,
+        "arguments": ["elementId", "name", "x", "y"]
       },
       "delete_element": {
         "family": "object_topology",
@@ -676,7 +718,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "delete",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId"]
       },
       "set_chart_data": {
         "family": "chart_model",
@@ -684,7 +727,8 @@
         "execution": "model_replace",
         "identityEffect": "replace",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "data", "rowDescriptions", "columnDescriptions"]
       },
       "set_chart_type": {
         "family": "chart_model",
@@ -692,7 +736,8 @@
         "execution": "model_replace",
         "identityEffect": "replace",
         "availability": "runtime_verified",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "chartType"]
       },
       "set_chart_format": {
         "family": "chart_model",
@@ -700,7 +745,8 @@
         "execution": "model_replace",
         "identityEffect": "replace",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["elementId", "chartFormat"]
       },
       "set_slide_layout": {
         "family": "slide_properties",
@@ -708,7 +754,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 14
+        "minEnginePatch": 14,
+        "arguments": ["slideIndex", "masterIndex", "layout"]
       },
       "set_background": {
         "family": "slide_properties",
@@ -716,7 +763,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 2
+        "minEnginePatch": 2,
+        "arguments": ["slideIndex", "color"]
       },
       "set_table_cell": {
         "family": "table_content",
@@ -724,7 +772,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 2
+        "minEnginePatch": 2,
+        "arguments": ["elementId", "row", "column", "text"]
       },
       "rename_slide": {
         "family": "slide_properties",
@@ -732,7 +781,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 2
+        "minEnginePatch": 2,
+        "arguments": ["slideIndex", "name"]
       },
       "set_slide_hidden": {
         "family": "slide_properties",
@@ -740,7 +790,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 2
+        "minEnginePatch": 2,
+        "arguments": ["slideIndex", "hidden"]
       },
       "set_alt_text": {
         "family": "object_style",
@@ -748,7 +799,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 3
+        "minEnginePatch": 3,
+        "arguments": ["elementId", "title", "description", "decorative"]
       },
       "set_shape_name": {
         "family": "object_style",
@@ -756,7 +808,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 3
+        "minEnginePatch": 3,
+        "arguments": ["elementId", "name"]
       },
       "set_text_box": {
         "family": "object_text",
@@ -764,7 +817,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 3
+        "minEnginePatch": 3,
+        "arguments": ["elementId", "marginLeft", "marginRight", "marginTop", "marginBottom", "autoGrowHeight", "autoGrowWidth", "wordWrap"]
       },
       "set_character_spacing": {
         "family": "object_text",
@@ -772,7 +826,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 5
+        "minEnginePatch": 5,
+        "arguments": ["elementId", "spacing"]
       },
       "set_text_language": {
         "family": "object_text",
@@ -780,7 +835,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 23
+        "minEnginePatch": 23,
+        "arguments": ["elementId", "languageTag"]
       },
       "set_text_case": {
         "family": "object_text",
@@ -788,7 +844,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 23
+        "minEnginePatch": 23,
+        "arguments": ["elementId", "textCase"]
       },
       "set_script_position": {
         "family": "object_text",
@@ -796,7 +853,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 5
+        "minEnginePatch": 5,
+        "arguments": ["elementId", "script"]
       },
       "set_shape_shadow": {
         "family": "object_style",
@@ -804,7 +862,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 3
+        "minEnginePatch": 3,
+        "arguments": ["elementId", "shadow", "color", "shadowOffsetX", "shadowOffsetY", "shadowBlur", "opacity"]
       },
       "set_object_lock": {
         "family": "object_style",
@@ -812,7 +871,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 9
+        "minEnginePatch": 9,
+        "arguments": ["elementId", "lockPosition", "lockSize", "printable"]
       },
       "set_line_style": {
         "family": "object_style",
@@ -820,7 +880,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 31
+        "minEnginePatch": 31,
+        "arguments": ["elementId", "lineStyle"]
       },
       "set_printable": {
         "family": "object_style",
@@ -836,7 +897,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 18
+        "minEnginePatch": 18,
+        "arguments": ["elementId", "interaction", "url", "description", "targetSlideIndex"]
       },
       "replace_text_range": {
         "family": "object_text",
@@ -844,7 +906,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 4
+        "minEnginePatch": 4,
+        "arguments": ["elementId", "paragraphId", "startOffset", "endOffset", "expectedText", "text"]
       },
       "insert_table_rows": {
         "family": "table_structure",
@@ -852,7 +915,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 5
+        "minEnginePatch": 5,
+        "arguments": ["elementId", "index", "count"]
       },
       "delete_table_rows": {
         "family": "table_structure",
@@ -860,7 +924,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 5
+        "minEnginePatch": 5,
+        "arguments": ["elementId", "index", "count"]
       },
       "insert_table_columns": {
         "family": "table_structure",
@@ -868,7 +933,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 5
+        "minEnginePatch": 5,
+        "arguments": ["elementId", "index", "count"]
       },
       "delete_table_columns": {
         "family": "table_structure",
@@ -876,7 +942,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 5
+        "minEnginePatch": 5,
+        "arguments": ["elementId", "index", "count"]
       },
       "merge_table_cells": {
         "family": "table_structure",
@@ -884,7 +951,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 5
+        "minEnginePatch": 5,
+        "arguments": ["elementId", "startRow", "endRow", "startColumn", "endColumn"]
       },
       "split_table_cell": {
         "family": "table_structure",
@@ -892,7 +960,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 5
+        "minEnginePatch": 5,
+        "arguments": ["elementId", "row", "column", "rows", "columns"]
       },
       "set_table_row_height": {
         "family": "table_structure",
@@ -900,7 +969,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 5
+        "minEnginePatch": 5,
+        "arguments": ["elementId", "index", "height"]
       },
       "set_table_column_width": {
         "family": "table_structure",
@@ -908,7 +978,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 5
+        "minEnginePatch": 5,
+        "arguments": ["elementId", "index", "width"]
       },
       "set_table_cell_format": {
         "family": "table_style",
@@ -916,7 +987,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 6
+        "minEnginePatch": 6,
+        "arguments": ["elementId", "row", "column", "tableCellFormat"]
       },
       "set_slide_transition": {
         "family": "slide_transition",
@@ -924,7 +996,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 7
+        "minEnginePatch": 7,
+        "arguments": ["slideIndex", "transitionEffect", "transitionDuration"]
       },
       "set_slide_metadata": {
         "family": "slide_properties",
@@ -932,7 +1005,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 30
+        "minEnginePatch": 30,
+        "arguments": ["slideIndex", "slideMetadata"]
       },
       "set_animation_timing": {
         "family": "animation",
@@ -940,7 +1014,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 8
+        "minEnginePatch": 8,
+        "arguments": ["elementId", "animationId", "duration", "delay", "start"]
       },
       "add_animation_effect": {
         "family": "animation",
@@ -948,7 +1023,8 @@
         "execution": "native_transform",
         "identityEffect": "create",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 21
+        "minEnginePatch": 21,
+        "arguments": ["elementId", "presetId", "duration", "delay", "start"]
       },
       "remove_animation_effect": {
         "family": "animation",
@@ -956,7 +1032,8 @@
         "execution": "native_transform",
         "identityEffect": "delete",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 21
+        "minEnginePatch": 21,
+        "arguments": ["elementId", "animationId"]
       },
       "replace_animation_effect": {
         "family": "animation",
@@ -964,7 +1041,8 @@
         "execution": "native_transform",
         "identityEffect": "replace",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 21
+        "minEnginePatch": 21,
+        "arguments": ["elementId", "animationId", "presetId"]
       },
       "move_animation_effect": {
         "family": "animation",
@@ -972,7 +1050,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 21
+        "minEnginePatch": 21,
+        "arguments": ["elementId", "animationId", "animationIndex"]
       },
       "crop_image": {
         "family": "media_geometry",
@@ -980,7 +1059,9 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_verified",
-        "minEnginePatch": 6
+        "minEnginePatch": 6,
+        "arguments": ["elementId", "left", "top", "right", "bottom", "geometry"],
+        "description": "Crop the existing picture without replacing its original media. geometry ellipse clips to an ellipse; a circle also requires equal observed width and height. rectangle restores the rectangular picture shape. left/top/right/bottom are source fractions from 0 inclusive to 1 exclusive; pass zero for full source. Omit all four crop fractions to change only shape and preserve existing framing."
       },
       "insert_image": {
         "family": "media_asset",
@@ -988,7 +1069,8 @@
         "execution": "platform_asset",
         "identityEffect": "create",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["slideIndex", "assetId", "x", "y", "width", "height", "name"]
       },
       "replace_image": {
         "family": "media_asset",
@@ -996,7 +1078,8 @@
         "execution": "platform_asset",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 24
+        "minEnginePatch": 24,
+        "arguments": ["elementId", "assetId"]
       },
       "insert_media": {
         "family": "media_asset",
@@ -1004,7 +1087,8 @@
         "execution": "platform_asset",
         "identityEffect": "create",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["slideIndex", "assetId", "x", "y", "width", "height", "name"]
       },
       "replace_media": {
         "family": "media_asset",
@@ -1012,7 +1096,8 @@
         "execution": "platform_asset",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 27
+        "minEnginePatch": 27,
+        "arguments": ["elementId", "assetId"]
       },
       "set_media_playback": {
         "family": "media_playback",
@@ -1028,7 +1113,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 24
+        "minEnginePatch": 24,
+        "arguments": ["elementId", "smartartNode"]
       },
       "add_smartart_node": {
         "family": "diagram_model",
@@ -1036,7 +1122,8 @@
         "execution": "native_transform",
         "identityEffect": "create",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 24
+        "minEnginePatch": 24,
+        "arguments": ["elementId", "smartartNode"]
       },
       "delete_smartart_node": {
         "family": "diagram_model",
@@ -1044,7 +1131,8 @@
         "execution": "native_transform",
         "identityEffect": "delete",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 24
+        "minEnginePatch": 24,
+        "arguments": ["elementId", "smartartNode"]
       },
       "set_fontwork": {
         "family": "fontwork",
@@ -1052,7 +1140,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 24
+        "minEnginePatch": 24,
+        "arguments": ["elementId", "fontwork"]
       },
       "set_3d_material": {
         "family": "object_3d",
@@ -1076,7 +1165,8 @@
         "execution": "native_transform",
         "identityEffect": "reorder",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 24
+        "minEnginePatch": 24,
+        "arguments": ["elementIds"]
       },
       "set_paragraph_format": {
         "family": "object_text",
@@ -1084,7 +1174,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 27
+        "minEnginePatch": 27,
+        "arguments": ["elementId", "paragraphId", "paragraphFormat"]
       },
       "set_paragraph_list": {
         "family": "object_text",
@@ -1092,7 +1183,8 @@
         "execution": "native_transform",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 27
+        "minEnginePatch": 27,
+        "arguments": ["elementId", "paragraphId", "paragraphList"]
       },
       "add_comment": {
         "family": "comments",
@@ -1100,7 +1192,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "create",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["slideIndex", "text", "author", "initials", "x", "y"]
       },
       "edit_comment": {
         "family": "comments",
@@ -1108,7 +1201,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "preserve",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["slideIndex", "commentIndex", "text", "author"]
       },
       "delete_comment": {
         "family": "comments",
@@ -1116,7 +1210,8 @@
         "execution": "editor_dispatch",
         "identityEffect": "delete",
         "availability": "runtime_validation_required",
-        "minEnginePatch": 0
+        "minEnginePatch": 0,
+        "arguments": ["slideIndex", "commentIndex"]
       }
     }
   },
@@ -1994,7 +2089,8 @@
       },
       "geometry": {
         "type": ["string", "null"],
-        "enum": ["rectangle", "ellipse", "line", null]
+        "enum": ["rectangle", "ellipse", "line", null],
+        "description": "add_shape: rectangle/ellipse/line; crop_image: rectangle/ellipse only (circle requires width=height). Preserve original media with crop_image, never replace it with a flattened image."
       },
       "connectorKind": {
         "type": ["string", "null"],

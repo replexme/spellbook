@@ -27,6 +27,12 @@ export function parseCompletion(raw: string): {
   outcome: string;
   message: string;
   reason: string;
+  review?: {
+    approved: boolean;
+    requestSatisfied: boolean;
+    problems: string[];
+    reviewedSlideIndexes: number[];
+  } | null;
 } | null;
 export function finalizeTurn(
   raw: string,
@@ -35,6 +41,7 @@ export function finalizeTurn(
 export function continuationGoal(
   request: string,
   history?: Array<{ task?: TaskResult; request?: string; changed?: boolean }>,
+  activeGoal?: import("./native-goal.cjs").ActiveGoal | null,
 ): string | null;
 
 export type ConversationTurn = {
@@ -48,3 +55,5 @@ export type ConversationTurn = {
 export const NATIVE_HISTORY_TURN_LIMIT: number;
 export const NATIVE_HISTORY_CHARACTER_LIMIT: number;
 export function boundedConversationHistory(turns: unknown): ConversationTurn[];
+
+export function explicitEditRequest(request: string): boolean;

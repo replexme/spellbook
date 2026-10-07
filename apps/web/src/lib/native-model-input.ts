@@ -31,5 +31,10 @@ export function validatedNativeModelInput(value: unknown) {
   )
     ? [...MODEL_INPUT_FIELDS, ...PROVIDER_USAGE_FIELDS]
     : MODEL_INPUT_FIELDS;
-  return Object.fromEntries(fields.map((field) => [field, counts[field]]));
+  const timing = ["elapsedMs", "hostMs", "modelMs", "hostCalls"].filter(
+    (field) => validCount(counts[field]),
+  );
+  return Object.fromEntries(
+    [...fields, ...timing].map((field) => [field, counts[field]]),
+  );
 }

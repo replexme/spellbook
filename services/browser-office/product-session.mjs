@@ -331,112 +331,131 @@ export function createProductSession({
       serial(() => manualCheckpoint(reason)),
     apply: (request) =>
       serial(async () => {
-        ready();
-        const input = structuredClone(request);
-        if (
-          !input?.commands?.length ||
-          input.commands.length > 50 ||
-          typeof input.expectedRevision !== "string"
-        )
-          throw Error("product_command_request_invalid");
-        await manualCheckpoint("before_ai_edit");
-        const before = await liveMatches(current.observation);
-        if (before.revision !== input.expectedRevision)
-          throw Error("product_command_stale_observation");
-        for (const command of input.commands) {
-          if (
-            !Object.hasOwn(operationContracts, command.op) ||
-            !validateCommand(command)
-          )
-            throw Error("product_command_contract_invalid");
-        }
-        // Resources come from the admitted document and the trusted host. The
-        // canonical AI request never acquires byte/URL authority. Stage all
-        // resources before opening history, then recheck the live revision.
-        await prepareResources({bytes:current.bytes.slice(),observation:structuredClone(before),commands:structuredClone(input.commands)});
-        // Bind every target and validate every operation before creating native history.
-        const prepared = await engine.preflight(input.commands, before);
-        await liveMatches(before);
-        const token = await engine.begin();
-        let committed = false;
+        let mutationStarted = false;
         try {
-          for (const command of prepared) await engine.apply(command);
-          const edited = await observe();
-          await engine.verifyIntent(before, edited, input.commands, prepared);
-          if (edited.revision === before.revision) {
-            await engine.finish(token, false);
-            await liveMatches(before);
-            return { observation: structuredClone(before), changed: false };
+          ready();
+          const input = structuredClone(request);
+          if (
+            !input?.commands?.length ||
+            input.commands.length > 50 ||
+            typeof input.expectedRevision !== "string"
+          )
+            throw Error("product_command_request_invalid");
+          await manualCheckpoint("before_ai_edit");
+          const before = await liveMatches(current.observation);
+          if (before.revision !== input.expectedRevision)
+            throw Error("product_command_stale_observation");
+          for (const command of input.commands) {
+            if (
+              !Object.hasOwn(operationContracts, command.op) ||
+              !validateCommand(command)
+            )
+              throw Error("product_command_contract_invalid");
           }
-          const bytes = await engine.snapshot({
-            before,
-            edited,
-            commands: input.commands,
-            prepared,
-            authorize: (bytes) => admit(bytes, edited),
+          // Resources come from the admitted document and the trusted host. The
+          // canonical AI request never acquires byte/URL authority. Stage all
+          // resources before opening history, then recheck the live revision.
+          await prepareResources({
+            bytes: current.bytes.slice(),
+            observation: structuredClone(before),
+            commands: structuredClone(input.commands),
           });
-          const accepted = await admit(bytes, edited);
-          await liveMatches(edited);
-          const priorCommands = commands;
-          const entry = {
-            before: current,
-            after: accepted,
-            commands: input.commands,
-            beforeBytes: current.bytes,
-            afterBytes: accepted.bytes,
-          };
-          const priorUndo = undo,
-            priorRedo = redo,
-            priorBase = base;
-          undo = [...undo, entry];
-          redo = [];
-          commands = [...commands, ...input.commands];
-          boundHistory();
+          // Bind every target and validate every operation before creating native history.
+          const prepared = await engine.preflight(input.commands, before);
+          await liveMatches(before);
+          mutationStarted = true;
+          const token = await engine.begin();
+          let committed = false;
           try {
-            await checkpoint(accepted);
-          } catch (error) {
-            commands = priorCommands;
-            undo = priorUndo;
-            redo = priorRedo;
-            base = priorBase;
-            throw error;
-          }
-          try {
-            await engine.finish(token, true);
-            committed = true;
-          } catch (error) {
-            commands = priorCommands;
-            undo = priorUndo;
-            redo = priorRedo;
-            base = priorBase;
-            try {
-              await checkpoint(current);
-            } catch {
-              failed = true;
+            for (const command of prepared) await engine.apply(command);
+            const edited = await observe();
+            await engine.verifyIntent(before, edited, input.commands, prepared);
+            if (edited.revision === before.revision) {
+              await engine.finish(token, false);
+              await liveMatches(before);
+              return { observation: structuredClone(before), changed: false };
             }
-            throw error;
+            const bytes = await engine.snapshot({
+              before,
+              edited,
+              commands: input.commands,
+              prepared,
+              authorize: (bytes) => admit(bytes, edited),
+            });
+            const accepted = await admit(bytes, edited);
+            await liveMatches(edited);
+            const priorCommands = commands;
+            const entry = {
+              before: current,
+              after: accepted,
+              commands: input.commands,
+              beforeBytes: current.bytes,
+              afterBytes: accepted.bytes,
+            };
+            const priorUndo = undo,
+              priorRedo = redo,
+              priorBase = base;
+            undo = [...undo, entry];
+            redo = [];
+            commands = [...commands, ...input.commands];
+            boundHistory();
+            try {
+              await checkpoint(accepted);
+            } catch (error) {
+              commands = priorCommands;
+              undo = priorUndo;
+              redo = priorRedo;
+              base = priorBase;
+              throw error;
+            }
+            try {
+              await engine.finish(token, true);
+              committed = true;
+            } catch (error) {
+              commands = priorCommands;
+              undo = priorUndo;
+              redo = priorRedo;
+              base = priorBase;
+              try {
+                await checkpoint(current);
+              } catch {
+                failed = true;
+              }
+              throw error;
+            }
+            await liveMatches(edited);
+            current = accepted;
+            await acceptNativeToken();
+            return {
+              observation: structuredClone(edited),
+              artifactReceipt: structuredClone(accepted.receipt),
+            };
+          } catch (error) {
+            try {
+              if (committed) {
+                await engine.undo();
+                /* The failed committed point cannot preserve a previous Redo branch. */ failed = true;
+              } else await engine.finish(token, false);
+              await liveMatches(before);
+            } catch (restoreError) {
+              failed = true;
+              throw Error(
+                "product_mutation_restore_failed:" +
+                  restoreError.message +
+                  ";original_failure:" +
+                  error.message,
+                { cause: error },
+              );
+            }
+            throw new Error("product_mutation_rolled_back:" + error.message, {
+              cause: error,
+            });
           }
-          await liveMatches(edited);
-          current = accepted;
-          await acceptNativeToken();
-          return {
-            observation: structuredClone(edited),
-            artifactReceipt: structuredClone(accepted.receipt),
-          };
         } catch (error) {
-          try {
-            if (committed) {
-              await engine.undo();
-              /* The failed committed point cannot preserve a previous Redo branch. */ failed = true;
-            } else await engine.finish(token, false);
-            await liveMatches(before);
-          } catch (restoreError) {
-            failed = true;
-            throw Error(
-              "product_mutation_restore_failed:" + restoreError.message + ";original_failure:" + error.message,
-              { cause: error },
-            );
-          }
+          if (!mutationStarted)
+            throw new Error("product_mutation_rejected:" + error.message, {
+              cause: error,
+            });
           throw error;
         }
       }),

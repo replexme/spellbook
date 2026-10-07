@@ -124,6 +124,11 @@ export class LocalNativeTurns {
         );
         turn.result = await runNativeTurn(client, {
           requestText: body.requestText as string,
+          documentScope:
+            typeof body.documentScope === "string" ? body.documentScope : "",
+          activeGoal: body.activeGoal as
+            | import("../../../contracts/native-goal.cjs").ActiveGoal
+            | null,
           permission,
           conversationHistory: boundedConversationHistory(
             body.conversationHistory,

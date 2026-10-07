@@ -93,7 +93,14 @@ function fixture(
       // The first turn answers the request; later turns are the agent's
       // follow-up (for example the enforced post-edit review).
       await (turns === 1 ? work : followUp)(options);
-      return "result";
+      return JSON.stringify({
+        intent: "edit",
+        goal: "Change title",
+        outcome: "applied",
+        message: "result",
+        reason: "",
+        review: null,
+      });
     },
   } as unknown as AppServerClient;
   return {
@@ -199,8 +206,9 @@ describe("shared open document agent", () => {
 
   it("publishes every bounded native operation from the shared contract", async () => {
     const f = fixture(async (o) => {
-      const schema = o.tools.find((tool) => tool.name === "native_edit")
-        ?.inputSchema as {
+      const batch = o.tools.find((tool) => tool.name === "native_batch_edit")
+        ?.inputSchema as { properties: { commands: { items: unknown } } };
+      const schema = batch.properties.commands.items as {
         properties: {
           op: { enum: string[] };
           row: { type: string[] };
@@ -244,11 +252,11 @@ describe("shared open document agent", () => {
       expect(schema.properties.row.type).toContain("number");
       expect(schema.properties.column.type).toContain("number");
       expect(
-        o.tools.find((tool) => tool.name === "native_edit")?.description,
-      ).toContain("rowDescriptions (category labels)");
+        o.tools.find((tool) => tool.name === "native_batch_edit")?.description,
+      ).toContain("one native Undo action");
       expect(
-        o.tools.find((tool) => tool.name === "native_edit")?.description,
-      ).toContain("column/line/area/pie/scatter/radar");
+        o.tools.find((tool) => tool.name === "native_batch_edit")?.description,
+      ).toContain("crop_image");
     });
     await f.run();
   });
@@ -424,7 +432,8 @@ describe("shared open document agent", () => {
     });
     expect(await f.run()).toMatchObject({
       changed: false,
-      status: "completed",
+      status: "needs_review",
+      task: { outcome: "unverified" },
     });
     expect(f.call.mock.calls[1]?.[0]).toMatchObject({
       operation: "edit_batch",
@@ -894,7 +903,11 @@ describe("shared open document agent", () => {
       return structuredClone(state);
     });
     const result = await f.run();
-    expect(result).toMatchObject({ changed: false, status: "completed" });
+    expect(result).toMatchObject({
+      changed: false,
+      status: "needs_review",
+      task: { outcome: "unverified" },
+    });
     expect(result.text).toContain(UNCONFIRMED_EDIT_NOTICE);
   });
   it("adds no failure notice to a dry run that fails", async () => {
@@ -932,7 +945,8 @@ describe("shared open document agent", () => {
     });
     expect(await f.run()).toMatchObject({
       changed: false,
-      status: "completed",
+      status: "needs_review",
+      task: { outcome: "unverified" },
     });
     expect(f.turns()).toBe(1);
   });

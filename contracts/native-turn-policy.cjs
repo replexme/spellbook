@@ -19,10 +19,29 @@ const completionSchema = {
     },
     message: { type: "string" },
     reason: { type: "string" },
+    review: {
+      type: ["object", "null"],
+      additionalProperties: false,
+      properties: {
+        approved: { type: "boolean" },
+        requestSatisfied: { type: "boolean" },
+        problems: { type: "array", items: { type: "string" } },
+        reviewedSlideIndexes: {
+          type: "array",
+          items: { type: "integer", minimum: 0 },
+        },
+      },
+      required: [
+        "approved",
+        "requestSatisfied",
+        "problems",
+        "reviewedSlideIndexes",
+      ],
+    },
   },
-  required: ["intent", "goal", "outcome", "message", "reason"],
+  required: ["intent", "goal", "outcome", "message", "reason", "review"],
 };
-const completionInstruction = `Return only JSON with intent (answer or edit), goal (the user's intended result, preserving an unfinished goal on continuation), outcome (answered, applied, blocked, needs_input, unchanged), message (Korean), and reason. Do not downgrade an edit request to an answer merely because no edit ran. Applied requires actual mutation and native_review confirming the requested result. Unchanged never means an edit was applied. Blocked requires a concrete missing capability, permission or asset; do not invent a cause. An embedded picture is not a missing user upload. Use the live engine capabilities, not earlier assistant claims. The edit result already includes fresh screenshots; review them directly, without another observe unless more detail is needed. Before native_review, check the user's goal, not just the absence of layout problems; set requestSatisfied accordingly. A follow-up asking to proceed inherits the unfinished goal, not the previous unsupported workaround.`;
+const completionInstruction = `Return only JSON with intent (answer or edit), goal (the user's intended result, preserving an unfinished goal on continuation), outcome (answered, applied, blocked, needs_input, unchanged), message (Korean), and reason. Do not downgrade an edit request to an answer merely because no edit ran. Applied requires actual mutation and review of every returned changed-slide image. Include review (approved, requestSatisfied, problems, reviewedSlideIndexes) in your final JSON after inspecting those images; use null for an answer without changes. This final review and completion are one response; do not call native_review unless recovering an incomplete review. Unchanged never means an edit was applied. Blocked requires a concrete missing capability, permission or asset; do not invent a cause. An embedded picture is not a missing user upload. Use the live engine capabilities, not earlier assistant claims. The edit result already includes fresh screenshots; review them directly, without another observe unless more detail is needed. Before the final review, check the user's goal, not just the absence of layout problems; set requestSatisfied accordingly. A follow-up asking to proceed inherits the unfinished goal, not the previous unsupported workaround.`;
 
 function parseCompletion(raw) {
   try {
@@ -147,13 +166,14 @@ function finalizeTurn(raw, evidence) {
   return result("answered", report.message);
 }
 
-function continuationGoal(request, history = []) {
+function continuationGoal(request, history = [], activeGoal = null) {
   if (
     !/^(?:니가\s*)?(?:그걸\s*)?(?:계속|이어서|진행|해\s*줘|해줘|하라고|다시\s*해)/u.test(
       request.trim(),
     )
   )
     return null;
+  if (activeGoal) return activeGoal.request;
   for (const previous of [...history].reverse()) {
     const task = previous?.task;
     if (task?.intent === "edit")
@@ -238,6 +258,7 @@ function boundedConversationHistory(turns) {
 }
 
 module.exports = {
+  explicitEditRequest,
   boundedConversationHistory,
   NATIVE_HISTORY_TURN_LIMIT,
   NATIVE_HISTORY_CHARACTER_LIMIT,

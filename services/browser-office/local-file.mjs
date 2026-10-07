@@ -76,9 +76,16 @@ export async function rememberLocalOfficeHandle(documentId, handle, sha256) {
   try {
     await new Promise((resolve, reject) => {
       const transaction = database.transaction("documents", "readwrite");
-      transaction
-        .objectStore("documents")
-        .put({ documentId, handle, sha256, name: handle.name });
+      const store = transaction.objectStore("documents");
+      const record = store.get(documentId);
+      record.onsuccess = () =>
+        store.put({
+          ...record.result,
+          documentId,
+          handle,
+          sha256,
+          name: handle.name,
+        });
       transaction.oncomplete = resolve;
       transaction.onerror = () => reject(transaction.error);
       transaction.onabort = () =>
@@ -113,4 +120,37 @@ export async function openLocalOfficeHandle(handle) {
   const documentId = "local:" + crypto.randomUUID();
   await rememberLocalOfficeHandle(documentId, handle, identity.sha256);
   return { ...identity, name: file.name, documentId };
+}
+
+// Goal/history stay beside the local file handle and retain its document scope.
+export async function localOfficeAIState(documentId, state) {
+  const database = await localHandleDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(
+        "documents",
+        state === undefined ? "readonly" : "readwrite",
+      );
+      const store = transaction.objectStore("documents"),
+        record = store.get(documentId);
+      let value;
+      record.onsuccess = () => {
+        value = record.result?.aiState ?? null;
+        if (state !== undefined) {
+          if (!record.result) {
+            transaction.abort();
+            return;
+          }
+          value = state;
+          store.put({ ...record.result, aiState: state });
+        }
+      };
+      transaction.oncomplete = () => resolve(value);
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () =>
+        reject(transaction.error ?? Error("local_ai_state_record_aborted"));
+    });
+  } finally {
+    database.close();
+  }
 }

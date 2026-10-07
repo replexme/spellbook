@@ -735,16 +735,36 @@ export function createOnlyOfficeProductEngine({
             if (command.op === "crop_image") {
               if (!shape.isImage?.() || typeof shape.setSrcRect !== "function")
                 throw Error("onlyoffice_product_image_target_unavailable");
-              for (const key of ["left", "top", "right", "bottom"])
-                if (
-                  !Number.isFinite(command[key]) ||
-                  command[key] < 0 ||
-                  command[key] >= 1
-                )
-                  throw Error("onlyoffice_product_argument_invalid:" + key);
+              if (command.geometry != null) {
+                if (!["rectangle", "ellipse"].includes(command.geometry))
+                  throw Error(
+                    "onlyoffice_product_argument_invalid:image_shape",
+                  );
+                if (typeof shape.changePresetGeom !== "function")
+                  throw Error("onlyoffice_product_image_shape_unavailable");
+                if (shape.getNoChangeShapeType?.())
+                  throw Error("onlyoffice_product_image_shape_locked");
+              }
+              if (shape.getNoCrop?.())
+                throw Error("onlyoffice_product_image_crop_locked");
+              const cropKeys = ["left", "top", "right", "bottom"];
+              const cropRequested = cropKeys.some(
+                (key) => command[key] != null,
+              );
+              if (!cropRequested && command.geometry == null)
+                throw Error("onlyoffice_product_argument_invalid:empty_crop");
+              if (cropRequested)
+                for (const key of cropKeys)
+                  if (
+                    !Number.isFinite(command[key]) ||
+                    command[key] < 0 ||
+                    command[key] >= 1
+                  )
+                    throw Error("onlyoffice_product_argument_invalid:" + key);
               if (
-                command.left + command.right >= 1 ||
-                command.top + command.bottom >= 1
+                cropRequested &&
+                (command.left + command.right >= 1 ||
+                  command.top + command.bottom >= 1)
               )
                 throw Error("onlyoffice_product_argument_invalid:crop_extent");
             }
@@ -1520,12 +1540,16 @@ export function createOnlyOfficeProductEngine({
             case "delete_element":
               return d.Delete();
             case "crop_image": {
-              const rectangle = new window.AscFormat.CSrcRect();
-              rectangle.l = command.left * 100;
-              rectangle.t = command.top * 100;
-              rectangle.r = (1 - command.right) * 100;
-              rectangle.b = (1 - command.bottom) * 100;
-              d.Drawing.setSrcRect(rectangle);
+              if (["left", "top", "right", "bottom"].some(key => command[key] != null)) {
+                const rectangle = new window.AscFormat.CSrcRect();
+                rectangle.l = command.left * 100;
+                rectangle.t = command.top * 100;
+                rectangle.r = (1 - command.right) * 100;
+                rectangle.b = (1 - command.bottom) * 100;
+                d.Drawing.setSrcRect(rectangle);
+              }
+              if (command.geometry != null)
+                d.Drawing.changePresetGeom(command.geometry === "rectangle" ? "rect" : "ellipse");
               return true;
             }
             case "set_object_lock": {

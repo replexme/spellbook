@@ -51,6 +51,7 @@ export interface AiJob {
 }
 
 export interface NativeJob {
+  activeGoal?: import("../../../contracts/native-goal.cjs").ActiveGoal | null;
   jobId: string;
   callbackUrl: string;
   toolUrl: string;

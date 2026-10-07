@@ -164,6 +164,74 @@ const observation = {
 };
 
 describe.skipIf(!enabled)("durable native editor orchestration", () => {
+  it("retains a cancelled editing goal through 20 answer turns outside model history and scopes it to the document", async () => {
+    const f = await fixture();
+    const goal = "사진을 원형으로 잘라서 넣어줘";
+    const first = await submitNativeTurn(session, f.documentId, {
+      text: goal,
+      permission: "document",
+    });
+    await cancelNativeTurn(session, f.documentId);
+    for (let i = 0; i < 20; i++) {
+      const submitted = await submitNativeTurn(session, f.documentId, {
+        text: "현재 문서에 뭐가 있어?",
+        permission: "read_only",
+      });
+      const [turn] =
+        await db()`select job_id from spellbook_native_turns where id=${submitted.turnId}`;
+      const owner = {
+        jobId: String(turn.job_id),
+        sessionId: f.nativeSessionId,
+        executionToken: `goal-answer-${i}`,
+      };
+      await executeNativeTool({ ...owner, operation: "start" });
+      await completeNativeTurn(
+        { id: turn.job_id },
+        {
+          jobId: turn.job_id,
+          status: "succeeded",
+          result: {
+            text: "사진이 있습니다.",
+            changed: false,
+            reviewed: false,
+            executionToken: owner.executionToken,
+            task: {
+              intent: "answer",
+              goal: "문서 설명",
+              outcome: "answered",
+              reason: "",
+            },
+          },
+        },
+      );
+    }
+    const resume = await submitNativeTurn(session, f.documentId, {
+      text: "진행 하라고",
+      permission: "selection",
+    });
+    const [job] =
+      await db()`select j.payload from spellbook_jobs j join spellbook_native_turns t on t.job_id=j.id where t.id=${resume.turnId}`;
+    expect(job.payload.conversationHistory).toHaveLength(12);
+    expect(
+      job.payload.conversationHistory.every(
+        (row: { request: string }) => row.request !== goal,
+      ),
+    ).toBe(true);
+    expect(job.payload.activeGoal).toMatchObject({
+      request: goal,
+      scope: f.nativeSessionId,
+    });
+    expect(job.payload.permissionMode).toBe("selection");
+    const another = await fixture();
+    const other = await submitNativeTurn(session, another.documentId, {
+      text: "진행 하라고",
+      permission: "document",
+    });
+    const [otherJob] =
+      await db()`select j.payload from spellbook_jobs j join spellbook_native_turns t on t.job_id=j.id where t.id=${other.turnId}`;
+    expect(otherJob.payload.activeGoal).toBeNull();
+  });
+
   it("isolates the schema on every concurrent pool connection", async () => {
     const rows = await Promise.all(
       Array.from(

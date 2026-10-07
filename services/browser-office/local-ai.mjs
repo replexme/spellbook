@@ -1,4 +1,9 @@
 /* SPDX-License-Identifier: MPL-2.0 */
+import { localOfficeAIState } from "./local-file.mjs";
+import {
+  normalizeActiveGoal,
+  prepareActiveGoal,
+} from "../../contracts/native-goal.cjs";
 import {
   pairLocalConnector,
   readLocalConnectorSession,
@@ -7,7 +12,9 @@ import { boundedConversationHistory } from "../../contracts/native-turn-policy.c
 import { localOffice } from "./local-workspace.mjs";
 const origin = "http://127.0.0.1:43127",
   el = (id) => document.getElementById(id);
-let conversationHistory = [];
+let conversationHistory = [],
+  activeGoal = null,
+  stateReady = Promise.resolve();
 let session = readLocalConnectorSession(sessionStorage),
   turnId,
   busy = false,
@@ -71,9 +78,20 @@ el("ai-run").onclick = async () => {
   const requestText = el("ai-request").value;
   el("ai-run").disabled = true;
   try {
+    await stateReady;
+    if (cancelled || generation !== localOffice.generation())
+      throw Error("document_closed");
+    const documentScope = localOffice.documentScope();
+    activeGoal = prepareActiveGoal(requestText, activeGoal, documentScope);
+    await localOfficeAIState(documentScope, {
+      conversationHistory,
+      activeGoal,
+    });
     const created = await post("/v1/local-turns", {
       requestText,
       conversationHistory,
+      activeGoal,
+      documentScope,
       permissionMode: el("ai-scope").value,
       modelSettings: JSON.parse(el("ai-model").value),
     });
@@ -128,6 +146,14 @@ el("ai-run").onclick = async () => {
             task: value.result?.task,
           },
         ]);
+        activeGoal = normalizeActiveGoal(
+          value.result?.activeGoal,
+          documentScope,
+        );
+        await localOfficeAIState(documentScope, {
+          conversationHistory,
+          activeGoal,
+        });
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -151,6 +177,7 @@ el("ai-cancel").onclick = cancel;
 window.addEventListener("pagehide", cancel);
 window.addEventListener("spellbook-local-document-changing", () => {
   conversationHistory = [];
+  activeGoal = null;
   cancel();
 });
 el("ai").addEventListener("toggle", () => {
@@ -158,3 +185,16 @@ el("ai").addEventListener("toggle", () => {
     void localOffice.call({ operation: "fit_view" }).catch(() => {});
 });
 if (session) void models().catch(fail);
+
+window.addEventListener("spellbook-local-document-opened", (event) => {
+  const { documentId, generation } = event.detail;
+  stateReady = localOfficeAIState(documentId)
+    .then((state) => {
+      if (generation !== localOffice.generation()) return;
+      conversationHistory = boundedConversationHistory(
+        state?.conversationHistory ?? [],
+      );
+      activeGoal = normalizeActiveGoal(state?.activeGoal, documentId);
+    })
+    .catch(fail);
+});

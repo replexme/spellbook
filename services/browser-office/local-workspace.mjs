@@ -11,7 +11,9 @@ const editor = element("editor"),
 element("ai").addEventListener("toggle", () => {
   document.body.classList.toggle("has-panel", element("ai").open);
 });
-element("ai-close").onclick = () => { element("ai").open = false; };
+element("ai-close").onclick = () => {
+  element("ai").open = false;
+};
 const fileMenu = document.querySelector(".local-file-menu");
 fileMenu.addEventListener("click", (event) => {
   if (event.target.closest("button, a")) fileMenu.open = false;
@@ -81,7 +83,12 @@ const call = async (request) => {
     port.postMessage({ id, request });
   });
 };
-const phoneView = installLocalPhoneView({call, isReady: () => !!port && !element("save").disabled, generation: () => generation, reportError: error => showError(error)});
+const phoneView = installLocalPhoneView({
+  call,
+  isReady: () => !!port && !element("save").disabled,
+  generation: () => generation,
+  reportError: (error) => showError(error),
+});
 const showError = (error) => {
   const text = `작업을 완료하지 못했습니다: ${error.message}`;
   element("error").hidden = false;
@@ -126,6 +133,11 @@ async function receive(message) {
     );
   } else if (message.type === "open-complete") {
     buttons(true);
+    window.dispatchEvent(
+      new CustomEvent("spellbook-local-document-opened", {
+        detail: { documentId: current.documentId, generation },
+      }),
+    );
     phoneView.opened();
     update(
       message.recovered
@@ -188,7 +200,7 @@ async function receive(message) {
   } else if (message.type === "save-response") {
     pendingHandle = null;
     if (!message.success) throw Error(message.error ?? "local_save_failed");
-    port.postMessage({type: "file-name", fileName: current.name});
+    port.postMessage({ type: "file-name", fileName: current.name });
     modified = !!message.modified;
     update(
       modified ? "이후 변경은 아직 저장하지 않았습니다" : "파일 저장 완료",
@@ -465,6 +477,7 @@ export const localProgramsReady =
 localProgramsReady.catch(() => {});
 export const localOffice = {
   call,
+  documentScope: () => current?.documentId ?? "",
   generation: () => generation,
   sendCommand,
   isReady: () => !!port && !element("save").disabled,

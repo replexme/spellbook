@@ -663,6 +663,35 @@ test("image cropping verifies all edges and preserves picture geometry and other
   );
 });
 
+test("image shape cropping rejects rectangular results and unrequested changes", () => {
+  const before = document();
+  before.slides[0].elements[0].kind = "image";
+  before.slides[0].elements[0].onlyoffice.crop = null;
+  before.slides[0].onlyoffice.drawings[0].geometry = {
+    preset: "rect", adjustments: {}, paths: null,
+  };
+  const after = structuredClone(before);
+  const command = {
+    op: "crop_image", elementId: "0/0", geometry: "ellipse",
+    left: 0, top: 0, right: 0, bottom: 0,
+  };
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /intent_mismatch:image_shape/,
+  );
+  after.slides[0].onlyoffice.drawings[0].geometry.preset = "ellipse";
+  verifyOnlyOfficeProductIntent(before, after, [command]);
+  after.slides[0].elements[1].onlyoffice.ownName = "unrequested";
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [command]),
+    /unrequested_change/,
+  );
+  assert.throws(
+    () => verifyOnlyOfficeProductIntent(before, after, [{...command, geometry: "line"}]),
+    /argument_invalid:image_shape/,
+  );
+});
+
 test("slide background replaces its fill while preserving every drawing and other slide", () => {
   const before = document();
   before.slides[0].onlyoffice.background = null;

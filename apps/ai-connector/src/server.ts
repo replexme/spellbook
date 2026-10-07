@@ -231,6 +231,8 @@ async function executeNativeJob(
     const result = await runNativeTurn(client, {
       requestText: job.requestText,
       conversationHistory: job.conversationHistory,
+      activeGoal: job.activeGoal,
+      documentScope: job.sessionId,
       modelSettings: job.modelSettings,
       permission,
       host,

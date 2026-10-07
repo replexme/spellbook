@@ -72,7 +72,7 @@ async function collect(directory) {
         await collect(name);
     } else if (
       entry.isFile() &&
-      (/\.(mjs|js|json|html|md|ts|txt|patch|sh|py|css)$/.test(name) ||
+      (/\.(mjs|cjs|js|json|html|md|ts|cts|txt|patch|sh|py|css)$/.test(name) ||
         entry.name.startsWith("Dockerfile"))
     )
       sources.push(name);

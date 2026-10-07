@@ -1,3 +1,4 @@
+import {validateOperationArguments} from "../../../contracts/native-edit-tools.cjs";
 import Ajv from "ajv";
 import { createOfficeEditor } from "/npm/public-api.js";
 import { createProductSession } from "../product-session.mjs";
@@ -201,8 +202,10 @@ const validateFull = new Ajv({ strict: false }).compile(
 const absentCommandFields = Object.fromEntries(
   Object.keys(contract.toolInputSchema.properties).map((key) => [key, null]),
 );
-const validate = (command) =>
-  validateFull({ ...absentCommandFields, ...command });
+const validate = (command) => {
+  validateOperationArguments(command);
+  return validateFull({ ...absentCommandFields, ...command });
+};
 
 async function component(bytes, hidden = false) {
   const engineOrigin = hidden ? inspectionOrigin : candidateOrigin;
