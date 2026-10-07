@@ -16,6 +16,7 @@ import {
   putObject,
 } from "./storage";
 import { signClaims, verifiedClaims } from "./signed-claims";
+import { loadNativeSaveChangePolicy } from "./native-change-budget";
 import { incomingObjectName } from "./incoming-objects";
 import { assertStorageAvailable } from "./storage-usage";
 import { dispatchNativeSave, stageNativeSave } from "./native-save-stage";
@@ -211,6 +212,8 @@ export async function saveBrowserDocument(
     store: (object) =>
       putObject(object, data, currentPresentationFormat.mimeTypes[0]!),
     discard: async () => undefined,
+    humanConfirmed:
+      request.headers.get("x-spellbook-save-intent") === "human_confirmed",
   });
 }
 
@@ -258,6 +261,7 @@ interface BrowserSaveClaims {
   expectedRevision: string;
   size: number;
   expiresAt: number;
+  humanConfirmed?: boolean;
 }
 
 /**
@@ -295,6 +299,10 @@ export async function startBrowserSave(
   )
     throw new HttpError(412, "browser_revision_changed");
   const versionId = randomUUID();
+  const humanConfirmed =
+    request.headers.get("x-spellbook-save-intent") === "human_confirmed";
+  // Reject pending review before uploading a file that cannot become a version.
+  await requireSavePolicy(current.id, current.save_revision, humanConfirmed);
   const target = await directWriteTarget(
     incomingObjectName(savedObjects(session, documentId, versionId).object),
     currentPresentationFormat.mimeTypes[0]!,
@@ -309,6 +317,7 @@ export async function startBrowserSave(
     expectedRevision,
     size,
     expiresAt: Date.now() + BROWSER_SAVE_TOKEN_SECONDS * 1000,
+    humanConfirmed,
   };
   return {
     direct: true,
@@ -369,6 +378,7 @@ export async function completeBrowserSave(
     bytes: stored.size,
     store: (object) => moveObject(incoming, object),
     discard: () => deleteObject(incoming),
+    humanConfirmed: claims.humanConfirmed === true,
   });
 }
 
@@ -382,7 +392,7 @@ function savedObjects(session: Session, documentId: string, versionId: string) {
 
 async function activeBrowserSession(session: Session, documentId: string) {
   const [current] = await db()`
-    select s.id,s.working_version_id,s.working_sha256,s.status,s.wopi_lock,
+    select s.id,s.working_version_id,s.working_sha256,s.status,s.wopi_lock,s.save_revision,
       current.document_object as preservation_object
     from spellbook_native_sessions s
     join spellbook_documents d on d.id=s.document_id and d.account_id=s.account_id
@@ -411,6 +421,7 @@ async function acceptBrowserSave(
     store: (object: string) => Promise<void>;
     /** Drops bytes that turned out not to be needed. */
     discard: () => Promise<void>;
+    humanConfirmed?: boolean;
   },
 ): Promise<{ revision: string; unchanged: boolean }> {
   const { digest } = file;
@@ -446,6 +457,17 @@ async function acceptBrowserSave(
     });
     await file.discard().catch(() => undefined);
     return { revision: currentRevision, unchanged: true };
+  }
+
+  try {
+    await requireSavePolicy(
+      current.id,
+      current.save_revision,
+      file.humanConfirmed === true,
+    );
+  } catch (error) {
+    await file.discard().catch(() => undefined);
+    throw error;
   }
 
   // An unchanged save always succeeds; a new version must fit the plan.
@@ -487,6 +509,7 @@ async function acceptBrowserSave(
         preservationObject: current.preservation_object,
         saveRevision: locked.save_revision,
         bytes: file.bytes,
+        humanConfirmed: file.humanConfirmed === true,
       });
     });
   } catch (error) {
@@ -498,6 +521,28 @@ async function acceptBrowserSave(
     revision: browserRevision(versionId, digest),
     unchanged: false,
   };
+}
+
+async function requireSavePolicy(
+  sessionId: string,
+  saveRevision: number,
+  humanConfirmed: boolean,
+) {
+  try {
+    await loadNativeSaveChangePolicy(
+      db(),
+      sessionId,
+      saveRevision,
+      humanConfirmed,
+    );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === "native_ai_change_review_pending"
+    )
+      throw new HttpError(409, error.message);
+    throw error;
+  }
 }
 
 export function browserRevision(versionId: string, digest: string): string {

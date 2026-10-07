@@ -23,6 +23,7 @@ interface CompletedNativeTask {
 }
 
 interface NativeSaveTask extends CompletedNativeTask {
+  error?: string | null;
   taskStatus: string;
   turnStatus: string;
   changed: boolean;
@@ -135,6 +136,7 @@ export async function loadNativeSaveChangePolicy(
   sql: Sql | TransactionSql,
   sessionId: string,
   saveRevision: number,
+  humanConfirmed = false,
 ): Promise<NativeSaveChangePolicy> {
   // A request running in the browser records its editor calls when it ends,
   // so a save while it runs could carry edits no review has covered yet.
@@ -148,7 +150,7 @@ export async function loadNativeSaveChangePolicy(
   `;
   if (browserTurn) throw new Error("native_ai_change_review_pending");
   const tasks = await sql`
-    select task.id::text,task.request,task.result,
+    select task.id::text,task.request,task.result,task.error,
       task.status as "taskStatus",turn.status as "turnStatus",
       turn.changed,turn.reviewed
     from spellbook_native_tasks task
@@ -162,25 +164,58 @@ export async function loadNativeSaveChangePolicy(
       id: String(task.id),
       request: task.request,
       result: task.result,
+      error: typeof task.error === "string" ? task.error : null,
       taskStatus: String(task.taskStatus),
       turnStatus: String(task.turnStatus),
       changed: task.changed === true,
       reviewed: task.reviewed === true,
     })),
+    humanConfirmed,
   );
 }
 
 export function nativeSavePolicyFromTasks(
   tasks: NativeSaveTask[],
+  humanConfirmed = false,
 ): NativeSaveChangePolicy {
   const mutations = tasks.filter((task) => {
     const request = objectValue(task.request);
+    const result = objectValue(task.result);
+    if (
+      task.taskStatus === "failed" &&
+      /^(product_mutation_rejected|product_mutation_rolled_back):/.test(
+        task.error ?? "",
+      )
+    )
+      return false;
+    if (
+      task.taskStatus === "completed" &&
+      Array.isArray(result.changedSlideIndexes) &&
+      result.changedSlideIndexes.length === 0
+    )
+      return false;
     return (
       request.operation !== "observe" &&
       !(request.operation === "edit_batch" && request.dryRun === true)
     );
   });
   if (!mutations.length) return humanNativeSavePolicy();
+  // A person can retain the visible, admitted document without claiming that
+  // the AI fulfilled its request. Never accept an in-flight/ambiguous mutation.
+  if (
+    humanConfirmed &&
+    mutations.every(
+      (task) =>
+        task.taskStatus === "completed" &&
+        task.turnStatus === "completed" &&
+        task.changed,
+    )
+  ) {
+    return {
+      ...humanNativeSavePolicy(),
+      taskIds: mutations.map((task) => task.id).sort(),
+    };
+  }
   if (
     mutations.some(
       (task) =>

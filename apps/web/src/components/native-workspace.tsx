@@ -232,6 +232,7 @@ export function NativeWorkspace({
     /** Saves a person's browser-editor edits shortly after they start. */
     browserAutosave = useRef<ReturnType<typeof setTimeout> | null>(null),
     aiRunning = useRef(false),
+    reviewPending = useRef(false),
     downloadAfterRevision = useRef<number | null>(null),
     browserOpening = useRef(false),
     browserRevision = useRef(
@@ -567,10 +568,15 @@ export function NativeWorkspace({
     [launch.editorKind, origin],
   );
   const requestSave = useCallback(
-    (state = "저장 중…") => {
+    (state = "저장 중…", humanConfirmed = false) => {
+      if (humanConfirmed) reviewPending.current = false;
       pendingSaveRevision.current = saveRevision.current + 1;
       setSaveState(state);
-      sendOffice("Action_Save", { Notify: true, DontSaveIfUnmodified: false });
+      sendOffice("Action_Save", {
+        Notify: true,
+        DontSaveIfUnmodified: false,
+        HumanConfirmedChanges: humanConfirmed,
+      });
     },
     [sendOffice],
   );
@@ -582,7 +588,11 @@ export function NativeWorkspace({
     const wait = () => {
       browserAutosave.current = setTimeout(() => {
         browserAutosave.current = null;
-        if (!editorModified.current || pendingSaveRevision.current !== null)
+        if (
+          !editorModified.current ||
+          pendingSaveRevision.current !== null ||
+          reviewPending.current
+        )
           return;
         if (aiRunning.current) wait();
         else requestSave("자동 저장 중…");
@@ -863,7 +873,12 @@ export function NativeWorkspace({
   const saveBrowserDocument = useCallback(
     async (
       channel: MessagePort,
-      message: { requestId?: unknown; revision?: unknown; bytes?: unknown },
+      message: {
+        requestId?: unknown;
+        revision?: unknown;
+        bytes?: unknown;
+        humanConfirmed?: unknown;
+      },
     ) => {
       if (
         launch.editorKind !== "browser" ||
@@ -893,6 +908,8 @@ export function NativeWorkspace({
           launch.contentApiBase,
           browserRevision.current,
           message.bytes,
+          fetch,
+          message.humanConfirmed === true,
         );
         const revision = value.revision;
         const pendingRequest = pendingBrowserSave.current;
@@ -923,8 +940,13 @@ export function NativeWorkspace({
           cause instanceof Error &&
           cause.message === "native_ai_change_review_pending"
         ) {
-          setSaveState("변경 사항 있음");
-          armBrowserAutosave();
+          reviewPending.current = !aiRunning.current;
+          setSaveState(
+            reviewPending.current ? "AI 변경 확인 필요" : "변경 사항 있음",
+          );
+          if (reviewPending.current)
+            setError("native_ai_change_review_pending");
+          else armBrowserAutosave();
           return;
         }
         setSaveState("저장 실패");
@@ -1046,7 +1068,9 @@ export function NativeWorkspace({
               editorModified.current = result.data.modified === true;
               setSaveState((current) =>
                 result.data.modified
-                  ? "변경 사항 있음"
+                  ? reviewPending.current
+                    ? "AI 변경 확인 필요"
+                    : "변경 사항 있음"
                   : pendingSaveRevision.current !== null
                     ? current
                     : "저장됨",
@@ -1083,7 +1107,9 @@ export function NativeWorkspace({
                     setText(waiting.draft);
                   }
                 }
-                setSaveState("저장 실패");
+                setSaveState(
+                  reviewPending.current ? "AI 변경 확인 필요" : "저장 실패",
+                );
                 return;
               }
               const saved = pendingBrowserSave.current;
@@ -1891,7 +1917,12 @@ export function NativeWorkspace({
     downloadAfterRevision.current = nextRevision;
     setDownload((current) => (current ? { ...current, busy: true } : current));
     setSaveState("다운로드 준비 중…");
-    sendOffice("Action_Save", { Notify: true, DontSaveIfUnmodified: false });
+    reviewPending.current = false;
+    sendOffice("Action_Save", {
+      Notify: true,
+      DontSaveIfUnmodified: false,
+      HumanConfirmedChanges: true,
+    });
   }
 
   /* ── Conversation ───────────────────────────────────────────────── */
@@ -2126,7 +2157,7 @@ export function NativeWorkspace({
       const key = event.key.toLowerCase();
       if (key === "s") {
         event.preventDefault();
-        if (engineReady && !restoring) requestSave();
+        if (engineReady && !restoring) requestSave("저장 중…", true);
         return;
       }
       const target = event.target instanceof HTMLElement ? event.target : null;
@@ -2233,7 +2264,7 @@ export function NativeWorkspace({
       <WorkspaceTopBar
         fileName={launch.fileName}
         save={save}
-        onSave={() => requestSave()}
+        onSave={() => requestSave("저장 중…", true)}
         editorReady={engineReady}
         onUndo={() => sendOffice("Send_UNO_Command", { Command: ".uno:Undo" })}
         onRedo={() => sendOffice("Send_UNO_Command", { Command: ".uno:Redo" })}

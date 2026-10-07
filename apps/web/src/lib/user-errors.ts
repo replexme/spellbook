@@ -68,6 +68,10 @@ const messages: Record<string, string> = {
   browser_save_revision_missing: `저장을 확인하지 못했어요. ${RELOAD}`,
   browser_document_save_failed:
     "이 파일의 변경을 안전하게 저장하지 못했어요. 편집 내용을 확인하고 다시 시도해 주세요.",
+  product_document_changed:
+    "확인하는 동안 편집 내용이 바뀌었어요. 현재 내용을 확인한 뒤 다시 시도해 주세요. 이 탭은 닫지 않아도 돼요.",
+  native_ai_change_review_pending:
+    "AI가 변경 내용의 검토를 끝내지 못했어요. 현재 내용을 확인한 뒤 ‘지금 저장’을 누르면 이 상태로 저장할 수 있어요.",
   browser_document_download_failed: `파일을 내려받지 못했어요. ${TRY_AGAIN}`,
   browser_document_validation_failed:
     "저장한 파일을 확인하는 중에 문제가 생겼어요. 편집 내용을 확인하고 다시 저장해 주세요.",

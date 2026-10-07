@@ -122,6 +122,48 @@ const apply = (s, value, extra = {}) =>
     commands: [{ op: "set", value, ...extra }],
   });
 
+test("a torn observation is retried without authorizing a stale edit", async () => {
+  const s = setup();
+  let token = "1";
+  s.engine.changeToken = async () => token;
+  await s.session.open(s.bytes(1));
+  const original = s.engine.observe;
+  let torn = true;
+  s.engine.observe = async () => {
+    const value = await original();
+    if (torn) { torn = false; s.change(3); token = "3"; }
+    return value;
+  };
+  await assert.rejects(apply(s, 2), /product_command_stale_observation/);
+  assert.equal((await s.session.observe()).revision, "r3");
+  assert.deepEqual(s.calls, []);
+});
+
+test("continuous native changes cannot produce a stable observation", async () => {
+  const s = setup();
+  let token = 1;
+  s.engine.changeToken = async () => String(token);
+  await s.session.open(s.bytes(1));
+  const original = s.engine.observe;
+  let reads = 0;
+  s.engine.observe = async () => { reads++; token++; return original(); };
+  await assert.rejects(s.session.observe(), /product_document_changed/);
+  assert.equal(reads, 3);
+  assert.deepEqual(s.calls, []);
+});
+
+test("a transient torn read settles and retains exact admitted bytes", async () => {
+  const s = setup();
+  let token = 1;
+  s.engine.changeToken = async () => String(token);
+  await s.session.open(s.bytes(1));
+  const original = s.engine.observe;
+  let first = true;
+  s.engine.observe = async () => { const value = await original(); if (first) { first = false; s.change(2); token++; } return value; };
+  assert.equal((await s.session.observe()).revision,"r2");
+  assert.equal(s.record().candidateBytes[2],2);
+});
+
 test("resource authority failure precedes native preflight and history", async () => {
   const s=setup({}, {prepareResources:async()=>{throw Error("asset_owner_mismatch");}});
   await s.session.open(s.bytes(1));

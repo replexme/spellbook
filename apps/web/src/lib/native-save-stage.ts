@@ -22,6 +22,8 @@ interface NativeSaveStage {
   editorModified?: boolean | null;
   /** Size of the saved package, shown before downloading. */
   bytes?: number | null;
+  /** Explicitly retain the current document after an incomplete AI review. */
+  humanConfirmed?: boolean;
 }
 
 /** An undo marked this long ago no longer names the next save. */
@@ -40,6 +42,7 @@ export async function stageNativeSave(
     sql,
     stage.sessionId,
     stage.saveRevision,
+    stage.humanConfirmed === true,
   );
   const [baseline] = await sql`
     select graph_object from spellbook_versions

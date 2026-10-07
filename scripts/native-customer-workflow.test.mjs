@@ -333,6 +333,7 @@ test("human changes invalidate final review even after a successful edit", async
   );
   assert.equal(result.task.outcome, "unverified");
   assert.equal(result.reviewed, false);
+  assert.equal(result.reviewFailureCode, "native_review_document_changed");
 });
 test("aborted queued work never runs, while failure timing is retained", async () => {
   const controller = new AbortController(),

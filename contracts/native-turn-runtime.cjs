@@ -932,6 +932,7 @@ ${await input.web.readPage(url, signal)}`,
     24e4,
     directlyApplied,
   );
+  let reviewFailureCode = null;
   const finishReview = async (raw) => {
     await toolTail;
     input.signal.throwIfAborted();
@@ -939,9 +940,18 @@ ${await input.web.readPage(url, signal)}`,
     if (report?.review && changed) {
       try {
         await runTool("native_review", report.review, input.signal);
+        reviewFailureCode = null;
       } catch (error) {
         reviewed = false;
         requestSatisfied = false;
+        const reason = error instanceof Error ? error.message : "";
+        reviewFailureCode = reason.includes("evidence is stale") || reason === "product_document_changed"
+          ? "native_review_document_changed"
+          : reason.includes("not received every changed-slide screenshot")
+            ? "native_review_images_missing"
+            : reason.startsWith("customer_goal_not_satisfied:")
+              ? "native_review_goal_not_satisfied"
+              : "native_review_rejected";
         input.onTool("요청 결과 재검토 필요".trim());
       }
     }
@@ -999,6 +1009,7 @@ ${UNCONFIRMED_EDIT_NOTICE}`;
     changed,
     reviewed,
     requestSatisfied,
+    reviewFailureCode,
     task: completion.task,
     activeGoal: nextGoal,
     status:

@@ -65,6 +65,14 @@ describe("reading the editor's file", () => {
 });
 
 describe("saving the editor's file", () => {
+  it("sends explicit retention only to the app, including its relay fallback", async () => {
+    const fetcher = vi.fn<typeof fetch>(async (url) => String(url) === `${base}/saves` ? json({direct:false}) : json({revision:'"v2:x"'}));
+    await writeBrowserDocument(base,revision,file,fetcher,true);
+    for (const call of fetcher.mock.calls) expect(new Headers(call[1]?.headers).get("x-spellbook-save-intent")).toBe("human_confirmed");
+    const automatic = vi.fn<typeof fetch>(async (url) => String(url) === `${base}/saves` ? json({direct:false}) : json({revision:'"v2:x"'}));
+    await writeBrowserDocument(base,revision,file,automatic);
+    for (const call of automatic.mock.calls) expect(new Headers(call[1]?.headers).has("x-spellbook-save-intent")).toBe(false);
+  });
   it("writes straight to storage, then asks the app to check and save it", async () => {
     const fetcher = vi.fn<typeof fetch>(async (url, init) => {
       if (String(url) === `${base}/saves`)

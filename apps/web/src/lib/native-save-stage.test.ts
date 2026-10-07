@@ -45,6 +45,7 @@ describe("shared native save staging", () => {
       sql,
       "session-1",
       3,
+      false,
     );
     expect(payload).toMatchObject({
       inputObject: "versions/version-2/document.pptx",

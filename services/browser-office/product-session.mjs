@@ -62,14 +62,19 @@ export function createProductSession({
     if (!current || failed) throw Error("product_session_not_ready");
   };
   const observe = async () => {
-    const priorToken = await readNativeToken();
-    const value = await engine.observe();
-    const token = await readNativeToken();
-    if (priorToken !== token) throw Error("product_document_changed");
-    lastObservedNativeToken = token;
-    if (!value?.revision || !value.slides?.length)
-      throw Error("product_observation_incomplete");
-    return structuredClone(value);
+    // Observation crosses asynchronous engine calls. Discard a torn read and
+    // take a fresh one; callers still compare its revision before any write.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const priorToken = await readNativeToken();
+      const value = await engine.observe();
+      const token = await readNativeToken();
+      if (priorToken !== token) continue;
+      lastObservedNativeToken = token;
+      if (!value?.revision || !value.slides?.length)
+        throw Error("product_observation_incomplete");
+      return structuredClone(value);
+    }
+    throw Error("product_document_changed");
   };
   const admit = async (bytes, expected, recoveredReceipt = null) => {
     const owned = bytes.slice();

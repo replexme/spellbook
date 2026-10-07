@@ -83,6 +83,27 @@ PowerPoint compatibility, production deployment and comparative product
 quality as separate evidence. A small repeated cohort cannot establish broad
 performance superiority.
 
+## Incomplete review and saving
+
+A completed edit can remain unreviewed when the live document changes during
+visual review. That does not make the edit fulfilled. Automatic saves wait for
+review, and a pending review is checked before issuing a direct-upload target.
+The client stops retrying a completed, unreviewed turn and explains how to retain
+the visible document. A person's save button, keyboard save, or save-and-download
+explicitly retains that document under the existing human package budget. The
+intent is included in signed upload claims and rechecked under the session lock.
+Running or ambiguous mutations still refuse saves; package validation, ownership,
+revision checks, preservation, and forbidden package categories remain mandatory.
+Known rejected/rolled-back tasks and successful no-ops do not poison later saves.
+Retaining a document never changes the AI turn's review or fulfillment record.
+
+Observation discards and retries up to three reads whose native history token
+changes during the read. Writes still require the caller's exact revision, and
+continuous changes fail without producing a checkpoint. Incomplete final reviews
+record a bounded reason code, rather than dropping the cause. Editor errors keep
+one reference and occurrence time across the UI, support link, authenticated
+server event, and server log; only identifiers and reason codes are sent.
+
 ## Design references
 
 - [ONLYOFFICE image editing](https://helpcenter.onlyoffice.com/docs/userguides/presentation_editor/InsertImages.aspx): native crop-to-shape rather than raster replacement.

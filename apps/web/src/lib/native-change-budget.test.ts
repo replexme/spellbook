@@ -9,6 +9,66 @@ import {
 const result = (changedSlideIndexes: number[]) => ({ changedSlideIndexes });
 
 describe("native save change budgets", () => {
+  it("ignores proven rejection/rollback and completed no-ops, but retains ambiguous failures", () => {
+    const task = {
+      id: "attempt",
+      request: { operation: "edit", command: { op: "replace_text" } },
+      result: null,
+      taskStatus: "failed",
+      turnStatus: "failed",
+      changed: false,
+      reviewed: false,
+    };
+    for (const error of [
+      "product_mutation_rejected:invalid",
+      "product_mutation_rolled_back:invalid",
+    ])
+      expect(nativeSavePolicyFromTasks([{ ...task, error }]).origin).toBe(
+        "human",
+      );
+    expect(() =>
+      nativeSavePolicyFromTasks([{ ...task, error: "transport_timeout" }]),
+    ).toThrow("native_ai_change_review_pending");
+    expect(
+      nativeSavePolicyFromTasks([
+        {
+          ...task,
+          taskStatus: "completed",
+          turnStatus: "completed",
+          result: result([]),
+        },
+      ]).origin,
+    ).toBe("human");
+  });
+  it("accepts a person's explicit retention of completed unreviewed edits, never an ambiguous or running edit", () => {
+    const task = {
+      id: "edited",
+      request: { operation: "edit", command: { op: "replace_text" } },
+      result: result([0]),
+      taskStatus: "completed",
+      turnStatus: "completed",
+      changed: true,
+      reviewed: false,
+    };
+    expect(() => nativeSavePolicyFromTasks([task])).toThrow(
+      "native_ai_change_review_pending",
+    );
+    const policy = nativeSavePolicyFromTasks([task], true);
+    expect(policy.origin).toBe("human");
+    expect(policy.taskIds).toEqual(["edited"]);
+    expect(policy.budget.allowedCategories).not.toContain("macros");
+    for (const change of [
+      { turnStatus: "running" },
+      { taskStatus: "failed" },
+      { changed: false },
+    ])
+      expect(() =>
+        nativeSavePolicyFromTasks([{ ...task, ...change }], true),
+      ).toThrow("native_ai_change_review_pending");
+    expect(
+      nativeSavePolicyFromTasks([{ ...task, reviewed: true }]).origin,
+    ).toBe("ai");
+  });
   it("allows the complete native human surface but rejects opaque package mutation", () => {
     const policy = humanNativeSavePolicy();
 

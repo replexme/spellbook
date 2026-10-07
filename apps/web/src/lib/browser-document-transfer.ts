@@ -103,10 +103,18 @@ export async function writeBrowserDocument(
   revision: string,
   bytes: ArrayBuffer,
   fetchImpl: typeof fetch = fetch,
+  humanConfirmed = false,
 ): Promise<{ revision: string; unchanged: boolean }> {
+  const intentHeaders: Record<string, string> = humanConfirmed
+    ? { "x-spellbook-save-intent": "human_confirmed" }
+    : {};
   const started = await fetchImpl(`${contentApiBase}/saves`, {
     method: "POST",
-    headers: { "content-type": "application/json", "if-match": revision },
+    headers: {
+      "content-type": "application/json",
+      "if-match": revision,
+      ...intentHeaders,
+    },
     body: JSON.stringify({ size: bytes.byteLength }),
     cache: "no-store",
   });
@@ -143,7 +151,11 @@ export async function writeBrowserDocument(
   return saved(
     await fetchImpl(`${contentApiBase}/contents`, {
       method: "PUT",
-      headers: { "content-type": PPTX_TYPE, "if-match": revision },
+      headers: {
+        "content-type": PPTX_TYPE,
+        "if-match": revision,
+        ...intentHeaders,
+      },
       body: bytes,
       cache: "no-store",
     }),

@@ -985,6 +985,16 @@ export async function completeNativeTurn(
   const executionToken =
     typeof result?.executionToken === "string" ? result.executionToken : "";
   const modelInput = validatedNativeModelInput(result?.modelInput);
+  const reviewFailureCode =
+    !reviewed &&
+    [
+      "native_review_document_changed",
+      "native_review_images_missing",
+      "native_review_goal_not_satisfied",
+      "native_review_rejected",
+    ].includes(String(result?.reviewFailureCode))
+      ? String(result?.reviewFailureCode)
+      : null;
   if (
     !text ||
     text.length > 8_000 ||
@@ -1084,6 +1094,7 @@ export async function completeNativeTurn(
     const [turn] =
       await sql`update spellbook_native_turns set status='completed', assistant_text=${text},
       changed=${changed}, reviewed=${reviewed},
+      last_error=${reviewFailureCode},
       model_usage=coalesce(${modelInput ? sql.json(modelInput as never) : null}::jsonb, model_usage),
       updated_at=now() where job_id=${job.id} returning id,session_id`;
     const summary = await storeTurnSummary(
@@ -1095,7 +1106,7 @@ export async function completeNativeTurn(
           permissionMode: record.permission_mode,
           changed,
           reviewed,
-          lastError: null,
+          lastError: reviewFailureCode,
           provider: record.provider,
           task: completion.task,
         },

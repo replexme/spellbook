@@ -1,13 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Banner, IconButton } from "@/design-system";
 import { newErrorReference } from "@/lib/support";
-import {
-  UNEXPECTED_ERROR,
-  errorNeedsReference,
-  userFacingError,
-} from "@/lib/user-errors";
+import { reportEditorError } from "@/lib/editor-error-report";
+import { UNEXPECTED_ERROR, userFacingError } from "@/lib/user-errors";
 import { SupportLink } from "../status-screen";
 
 /**
@@ -27,15 +24,20 @@ export function PanelError({
   documentId: string;
   onDismiss: () => void;
 }) {
-  const needsReference = errorNeedsReference(error);
-  // One number per distinct failure shown.
-  const reference = useMemo(
-    () => (needsReference ? newErrorReference() : null),
-    [error, needsReference],
+  const failure = useMemo(
+    () => ({
+      reference: newErrorReference(),
+      occurredAt: new Date().toISOString(),
+    }),
+    [error],
   );
   const code = /^[a-z][a-z0-9_]{1,79}$/.test(error.trim())
     ? error.trim()
-    : null;
+    : "unexpected_error";
+  const reference = failure.reference;
+  useEffect(() => {
+    reportEditorError(documentId, reference, code, failure.occurredAt);
+  }, [documentId, reference, code, failure.occurredAt]);
   return (
     <Banner
       tone="danger"
@@ -65,6 +67,7 @@ export function PanelError({
           documentId,
           errorReference: reference,
           errorCode: code,
+          occurredAt: failure.occurredAt,
         }}
       >
         문제 신고

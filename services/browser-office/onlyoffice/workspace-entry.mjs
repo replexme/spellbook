@@ -615,6 +615,7 @@ async function handle(message) {
                 revision: hostRevision,
                 bytes: owned.buffer,
                 reason: message.reason,
+                humanConfirmed: message.values?.HumanConfirmedChanges === true || message.reason === "native_user_save",
               },
               [owned.buffer],
             );

@@ -13,6 +13,7 @@ export interface SupportContext {
   errorReference?: string | null;
   /** The internal reason code, if there was one. */
   errorCode?: string | null;
+  occurredAt?: string;
 }
 
 const CODE = /^[a-z][a-z0-9_.-]{0,79}$/;
@@ -40,7 +41,7 @@ export function supportMailto(
     context.errorCode && CODE.test(context.errorCode)
       ? `오류 코드: ${context.errorCode}`
       : null,
-    `시각: ${now.toISOString()}`,
+    `시각: ${context.occurredAt && Number.isFinite(Date.parse(context.occurredAt)) ? context.occurredAt : now.toISOString()}`,
   ].filter((line): line is string => line !== null);
   const subject = context.errorReference
     ? `[Spellbook 문제 신고] 오류 번호 ${context.errorReference}`
