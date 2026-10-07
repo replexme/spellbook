@@ -20,6 +20,8 @@ export function saveView(
     return { kind: "dirty", label: "저장 안 됨 · 지금 저장" };
   if (state === "복구된 변경 사항 있음")
     return { kind: "dirty", label: "복구한 변경 있음 · 지금 저장" };
+  if (state === "AI 변경 확인 필요")
+    return { kind: "dirty", label: "AI 변경 확인 필요 · 지금 저장" };
   if (state === "저장 실패")
     return { kind: "error", label: "저장하지 못함 · 다시 시도" };
   return { kind: "busy", label: state };
