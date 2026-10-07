@@ -1498,7 +1498,7 @@ export function NativeWorkspace({
         );
         setSaveState("저장 실패");
         setError(
-          "저장한 파일을 안전하게 확인하지 못했어요. 마지막 저장본은 유지돼요.",
+          response.session.error ?? "browser_document_validation_failed",
         );
         if (waiting) {
           setBusy(false);

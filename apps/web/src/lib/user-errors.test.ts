@@ -51,6 +51,15 @@ describe("user-facing product errors", () => {
       expect(userFacingError(code, "x")).toContain("삭제");
   });
 
+  it("keeps save-validation codes available for reporting while explaining preservation", () => {
+    const code = "native_scan_submitted_artifact_mismatch";
+    expect(isKnownErrorCode(code)).toBe(true);
+    expect(userFacingError(code, "실패했어요.")).toBe(
+      "저장한 파일을 안전하게 확인하지 못했어요. 마지막 저장본은 유지돼요.",
+    );
+    expect(userFacingError(code, "실패했어요.")).not.toContain(code);
+  });
+
   it("explains an AI worker's reported reason in Korean", () => {
     expect(userFacingError("ai_failure:timeout", "x")).toMatch(/[가-힣]/);
     expect(userFacingError("ai_failure:timeout", "x")).not.toContain(

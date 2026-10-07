@@ -11,6 +11,8 @@ import { aiFailureMessage, reportedAiFailure } from "./ai-errors";
 const TRY_AGAIN = "잠시 뒤 다시 시도해 주세요.";
 const RELOAD = "페이지를 새로 고친 뒤 다시 시도해 주세요.";
 const SAFE = "파일은 그대로 저장돼 있어요.";
+const SAVE_CHECK_FAILED =
+  "저장한 파일을 안전하게 확인하지 못했어요. 마지막 저장본은 유지돼요.";
 
 const messages: Record<string, string> = {
   // Session and access
@@ -75,6 +77,11 @@ const messages: Record<string, string> = {
   browser_document_download_failed: `파일을 내려받지 못했어요. ${TRY_AGAIN}`,
   browser_document_validation_failed:
     "저장한 파일을 확인하는 중에 문제가 생겼어요. 편집 내용을 확인하고 다시 저장해 주세요.",
+  native_scan_submitted_artifact_mismatch: SAVE_CHECK_FAILED,
+  native_scan_validation_failed: SAVE_CHECK_FAILED,
+  native_scan_outputs_missing: SAVE_CHECK_FAILED,
+  native_scan_artifact_identity_mismatch: SAVE_CHECK_FAILED,
+  native_scan_validation_identity_mismatch: SAVE_CHECK_FAILED,
   office_editor_save_required: "먼저 지금 편집 내용을 저장해 주세요.",
   document_save_in_progress:
     "저장하는 중이에요. 저장이 끝나면 다시 시도해 주세요.",
