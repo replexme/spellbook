@@ -14,4 +14,12 @@
 
 작업 주소는 `https://office.spellbook.replex.me`, SDK는 `https://present-office-static-mviaa4yhiq-du.a.run.app`, 독립 미리보기는 `https://present-office-static-141191783520.asia-northeast3.run.app`이다. 모두 기존의 하나의 무자격증명 정적 서버를 사용하며 브라우저 출처는 서로 다르다. 호스트는 `https://spellbook.replex.me`이다. 최소 인스턴스 0, 요청 기반 CPU를 유지한다.
 
-실제 배포 이미지·트래픽·파일 읽기·문서 편집/저장 결과는 배포 실행 후 기록한다. 운영 완료 여부는 아래 실제 결과로 판단하며 로컬 94개/100회 통과로 대신하지 않는다.
+운영 반영 완료: 정적 편집기 revision `present-office-static-static-b287f83f-4160e376-76350d4f`, 웹 `present-web-00294-cod`, AI worker `present-ai-worker-00080-7ds`에 각각 트래픽 100%가 연결됐다. 웹의 실제 설정은 `browser` 편집 모드와 위 작업 주소, 공개 코어 `d70109a5f5244cda85666cfc463e22546f0fccc1`이다. `/api/health` 및 데이터베이스·저장소·계정 읽기 `/api/ready`가 통과했다.
+
+운영의 JS/WASM 보조 파일 8개와 SDK 번들 6개를 내려받아 선택 배포의 SHA-256과 모두 일치함을 확인했다. 기존 세 출처 모두 ONLYOFFICE 준비 응답과 동일한 배포 해시를 반환했다. 소스·법적 고지 12개 경로에 HEAD 요청이 성공했다.
+
+실제 50장 PPTX를 운영 주소에서 열어 슬라이드 추가와 복제 두 항목을 확인했다. 각각 실제 저장 파일이 독립 OpenXML 검증을 통과했고, 실행 취소는 원본 파일 바이트와 정확히 일치했으며 다시 실행은 저장 파일과 정확히 일치했다. 저장 파일을 다시 열었을 때 모든 슬라이드 관찰값이 편집 직후와 같았다. 화면 캡처의 한국어 메뉴·슬라이드·편집 영역·법적 고지를 직접 확인했다. 두 운영 항목 완료 후, 동일 바이트의 나머지 로컬 검증 행렬을 운영에서 반복하는 실행은 중단했다. 운영 10개 항목 전체 통과로 주장하지 않는다. 실제 OS 파일 선택 창은 시험에서 OPFS 파일 핸들로 대체했다. 사용자 계정의 SSO·고객 문서 저장 경로 전체를 이 검사로 증명하지 않는다.
+
+실행 증거는 `artifacts/release-execution-20261007/`의 `production-services-readback.json`, `production-engine-readback.json`, `production-source-readback.json`, `production-real50-structure/report.json` 및 화면/저장 PPTX에 있다. 소유한 작업용 worktree와 브라우저를 정리했다. 작업 이미지도 제거됐다. 공유 로컬 VM에 다른 작업의 실행 중 컨테이너가 있어 VM과 해당 컨테이너는 보존했다.
+
+사용자의 10월 7일 지적으로 가비아/DNS 작업과 별도 서명·Windows 출시 점검은 범위에서 제외했다. DNS 변경 및 회원가입은 수행하지 않았다. 편집기 교체에 필요하지 않은 도메인 문제로 작업을 넓힌 판단은 잘못이었다.
