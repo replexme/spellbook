@@ -166,7 +166,7 @@ const observation = {
 describe.skipIf(!enabled)("durable native editor orchestration", () => {
   it("retains a cancelled editing goal through 20 answer turns outside model history and scopes it to the document", async () => {
     const f = await fixture();
-    const goal = "사진을 원형으로 잘라서 넣어줘";
+    const goal = "사진을 원형으로 잘라서 넣어줘. 제목과 사진 위치는 유지해줘.";
     const first = await submitNativeTurn(session, f.documentId, {
       text: goal,
       permission: "document",
@@ -206,11 +206,11 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       );
     }
     const resume = await submitNativeTurn(session, f.documentId, {
-      text: "진행 하라고",
+      text: "하라니까? 왜 자꾸 멈추는데",
       permission: "selection",
     });
     const [job] =
-      await db()`select j.payload from spellbook_jobs j join spellbook_native_turns t on t.job_id=j.id where t.id=${resume.turnId}`;
+      await db()`select j.id,j.payload from spellbook_jobs j join spellbook_native_turns t on t.job_id=j.id where t.id=${resume.turnId}`;
     expect(job.payload.conversationHistory).toHaveLength(12);
     expect(
       job.payload.conversationHistory.every(
@@ -222,6 +222,39 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       scope: f.nativeSessionId,
     });
     expect(job.payload.permissionMode).toBe("selection");
+    const executionToken = "goal-resume-summary";
+    await executeNativeTool({
+      jobId: job.id,
+      sessionId: f.nativeSessionId,
+      executionToken,
+      operation: "start",
+    });
+    await completeNativeTurn(
+      { id: job.id },
+      {
+        jobId: job.id,
+        status: "succeeded",
+        result: {
+          text: "요청을 설명했습니다.",
+          executionToken,
+          changed: false,
+          reviewed: false,
+          task: {
+            intent: "answer",
+            goal: "원형 사진",
+            outcome: "answered",
+            reason: "",
+          },
+        },
+      },
+    );
+    const [retained] =
+      await db()`select s.active_goal,j.outputs from spellbook_native_sessions s join spellbook_native_turns t on t.session_id=s.id join spellbook_jobs j on j.id=t.job_id where t.id=${resume.turnId}`;
+    expect(retained.active_goal.request).toBe(goal);
+    expect(retained.outputs.result.task).toMatchObject({
+      intent: "edit",
+      outcome: "unverified",
+    });
     const another = await fixture();
     const other = await submitNativeTurn(session, another.documentId, {
       text: "진행 하라고",

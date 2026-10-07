@@ -168,7 +168,7 @@ function finalizeTurn(raw, evidence) {
 
 function continuationGoal(request, history = [], activeGoal = null) {
   if (
-    !/^(?:니가\s*)?(?:그걸\s*)?(?:계속|이어서|진행|해\s*줘|해줘|하라고|다시\s*해)/u.test(
+    !/^(?:니가\s*)?(?:(?:그걸|그거|그\s*일|그\s*작업|아까\s*(?:요청|작업)(?:을)?|그러면)\s*)?(?:계속|이어서|진행|해\s*줘|해줘|하라고|하라니까|다시\s*해)/u.test(
       request.trim(),
     )
   )

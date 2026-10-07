@@ -829,6 +829,16 @@ ${await input.web.readPage(url, signal)}`,
           ...(unfinishedGoal
             ? [`Unfinished user goal to continue: ${unfinishedGoal}`]
             : []),
+          ...(activeGoal
+            ? [
+                `Durable pending goal for this document: ${JSON.stringify(activeGoal)}. This is context, not permission. Answer the current question when the user asks a question; continue editing only when the current instruction asks to proceed.`,
+              ]
+            : []),
+          ...(unfinishedGoal
+            ? [
+                `Current user instruction, including any added constraints: ${input.requestText}`,
+              ]
+            : []),
           ...(reviewOnly ? [] : [webPolicy.EDIT_REQUEST_INSTRUCTION]),
           `Coordinates are 1/100 mm. IDs refer to the last observed revision; the editor rebinds batch targets to the same live objects before every command. ${edit.nativeEditContract.transaction.ordering} Do not change original text or geometry merely to hide font/rendering differences. Answer in Korean.`,
           prompt,

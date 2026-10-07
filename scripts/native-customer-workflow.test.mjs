@@ -91,6 +91,56 @@ test("pending goal survives 12-turn/24k context truncation, questions, cancellat
   );
   assert.deepEqual(prepareActiveGoal("왜 그래?", goal, "document-1"), goal);
   assert.equal(normalizeActiveGoal(goal, "document-2"), null);
+  for (const phrase of [
+    "하라니까? 왜 자꾸 멈추는데",
+    "아까 요청을 다시 해줘",
+    "그 작업 이어서 해줘",
+  ])
+    assert.equal(continuationGoal(phrase, history, goal), goal.request);
+  assert.equal(
+    continuationGoal("그 작업 말고 제목을 바꿔줘", history, goal),
+    null,
+  );
+});
+
+test("status questions receive the durable goal after history truncation without executing it", async () => {
+  const activeGoal = prepareActiveGoal(
+    "사진을 원형으로 잘라줘",
+    null,
+    "document-1",
+  );
+  const host = {
+    call: async () => {
+      throw Error("question_must_not_edit");
+    },
+  };
+  const result = await runNativeTurn(
+    {
+      run: async (options) => {
+        assert(
+          options.instructions.includes(
+            "Durable pending goal for this document:",
+          ),
+        );
+        assert(options.instructions.includes(activeGoal.request));
+        return completion({
+          intent: "answer",
+          outcome: "answered",
+          message: "사진을 원형으로 바꾸는 일이 남았습니다.",
+          review: null,
+        });
+      },
+    },
+    {
+      ...input(host),
+      requestText: "무슨 작업이 남았어?",
+      activeGoal,
+      conversationHistory: [],
+    },
+  );
+  assert.equal(result.task.outcome, "answered");
+  assert.deepEqual(result.activeGoal, activeGoal);
+  assert.equal(result.changed, false);
 });
 test("circle is an ellipse with equal frame dimensions, not any successful command or an oval", () => {
   const checks = goalChecks("사진을 원형으로 잘라줘", before, permission);

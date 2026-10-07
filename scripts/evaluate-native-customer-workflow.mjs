@@ -60,7 +60,7 @@ try {
     {
       id: "continued-multi-circle",
       fixture: "native-image-shape.pptx",
-      request: "진행해",
+      request: "하라니까? 왜 자꾸 멈추는데",
       continuedGoal: "모든 사진을 원형으로 잘라줘. 제목은 유지해줘.",
       duplicateSlide: true,
     },

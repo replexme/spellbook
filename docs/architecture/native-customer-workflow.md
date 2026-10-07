@@ -13,6 +13,8 @@ conversation. Hosted sessions store it in `spellbook_native_sessions.active_goal
 local workspaces store it beside their file handle in IndexedDB. Answer turns
 and cancellation retain the pending goal. A new explicit edit replaces it, a
 verified completion clears it, and another document cannot inherit it.
+Status questions also receive this pending goal without authorizing an edit;
+continuation instructions retain additional constraints from the current turn.
 
 Live editor revision, permission and native observations govern every mutation.
 A remembered goal never grants permission. Native batches retain existing

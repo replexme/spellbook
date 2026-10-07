@@ -36,7 +36,10 @@ import {
 import { signNativeConnectorToken } from "./native-connector-token";
 import { aiConnectorConfig } from "./ai-connector-config";
 import { aiTurnLimit, assertWithinAiTurnLimit } from "./ai-turn-limit";
-import { finalizeTurn } from "../../../../contracts/native-turn-policy.cjs";
+import {
+  finalizeTurn,
+  continuationGoal,
+} from "../../../../contracts/native-turn-policy.cjs";
 import {
   hasAppliedNativeMutation,
   loadTurnSummary,
@@ -1027,22 +1030,24 @@ export async function completeNativeTurn(
             message: text,
           })
         : "";
+    const [goalSession] =
+      await sql`select active_goal from spellbook_native_sessions where id=${record.session_id} for update`;
+    const priorGoal = normalizeActiveGoal(
+      goalSession?.active_goal,
+      record.session_id,
+    );
+    const unfinishedGoal = continuationGoal(record.request_text, [], priorGoal);
     const completion = finalizeTurn(
       rawCompletion || (record.permission_mode === "read_only" ? text : ""),
       {
-        requestText: record.request_text,
+        requestText: unfinishedGoal ?? record.request_text,
+        ...(unfinishedGoal ? { requiredIntent: "edit" as const } : {}),
         readOnly: record.permission_mode === "read_only",
         changed: applied,
         reviewed,
         requestSatisfied: result?.requestSatisfied === true,
         unconfirmedMutation: changed !== applied,
       },
-    );
-    const [goalSession] =
-      await sql`select active_goal from spellbook_native_sessions where id=${record.session_id} for update`;
-    const priorGoal = normalizeActiveGoal(
-      goalSession?.active_goal,
-      record.session_id,
     );
     const returnedGoal = normalizeActiveGoal(
       result?.activeGoal,
@@ -1051,7 +1056,8 @@ export async function completeNativeTurn(
     const activeGoal = nextActiveGoal(
       priorGoal,
       record.session_id,
-      completion.task.goal,
+      // A model's summary cannot overwrite the customer's original conditions.
+      priorGoal?.request ?? returnedGoal?.request ?? record.request_text,
       completion,
       returnedGoal?.checks ?? priorGoal?.checks ?? [],
     );
