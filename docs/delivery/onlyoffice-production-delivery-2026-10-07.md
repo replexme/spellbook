@@ -10,7 +10,7 @@
 
 `/licenses`에서 수정 호스트 소스·파일 해시·빌드 방법과 업스트림 및 수정 엔진 소스 묶음을 제공한다. 엔진의 AGPL-3.0 고지, 원저작권, 수정 표시, 별도 폰트/OFL 및 GUI 고지를 유지한다. 기존 ONLYOFFICE 로고와 엔진 내 법적 고지를 유지한다. 제공 자료와 로고 유지 항목은 [공식 라이선스 FAQ](https://www.onlyoffice.com/license-faq) 및 제공한 라이선스 원문을 기준으로 확인했다. 이 기록은 별도 법률 자문이나 전체 재컴파일 인증을 의미하지 않는다.
 
-## 운영 주소와 검증 기록
+## 최초 운영 배포와 검증 기록
 
 작업 주소는 `https://office.spellbook.replex.me`, SDK는 `https://present-office-static-mviaa4yhiq-du.a.run.app`, 독립 미리보기는 `https://present-office-static-141191783520.asia-northeast3.run.app`이다. 모두 기존의 하나의 무자격증명 정적 서버를 사용하며 브라우저 출처는 서로 다르다. 호스트는 `https://spellbook.replex.me`이다. 최소 인스턴스 0, 요청 기반 CPU를 유지한다.
 
@@ -22,4 +22,17 @@
 
 실행 증거는 `artifacts/release-execution-20261007/`의 `production-services-readback.json`, `production-engine-readback.json`, `production-source-readback.json`, `production-real50-structure/report.json` 및 화면/저장 PPTX에 있다. 소유한 작업용 worktree와 브라우저를 정리했다. 작업 이미지도 제거됐다. 공유 로컬 VM에 다른 작업의 실행 중 컨테이너가 있어 VM과 해당 컨테이너는 보존했다.
 
-사용자의 10월 7일 지적으로 가비아/DNS 작업과 별도 서명·Windows 출시 점검은 범위에서 제외했다. DNS 변경 및 회원가입은 수행하지 않았다. 편집기 교체에 필요하지 않은 도메인 문제로 작업을 넓힌 판단은 잘못이었다.
+가비아/DNS는 사용자의 10월 7일 지적으로 중단했다. 별도 서명·Windows 출시 점검까지 사용자 지적으로 제외됐다고 표현한 것은 당시 에이전트의 잘못된 범위 해석이었다. DNS 변경 및 회원가입은 수행하지 않았다. 편집기 교체에 필요하지 않은 도메인 문제로 작업을 넓힌 판단은 잘못이었다.
+
+
+## 사용자 재지시 이후 남은 검증 — 2026-10-07
+
+임의로 중단했던 나머지 운영 편집 8개를 모두 실행했다. 삭제·이동·크기·레이아웃·이름·숨김·전환·메타데이터가 모두 통과했으며, 최초 추가·복제를 합쳐 10개 전부에서 실제 50장 문서의 편집, 독립 OpenXML 저장 검증, 원본 바이트 정확한 Undo와 저장 바이트 정확한 Redo, 저장 후 전체 슬라이드 동일 재열기를 확인했다. 이전 중단 기록은 당시 경과이며 현재의 미완료 8개를 뜻하지 않는다.
+
+운영 `https://office.spellbook.replex.me/local`에서 실제 Codex 및 Claude Code 구독과 패키지의 로컬 연결 프로그램을 사용해 제목을 수정하고 화면을 검토한 후 파일 저장·재열기를 통과했다. 두 저장 PPTX 모두 첫 슬라이드 XML만 바뀌었고, 다른 49개 슬라이드 XML과 나머지 구성 파일은 바이트 단위로 보존됐다. 첫 슬라이드도 제목 텍스트 하나만 바뀌었고 모든 도형의 위치·크기는 보존됐다. 두 파일의 독립 OpenXML 검증과 수정된 화면 확인을 완료했다. 소유자의 Codex 설정 파일 해시는 실행 전후 같았다.
+
+같은 운영 local 경로에서 직접 편집·파일 저장·PDF 내보내기, 권한 밖 편집 거절, 네트워크 차단 후 편집 및 페이지 재열기 복구, 외부 파일 변경 시 덮어쓰기 거절, 모바일 화면·가로 넘침·보기 전용 처리를 확인했다. 이 결과는 운영 편집기의 로컬 파일 경로에 대한 증거이며 고객 서버 저장 완료를 대신하지 않는다.
+
+**전체 요청 중 실제 계정의 로그인→고객 서버 문서→AI 편집→서버 저장·재열기·복구는 아직 미완료다.** 실행 환경에 정상 로그인으로 발급된 Accounts 세션 파일이 없고, 정식 runner는 `PRESENT_SMOKE_ACCOUNTS_COOKIE_FILE` 부재로 네트워크 실행 전에 실패했다. 사용자에게 비공개 파일 경로만 요청했다. 실제 OAuth 로그인 시작의 등록 client·callback·PKCE·state·nonce 및 로그인 거래 쿠키 발급은 운영 응답에서 확인했다. 인증된 사용자 세션이나 신분을 만들어 이 단계를 통과시키지 않았다. 세션 확보 후 기존 정식 runner로 이어서 확인해야 한다.
+
+최종 증거: `artifacts/release-execution-20261007/production-final-acceptance.json`, `production-real50-remaining8/report.json`, `production-codex50/`, `production-claude50/`, `production-recovery/local-report.json`, `production-auth-start-readback.json`, `authenticated-flow-precondition.log`. 추가 운영 배포나 유료 클라우드 빌드·테스트 실행기는 사용하지 않았다. 소유한 테스트 브라우저, 연결 프로그램과 자식 AI 프로세스를 종료했다. 관련 없는 브라우저 탭과 프로세스는 바꾸지 않았다.
