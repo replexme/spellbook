@@ -3,9 +3,11 @@ import {
   pairLocalConnector,
   readLocalConnectorSession,
 } from "../../apps/web/src/lib/local-ai-connector.ts";
+import { boundedConversationHistory } from "../../contracts/native-turn-policy.cjs";
 import { localOffice } from "./local-workspace.mjs";
 const origin = "http://127.0.0.1:43127",
   el = (id) => document.getElementById(id);
+let conversationHistory = [];
 let session = readLocalConnectorSession(sessionStorage),
   turnId,
   busy = false,
@@ -66,10 +68,12 @@ el("ai-run").onclick = async () => {
   busy = true;
   cancelled = false;
   const generation = localOffice.generation();
+  const requestText = el("ai-request").value;
   el("ai-run").disabled = true;
   try {
     const created = await post("/v1/local-turns", {
-      requestText: el("ai-request").value,
+      requestText,
+      conversationHistory,
       permissionMode: el("ai-scope").value,
       modelSettings: JSON.parse(el("ai-model").value),
     });
@@ -108,9 +112,22 @@ el("ai-run").onclick = async () => {
         });
       }
       if (value.done) {
+        if (cancelled || generation !== localOffice.generation())
+          throw Error("document_closed");
         if (value.result?.error) throw Error(value.result.error);
         el("ai-result").textContent =
           value.result?.text ?? el("ai-result").textContent;
+        conversationHistory = boundedConversationHistory([
+          ...conversationHistory,
+          {
+            request: requestText,
+            response: value.result?.text ?? null,
+            status: "completed",
+            changed: value.result?.changed,
+            reviewed: value.result?.reviewed,
+            task: value.result?.task,
+          },
+        ]);
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -132,7 +149,10 @@ const cancel = () => {
 };
 el("ai-cancel").onclick = cancel;
 window.addEventListener("pagehide", cancel);
-window.addEventListener("spellbook-local-document-changing", cancel);
+window.addEventListener("spellbook-local-document-changing", () => {
+  conversationHistory = [];
+  cancel();
+});
 el("ai").addEventListener("toggle", () => {
   if (localOffice.isReady())
     void localOffice.call({ operation: "fit_view" }).catch(() => {});

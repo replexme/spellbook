@@ -1,3 +1,4 @@
+import { boundedConversationHistory } from "../../../contracts/native-turn-policy.cjs";
 import { randomUUID } from "node:crypto";
 import {
   runNativeTurn,
@@ -124,6 +125,9 @@ export class LocalNativeTurns {
         turn.result = await runNativeTurn(client, {
           requestText: body.requestText as string,
           permission,
+          conversationHistory: boundedConversationHistory(
+            body.conversationHistory,
+          ),
           host: {
             call,
             createImage: async (image, signal) => {

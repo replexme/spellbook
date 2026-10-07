@@ -21,9 +21,7 @@ export type TurnEvidence = {
 };
 export const completionSchema: Record<string, unknown>;
 export const completionInstruction: string;
-export function parseCompletion(
-  raw: string,
-): {
+export function parseCompletion(raw: string): {
   intent: "answer" | "edit";
   goal: string;
   outcome: string;
@@ -38,3 +36,15 @@ export function continuationGoal(
   request: string,
   history?: Array<{ task?: TaskResult; request?: string; changed?: boolean }>,
 ): string | null;
+
+export type ConversationTurn = {
+  request: string;
+  response: string | null;
+  status: "completed" | "failed" | "cancelled";
+  changed?: boolean;
+  reviewed?: boolean;
+  task?: TaskResult;
+};
+export const NATIVE_HISTORY_TURN_LIMIT: number;
+export const NATIVE_HISTORY_CHARACTER_LIMIT: number;
+export function boundedConversationHistory(turns: unknown): ConversationTurn[];

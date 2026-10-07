@@ -99,3 +99,68 @@ it("expired local document turns are removed without another browser request", a
     vi.useRealTimers();
   }
 });
+
+it("passes only bounded document conversation into a paired local continuation", async () => {
+  const runStructuredTurn = vi.fn(async (input: Array<{ text?: string }>) => {
+    expect(input[0].text).toContain(
+      "Unfinished user goal to continue: 사진을 원형으로 잘라서 넣어줘",
+    );
+    return JSON.stringify({
+      intent: "edit",
+      goal: "사진을 원형으로 잘라서 넣어줘",
+      outcome: "blocked",
+      message: "방법 확인 중",
+      reason: "방법 미확인",
+    });
+  });
+  const store = new LocalNativeTurns(async () => ({
+    supportsImageGeneration: false,
+    runStructuredTurn,
+  }));
+  try {
+    const { turnId } = store.start("paired-owner", {
+      requestText: "진행 하라고",
+      permissionMode: "document",
+      conversationHistory: [
+        {
+          request: "사진을 원형으로 잘라서 넣어줘",
+          response: "실제 변경 없음",
+          status: "completed",
+          changed: false,
+          reviewed: false,
+          task: {
+            intent: "edit",
+            goal: "사진을 원형으로 잘라서 넣어줘",
+            outcome: "unverified",
+            reason: "no_mutation",
+          },
+        },
+      ],
+    });
+    const task = store.poll("paired-owner", turnId, 0).tasks[0];
+    store.reply(
+      "paired-owner",
+      turnId,
+      task.id,
+      {
+        unit: "pt",
+        revision: "r1",
+        activeSlide: 0,
+        selectedElementIds: [],
+        slides: [{ slideIndex: 0, elements: [] }],
+        images: [],
+        changedSlideIndexes: [],
+        visualEvidenceComplete: true,
+      },
+      null,
+    );
+    await pause();
+    expect(runStructuredTurn).toHaveBeenCalledTimes(1);
+    expect(store.poll("paired-owner", turnId, 0).result).toMatchObject({
+      changed: false,
+      task: { goal: "사진을 원형으로 잘라서 넣어줘", outcome: "blocked" },
+    });
+  } finally {
+    store.dispose();
+  }
+});
