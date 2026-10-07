@@ -178,8 +178,8 @@ export function checksFor(summary: TurnSummary, outcome: Outcome): CheckItem[] {
   else if (outcome === "unverified")
     items.push({
       tone: "warn",
-      label: "바뀐 화면을 AI가 다시 확인하지 못함",
-      evidence: "turn.reviewed=false",
+      label: "요청한 결과의 완료를 확인하지 못함",
+      evidence: "summary.outcome=unverified",
     });
   const issues = summary.introducedIssues;
   if (issues) {
@@ -496,11 +496,7 @@ export function ResultCard({
         <div className="rc-section">
           <Banner
             tone={
-              isRateLimit
-                ? "warn"
-                : outcome === "failed"
-                  ? "danger"
-                  : "neutral"
+              isRateLimit ? "warn" : outcome === "failed" ? "danger" : "neutral"
             }
           >
             {message}
@@ -628,7 +624,9 @@ export function ResultCard({
     summary?.changes.find((change) => change.elementId) ?? summary?.changes[0];
   const title =
     outcome === "unverified"
-      ? "바뀜 · 확인 못 함"
+      ? changedSlides.length || turn.changed
+        ? "바뀜 · 완료 확인 필요"
+        : "편집 결과 확인 필요"
       : `바뀜${changedSlides.length ? ` · ${slideList(changedSlides)}` : ""}`;
   return (
     <article
@@ -650,7 +648,9 @@ export function ResultCard({
       {outcome === "unverified" ? (
         <div className="rc-section">
           <Banner tone="warn">
-            AI가 바뀐 화면을 다시 보지 못했어요. 직접 확인해 주세요.
+            {changedSlides.length || turn.changed
+              ? "문서는 바뀌었지만 요청한 결과가 완료됐는지 확인하지 못했어요."
+              : "편집기 기록에서 실제 변경을 확인하지 못했어요."}
           </Banner>
         </div>
       ) : null}
@@ -793,7 +793,9 @@ export function RunningCard({
         <details className="run-thinking" open={!turn.text.trim()}>
           <summary className="run-thinking-summary">
             <span className="run-pulse-dot is-thinking" aria-hidden="true" />
-            <span>AI 생각 중 ({Math.max(1, Math.round((now - started) / 1000))}초)</span>
+            <span>
+              AI 생각 중 ({Math.max(1, Math.round((now - started) / 1000))}초)
+            </span>
           </summary>
           <div className="run-thinking-content">
             <pre>{turn.thinking}</pre>

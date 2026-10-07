@@ -1,3 +1,9 @@
+import {
+  completionInstruction,
+  finalizeTurn,
+  continuationGoal,
+  type TaskResult,
+} from "../../../../../contracts/native-turn-policy.cjs";
 import type { ModelSettings } from "../ai-models";
 import { engineSupports } from "../ai-edit-limits";
 import {
@@ -197,6 +203,7 @@ export async function runNativeTurn(
     conversationHistory?: Array<{
       request: string;
       response: string | null;
+      task?: TaskResult;
       status: "completed" | "failed" | "cancelled";
     }>;
     modelSettings?: ModelSettings;
@@ -218,6 +225,7 @@ export async function runNativeTurn(
     | undefined;
   let changed = false,
     reviewed = false;
+  let requestSatisfied = false;
   let toolTail: Promise<unknown> = Promise.resolve();
   // Filled in place so the caller still has the counts when the turn fails.
   const modelInput = input.modelInput ?? newModelInput();
@@ -511,6 +519,7 @@ export async function runNativeTurn(
         additionalProperties: false,
         properties: {
           approved: { type: "boolean" },
+          requestSatisfied: { type: "boolean" },
           problems: { type: "array", items: { type: "string" } },
           reviewedSlideIndexes: {
             type: "array",
@@ -518,7 +527,12 @@ export async function runNativeTurn(
             uniqueItems: true,
           },
         },
-        required: ["approved", "problems", "reviewedSlideIndexes"],
+        required: [
+          "approved",
+          "problems",
+          "reviewedSlideIndexes",
+          "requestSatisfied",
+        ],
       },
     },
     {
@@ -673,11 +687,13 @@ export async function runNativeTurn(
       if (!changed || !observed) throw new Error("No changed slide to review.");
       const result = args as {
         approved?: boolean;
+        requestSatisfied?: boolean;
         problems?: unknown[];
         reviewedSlideIndexes?: unknown[];
       };
       if (
         typeof result.approved !== "boolean" ||
+        typeof result.requestSatisfied !== "boolean" ||
         !Array.isArray(result.problems) ||
         result.problems.some((problem) => typeof problem !== "string") ||
         !Array.isArray(result.reviewedSlideIndexes) ||
@@ -717,6 +733,7 @@ export async function runNativeTurn(
         throw new Error(
           "A visual review cannot approve newly introduced layout issues.",
         );
+      requestSatisfied = result.requestSatisfied === true;
       reviewed = result.approved && result.problems.length === 0;
       input.onTool(reviewed ? "수정 화면 확인 완료" : "수정 화면 재검토 필요");
       return { ok: true, text: JSON.stringify(result) };
@@ -738,6 +755,10 @@ export async function runNativeTurn(
     }
     throw new Error("Unknown tool.");
   };
+  const unfinishedGoal = continuationGoal(
+    input.requestText,
+    input.conversationHistory,
+  );
   const turn = (prompt: string, timeoutMs: number, reviewOnly = false) =>
     model.run({
       instructions: [
@@ -749,6 +770,10 @@ export async function runNativeTurn(
         `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
         "The slide heading list is a navigation index, not enough evidence to edit. The initial attachment and native_observe return actual page image and full element details. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. The edit result includes fresh changed-slide screenshots; inspect them and call native_review directly unless you need more detail. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
         WEB_TOOLS_INSTRUCTION,
+        completionInstruction,
+        ...(unfinishedGoal
+          ? [`Unfinished user goal to continue: ${unfinishedGoal}`]
+          : []),
         ...(reviewOnly ? [] : [EDIT_REQUEST_INSTRUCTION]),
         `Coordinates are 1/100 mm. IDs refer to the last observed revision; the editor rebinds batch targets to the same live objects before every command. ${nativeEditContract.transaction.ordering} Do not change original text or geometry merely to hide font/rendering differences. Answer in Korean.`,
         prompt,
@@ -776,7 +801,7 @@ export async function runNativeTurn(
           }),
         );
       },
-      onText: input.onText,
+      onText: () => {}, // Buffer provisional claims until execution is adjudicated.
       onThinking: input.onThinking,
       onUsage: (usage) => {
         modelInput.providerCalls += usage.calls;
@@ -792,22 +817,34 @@ export async function runNativeTurn(
   let text = await turn(`User request: ${input.requestText}`, 240_000);
   // Looking at the result after an edit is the product contract, not a hint.
   // A model that edits and stops is asked once more to observe and review.
-  if (changed && !reviewed) {
+  if (changed && (!reviewed || !requestSatisfied)) {
     const review = await turn(
-      "Observe the changed slides, then call native_review with every changed slide. Approve only if the fresh screenshot shows the requested change without new problems; otherwise report the problems. Then tell the user in Korean what changed and what the review found.",
+      "Use the fresh changed-slide screenshots already returned by the edit. If the requested result is missing, correct only the missing part when editing is allowed. Call native_review directly with every changed slide, requestSatisfied, and problems. Only observe again if necessary. Approve only if the fresh screenshot shows the requested change without new problems; otherwise report the problems. Then tell the user in Korean what changed and what the review found.",
       180_000,
-      true,
+      !reviewed,
     );
     if (review.trim()) text = review;
   }
-  if (changed && !reviewed)
-    text = `${text.trim()}\n\n${UNREVIEWED_EDIT_NOTICE}`;
+  const completion = finalizeTurn(text, {
+    requestText: unfinishedGoal || input.requestText,
+    ...(unfinishedGoal ? { requiredIntent: "edit" as const } : {}),
+    readOnly: input.permission.mode === "read_only",
+    changed,
+    reviewed,
+    requestSatisfied,
+    unconfirmedMutation,
+  });
+  text = completion.text;
+  if (changed && !reviewed) text += `\n\n${UNREVIEWED_EDIT_NOTICE}`;
   else if (unconfirmedMutation && !reviewed)
-    text = `${text.trim()}\n\n${UNCONFIRMED_EDIT_NOTICE}`;
+    text += `\n\n${UNCONFIRMED_EDIT_NOTICE}`;
+  input.onText(text);
   return {
     text,
     changed,
     reviewed,
+    requestSatisfied,
+    task: completion.task,
     status:
       changed && !reviewed ? ("needs_review" as const) : ("completed" as const),
     modelInput,

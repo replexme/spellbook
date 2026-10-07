@@ -48,4 +48,33 @@ describe("bounded native conversation history", () => {
       ),
     ).toBeLessThanOrEqual(NATIVE_HISTORY_CHARACTER_LIMIT);
   });
+  it("bounds task goals and reasons along with conversation text", () => {
+    const history = boundedNativeConversationHistory(
+      Array.from({ length: 12 }, () => ({
+        request_text: "r".repeat(2000),
+        assistant_text: "a".repeat(8000),
+        status: "completed",
+        changed: false,
+        reviewed: false,
+        task: {
+          intent: "edit",
+          goal: "g".repeat(2000),
+          outcome: "unverified",
+          reason: "x".repeat(1000),
+        },
+      })),
+    );
+    expect(
+      history.reduce(
+        (n, t) =>
+          n +
+          t.request.length +
+          (t.response?.length ?? 0) +
+          (t.task?.goal.length ?? 0) +
+          (t.task?.reason.length ?? 0),
+        0,
+      ),
+    ).toBeLessThanOrEqual(NATIVE_HISTORY_CHARACTER_LIMIT);
+    expect(history[0]?.changed).toBe(false);
+  });
 });

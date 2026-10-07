@@ -1,3 +1,4 @@
+import { continuationGoal } from "../../../../contracts/native-turn-policy.cjs";
 import { createHash, randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -721,6 +722,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
           text: "화면까지 확인해 제목을 바꿨습니다.",
           changed: true,
           reviewed: true,
+          requestSatisfied: true,
+          task: {
+            intent: "edit",
+            goal: "요청한 제목 변경",
+            outcome: "fulfilled",
+            reason: "",
+          },
           executionToken: owner.executionToken,
         },
       },
@@ -855,6 +863,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
           text: "화면까지 확인해 제목을 바꿨습니다.",
           changed: true,
           reviewed: true,
+          requestSatisfied: true,
+          task: {
+            intent: "edit",
+            goal: "요청한 제목 변경",
+            outcome: "fulfilled",
+            reason: "",
+          },
           executionToken: owner.executionToken,
         },
       },
@@ -1094,6 +1109,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
         text: "수정했습니다.",
         changed: true,
         reviewed: true,
+        requestSatisfied: true,
+        task: {
+          intent: "edit",
+          goal: "요청한 제목 변경",
+          outcome: "fulfilled",
+          reason: "",
+        },
         status: "completed",
         executionToken: "worker-1",
         modelInput: {
@@ -1196,6 +1218,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
           text: "바꿨어요.",
           changed: true,
           reviewed: true,
+          requestSatisfied: true,
+          task: {
+            intent: "edit",
+            goal: "요청한 제목 변경",
+            outcome: "fulfilled",
+            reason: "",
+          },
           status: "completed",
           executionToken: "worker-undo",
         },
@@ -1473,6 +1502,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
               text: "브라우저에서 수정했습니다.",
               changed: true,
               reviewed: true,
+              requestSatisfied: true,
+              task: {
+                intent: "edit",
+                goal: "요청한 제목 변경",
+                outcome: "fulfilled",
+                reason: "",
+              },
               status: "completed",
               executionToken: "browser-execution",
             },
@@ -1719,6 +1755,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
                 text: "로컬 구독으로 수정했습니다.",
                 changed: true,
                 reviewed: true,
+                requestSatisfied: true,
+                task: {
+                  intent: "edit",
+                  goal: "요청한 제목 변경",
+                  outcome: "fulfilled",
+                  reason: "",
+                },
                 status: "completed",
                 executionToken,
               },
@@ -1733,7 +1776,10 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
         expect.arrayContaining([
           expect.objectContaining({
             type: "done",
-            text: "로컬 구독으로 수정했습니다.",
+            text: "편집 적용 여부를 확인하지 못했습니다. 현재 문서를 다시 확인해야 합니다.",
+            changed: false,
+            reviewed: false,
+            summary: expect.objectContaining({ outcome: "unverified" }),
           }),
         ]),
       );
@@ -1875,8 +1921,20 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       "/internal/jobs/native",
       expect.objectContaining({
         conversationHistory: [
-          { request: "첫 요청", response: "첫 응답", status: "completed" },
-          { request: "두 번째 요청", response: null, status: "failed" },
+          {
+            request: "첫 요청",
+            response: "첫 응답",
+            status: "completed",
+            changed: false,
+            reviewed: false,
+          },
+          {
+            request: "두 번째 요청",
+            response: null,
+            status: "failed",
+            changed: false,
+            reviewed: false,
+          },
         ],
       }),
     );
@@ -1939,6 +1997,79 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     ).rejects.toThrow("asset_not_found");
   });
 
+  it("persists the actual six-turn failure sequence without promoting observe-only work to completion", async () => {
+    const f = await fixture();
+    const requests = [
+      "사진을 원형으로 잘라서 들어가게 해줘",
+      "문서가 왜 안바꼈어",
+      "왜 지원을 안해 지원되게 해야지",
+      "되는 방안을 찾아와",
+      "니가 그걸 진행하라니까",
+      "진행 하라고",
+    ];
+    for (const [index, request] of requests.entries()) {
+      const submitted = await submitNativeTurn(session, f.documentId, {
+        text: request,
+        permission: "document",
+      });
+      const [turn] =
+        await db()`select job_id from spellbook_native_turns where id=${submitted.turnId}`;
+      const [job] =
+        await db()`select payload from spellbook_jobs where id=${turn.job_id}`;
+      const history = job.payload.conversationHistory;
+      const goal = continuationGoal(request, history) || request;
+      if (index >= 4) expect(goal).toBe(requests[0]);
+      const owner = {
+        jobId: String(turn.job_id),
+        sessionId: f.nativeSessionId,
+        executionToken: `replay-${index}`,
+      };
+      await executeNativeTool({ ...owner, operation: "start" });
+      const task = (await executeNativeTool({
+        ...owner,
+        operation: "task_create",
+        request: { operation: "observe", detailSlideIndex: null },
+      })) as { taskId: string };
+      await completeNativeTask(session, f.documentId, {
+        id: task.taskId,
+        value: observation,
+      });
+      await completeNativeTurn(
+        { id: turn.job_id },
+        {
+          jobId: turn.job_id,
+          status: "succeeded",
+          result: {
+            text:
+              index === 0
+                ? "원형으로 수정했습니다."
+                : "사진을 업로드해 주세요.",
+            changed: false,
+            reviewed: false,
+            executionToken: owner.executionToken,
+            ...(index === 0
+              ? {}
+              : {
+                  task: {
+                    intent: index < 4 ? "answer" : "edit",
+                    goal,
+                    outcome: index < 4 ? "answered" : "needs_input",
+                    reason: "",
+                  },
+                }),
+          },
+        },
+      );
+      const [stored] =
+        await db()`select assistant_text, changed, reviewed, summary from spellbook_native_turns where id=${submitted.turnId}`;
+      expect(stored.changed).toBe(false);
+      expect(stored.reviewed).toBe(false);
+      expect(stored.assistant_text).not.toContain("수정했습니다");
+      if (index === 0) expect(stored.summary.outcome).toBe("unverified");
+      if (index >= 4) expect(stored.summary.outcome).toBe("unchanged");
+    }
+  });
+
   it("cancellation prevents a late worker from completing the turn", async () => {
     const f = await fixture();
     const submitted = await submitNativeTurn(session, f.documentId, {
@@ -1964,6 +2095,13 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
           text: "늦은 결과",
           changed: true,
           reviewed: true,
+          requestSatisfied: true,
+          task: {
+            intent: "edit",
+            goal: "요청한 제목 변경",
+            outcome: "fulfilled",
+            reason: "",
+          },
           executionToken: "worker",
         },
       },
@@ -2137,13 +2275,19 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       select j.id, j.payload from spellbook_jobs j
       join spellbook_native_turns t on t.job_id=j.id where t.id=${submitted.turnId}
     `;
-    const objectName = initialObservationObject(accountId, f.documentId, job.id);
+    const objectName = initialObservationObject(
+      accountId,
+      f.documentId,
+      job.id,
+    );
     expect(storage.putObject).toHaveBeenCalledWith(
       objectName,
       expect.any(Buffer),
       "application/json",
     );
-    const stored = (storage.putObject.mock.calls.at(-1) as unknown[])[1] as Buffer;
+    const stored = (
+      storage.putObject.mock.calls.at(-1) as unknown[]
+    )[1] as Buffer;
     expect(JSON.parse(stored.toString("utf8")).images[0].pngBase64).toBe(png);
     const queued = workers.enqueueWorkerJob.mock.calls.at(-1)?.[3] as Record<
       string,
@@ -2224,7 +2368,9 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       executionToken: "queue-worker",
       operation: "start",
     });
-    expect((await pollNativeSession(session, first.documentId, 0)).waiting).toBeNull();
+    expect(
+      (await pollNativeSession(session, first.documentId, 0)).waiting,
+    ).toBeNull();
     const moved = await pollNativeSession(session, second.documentId, 0);
     expect(moved.waiting!.position).toBe(behind.waiting!.position - 1);
   });
@@ -2271,7 +2417,11 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     const submitted = await submitNativeTurn(session, f.documentId, {
       text: "https://example.com 요약",
       permission: "read_only",
-      modelSettings: { provider: "openai_api", model: "gpt-x", effort: "medium" },
+      modelSettings: {
+        provider: "openai_api",
+        model: "gpt-x",
+        effort: "medium",
+      },
       execution: "browser",
     });
     const job = submitted.browserJob!;
@@ -2308,7 +2458,8 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       select job_id from spellbook_native_turns where id=${submitted.turnId}
     `;
     const jobId = String(turn.job_id);
-    const [first] = await db()`select delivery_count from spellbook_jobs where id=${jobId}`;
+    const [first] =
+      await db()`select delivery_count from spellbook_jobs where id=${jobId}`;
     expect(first.delivery_count).toBe(1);
     workers.enqueueWorkerJob.mockClear();
     // Still in the queue a short while after sending: left alone.
@@ -2326,7 +2477,9 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     );
     await db()`update spellbook_jobs set dispatched_at=now()-interval '6 minutes' where id=${jobId}`;
     await pollNativeSession(session, f.documentId, 0);
-    expect(workers.enqueueWorkerJob.mock.calls.at(-1)?.[4]).toEqual({ attempt: 3 });
+    expect(workers.enqueueWorkerJob.mock.calls.at(-1)?.[4]).toEqual({
+      attempt: 3,
+    });
     // After the last delivery it fails with a Korean reason, not "waiting".
     await db()`update spellbook_jobs set dispatched_at=now()-interval '6 minutes' where id=${jobId}`;
     await pollNativeSession(session, f.documentId, 0);

@@ -31,7 +31,13 @@ import {
 import { signNativeConnectorToken } from "./native-connector-token";
 import { aiConnectorConfig } from "./ai-connector-config";
 import { aiTurnLimit, assertWithinAiTurnLimit } from "./ai-turn-limit";
-import { loadTurnSummary } from "./native-turn-summary";
+import { finalizeTurn } from "../../../../contracts/native-turn-policy.cjs";
+import {
+  hasAppliedNativeMutation,
+  loadTurnSummary,
+  summarizeTurn,
+  type TurnTaskRecord,
+} from "./native-turn-summary";
 import { validatedNativeModelInput } from "./native-model-input";
 import {
   documentJobRecovery,
@@ -250,11 +256,12 @@ export async function submitNativeTurn(
     }
     const history = boundedNativeConversationHistory(
       await sql`
-        select request_text, assistant_text, status
-        from spellbook_native_turns
-        where session_id=${native.id}
-          and status in ('completed','failed','cancelled')
-        order by created_at desc limit ${NATIVE_HISTORY_TURN_LIMIT}
+        select t.request_text, t.assistant_text, t.status, t.changed, t.reviewed,
+          j.outputs->'result'->'task' as task
+        from spellbook_native_turns t join spellbook_jobs j on j.id=t.job_id
+        where t.session_id=${native.id}
+          and t.status in ('completed','failed','cancelled')
+        order by t.created_at desc limit ${NATIVE_HISTORY_TURN_LIMIT}
       `,
     );
     payload = history.length
@@ -422,7 +429,8 @@ export function nativeTurnRecoveryPolicy(): DocumentJobRecoveryPolicy {
 
 async function recoverQueuedNativeTurns(documentId: string): Promise<void> {
   const policy = nativeTurnRecoveryPolicy();
-  const queued = await db()`select id,payload,created_at,updated_at,dispatched_at,delivery_count
+  const queued =
+    await db()`select id,payload,created_at,updated_at,dispatched_at,delivery_count
     from spellbook_jobs
     where document_id=${documentId} and status='queued' and job_type='native_turn'
       and coalesce(payload->>'execution','internal') = 'internal'
@@ -450,9 +458,15 @@ async function recoverQueuedNativeTurns(documentId: string): Promise<void> {
       returning delivery_count`;
     if (!claimed) continue;
     try {
-      await enqueueWorkerJob(job.id, "ai", "/internal/jobs/native", job.payload, {
-        attempt: Number(claimed.delivery_count),
-      });
+      await enqueueWorkerJob(
+        job.id,
+        "ai",
+        "/internal/jobs/native",
+        job.payload,
+        {
+          attempt: Number(claimed.delivery_count),
+        },
+      );
       await db()`update spellbook_jobs set error=null where id=${job.id}`;
     } catch (error) {
       // Not sent: tried again on a later look, after the short wait.
@@ -551,7 +565,10 @@ async function failInterruptedNativeTurn(
       insert into spellbook_native_events (session_id,turn_id,event_type,payload)
       values (${stale.session_id},${stale.turn_id},'error',${sql.json({ error: summary?.failure?.message ?? INTERRUPTED_NATIVE_TURN_MESSAGE, summary } as never)})
     `;
-    interrupted = { accountId: String(stale.account_id), jobId: String(stale.id) };
+    interrupted = {
+      accountId: String(stale.account_id),
+      jobId: String(stale.id),
+    };
   });
   if (interrupted)
     await discardInitialObservation(
@@ -944,9 +961,9 @@ export async function completeNativeTurn(
   callback: WorkerCallback,
 ) {
   const result = callback.result as Record<string, unknown> | undefined;
-  const text = typeof result?.text === "string" ? result.text.trim() : "";
-  const changed = result?.changed as boolean;
-  const reviewed = result?.reviewed as boolean;
+  let text = typeof result?.text === "string" ? result.text.trim() : "";
+  let changed = result?.changed as boolean;
+  let reviewed = result?.reviewed as boolean;
   const executionToken =
     typeof result?.executionToken === "string" ? result.executionToken : "";
   const modelInput = validatedNativeModelInput(result?.modelInput);
@@ -959,8 +976,62 @@ export async function completeNativeTurn(
   )
     throw new Error("invalid_native_completion");
   await db().begin(async (sql) => {
+    const [record] = await sql`select t.id, t.request_text, t.permission_mode,
+      t.model_settings->>'provider' as provider
+      from spellbook_native_turns t join spellbook_jobs j on j.id=t.job_id
+      where j.id=${job.id} and j.status in ('queued','running') and j.execution_token=${executionToken}
+      for update of j`;
+    if (!record) return;
+    const tasks =
+      await sql`select id, request, status, result, error from spellbook_native_tasks
+      where turn_id=${record.id} order by created_at, id`;
+    const applied = hasAppliedNativeMutation(
+      tasks as unknown as TurnTaskRecord[],
+    );
+    const reportedTask = result?.task as Record<string, unknown> | undefined;
+    const rawCompletion =
+      reportedTask &&
+      ["answer", "edit"].includes(String(reportedTask.intent)) &&
+      [
+        "fulfilled",
+        "answered",
+        "blocked",
+        "needs_input",
+        "unchanged",
+        "unverified",
+      ].includes(String(reportedTask.outcome))
+        ? JSON.stringify({
+            intent: reportedTask.intent,
+            goal: reportedTask.goal,
+            reason: reportedTask.reason,
+            outcome:
+              reportedTask.outcome === "fulfilled"
+                ? "applied"
+                : reportedTask.outcome,
+            message: text,
+          })
+        : "";
+    const completion = finalizeTurn(
+      rawCompletion || (record.permission_mode === "read_only" ? text : ""),
+      {
+        requestText: record.request_text,
+        readOnly: record.permission_mode === "read_only",
+        changed: applied,
+        reviewed,
+        requestSatisfied: result?.requestSatisfied === true,
+        unconfirmedMutation: changed !== applied,
+      },
+    );
+    // Old workers can still answer read-only questions; their edit claims are unverified.
+    text = completion.text;
+    changed = applied;
+    reviewed = applied && reviewed;
+    const storedCallback = {
+      ...callback,
+      result: { ...result, text, changed, reviewed, task: completion.task },
+    };
     const [claimed] =
-      await sql`update spellbook_jobs set status='succeeded', outputs=${sql.json(callback as any)}, updated_at=now()
+      await sql`update spellbook_jobs set status='succeeded', outputs=${sql.json(storedCallback as any)}, updated_at=now()
       where id=${job.id} and status in ('queued','running') and execution_token=${executionToken} returning id`;
     if (!claimed) return;
     const [turn] =
@@ -968,7 +1039,22 @@ export async function completeNativeTurn(
       changed=${changed}, reviewed=${reviewed},
       model_usage=coalesce(${modelInput ? sql.json(modelInput as never) : null}::jsonb, model_usage),
       updated_at=now() where job_id=${job.id} returning id,session_id`;
-    const summary = await storeTurnSummary(sql, turn.id);
+    const summary = await storeTurnSummary(
+      sql,
+      turn.id,
+      summarizeTurn(
+        {
+          status: "completed",
+          permissionMode: record.permission_mode,
+          changed,
+          reviewed,
+          lastError: null,
+          provider: record.provider,
+          task: completion.task,
+        },
+        tasks as unknown as TurnTaskRecord[],
+      ),
+    );
     await sql`insert into spellbook_native_events (session_id,turn_id,event_type,payload)
       values (${turn.session_id},${turn.id},'done',${sql.json({ text, changed, reviewed, status: typeof result?.status === "string" ? result.status : "completed", turnId: turn.id, summary, ...(modelInput ? { modelInput } : {}) } as never)})`;
   });
@@ -1013,7 +1099,10 @@ export async function failNativeTurn(
       model_usage=coalesce(${usage ? sql.json(usage as never) : null}::jsonb, model_usage), updated_at=now()
       where job_id=${jobId} and status in ('queued','running') returning id,session_id,account_id,document_id`;
     finished = turn
-      ? { account_id: String(turn.account_id), document_id: String(turn.document_id) }
+      ? {
+          account_id: String(turn.account_id),
+          document_id: String(turn.document_id),
+        }
       : null;
     await sql`update spellbook_jobs set status='failed',error=${error.slice(0, 1_000)},updated_at=now()
       where id=${jobId} and status in ('queued','running')`;
@@ -1027,7 +1116,8 @@ export async function failNativeTurn(
     }
   });
   const done = finished as { account_id: string; document_id: string } | null;
-  if (done) await discardInitialObservation(done.account_id, done.document_id, jobId);
+  if (done)
+    await discardInitialObservation(done.account_id, done.document_id, jobId);
 }
 
 /**
@@ -1036,8 +1126,12 @@ export async function failNativeTurn(
  * the page that relayed them keeps its own copies, and after a reload the
  * card shows the saved versions' previews instead.
  */
-async function storeTurnSummary(sql: any, turnId: string) {
-  const summary = await loadTurnSummary(sql, turnId);
+async function storeTurnSummary(
+  sql: any,
+  turnId: string,
+  prepared?: Awaited<ReturnType<typeof loadTurnSummary>>,
+) {
+  const summary = prepared ?? (await loadTurnSummary(sql, turnId));
   if (summary)
     await sql`update spellbook_native_turns set summary=${sql.json(summary as never)} where id=${turnId}`;
   await sql`

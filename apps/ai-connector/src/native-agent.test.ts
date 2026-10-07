@@ -682,7 +682,12 @@ describe("shared open document agent", () => {
       );
       await o.onTool(
         "native_review",
-        { approved: true, problems: [], reviewedSlideIndexes: [0] },
+        {
+          approved: true,
+          requestSatisfied: true,
+          problems: [],
+          reviewedSlideIndexes: [0],
+        },
         "3",
         f.signal,
       );
@@ -716,7 +721,12 @@ describe("shared open document agent", () => {
         (
           await o.onTool(
             "native_review",
-            { approved: true, problems: [], reviewedSlideIndexes: [] },
+            {
+              approved: true,
+              requestSatisfied: true,
+              problems: [],
+              reviewedSlideIndexes: [],
+            },
             "3",
             f.signal,
           )
@@ -726,7 +736,12 @@ describe("shared open document agent", () => {
         (
           await o.onTool(
             "native_review",
-            { approved: true, problems: [], reviewedSlideIndexes: [0] },
+            {
+              approved: true,
+              requestSatisfied: true,
+              problems: [],
+              reviewedSlideIndexes: [0],
+            },
             "4",
             f.signal,
           )
@@ -770,7 +785,12 @@ describe("shared open document agent", () => {
           (
             await o.onTool(
               "native_review",
-              { approved: true, problems: [], reviewedSlideIndexes: [0] },
+              {
+                approved: true,
+                requestSatisfied: true,
+                problems: [],
+                reviewedSlideIndexes: [0],
+              },
               "4",
               f.signal,
             )
@@ -944,7 +964,12 @@ describe("shared open document agent", () => {
           (
             await o.onTool(
               "native_review",
-              { approved: true, problems: [], reviewedSlideIndexes: [0] },
+              {
+                approved: true,
+                requestSatisfied: true,
+                problems: [],
+                reviewedSlideIndexes: [0],
+              },
               "3",
               f.signal,
             )
@@ -1230,11 +1255,22 @@ describe("shared open document agent", () => {
         );
         await options.onTool(
           "native_review",
-          { approved: true, problems: [], reviewedSlideIndexes: [0] },
+          {
+            approved: true,
+            requestSatisfied: true,
+            problems: [],
+            reviewedSlideIndexes: [0],
+          },
           "review",
           signal,
         );
-        return "삽입된 이미지를 확인했습니다.";
+        return JSON.stringify({
+          intent: "edit",
+          goal: "이미지 삽입",
+          outcome: "applied",
+          message: "삽입된 이미지를 확인했습니다.",
+          reason: "",
+        });
       },
     } as unknown as AppServerClient;
     const signal = new AbortController().signal;

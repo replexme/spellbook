@@ -3,6 +3,7 @@
  * own task records (observe/edit results), never from the assistant's text.
  * Pure functions; the DB loader lives at the bottom.
  */
+import type { TaskResult } from "../../../../contracts/native-turn-policy.cjs";
 import capabilities from "../../../../contracts/native-edit-capabilities.json";
 import { elementLabel } from "./element-label";
 import {
@@ -122,6 +123,7 @@ export type TurnTaskRecord = {
 };
 
 export type TurnRecord = {
+  task?: TaskResult | null;
   status: string;
   permissionMode: string;
   changed: boolean;
@@ -154,6 +156,10 @@ function applied(task: TurnTaskRecord) {
   return Array.isArray(task.result.changedSlideIndexes)
     ? task.result.changedSlideIndexes.length > 0
     : status === "applied";
+}
+
+export function hasAppliedNativeMutation(tasks: TurnTaskRecord[]) {
+  return tasks.some((task) => isMutation(task) && applied(task));
 }
 
 const scopePattern =
@@ -818,7 +824,9 @@ export function summarizeTurn(
     outcome = "running";
   else if (turn.status === "cancelled") outcome = "cancelled";
   else if (turn.status === "failed") outcome = "failed";
+  else if (turn.task?.outcome === "unverified") outcome = "unverified";
   else if (changed) outcome = turn.reviewed ? "changed" : "unverified";
+  else if (turn.task?.intent === "edit") outcome = "unchanged";
   else if (turn.permissionMode === "read_only" || mutations.length === 0)
     outcome = "answered";
   else outcome = "unchanged";
@@ -882,9 +890,9 @@ export async function loadTurnSummary(
   turnId: string,
 ): Promise<TurnSummary | null> {
   const [turn] = await sql`
-    select status, permission_mode, changed, reviewed, last_error,
-      model_settings->>'provider' as provider
-    from spellbook_native_turns where id=${turnId}
+    select t.status, t.permission_mode, t.changed, t.reviewed, t.last_error,
+      t.model_settings->>'provider' as provider, j.outputs->'result'->'task' as task
+    from spellbook_native_turns t join spellbook_jobs j on j.id=t.job_id where t.id=${turnId}
   `;
   if (!turn) return null;
   const tasks = await sql`
@@ -893,6 +901,7 @@ export async function loadTurnSummary(
   `;
   return summarizeTurn(
     {
+      task: turn.task ?? null,
       status: turn.status,
       permissionMode: turn.permission_mode,
       changed: turn.changed,

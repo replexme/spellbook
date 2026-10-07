@@ -28,6 +28,7 @@ export interface BrowserJob {
   conversationHistory?: Array<{
     request: string;
     response: string | null;
+    task?: import("../../../../../contracts/native-turn-policy.cjs").TaskResult;
     status: "completed" | "failed" | "cancelled";
   }>;
 }

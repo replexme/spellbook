@@ -1,3 +1,10 @@
+import {
+  completionSchema,
+  completionInstruction,
+  finalizeTurn,
+  continuationGoal,
+  type TaskResult,
+} from "./native-turn-policy.js";
 import type {
   DynamicTool,
   AgentTurnClient,
@@ -176,6 +183,9 @@ export async function runNativeTurn(
     conversationHistory?: Array<{
       request: string;
       response: string | null;
+      task?: TaskResult;
+      changed?: boolean;
+      reviewed?: boolean;
       status: "completed" | "failed" | "cancelled";
     }>;
     modelSettings?: ModelSettings;
@@ -198,6 +208,7 @@ export async function runNativeTurn(
     | undefined;
   let changed = false,
     reviewed = false;
+  let requestSatisfied = false;
   let toolTail: Promise<unknown> = Promise.resolve();
   const observeSchema = {
     type: "object",
@@ -412,6 +423,10 @@ export async function runNativeTurn(
   const web = new TurnWebAccess(input.requestText);
   // A review-only turn may look and record a review, never edit.
   const REVIEW_ONLY_TOOLS = new Set(["native_observe", "native_review"]);
+  const unfinishedGoal = continuationGoal(
+    input.requestText,
+    input.conversationHistory,
+  );
   const turn = (
     prompt: string,
     allowImageGeneration: boolean,
@@ -432,6 +447,10 @@ export async function runNativeTurn(
             "Observe returns live element structure, a revision, deterministic layout findings, and slide screenshots. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Inspect introducedIssues and the fresh screenshot after edits, correct any regression, then call native_review. Do not claim an edit happened without a successful tool result.",
             "Other slides may be summaries marked detailsAvailable. Call native_observe with their detailSlideIndex before choosing their objects or evaluating their content. A summary is navigation, not the complete authored text.",
             WEB_TOOLS_INSTRUCTION,
+            completionInstruction,
+            ...(unfinishedGoal
+              ? [`Unfinished user goal to continue: ${unfinishedGoal}`]
+              : []),
             ...(reviewOnly
               ? []
               : [
@@ -442,7 +461,7 @@ export async function runNativeTurn(
           ].join("\n"),
         },
       ],
-      {},
+      completionSchema,
       timeout,
       {
         modelSettings: input.modelSettings,
@@ -479,6 +498,7 @@ export async function runNativeTurn(
                 additionalProperties: false,
                 properties: {
                   approved: { type: "boolean" },
+                  requestSatisfied: { type: "boolean" },
                   problems: { type: "array", items: { type: "string" } },
                   reviewedSlideIndexes: {
                     type: "array",
@@ -486,20 +506,19 @@ export async function runNativeTurn(
                     uniqueItems: true,
                   },
                 },
-                required: ["approved", "problems", "reviewedSlideIndexes"],
+                required: [
+                  "approved",
+                  "problems",
+                  "reviewedSlideIndexes",
+                  "requestSatisfied",
+                ],
               },
             },
             ...WEB_TOOL_DEFINITIONS,
           ] satisfies DynamicTool[]
         ).filter((tool) => !reviewOnly || REVIEW_ONLY_TOOLS.has(tool.name)),
-        onEvent: (event) => {
-          const value = event.params as { delta?: string } | undefined;
-          if (
-            event.method === "item/agentMessage/delta" &&
-            typeof value?.delta === "string"
-          )
-            input.onText(value.delta);
-        },
+        // Buffer model output until the execution evidence has been checked.
+        onEvent: () => {},
         allowImageGeneration,
         onGeneratedImage: allowImageGeneration
           ? async (image) => {
@@ -700,11 +719,13 @@ export async function runNativeTurn(
                 throw new Error("No changed slide to review.");
               const result = args as {
                 approved?: boolean;
+                requestSatisfied?: boolean;
                 problems?: unknown[];
                 reviewedSlideIndexes?: unknown[];
               };
               if (
                 typeof result.approved !== "boolean" ||
+                typeof result.requestSatisfied !== "boolean" ||
                 !Array.isArray(result.problems) ||
                 result.problems.some((p) => typeof p !== "string") ||
                 !Array.isArray(result.reviewedSlideIndexes) ||
@@ -747,6 +768,7 @@ export async function runNativeTurn(
                 throw new Error(
                   "A visual review cannot approve newly introduced layout issues.",
                 );
+              requestSatisfied = result.requestSatisfied === true;
               reviewed = result.approved && result.problems.length === 0;
               input.onTool(
                 reviewed ? "수정 화면 확인 완료" : "수정 화면 재검토 필요",
@@ -811,7 +833,7 @@ export async function runNativeTurn(
   );
   // Looking at the result after an edit is the product contract, not a hint.
   // A model that edits and stops is asked once more to observe and review.
-  if (changed && !reviewed) {
+  if (changed && (!reviewed || !requestSatisfied)) {
     const review = generatedImageInserted
       ? await turn(
           "The requested generated image is now an editable picture object in the open presentation. Observe the fresh slide, correct its position or size if needed, then call native_review. Do not generate another image.",
@@ -819,21 +841,33 @@ export async function runNativeTurn(
           180000,
         )
       : await turn(
-          "Observe the changed slides, then call native_review with every changed slide. Approve only if the fresh screenshot shows the requested change without new problems; otherwise report the problems. Then tell the user in Korean what changed and what the review found.",
+          "Use the fresh changed-slide screenshots already returned by the edit. If the requested result is missing, correct only the missing part when editing is allowed. Call native_review directly with every changed slide, requestSatisfied, and problems. Only observe again if necessary. Approve only if the fresh screenshot shows the requested change without new problems; otherwise report the problems. Then tell the user in Korean what changed and what the review found.",
           false,
           180000,
-          true,
+          !reviewed,
         );
     if (review.trim()) text = review;
   }
-  if (changed && !reviewed)
-    text = `${text.trim()}\n\n${UNREVIEWED_EDIT_NOTICE}`;
+  const completion = finalizeTurn(text, {
+    requestText: unfinishedGoal || input.requestText,
+    ...(unfinishedGoal ? { requiredIntent: "edit" as const } : {}),
+    readOnly: input.permission.mode === "read_only",
+    changed,
+    reviewed,
+    requestSatisfied,
+    unconfirmedMutation,
+  });
+  text = completion.text;
+  if (changed && !reviewed) text += `\n\n${UNREVIEWED_EDIT_NOTICE}`;
   else if (unconfirmedMutation && !reviewed)
-    text = `${text.trim()}\n\n${UNCONFIRMED_EDIT_NOTICE}`;
+    text += `\n\n${UNCONFIRMED_EDIT_NOTICE}`;
+  input.onText(text);
   return {
     text,
     changed,
     reviewed,
+    requestSatisfied,
+    task: completion.task,
     status: changed && !reviewed ? "needs_review" : "completed",
   };
 }

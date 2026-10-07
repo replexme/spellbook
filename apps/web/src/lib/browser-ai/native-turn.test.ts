@@ -96,6 +96,98 @@ const edit = {
 };
 
 describe("browser-run AI request", () => {
+  it("withholds a streamed false completion when no edit ran", async () => {
+    const onText = vi.fn();
+    const { model } = scriptedModel(async (_tool, input) => {
+      input.onText("사진을 원형으로 수정했습니다.");
+      return "사진을 원형으로 수정했습니다.";
+    });
+    const result = await runNativeTurn(model, {
+      requestText: "사진을 원형으로 잘라서 넣어줘",
+      permission: documentScope,
+      host: editorHost(),
+      web: { search: async () => [], readPage: async () => "" },
+      signal: new AbortController().signal,
+      onText,
+      onTool: () => {},
+    });
+    expect(result.task.outcome).toBe("unverified");
+    expect(onText.mock.calls).toEqual([[result.text]]);
+    expect(result.text).not.toContain("수정했습니다");
+  });
+
+  it("reuses edit screenshots for review while retaining the live revision check", async () => {
+    const host = editorHost();
+    const { model, turns } = scriptedModel(async (tool) => {
+      await tool("native_observe", { detailSlideIndex: null });
+      await tool("native_edit", edit);
+      await tool("native_review", {
+        approved: true,
+        requestSatisfied: true,
+        problems: [],
+        reviewedSlideIndexes: [0],
+      });
+      return JSON.stringify({
+        intent: "edit",
+        goal: "제목 변경",
+        outcome: "applied",
+        message: "제목을 수정하고 확인했습니다.",
+        reason: "",
+      });
+    });
+    const result = await run(model, host);
+    expect(result.task.outcome).toBe("fulfilled");
+    expect(turns).toHaveLength(1);
+    expect(host.call.mock.calls.map(([request]) => request.operation)).toEqual([
+      "observe",
+      "edit",
+      "observe",
+    ]);
+  });
+
+  it("does not accept layout approval as confirmation of the user's result", async () => {
+    const { model, turns } = scriptedModel(
+      async (tool) => {
+        await tool("native_observe", { detailSlideIndex: null });
+        await tool("native_edit", edit);
+        expect(
+          (
+            await tool("native_review", {
+              approved: true,
+              problems: [],
+              reviewedSlideIndexes: [0],
+            })
+          ).ok,
+        ).toBe(false);
+        await tool("native_review", {
+          approved: true,
+          requestSatisfied: false,
+          problems: [],
+          reviewedSlideIndexes: [0],
+        });
+        return JSON.stringify({
+          intent: "edit",
+          goal: "제목 변경",
+          outcome: "applied",
+          message: "완료",
+          reason: "",
+        });
+      },
+      async () =>
+        JSON.stringify({
+          intent: "edit",
+          goal: "제목 변경",
+          outcome: "applied",
+          message: "완료",
+          reason: "",
+        }),
+    );
+    const result = await run(model);
+    expect(turns).toHaveLength(2);
+    expect(result.task.outcome).toBe("unverified");
+    expect(result.text).not.toBe("완료");
+  });
+
   it("records provider cache hits separately from page payload bytes", async () => {
     const model: TurnModel = {
       async run(input) {
@@ -156,6 +248,7 @@ describe("browser-run AI request", () => {
       expect(edited.ok).toBe(true);
       const review = await tool("native_review", {
         approved: true,
+        requestSatisfied: true,
         problems: [],
         reviewedSlideIndexes: [59],
       });
@@ -229,11 +322,18 @@ describe("browser-run AI request", () => {
         await tool("native_observe", { detailSlideIndex: null });
         const review = await tool("native_review", {
           approved: true,
+          requestSatisfied: true,
           problems: [],
           reviewedSlideIndexes: [0],
         });
         expect(review.ok).toBe(true);
-        return "제목을 바꾸고 화면에서 확인했어요";
+        return JSON.stringify({
+          intent: "edit",
+          goal: "제목 변경",
+          outcome: "applied",
+          message: "제목을 바꾸고 화면에서 확인했어요",
+          reason: "",
+        });
       },
     );
     const result = await run(model);
@@ -296,6 +396,7 @@ describe("browser-run AI request", () => {
         await tool("native_edit", edit);
         const review = await tool("native_review", {
           approved: true,
+          requestSatisfied: true,
           problems: [],
           reviewedSlideIndexes: [],
         });
@@ -322,7 +423,12 @@ describe("web access in a browser-run request", () => {
         ["web_search", { query: "Seoul" }],
         ["fetch_web_page", { url: "https://ko.wikipedia.org/wiki/Seoul" }],
       ] as const)
-        outputs.push(await tool(name, args).catch((error) => ({ ok: false, text: String(error) })));
+        outputs.push(
+          await tool(name, args).catch((error) => ({
+            ok: false,
+            text: String(error),
+          })),
+        );
       return "요약했습니다.";
     });
     await runNativeTurn(model, {
@@ -331,7 +437,11 @@ describe("web access in a browser-run request", () => {
       host: editorHost(),
       web: {
         search: async () => [
-          { title: "Seoul", snippet: "", url: "https://ko.wikipedia.org/wiki/Seoul" },
+          {
+            title: "Seoul",
+            snippet: "",
+            url: "https://ko.wikipedia.org/wiki/Seoul",
+          },
         ],
         readPage: read,
       },
@@ -339,14 +449,21 @@ describe("web access in a browser-run request", () => {
       onText: () => undefined,
       onTool: () => undefined,
     });
-    expect(outputs.map((output) => output.ok)).toEqual([false, true, true, true]);
+    expect(outputs.map((output) => output.ok)).toEqual([
+      false,
+      true,
+      true,
+      true,
+    ]);
     expect(read.mock.calls.map((call) => call[0])).toEqual([
       "https://docs.example.com/guide",
       "https://ko.wikipedia.org/wiki/Seoul",
     ]);
     expect(outputs[1]!.text).toMatch(/^\[Untrusted web page text/);
     const instructions = turns[0]!.instructions;
-    expect(instructions).not.toMatch(/MUST NOT ask|NEVER claim that you cannot access/);
+    expect(instructions).not.toMatch(
+      /MUST NOT ask|NEVER claim that you cannot access/,
+    );
     expect(instructions).toMatch(/Wikipedia/);
   });
 });
