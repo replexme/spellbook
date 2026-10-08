@@ -23,6 +23,7 @@ const EXPORT_APPLESCRIPT = String.raw`
 on run argv
   set sourcePath to item 1 of argv
   set outputPath to item 2 of argv
+  set quitAfterExport to item 3 of argv is "owned"
   set openedPresentation to missing value
   tell application "Microsoft PowerPoint"
     if (count of presentations) is not 0 then error "PowerPoint has an open presentation. Close it before corpus export."
@@ -38,7 +39,13 @@ on run argv
       end repeat
       set openedPresentation to presentation 1
       save openedPresentation in (POSIX file outputPath) as save as PDF
-      close openedPresentation saving no
+      if quitAfterExport then
+        -- Closing the final document opens PowerPoint's Home window and clears
+        -- the hidden flag. Quit our empty-at-entry process directly instead.
+        quit saving no
+      else
+        close openedPresentation saving no
+      end if
     on error errorMessage number errorNumber
       if openedPresentation is not missing value then
         try
@@ -168,7 +175,7 @@ export async function exportPowerPointReferences({
         );
         const pdfPath = path.join(powerPointStagingDirectory, "reference.pdf");
         await fs.copyFile(source, stagedSource);
-        runPowerPointExport(stagedSource, pdfPath, timeoutMs);
+        const background = runPowerPointExport(stagedSource, pdfPath, timeoutMs, ownsPowerPoint);
         requireCommand("pdftoppm", [
           "-png",
           "-r",
@@ -187,7 +194,7 @@ export async function exportPowerPointReferences({
         await fs.writeFile(
           path.join(temporaryDirectory, "reference-metadata.json"),
           `${JSON.stringify(
-            { sourceSha256, referenceRenderer, slides },
+            { sourceSha256, referenceRenderer, slides, background },
             null,
             2,
           )}\n`,
@@ -299,15 +306,24 @@ export function ensureHiddenPowerPoint(
   return owned;
 }
 
-function runPowerPointExport(source, pdfPath, timeoutMs) {
-  ensureHiddenPowerPoint();
-  const result = spawnSync("osascript", ["-", source, pdfPath], {
+function runPowerPointExport(source, pdfPath, timeoutMs, ownsPowerPoint) {
+  const newlyOwned = ensureHiddenPowerPoint();
+  const before = readPowerPointState();
+  const quitOwned = ownsPowerPoint || newlyOwned;
+  const result = spawnSync("osascript", ["-", source, pdfPath, quitOwned ? "owned" : "existing"], {
     encoding: "utf8",
     input: EXPORT_APPLESCRIPT,
     timeout: timeoutMs,
   });
   if (result.error || result.status !== 0)
     throw commandError("Microsoft PowerPoint", result);
+  if (quitOwned) {
+    for (let n = 0; n < 100 && readPowerPointState(); n++)
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    if (readPowerPointState()) throw Error("Owned PowerPoint process did not exit after background export");
+  } else ensureHiddenPowerPoint();
+  return { before, after: readPowerPointState(), ownedProcess: quitOwned,
+    procedure: quitOwned ? "hidden launch; native PDF export; quit without opening Home" : "existing hidden process" };
 }
 
 function recoverPowerPointAfterFailure() {
