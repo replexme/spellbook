@@ -52,7 +52,7 @@ switch (args[0])
     }
     case "render" when args.Length is 3 or 4:
     {
-        IPresentationRenderer renderer = new LibreOfficeRenderer();
+        IPresentationRenderer renderer = new OnlyOfficeRenderer();
         var slideIndexes = args.Length == 4
             ? args[3].Split(',').Select(value => int.Parse(value) - 1).ToArray()
             : null;

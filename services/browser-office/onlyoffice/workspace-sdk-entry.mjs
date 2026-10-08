@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import { installOnlyOfficeProductPort } from "./product-native-port.mjs";
 import { initializeOnlyOfficeSections } from "./section-artifact.mjs";
+import { captureOnlyOfficeSlide } from "./slide-capture.mjs";
 const owner = parent.parent,
   ownerOrigin = new URL(import.meta.url).searchParams.get("clientOrigin");
 if (!ownerOrigin || new URL(ownerOrigin).origin !== ownerOrigin)
@@ -133,34 +134,7 @@ window.addEventListener("message", async (event) => {
             selectedIds: selected.map((o) => paths.get(o.Id)).filter(Boolean),
           };
         } else if (data.method === "capture") {
-          const index = data.slideIndex;
-          if (!Number.isSafeInteger(index) || !m.Slides[index])
-            throw Error("slide_invalid");
-          const slide = m.Slides[index],
-            canvas = document.createElement("canvas");
-          canvas.width = 1280;
-          canvas.height = Math.round((1280 * slide.Height) / slide.Width);
-          const g = new AscCommon.CGraphics();
-          g.init(
-            canvas.getContext("2d"),
-            canvas.width,
-            canvas.height,
-            slide.Width,
-            slide.Height,
-          );
-          g.m_oFontManager = AscCommon.g_fontManager;
-          g.transform(1, 0, 0, 1, 0, 0);
-          const previous = AscCommon.IsShapeToImageConverter;
-          try {
-            AscCommon.IsShapeToImageConverter = true;
-            slide.draw(g);
-            value = {
-              slideIndex: index,
-              pngBase64: canvas.toDataURL("image/png").split(",")[1],
-            };
-          } finally {
-            AscCommon.IsShapeToImageConverter = previous;
-          }
+          value = captureOnlyOfficeSlide(data.slideIndex);
         } else if (data.method === "reveal") {
           if (
             !Number.isSafeInteger(data.slideIndex) ||

@@ -90,6 +90,7 @@ export async function exportOnlyOfficeStatic({
       "/document_editor_service_worker.js",
       "/web-apps/apps/presentationeditor/main/index.html",
       "/assets/officeHost-C2hljZhH.js",
+      "/sdkjs/slide/sdk-all.js",
     ]) {
       const response = await fetch(origin + route);
       if (!response.ok) throw Error("static_export_route_failed:" + route);

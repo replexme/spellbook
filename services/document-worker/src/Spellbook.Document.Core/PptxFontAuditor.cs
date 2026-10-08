@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
 using System.Xml.Linq;
@@ -16,10 +17,12 @@ public sealed class RendererFontEnvironment
     public RendererFontEnvironment(
         bool available,
         IReadOnlyList<string> families,
-        Func<string, string?>? substitutionResolver = null)
+        Func<string, string?>? substitutionResolver = null,
+        bool embeddedFontsSupported = true)
     {
         Available = available;
         Families = families;
+        EmbeddedFontsSupported = embeddedFontsSupported;
         this.substitutionResolver = substitutionResolver ?? (_ => null);
         normalizedFamilies = families
             .SelectMany(SplitAliases)
@@ -31,6 +34,22 @@ public sealed class RendererFontEnvironment
     public bool Available { get; }
 
     public IReadOnlyList<string> Families { get; }
+
+    public bool EmbeddedFontsSupported { get; }
+
+    public static RendererFontEnvironment DetectOnlyOffice(string? sourceMapPath = null)
+    {
+        sourceMapPath ??= Path.Combine(Directory.GetCurrentDirectory(),
+            "services/browser-office/onlyoffice/distribution/onlyoffice-browser-font-source-map.json");
+        using var sourceMap = JsonDocument.Parse(File.ReadAllBytes(sourceMapPath));
+        var families = sourceMap.RootElement.GetProperty("visibleFamilies").EnumerateArray()
+            .Select(value => value.GetString() ?? throw new InvalidDataException("Invalid ONLYOFFICE font family."))
+            .ToArray();
+        if (families.Length == 0) throw new InvalidDataException("ONLYOFFICE font catalog is empty.");
+        // The selected 9.3 presentation importer does not load embedded PPTX fonts.
+        // Host fontconfig and package preservation are not evidence of availability.
+        return new RendererFontEnvironment(true, families, embeddedFontsSupported: false);
+    }
 
     public bool HasFamily(string family) => normalizedFamilies.Contains(Normalize(family));
 
@@ -165,7 +184,8 @@ public sealed class PptxFontAuditor
             .Select(face => face.Typeface)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var missing = environment.Available
-            ? declared.Where(family => !environment.HasFamily(family) && !embedded.Contains(family)).ToList()
+            ? declared.Where(family => !environment.HasFamily(family)
+                && !(environment.EmbeddedFontsSupported && embedded.Contains(family))).ToList()
             : declared.ToList();
         var substitutions = missing
             .Select(original => new FontSubstitution(original, environment.ResolveSubstitution(original) ?? string.Empty))

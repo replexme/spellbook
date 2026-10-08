@@ -6,10 +6,10 @@ using Spellbook.Document.Core;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<LocalObjectStore>();
 builder.Services.AddSingleton<PptxSafetyScanner>();
-builder.Services.AddSingleton(RendererFontEnvironment.Detect());
+builder.Services.AddSingleton(RendererFontEnvironment.DetectOnlyOffice());
 builder.Services.AddSingleton<PresentationInspector>();
 builder.Services.AddSingleton<PptxPatcher>();
-builder.Services.AddSingleton<IPresentationRenderer, LibreOfficeRenderer>();
+builder.Services.AddSingleton<IPresentationRenderer, OnlyOfficeRenderer>();
 builder.Services.AddSingleton<IDocumentFormatAdapter, PptxDocumentFormatAdapter>();
 builder.Services.AddHttpClient();
 

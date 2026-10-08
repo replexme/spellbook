@@ -9,6 +9,7 @@ import {
   addOnlyOfficeProductBootstrap,
   addOnlyOfficeProductResourceHost,
 } from "./product-runtime-addon.mjs";
+import { patchOnlyOfficeDistributedAlignment } from "./distributed-alignment.mjs";
 const sourceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(sourceRoot, "../../..");
 function validOrigin(value) {
@@ -113,7 +114,7 @@ export function createOnlyOfficeWorkspaceServer({
       if (pathname === "/licenses") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(
-          '<!doctype html><meta charset="utf-8"><title>Spellbook licenses and source</title><h1>Licenses and corresponding source</h1><p><a href="/licensing.html">Pinned ONLYOFFICE distribution licenses, fonts and upstream source archives</a></p><p><a href="/workspace-sources.tar.gz">Current host source archive</a> · <a href="/workspace-source-receipt.json">Bundle and source identity receipt</a></p><p>Host source carries MPL-2.0 notices. ONLYOFFICE distribution carries AGPL-3.0 notices. ' +
+          '<!doctype html><meta charset="utf-8"><title>Spellbook licenses and source</title><h1>Licenses and corresponding source</h1><p><a href="/licensing.html">Pinned ONLYOFFICE distribution licenses, fonts and upstream source archives</a></p><p><a href="/workspace-sources.tar.gz">Current host and native SDK adaptation source archive</a> · <a href="/workspace-source-receipt.json">Bundle and source identity receipt</a></p><p>Host integration source carries MPL-2.0 notices. Native SDK adaptations and the ONLYOFFICE distribution carry AGPL-3.0 notices. ' +
             (admission?.auxiliaryWasmRebuildVerified
               ? '<a href="/sources/auxiliary-build-receipt.json">Four auxiliary JS/WASM pairs reproduced from the provided source.</a> '
               : "Auxiliary WASM reproduction remains unverified. ") +
@@ -150,6 +151,8 @@ export function createOnlyOfficeWorkspaceServer({
       if (!names[pathname] && !file.startsWith(dist + path.sep))
         throw Error("path_invalid");
       let bytes = await fs.readFile(file);
+      if (pathname === "/sdkjs/slide/sdk-all.js")
+        bytes = Buffer.from(patchOnlyOfficeDistributedAlignment(bytes.toString()));
       if (pathname === "/web-apps/apps/presentationeditor/main/index.html")
         bytes = Buffer.from(
           addOnlyOfficeProductBootstrap(bytes.toString()).replace(

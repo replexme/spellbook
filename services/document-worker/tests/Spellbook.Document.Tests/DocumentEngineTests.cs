@@ -855,6 +855,35 @@ public sealed class DocumentEngineTests : IDisposable
     }
 
     [Fact]
+    public void InspectorDoesNotTreatPreservedEmbeddedFontsAsLoadedByAnUnsupportedRenderer()
+    {
+        const string family = "Embedded Fixture Sans";
+        var path = TestPresentationFactory.Create(directory, fontFamily: family);
+        AddEmbeddedFont(path, family, permissions: 0x0008);
+        var environment = new RendererFontEnvironment(true, ["Liberation Sans"], embeddedFontsSupported: false);
+
+        var graph = new PresentationInspector(environment).Inspect(path);
+
+        Assert.Equal([family], graph.MissingFonts);
+        Assert.Equal("B", Assert.Single(graph.Slides).SupportGrade);
+    }
+
+    [Fact]
+    public void OnlyOfficeFontAuditUsesThePackagedFontCatalogInsteadOfHostFontconfig()
+    {
+        var catalog = Path.Combine(directory, "font-source-map.json");
+        File.WriteAllText(catalog, "{\"visibleFamilies\":[\"Carlito\",\"Noto Sans KR\"]}");
+
+        var environment = RendererFontEnvironment.DetectOnlyOffice(catalog);
+
+        Assert.True(environment.Available);
+        Assert.True(environment.HasFamily("Noto Sans KR"));
+        Assert.False(environment.HasFamily("Arial"));
+        Assert.False(environment.EmbeddedFontsSupported);
+        Assert.Null(environment.ResolveSubstitution("Arial"));
+    }
+
+    [Fact]
     public void InspectorDoesNotInstallPreviewOnlyEmbeddedFontsForEditing()
     {
         const string family = "Preview Only Fixture Sans";

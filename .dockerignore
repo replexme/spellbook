@@ -18,3 +18,5 @@ eval/results
 **/*.tsbuildinfo
 **/__pycache__
 **/*.pyc
+!services/browser-office/onlyoffice/distribution/server/FileConverter/bin
+!services/browser-office/onlyoffice/distribution/server/FileConverter/bin/**

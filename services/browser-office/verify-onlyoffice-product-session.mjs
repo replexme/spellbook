@@ -18,6 +18,7 @@ import { createOnlyOfficeResourcePreparation } from "./onlyoffice/product-resour
 import { onlyOfficeSourceTargets } from "./onlyoffice/source-targets.mjs";
 import { createOnlyOfficeComparisonHost } from "./onlyoffice/comparison-host.mjs";
 import { addOnlyOfficeProductBootstrap, addOnlyOfficeProductResourceHost } from "./onlyoffice/product-runtime-addon.mjs";
+import { patchOnlyOfficeDistributedAlignment } from "./onlyoffice/distributed-alignment.mjs";
 import {
   createOnlyOfficeProductEngine,
   observeOnlyOfficeProduct,
@@ -205,6 +206,7 @@ const candidateServer = createServer(async (req, res) => {
       throw Error("invalid_path");
     const bytes = await fs.readFile(file);
     let served=bytes;
+    if(name === "sdkjs/slide/sdk-all.js")served=Buffer.from(patchOnlyOfficeDistributedAlignment(bytes.toString("utf8")));
     if(name === "web-apps/apps/presentationeditor/main/index.html")served=Buffer.from(addOnlyOfficeProductBootstrap(bytes.toString("utf8")));
     if(name === "assets/officeHost-C2hljZhH.js")served=Buffer.from(addOnlyOfficeProductResourceHost(bytes.toString("utf8")));
     if(served!==bytes){

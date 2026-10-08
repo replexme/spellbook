@@ -4,6 +4,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { unzipSync, zipSync, strFromU8, strToU8 } from "fflate";
+import { DOMParser, XMLSerializer } from "@xmldom/xmldom";
 
 const POWERPOINT_APP = "/Applications/Microsoft PowerPoint.app";
 const POWERPOINT_CONTAINER_DOCUMENTS = path.join(
@@ -28,7 +30,9 @@ on run argv
   tell application "Microsoft PowerPoint"
     if (count of presentations) is not 0 then error "PowerPoint has an open presentation. Close it before corpus export."
   end tell
+  log "powerpoint_open_begin"
   tell application "Microsoft PowerPoint" to open (POSIX file sourcePath)
+  log "powerpoint_open_complete"
   tell application "Microsoft PowerPoint"
     try
       set waitedTenths to 0
@@ -38,7 +42,10 @@ on run argv
         set waitedTenths to waitedTenths + 1
       end repeat
       set openedPresentation to presentation 1
+      set print hidden slides of print options of openedPresentation to true
+      log "powerpoint_pdf_begin"
       save openedPresentation in (POSIX file outputPath) as save as PDF
+      log "powerpoint_pdf_complete"
       if quitAfterExport then
         -- Closing the final document opens PowerPoint's Home window and clears
         -- the hidden flag. Quit our empty-at-entry process directly instead.
@@ -49,7 +56,11 @@ on run argv
     on error errorMessage number errorNumber
       if openedPresentation is not missing value then
         try
-          close openedPresentation saving no
+          if quitAfterExport then
+            quit saving no
+          else
+            close openedPresentation saving no
+          end if
         end try
       end if
       error errorMessage number errorNumber
@@ -64,17 +75,155 @@ export function parseRasterSlideName(file) {
   return match ? Number(match[1]) : null;
 }
 
+export function presentationSlideCount(bytes) {
+  const part = unzipSync(bytes)["ppt/presentation.xml"];
+  if (!part) throw Error("Presentation slide order is missing.");
+  const document = new DOMParser().parseFromString(
+    strFromU8(part),
+    "application/xml",
+  );
+  const count = orderedSlideIds(document).length;
+  if (!count) throw Error("Presentation contains no ordered slides.");
+  return count;
+}
+
+function orderedSlideIds(document) {
+  const root = document.documentElement,
+    namespace = root.namespaceURI;
+  if (
+    root.localName !== "presentation" ||
+    ![
+      "http://schemas.openxmlformats.org/presentationml/2006/main",
+      "http://purl.oclc.org/ooxml/presentationml/main",
+    ].includes(namespace)
+  )
+    throw Error("Presentation namespace is unsupported.");
+  const lists = Array.from(root.childNodes).filter(
+    (node) => node.localName === "sldIdLst" && node.namespaceURI === namespace,
+  );
+  if (lists.length !== 1)
+    throw Error("Presentation slide order is missing or ambiguous.");
+  return Array.from(lists[0].childNodes).filter(
+    (node) => node.localName === "sldId" && node.namespaceURI === namespace,
+  );
+}
+
+// macOS PowerPoint's PDF save ignores print-hidden-slides. Show only those
+// slides in the owned capture copy; never rewrite the customer's source file.
+export function preparePowerPointRenderSource(bytes) {
+  const parts = unzipSync(bytes),
+    parser = new DOMParser();
+  const presentation = parser.parseFromString(
+    strFromU8(parts["ppt/presentation.xml"]),
+    "application/xml",
+  );
+  const relationships = parser.parseFromString(
+    strFromU8(parts["ppt/_rels/presentation.xml.rels"]),
+    "application/xml",
+  );
+  const targets = new Map(
+    Array.from(
+      relationships.getElementsByTagNameNS(
+        "http://schemas.openxmlformats.org/package/2006/relationships",
+        "Relationship",
+      ),
+    )
+      .filter((rel) => rel.getAttribute("TargetMode") !== "External")
+      .map((rel) => {
+        const target = rel.getAttribute("Target");
+        return [
+          rel.getAttribute("Id"),
+          path.posix.normalize(
+            target.startsWith("/") ? target.slice(1) : "ppt/" + target,
+          ),
+        ];
+      }),
+  );
+  const ids = orderedSlideIds(presentation);
+  const hiddenSlideIndexes = [];
+  ids.forEach((id, index) => {
+    const relationshipId =
+      id.getAttributeNS(
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        "id",
+      ) ||
+      id.getAttributeNS(
+        "http://purl.oclc.org/ooxml/officeDocument/relationships",
+        "id",
+      );
+    const part = targets.get(relationshipId);
+    if (!part || !parts[part])
+      throw Error("Ordered slide relationship is missing.");
+    const document = parser.parseFromString(
+      strFromU8(parts[part]),
+      "application/xml",
+    );
+    if (
+      ["0", "false"].includes(document.documentElement.getAttribute("show"))
+    ) {
+      hiddenSlideIndexes.push(index);
+      document.documentElement.setAttribute("show", "1");
+      parts[part] = strToU8(new XMLSerializer().serializeToString(document));
+    }
+  });
+  return {
+    bytes: hiddenSlideIndexes.length ? zipSync(parts) : bytes,
+    hiddenSlideIndexes,
+  };
+}
+
 export function buildReferenceRenderer({
   powerPointVersion,
   macOsVersion,
   dpi,
+  fontEnvironmentSha256,
 }) {
   return {
     name: "Microsoft PowerPoint",
     version: powerPointVersion,
     os: `macOS ${macOsVersion}`,
+    ...(fontEnvironmentSha256 ? { fontEnvironmentSha256 } : {}),
     exportProcedure: `PowerPoint AppleScript save as PDF, then Poppler pdftoppm ${dpi} DPI PNG; one image per slide`,
   };
+}
+
+// Font installation can change native layout without changing the PPTX, OS or
+// PowerPoint version. Bind reference reuse to the actual available font bytes.
+export async function captureFontEnvironment(directories) {
+  const files = [];
+  async function visit(directory) {
+    let entries;
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) await visit(file);
+      else if (entry.isFile() && /\.(ttf|otf|ttc|otc|dfont)$/i.test(entry.name))
+        files.push({ file, sha256: await sha256(file) });
+    }
+  }
+  for (const directory of directories) await visit(path.resolve(directory));
+  files.sort((left, right) => left.file.localeCompare(right.file, "en"));
+  return {
+    sha256: createHash("sha256").update(JSON.stringify(files)).digest("hex"),
+    files,
+    scope:
+      "Installed system, user, Apple downloaded and PowerPoint bundled font files; excludes inaccessible Office cloud-font caches",
+  };
+}
+
+function nativeFontDirectories() {
+  return [
+    "/System/Library/Fonts",
+    "/System/Library/AssetsV2/com_apple_MobileAsset_Font8",
+    "/Library/Fonts",
+    path.join(os.homedir(), "Library/Fonts"),
+    path.join(POWERPOINT_APP, "Contents/Resources/DFonts"),
+  ];
 }
 
 export async function exportPowerPointReferences({
@@ -93,6 +242,7 @@ export async function exportPowerPointReferences({
     );
 
   await fs.access(POWERPOINT_APP);
+  const fontEnvironment = await captureFontEnvironment(nativeFontDirectories());
   const ownsPowerPoint = ensureHiddenPowerPoint();
   try {
     const openCount = Number(
@@ -115,6 +265,11 @@ export async function exportPowerPointReferences({
       ? path.resolve(referencesRoot)
       : path.join(manifestDirectory, "references-powerpoint-macos");
     await fs.mkdir(absoluteReferencesRoot, { recursive: true, mode: 0o700 });
+    await fs.writeFile(
+      path.join(absoluteReferencesRoot, "font-environment.json"),
+      `${JSON.stringify(fontEnvironment, null, 2)}\n`,
+      { mode: 0o600 },
+    );
 
     const powerPointVersion = requireCommand("mdls", [
       "-name",
@@ -129,53 +284,78 @@ export async function exportPowerPointReferences({
       powerPointVersion,
       macOsVersion,
       dpi,
+      fontEnvironmentSha256: fontEnvironment.sha256,
     });
     const exported = [];
     const failures = [];
+    const persistManifest = async () => {
+      manifest.referenceRenderer = referenceRenderer;
+      manifest.referenceFailures = failures;
+      const temporaryManifest = `${absoluteManifest}.tmp-${process.pid}`;
+      await fs.writeFile(
+        temporaryManifest,
+        `${JSON.stringify(manifest, null, 2)}\n`,
+        { mode: 0o600 },
+      );
+      await fs.rename(temporaryManifest, absoluteManifest);
+    };
 
     for (const [index, deck] of manifest.decks.entries()) {
-      const source = path.resolve(manifestDirectory, deck.source);
-      await fs.access(source);
-      const sourceSha256 = await sha256(source);
-      const finalDirectory = path.join(
-        absoluteReferencesRoot,
-        safeName(deck.id),
-      );
-      const reusable = await reusableReference(finalDirectory, {
-        sourceSha256,
-        referenceRenderer,
-      });
-      if (reusable) {
-        deck.references = relativePosix(manifestDirectory, finalDirectory);
-        exported.push({
-          id: deck.id,
-          slides: reusable.slides,
-          status: "reused",
-        });
-        console.log(
-          `[powerpoint] ${index + 1}/${manifest.decks.length} ${deck.id}: reused ${reusable.slides} slide(s)`,
-        );
-        continue;
-      }
-      if (await exists(finalDirectory))
-        throw new Error(
-          `Reference directory already exists but is stale or incomplete: ${finalDirectory}`,
-        );
-
-      const temporaryDirectory = await fs.mkdtemp(
-        path.join(absoluteReferencesRoot, `.${safeName(deck.id)}-`),
-      );
-      const powerPointStagingDirectory = await fs.mkdtemp(
-        path.join(POWERPOINT_CONTAINER_DOCUMENTS, "spellbook-reference-"),
-      );
+      let temporaryDirectory, powerPointStagingDirectory;
       try {
+        const source = path.resolve(manifestDirectory, deck.source);
+        await fs.access(source);
+        const sourceSha256 = await sha256(source);
+        const sourceSlides = presentationSlideCount(await fs.readFile(source));
+        const finalDirectory = path.join(
+          absoluteReferencesRoot,
+          safeName(deck.id),
+        );
+        const reusable = await reusableReference(finalDirectory, {
+          sourceSha256,
+          referenceRenderer,
+        });
+        if (reusable && reusable.slides === sourceSlides) {
+          deck.references = relativePosix(manifestDirectory, finalDirectory);
+          exported.push({
+            id: deck.id,
+            slides: reusable.slides,
+            status: "reused",
+          });
+          console.log(
+            `[powerpoint] ${index + 1}/${manifest.decks.length} ${deck.id}: reused ${reusable.slides} slide(s)`,
+          );
+          continue;
+        }
+        if (await exists(finalDirectory))
+          throw new Error(
+            `Reference directory already exists but is stale or incomplete: ${finalDirectory}`,
+          );
+
+        temporaryDirectory = await fs.mkdtemp(
+          path.join(absoluteReferencesRoot, `.${safeName(deck.id)}-`),
+        );
+        powerPointStagingDirectory = await fs.mkdtemp(
+          path.join(POWERPOINT_CONTAINER_DOCUMENTS, "spellbook-reference-"),
+        );
         const stagedSource = path.join(
           powerPointStagingDirectory,
           "source.pptx",
         );
         const pdfPath = path.join(powerPointStagingDirectory, "reference.pdf");
-        await fs.copyFile(source, stagedSource);
-        const background = runPowerPointExport(stagedSource, pdfPath, timeoutMs, ownsPowerPoint);
+        const renderSource = preparePowerPointRenderSource(
+          await fs.readFile(source),
+        );
+        await fs.writeFile(stagedSource, renderSource.bytes);
+        const renderSourceSha256 = createHash("sha256")
+          .update(renderSource.bytes)
+          .digest("hex");
+        const background = runPowerPointExport(
+          stagedSource,
+          pdfPath,
+          timeoutMs,
+          ownsPowerPoint,
+        );
         requireCommand("pdftoppm", [
           "-png",
           "-r",
@@ -186,6 +366,10 @@ export async function exportPowerPointReferences({
         const slides = await normalizeRasterNames(temporaryDirectory);
         if (slides === 0)
           throw new Error(`PowerPoint exported no slides for ${deck.id}.`);
+        if (slides !== sourceSlides)
+          throw new Error(
+            `PowerPoint exported ${slides} of ${sourceSlides} ordered slides; hidden slides must not be omitted.`,
+          );
         // Retain the native PDF for text-origin/font diagnostics; PNG alone
         // cannot explain changes in shaping, tracking, or paragraph layout.
         await retainNativeReferencePdf(pdfPath, temporaryDirectory);
@@ -194,7 +378,16 @@ export async function exportPowerPointReferences({
         await fs.writeFile(
           path.join(temporaryDirectory, "reference-metadata.json"),
           `${JSON.stringify(
-            { sourceSha256, referenceRenderer, slides, background },
+            {
+              sourceSha256,
+              renderSourceSha256,
+              hiddenSlideIndexes: renderSource.hiddenSlideIndexes,
+              referenceRenderer,
+              slides,
+              sourceSlides,
+              allSlides: true,
+              background,
+            },
             null,
             2,
           )}\n`,
@@ -211,11 +404,13 @@ export async function exportPowerPointReferences({
           `[powerpoint] ${index + 1}/${manifest.decks.length} ${deck.id}: exported ${slides} slide(s)`,
         );
       } catch (error) {
-        await fs.rm(temporaryDirectory, { recursive: true, force: true });
-        await fs.rm(powerPointStagingDirectory, {
-          recursive: true,
-          force: true,
-        });
+        if (temporaryDirectory)
+          await fs.rm(temporaryDirectory, { recursive: true, force: true });
+        if (powerPointStagingDirectory)
+          await fs.rm(powerPointStagingDirectory, {
+            recursive: true,
+            force: true,
+          });
         const message = error instanceof Error ? error.message : String(error);
         delete deck.references;
         failures.push({ id: deck.id, error: message });
@@ -223,18 +418,18 @@ export async function exportPowerPointReferences({
           `[powerpoint] ${index + 1}/${manifest.decks.length} ${deck.id}: failed: ${message}`,
         );
         if (ownsPowerPoint) recoverPowerPointAfterFailure();
+      } finally {
+        // Keep successful references and explicit failures across interruption.
+        await persistManifest();
       }
     }
 
-    manifest.referenceRenderer = referenceRenderer;
-    manifest.referenceFailures = failures;
-    const temporaryManifest = `${absoluteManifest}.tmp-${process.pid}`;
-    await fs.writeFile(
-      temporaryManifest,
-      `${JSON.stringify(manifest, null, 2)}\n`,
-      { mode: 0o600 },
-    );
-    await fs.rename(temporaryManifest, absoluteManifest);
+    const currentFonts = await captureFontEnvironment(nativeFontDirectories());
+    if (currentFonts.sha256 !== fontEnvironment.sha256)
+      throw new Error(
+        "Font environment changed during capture; native references require a new run.",
+      );
+    await persistManifest();
 
     return {
       manifest: absoluteManifest,
@@ -292,7 +487,10 @@ export function ensureHiddenPowerPoint(
       // the process created above, using AppKit before any AppleEvent; never
       // change the visibility of a pre-existing user application.
       if (state?.pid && !state.hidden) {
-        run("osascript", ["-l", "JavaScript", "-e",
+        run("osascript", [
+          "-l",
+          "JavaScript",
+          "-e",
           `ObjC.import("AppKit");const app=$.NSRunningApplication.runningApplicationWithProcessIdentifier(${state.pid});if(app)app.hide;`,
         ]);
       }
@@ -310,26 +508,40 @@ function runPowerPointExport(source, pdfPath, timeoutMs, ownsPowerPoint) {
   const newlyOwned = ensureHiddenPowerPoint();
   const before = readPowerPointState();
   const quitOwned = ownsPowerPoint || newlyOwned;
-  const result = spawnSync("osascript", ["-", source, pdfPath, quitOwned ? "owned" : "existing"], {
-    encoding: "utf8",
-    input: EXPORT_APPLESCRIPT,
-    timeout: timeoutMs,
-  });
+  const result = spawnSync(
+    "osascript",
+    ["-", source, pdfPath, quitOwned ? "owned" : "existing"],
+    {
+      encoding: "utf8",
+      input: EXPORT_APPLESCRIPT,
+      timeout: timeoutMs,
+    },
+  );
   if (result.error || result.status !== 0)
     throw commandError("Microsoft PowerPoint", result);
   if (quitOwned) {
     for (let n = 0; n < 100 && readPowerPointState(); n++)
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-    if (readPowerPointState()) throw Error("Owned PowerPoint process did not exit after background export");
+    if (readPowerPointState())
+      throw Error(
+        "Owned PowerPoint process did not exit after background export",
+      );
   } else ensureHiddenPowerPoint();
-  return { before, after: readPowerPointState(), ownedProcess: quitOwned,
-    procedure: quitOwned ? "hidden launch; native PDF export; quit without opening Home" : "existing hidden process" };
+  return {
+    before,
+    after: readPowerPointState(),
+    ownedProcess: quitOwned,
+    procedure: quitOwned
+      ? "hidden launch; native PDF export; quit without opening Home"
+      : "existing hidden process",
+  };
 }
 
 function recoverPowerPointAfterFailure() {
   const state = readPowerPointState();
   if (!state) return;
-  if (!state.hidden || state.active) throw Error("PowerPoint recovery refused: owner interaction detected");
+  if (!state.hidden || state.active)
+    throw Error("PowerPoint recovery refused: owner interaction detected");
   const stateResult = spawnSync(
     "osascript",
     [
@@ -358,18 +570,8 @@ function recoverPowerPointAfterFailure() {
       `PowerPoint recovery refused to close an unrelated presentation: count=${count}, name=${name || "<none>"}.`,
     );
 
-  if (count === 1) {
-    const closeResult = spawnSync(
-      "osascript",
-      [
-        "-e",
-        'tell application "Microsoft PowerPoint" to close presentation "source.pptx" saving no',
-      ],
-      { encoding: "utf8", timeout: 30_000 },
-    );
-    if (closeResult.error || closeResult.status !== 0) terminatePowerPoint();
-  }
-
+  // Quit the owned process directly. Closing its final document can reveal the
+  // Home window even during failure recovery.
   const quitResult = spawnSync(
     "osascript",
     ["-e", 'tell application "Microsoft PowerPoint" to quit saving no'],
