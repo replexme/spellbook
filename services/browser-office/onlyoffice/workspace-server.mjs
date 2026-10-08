@@ -100,6 +100,9 @@ export function createOnlyOfficeWorkspaceServer({
             await fs.readFile(path.join(dist, "distribution-manifest.json")),
           )
           .update(await fs.readFile(path.join(base, "sdk.bundle.js")))
+          .update(await fs.readFile(path.join(base, "workspace-source-receipt.json")))
+          .update(await fs.readFile(path.join(sourceRoot, "workspace-cache-worker.js")))
+          .update(JSON.stringify(config))
           .digest("hex");
         const code = (
           await fs.readFile(
@@ -107,6 +110,7 @@ export function createOnlyOfficeWorkspaceServer({
             "utf8",
           )
         ).replace("__RUNTIME_ID__", identity);
+        res.setHeader("X-Spellbook-Runtime-Identity", identity);
         res.writeHead(200, { "content-type": "text/javascript" });
         res.end(code);
         return;

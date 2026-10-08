@@ -29,23 +29,51 @@ window.addEventListener("message", async (event) => {
     }
     const registration = await navigator.serviceWorker.register(
       "/document_editor_service_worker.js",
-      { scope: "/" },
+      { scope: "/", updateViaCache: "none" },
     );
-    await navigator.serviceWorker.ready;
-    if (!navigator.serviceWorker.controller)
+    try {
+      await registration.update();
+    } catch (error) {
+      if (navigator.onLine || !registration.active) throw error;
+    }
+    // ready may still describe the previous active worker during an update.
+    // Wait for this release's install before promising offline recovery.
+    const replacement = registration.installing ?? registration.waiting;
+    if (replacement && replacement.state !== "activated")
       await new Promise((resolve, reject) => {
+        const changed = () => {
+          if (!["activated", "redundant"].includes(replacement.state)) return;
+          clearTimeout(timer);
+          replacement.removeEventListener("statechange", changed);
+          replacement.state === "activated"
+            ? resolve()
+            : reject(Error("public_asset_cache_install_failed"));
+        };
+        const timer = setTimeout(() => {
+          replacement.removeEventListener("statechange", changed);
+          reject(Error("public_asset_cache_install_timeout"));
+        }, 180000);
+        replacement.addEventListener("statechange", changed);
+        changed();
+      });
+    await navigator.serviceWorker.ready;
+    if (navigator.serviceWorker.controller !== registration.active)
+      await new Promise((resolve, reject) => {
+        const changed = () => {
+          if (navigator.serviceWorker.controller !== registration.active) return;
+          clearTimeout(timer);
+          navigator.serviceWorker.removeEventListener("controllerchange", changed);
+          resolve();
+        };
         const timer = setTimeout(
-          () => reject(Error("public_asset_cache_control_timeout")),
+          () => {
+            navigator.serviceWorker.removeEventListener("controllerchange", changed);
+            reject(Error("public_asset_cache_control_timeout"));
+          },
           10000,
         );
-        navigator.serviceWorker.addEventListener(
-          "controllerchange",
-          () => {
-            clearTimeout(timer);
-            resolve();
-          },
-          { once: true },
-        );
+        navigator.serviceWorker.addEventListener("controllerchange", changed);
+        changed();
       });
     const resources = [
       "/reset.html",

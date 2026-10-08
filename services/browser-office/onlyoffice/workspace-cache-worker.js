@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 // Cache only immutable candidate program resources. Document/blob/API bytes
 // remain governed by the exact-artifact and OPFS journal contracts.
-const CACHE = "spellbook-office-public-assets-__RUNTIME_ID__";
+const VERSION = "__RUNTIME_ID__";
+const CACHE = "spellbook-office-public-assets-" + VERSION;
 const allowed = (url) =>
   url.origin === self.location.origin &&
   !url.searchParams.has("file") &&
@@ -74,23 +75,40 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(self.clients.claim());
 });
+// Paths are stable across releases. An older worker can control a new page
+// before its replacement activates, so check that page's server identity
+// before serving cached programs. Share the check among concurrent requests.
+const clientVersions = new Map();
+async function currentVersion(event) {
+  const client = event.resultingClientId || event.clientId;
+  let check = client && clientVersions.get(client);
+  if (!check) {
+    check = fetch("/sw.js", { cache: "no-store" }).then(
+      response => response.ok && response.headers.get("X-Spellbook-Runtime-Identity") === VERSION,
+      // A previously verified program remains usable while offline.
+      () => true,
+    );
+    if (client) {
+      if (clientVersions.size >= 256) clientVersions.delete(clientVersions.keys().next().value);
+      clientVersions.set(client, check);
+    }
+  }
+  return check;
+}
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || !allowed(url)) return;
   event.respondWith(
     (async () => {
+      if (!await currentVersion(event)) return fetch(event.request);
       const cache = await caches.open(CACHE);
-      try {
-        const response = await fetch(event.request);
-        if (response.status === 200) {
-          await cache.put(key(url), response.clone());
-        }
-        return response;
-      } catch (error) {
-        const cached = await cache.match(key(url));
-        if (cached) return cached;
-        throw error;
+      const cached = await cache.match(key(url));
+      if (cached) return cached;
+      const response = await fetch(event.request);
+      if (response.status === 200) {
+        await cache.put(key(url), response.clone());
       }
+      return response;
     })(),
   );
 });

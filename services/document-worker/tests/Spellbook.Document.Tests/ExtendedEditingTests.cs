@@ -116,6 +116,38 @@ public sealed class ExtendedEditingTests : IDisposable
         Assert.NotEmpty(report.Errors);
     }
     [Fact]
+    public void UnreferencedUntypedZipPartsCannotBecomeValidationSuccess()
+    {
+        var source = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "../../../../../../../eval/public/fixtures/general-native-surface.pptx"));
+        var broken = Path.Combine(directory, "untyped-orphan.pptx");
+        File.Copy(source, broken);
+        using (var zip = ZipFile.Open(broken, ZipArchiveMode.Update))
+        using (var output = new StreamWriter(zip.CreateEntry("ppt/slides/.slide1.xml.swp").Open()))
+            output.Write("unreferenced editor temporary file");
+        var hash = Hashing.FileSha256(broken);
+        var validator = new PptxValidator();
+        var report = validator.ValidateOpenXml(broken);
+        Assert.Null(report.Failure);
+        Assert.False(report.Valid);
+        Assert.Contains(report.Errors, error => error.Contains(".slide1.xml.swp:package part has no declared content type"));
+        Assert.Equal(hash, Hashing.FileSha256(broken));
+        Assert.False(validator.Validate(source, broken,
+            new HashSet<string> { "ppt/slides/.slide1.xml.swp" }).Valid);
+        using (var zip = ZipFile.Open(broken, ZipArchiveMode.Update))
+        {
+            var entry = zip.GetEntry("[Content_Types].xml")!;
+            XDocument types; using (var input = entry.Open()) types = XDocument.Load(input);
+            types.Root!.Add(new XElement(types.Root.Name.Namespace + "Default",
+                new XAttribute("Extension", "swp"), new XAttribute("ContentType", "application/octet-stream")));
+            entry.Delete(); using var output = zip.CreateEntry("[Content_Types].xml").Open(); types.Save(output);
+        }
+        // Unknown bytes are legitimate when declared. Never delete them to pass.
+        Assert.True(validator.ValidateOpenXml(broken).Valid);
+        using var declared = ZipFile.OpenRead(broken);
+        Assert.NotNull(declared.GetEntry("ppt/slides/.slide1.xml.swp"));
+    }
+    [Fact]
     public void UnicodeMediaValidationDoesNotRewriteSourceAndStillFindsSchemaErrors()
     {
         var source = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

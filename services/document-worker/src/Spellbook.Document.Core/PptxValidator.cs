@@ -168,6 +168,26 @@ public sealed class PptxValidator
         if (names.Count != mapped.Count)
             throw new InvalidDataException("Ambiguous package entry URI aliases.");
         var issues = new List<string>();
+        // The SDK visits reachable parts and can silently ignore an untyped
+        // orphan ZIP entry. PowerPoint rejects such packages before opening
+        // any slide, so validate the content-type coverage of every file.
+        var contentTypes = archive.GetEntry("[Content_Types].xml")
+            ?? throw new InvalidDataException("Package content types are missing.");
+        XDocument types;
+        using (var input = contentTypes.Open()) types = XDocument.Load(input);
+        XNamespace ct = "http://schemas.openxmlformats.org/package/2006/content-types";
+        var defaults = types.Root?.Elements(ct + "Default")
+            .Where(element => !string.IsNullOrWhiteSpace((string?)element.Attribute("ContentType")))
+            .Select(element => (string?)element.Attribute("Extension") ?? "")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+        var overrides = types.Root?.Elements(ct + "Override")
+            .Where(element => !string.IsNullOrWhiteSpace((string?)element.Attribute("ContentType")))
+            .Select(element => Uri.UnescapeDataString(((string?)element.Attribute("PartName") ?? "").TrimStart('/')))
+            .ToHashSet(StringComparer.Ordinal) ?? [];
+        foreach (var entry in archive.Entries.Where(entry => !string.IsNullOrEmpty(entry.Name) && entry.FullName != "[Content_Types].xml"))
+            if (!overrides.Contains(Uri.UnescapeDataString(entry.FullName)) &&
+                !defaults.Contains(Path.GetExtension(entry.FullName).TrimStart('.')))
+                issues.Add($"/{entry.FullName}:package part has no declared content type.");
         var relationshipViews = new Dictionary<string, XDocument>(StringComparer.Ordinal);
         foreach (var entry in archive.Entries.Where(entry => entry.FullName.EndsWith(".rels", StringComparison.Ordinal)))
         {
