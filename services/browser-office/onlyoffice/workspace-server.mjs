@@ -8,7 +8,10 @@ import { localUiFiles } from "../local-ui-assets.mjs";
 import {
   addOnlyOfficeProductBootstrap,
   addOnlyOfficeProductResourceHost,
+  addOnlyOfficeDocumentFontLoader,
 } from "./product-runtime-addon.mjs";
+import { patchOnlyOfficeDocumentFontConversionWorker } from "./document-fonts.mjs";
+import { onlyOfficeDocumentFontPrograms } from "./product-programs.mjs";
 import { patchOnlyOfficeDistributedAlignment } from "./distributed-alignment.mjs";
 const sourceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(sourceRoot, "../../..");
@@ -118,7 +121,7 @@ export function createOnlyOfficeWorkspaceServer({
       if (pathname === "/licenses") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(
-          '<!doctype html><meta charset="utf-8"><title>Spellbook licenses and source</title><h1>Licenses and corresponding source</h1><p><a href="/licensing.html">Pinned ONLYOFFICE distribution licenses, fonts and upstream source archives</a></p><p><a href="/workspace-sources.tar.gz">Current host and native SDK adaptation source archive</a> · <a href="/workspace-source-receipt.json">Bundle and source identity receipt</a></p><p>Host integration source carries MPL-2.0 notices. Native SDK adaptations and the ONLYOFFICE distribution carry AGPL-3.0 notices. ' +
+          '<!doctype html><meta charset="utf-8"><title>Spellbook licenses and source</title><h1>Licenses and corresponding source</h1><p><a href="/licensing.html">Pinned ONLYOFFICE distribution licenses, fonts and upstream source archives</a></p><p><a href="/workspace-sources.tar.gz">Current host and native SDK adaptation source archive</a> · <a href="/workspace-source-receipt.json">Bundle and source identity receipt</a></p><p>The archive also includes the MPL-2.0 libeot decoder source, notices, bounded-output patch and local Emscripten rebuild script. Customer embedded fonts are document-owned private inputs and are not included.</p><p>Host integration source carries MPL-2.0 notices. Native SDK adaptations and the ONLYOFFICE distribution carry AGPL-3.0 notices. ' +
             (admission?.auxiliaryWasmRebuildVerified
               ? '<a href="/sources/auxiliary-build-receipt.json">Four auxiliary JS/WASM pairs reproduced from the provided source.</a> '
               : "Auxiliary WASM reproduction remains unverified. ") +
@@ -131,6 +134,8 @@ export function createOnlyOfficeWorkspaceServer({
       const localRoot = path.resolve(sourceRoot, "..");
       const names = {
         ...localUiFiles,
+        ...onlyOfficeDocumentFontPrograms(base),
+        "/comparison-repair.js": path.join(repositoryRoot, "services/browser-office/runtime/ooxml-worker.js"),
         "/workspace-sources.tar.gz": path.join(
           base,
           "workspace-sources.tar.gz",
@@ -146,17 +151,15 @@ export function createOnlyOfficeWorkspaceServer({
         "/local-file.mjs": path.join(localRoot, "local-file.mjs"),
         "/workspace.bundle.js": path.join(base, "workspace.bundle.js"),
         "/sdk.bundle.js": path.join(base, "sdk.bundle.js"),
-        "/comparison-repair.js": path.join(
-          repositoryRoot,
-          "services/browser-office/runtime/ooxml-worker.js",
-        ),
       };
       const file = names[pathname] ?? path.resolve(dist, "." + pathname);
       if (!names[pathname] && !file.startsWith(dist + path.sep))
         throw Error("path_invalid");
       let bytes = await fs.readFile(file);
       if (pathname === "/sdkjs/slide/sdk-all.js")
-        bytes = Buffer.from(patchOnlyOfficeDistributedAlignment(bytes.toString()));
+        bytes = Buffer.from(addOnlyOfficeDocumentFontLoader(patchOnlyOfficeDistributedAlignment(bytes.toString())));
+      if (pathname === "/wasm/x2t/conversion-worker-lKNm6_YF.js")
+        bytes = Buffer.from(patchOnlyOfficeDocumentFontConversionWorker(bytes.toString()));
       if (pathname === "/web-apps/apps/presentationeditor/main/index.html")
         bytes = Buffer.from(
           addOnlyOfficeProductBootstrap(bytes.toString()).replace(

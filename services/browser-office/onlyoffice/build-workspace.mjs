@@ -29,6 +29,7 @@ const bundles = [];
 for (const [input, output] of [
   ["workspace-entry.mjs", "workspace.bundle.js"],
   ["workspace-sdk-entry.mjs", "sdk.bundle.js"],
+  ["document-fonts.mjs", "document-fonts.bundle.js"],
   ["../local-ai.mjs", "local-ai.bundle.js"],
 ]) {
   const result = process.argv.includes("--package-only")
@@ -72,7 +73,8 @@ async function collect(directory) {
         await collect(name);
     } else if (
       entry.isFile() &&
-      (/\.(mjs|cjs|js|json|html|md|ts|cts|txt|patch|sh|py|css)$/.test(name) ||
+      (name.startsWith("services/browser-office/onlyoffice/eot/") ||
+        /\.(mjs|cjs|js|json|html|md|ts|cts|txt|patch|sh|py|css)$/.test(name) ||
         entry.name.startsWith("Dockerfile"))
     )
       sources.push(name);

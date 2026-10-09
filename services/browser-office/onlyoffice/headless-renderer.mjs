@@ -8,6 +8,7 @@ import { createOnlyOfficeWorkspaceServer } from "./workspace-server.mjs";
 import { admitSelectedOnlyOffice } from "../engine-selection.mjs";
 import { captureOnlyOfficeSlide } from "./slide-capture.mjs";
 import { patchOnlyOfficeDistributedAlignment } from "./distributed-alignment.mjs";
+import { addOnlyOfficeDocumentFontLoader } from "./product-runtime-addon.mjs";
 
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const host = (
@@ -73,12 +74,12 @@ export async function createOnlyOfficeHeadlessRenderer({
   );
   const productSdkSha256 = sha(
     Buffer.from(
-      patchOnlyOfficeDistributedAlignment(
+      addOnlyOfficeDocumentFontLoader(patchOnlyOfficeDistributedAlignment(
         await fs.readFile(
           path.join(distributionDirectory, "sdkjs/slide/sdk-all.js"),
           "utf8",
         ),
-      ),
+      )),
     ),
   );
   // Explicit local experiments record an overlay separately from the admitted
@@ -172,6 +173,7 @@ export async function createOnlyOfficeHeadlessRenderer({
           deniedRequests = [],
           failedRequests = [],
           consoleErrors = [];
+        let privateFontHttpRequests = 0;
         const started = performance.now();
         try {
           const bytes = await fs.readFile(inputPath);
@@ -182,6 +184,10 @@ export async function createOnlyOfficeHeadlessRenderer({
           context = await browser.newContext({
             viewport: { width: 1280, height: 900 },
             serviceWorkers: "block",
+          });
+          context.on("request", request => {
+            if (new URL(request.url()).pathname.startsWith("/fonts/document-"))
+              privateFontHttpRequests += 1;
           });
           await context.addInitScript(() => {
             window.__renderFontPicks = [];
@@ -336,6 +342,9 @@ export async function createOnlyOfficeHeadlessRenderer({
             openedMs,
             totalMs: performance.now() - started,
             errors,
+            documentFonts: await frame.evaluate(() =>
+              window.parent[Symbol.for("spellbook.onlyoffice.documentFonts/v1")]?.report ?? null),
+            privateFontHttpRequests,
             deniedRequests,
             fontPicks,
             paragraphFormats,

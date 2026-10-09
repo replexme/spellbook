@@ -94,6 +94,7 @@ window.addEventListener("message", async (event) => {
           u.origin === location.origin &&
           !u.searchParams.has("file") &&
           !u.searchParams.has("src") &&
+          !u.pathname.startsWith("/fonts/document-") &&
           (/^\/(?:assets|npm|sdkjs|web-apps|wasm|fonts)\//.test(u.pathname) ||
             [
               "/office-host.html",

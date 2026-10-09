@@ -7349,6 +7349,64 @@ export function preserveNativeExportWithSections({
   );
 }
 
+// Font metadata uses the same bounded package reader and XML policy as edits.
+export function inspectPptxEmbeddedFonts(input) {
+  if (!(input instanceof Uint8Array) || input.byteLength > maximumInputBytes) throw Error('embedded_font_package_size_invalid');
+  inspectZipPackage(input);
+  const textPart = name => name === presentationPath || /^ppt\/(slides|slideLayouts|slideMasters|theme)\/.*\.xml$/.test(name) && !name.includes('/_rels/');
+  // Most presentations have no embedded font. Do not inflate their media,
+  // slides or master/theme XML merely to establish that common case.
+  const header = unzipSync(input, {filter:({name,originalSize}) => {
+    if (![presentationPath,presentationRelationshipsPath].includes(name)) return false;
+    if (originalSize > 8 * 1024 * 1024) throw Error('embedded_font_xml_size_invalid');
+    return true;
+  }});
+  if (!header[presentationPath] || !header[presentationRelationshipsPath]) return {faces:[],skipped:[]};
+  const presentation = parseXml(header,presentationPath), fonts = [...presentation.getElementsByTagNameNS(presentationNamespace,'embeddedFont')];
+  if (!fonts.length) return {faces:[],skipped:[]};
+  const entries = unzipSync(input, {filter:({name,originalSize}) => {
+    if (textPart(name) || name === presentationRelationshipsPath) {
+      if (originalSize > 8 * 1024 * 1024) throw Error('embedded_font_xml_size_invalid');
+      return true;
+    }
+    return name.startsWith('ppt/fonts/') && /\.fntdata$/i.test(name) && originalSize <= 32 * 1024 * 1024;
+  }});
+  const descendants = (scope,local) => scope ? [scope,...scope.getElementsByTagName('*')].filter(e=>e.localName===local) : [];
+  const child = (scope,local) => [...(scope?.childNodes??[])].find(e=>e.nodeType===1&&e.localName===local);
+  const hasHangul = scope => descendants(scope,'t').some(e=>/[\u1100-\u11ff\u3130-\u318f\ua960-\ua97f\uac00-\ud7ff]/u.test(e.textContent));
+  const families = new Set(), placeholderStyles = new Set();
+  const addFamilies = scope => descendants(scope,'ea').forEach(e=>{const value=(e.getAttribute('typeface')??'').trim();if(value)families.add(value.toLowerCase());});
+  const documents=Object.keys(entries).filter(textPart).map(name=>({name,xml:name===presentationPath?presentation:parseXml(entries,name)}));
+  for(const {xml} of documents)for(const body of descendants(xml,'txBody')) {
+    if(!hasHangul(body))continue;
+    for(const run of descendants(body,'r').filter(hasHangul))addFamilies(child(run,'rPr'));
+    for(const paragraph of descendants(body,'p').filter(hasHangul))addFamilies(child(paragraph,'pPr'));
+    addFamilies(child(body,'lstStyle'));
+    const placeholder=child(child(child(body.parentNode,'nvSpPr'),'nvPr'),'ph'),type=placeholder?.getAttribute('type')?.trim();
+    placeholderStyles.add(['title','ctrTitle','subTitle'].includes(type)?'titleStyle':['body','obj'].includes(type)?'bodyStyle':'otherStyle');
+  }
+  for(const {name,xml} of documents.filter(d=>d.name.startsWith('ppt/slideMasters/')))for(const style of placeholderStyles)addFamilies(descendants(xml,style)[0]);
+  const relations=new Map();
+  for(const rel of parseXml(entries,presentationRelationshipsPath).getElementsByTagNameNS(packageRelationshipNamespace,'Relationship')){
+    const target=(rel.getAttribute('Target')??'').replaceAll('\\','/'),id=rel.getAttribute('Id');
+    if((rel.getAttribute('TargetMode')??'').toLowerCase()==='external'||!id||!target.startsWith('fonts/')||!target.toLowerCase().endsWith('.fntdata')||target.includes('..')||target.includes('?')||target.includes('#'))continue;
+    if(relations.has(id))throw Error('embedded_font_duplicate_relationship');relations.set(id,'ppt/'+target);
+  }
+  const faces=[],skipped=[],seen=new Set();let totalBytes=0;
+  for(const font of fonts){const typeface=child(font,'font')?.getAttribute('typeface')?.trim();if(!typeface)continue;
+    for(const face of [...font.childNodes].filter(e=>e.nodeType===1&&['regular','bold','italic','boldItalic'].includes(e.localName))){
+      const id=face.getAttributeNS(relationshipAttributeNamespace,'id');if(!id||seen.has(id))continue;seen.add(id);
+      const part=relations.get(id),bytes=entries[part];if(!part||!bytes||bytes.length<36){skipped.push({typeface,style:face.localName,reason:'embedded_font_part_unavailable'});continue;}
+      totalBytes+=bytes.length;if(faces.length>=64||totalBytes>64*1024*1024)throw Error('embedded_font_document_budget_exceeded');
+      const v=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),fsType=v.getUint16(32,true);
+      if(v.getUint16(34,true)!==0x504c||v.getUint32(0,true)>bytes.length||v.getUint32(4,true)<12||v.getUint32(4,true)>32*1024*1024){skipped.push({typeface,style:face.localName,reason:'embedded_font_eot_invalid'});continue;}
+      if((fsType&0x202)!==0||fsType!==0&&(fsType&8)===0){skipped.push({typeface,style:face.localName,reason:'embedded_font_editing_not_allowed'});continue;}
+      faces.push({typeface,style:face.localName,part,requiresHangul:families.has(typeface.toLowerCase()),bytes});
+    }
+  }
+  return {faces,skipped};
+}
+
 if (typeof DedicatedWorkerGlobalScope !== "undefined" && self instanceof DedicatedWorkerGlobalScope)
   self.onmessage = async (event) => {
     const {
@@ -7363,7 +7421,10 @@ if (typeof DedicatedWorkerGlobalScope !== "undefined" && self instanceof Dedicat
       nativeSections,
     } = event.data;
     try {
-      if (operation === "inspect") {
+      if (operation === "embedded-fonts") {
+        const report=inspectPptxEmbeddedFonts(new Uint8Array(bytes));
+        self.postMessage({requestId,report},report.faces.map(face=>face.bytes.buffer));
+      } else if (operation === "inspect") {
         self.postMessage({
           requestId,
           report: await inspectOoxmlDocumentWithAssets(new Uint8Array(bytes)),

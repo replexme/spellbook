@@ -7,6 +7,7 @@ const allowed = (url) =>
   url.origin === self.location.origin &&
   !url.searchParams.has("file") &&
   !url.searchParams.has("src") &&
+  !url.pathname.startsWith("/fonts/document-") &&
   (/^\/(?:assets|npm|sdkjs|web-apps|wasm|fonts|libs)\//.test(url.pathname) ||
     [
       "/local-workspace.css",
@@ -23,6 +24,12 @@ const allowed = (url) =>
       "/workspace.bundle.js",
       "/office-host.html",
       "/sdk.bundle.js",
+      "/document-fonts.bundle.js",
+      "/document-font-worker.js",
+      "/document-font-coverage.mjs",
+      "/document-font-selection.mjs",
+      "/eot/eot-decoder.mjs",
+      "/eot/eot-decoder.wasm",
       "/comparison-repair.js",
       "/plugins.json",
       "/themes.json",
@@ -36,6 +43,12 @@ const key = (url) => url.origin + url.pathname;
 // Worker-internal converter requests do not appear in Window performance
 // entries. Retain these pinned public programs before claiming offline control.
 const requiredPrograms = [
+  "/document-fonts.bundle.js",
+  "/document-font-worker.js",
+  "/document-font-coverage.mjs",
+  "/document-font-selection.mjs",
+  "/eot/eot-decoder.mjs",
+  "/eot/eot-decoder.wasm",
   "/wasm/x2t/x2t.js",
   "/wasm/x2t/x2t.wasm",
   "/wasm/x2t/conversion-worker-lKNm6_YF.js",
