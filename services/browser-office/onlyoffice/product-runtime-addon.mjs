@@ -19,6 +19,10 @@ export function addOnlyOfficeProductSdk(source) {
 }
 export function addOnlyOfficeProductResourceHost(source) {
   const anchor="G=await Tn(An,r),tr(),cr(`READY`,G.getState())";
-  if(typeof source!=="string"||source.split(anchor).length!==2)throw Error("onlyoffice_product_resource_host_source_mismatch");
-  return 'import {prepareOnlyOfficeDocumentFonts as __prepareDocumentFonts} from "/document-fonts.bundle.js";\n'+source.replace(anchor,"await __prepareDocumentFonts(r.buffer),G=await Tn(An,r),("+attachOnlyOfficeResourceHost.toString()+")(G,c),tr(),cr(`READY`,G.getState())");
+  const header="customization:{help:!1,about:!1,hideRightMenu:!0,compactToolbar:!0";
+  if(typeof source!=="string"||source.split(anchor).length!==2||source.split(header).length!==2)throw Error("onlyoffice_product_resource_host_source_mismatch");
+  // The product host owns the document title. Keep the original native logo,
+  // menus and editing controls while avoiding a second title/action row.
+  const customized=source.replace(header,header+",compactHeader:!0,toolbarHideFileName:!0");
+  return 'import {prepareOnlyOfficeDocumentFonts as __prepareDocumentFonts} from "/document-fonts.bundle.js";\n'+customized.replace(anchor,"await __prepareDocumentFonts(r.buffer),G=await Tn(An,r),("+attachOnlyOfficeResourceHost.toString()+")(G,c),tr(),cr(`READY`,G.getState())");
 }

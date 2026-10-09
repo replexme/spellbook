@@ -628,6 +628,15 @@ types and the source package retain their existing behavior. Both the browser
 editor and server renderer use this same adaptation. Title typography and
 plot bounds remain separate fidelity issues.
 
+## Compact native product header
+
+The shared resource host enables the native compact header and hides its
+duplicate document title. The outer product host owns that title. The original
+ONLYOFFICE logo, menus, editing controls and license/source notices remain.
+The pinned customization boundary is checked before adapting its source.
+The private candidate retained byte-identical native slide images and passed
+the actual keyboard edit, native Undo/Redo, save and recovery flow.
+
 ## Verified public program reuse across releases
 
 `/public-programs.json` binds the release identity to program SHA-256 values.
