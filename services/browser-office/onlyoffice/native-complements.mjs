@@ -227,6 +227,34 @@ export function installOnlyOfficeNativeComplements() {
   const writer = common.CBinaryFileWriter;
   common.CBinaryFileWriter = function(...args) {
     const instance = Reflect.construct(writer, args);
+    // Native transforms use millimetres; OOXML stores integer EMUs. The
+    // pinned writer truncates 10.169999999999998 * 36000 to 366119, losing an
+    // authored coordinate unit when a live auto-fit result should be 366120.
+    // Round only transform coordinates at the binary boundary. Do not change
+    // live geometry, angle/enumeration codecs, or the writer's other records.
+    let transformDepth = 0;
+    const scaledInteger = instance._WriteInt4;
+    if (typeof scaledInteger !== "function" || typeof instance._WriteInt1 !== "function")
+      throw Error("onlyoffice_product_transform_writer_unavailable");
+    for (const name of ["WriteXfrm", "WriteXfrmRot"]) {
+      const writeTransform = instance[name];
+      if (typeof writeTransform !== "function")
+        throw Error("onlyoffice_product_transform_writer_unavailable");
+      instance[name] = function(...values) {
+        transformDepth++;
+        try { return writeTransform.apply(instance, values); }
+        finally { transformDepth--; }
+      };
+    }
+    instance._WriteInt4 = function(type, value, scale) {
+      if (transformDepth && scale === 36000 && type >= 0 && type <= 7 && value != null) {
+        const coordinate = Math.round(value * scale);
+        if (!Number.isSafeInteger(coordinate) || coordinate < -2147483648 || coordinate > 2147483647)
+          throw Error("onlyoffice_product_transform_coordinate_invalid");
+        return instance._WriteInt1(type, coordinate);
+      }
+      return scaledInteger.call(instance, type, value, scale);
+    };
     const write = instance.WriteRunProperties;
     instance.WriteRunProperties = function(pr, ...rest) {
       const result = write.call(instance, pr, ...rest);

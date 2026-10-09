@@ -21,6 +21,13 @@ test('ordinary and zero-radius shapes retain the original native draw path',()=>
   assert.equal(shape.draw(f.graphics,'transform'),23);assert.strictEqual(shape.nativeContext,f.ctx);assert.equal(shape.drawCalls,1);assert.deepEqual(shape.args,['transform']);
  }assert.equal(f.canvases.length,1);}finally{f.close();}
 });
+test('empty layout-thumbnail destinations keep native no-op drawing without allocating invalid image surfaces',()=>{
+ const f=fixture();try{for(const dimensions of [[0,80],[100,0],[0,0]]){
+  [f.ctx.canvas.width,f.ctx.canvas.height]=dimensions;
+  const shape=new f.Shape();shape.spPr={effectProps:{EffectLst:{glow:{rad:36000},outerShdw:{blurRad:72000}}}};
+  assert.equal(shape.draw(f.graphics,'thumbnail'),23);assert.strictEqual(shape.nativeContext,f.ctx);assert.equal(shape.drawCalls,1);assert.equal(f.ctx.draws.length,0);
+ }assert.equal(f.canvases.length,1);}finally{f.close();}
+});
 test('native pixels feed inward soft edges and color-resolved glow without changing authored properties',()=>{
  const f=fixture();try{
   let resolved;const color={color:{RGBA:{R:1,G:2,B:3,A:255}},createDuplicate(){return {Calculate(...args){resolved=args;this.RGBA={R:36,G:88,B:255,A:178};}};}};

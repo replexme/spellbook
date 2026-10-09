@@ -74,7 +74,10 @@ export function installOnlyOfficeShapeEffects() {
         }
         return result;
       }
-      if(!ctx?.canvas||!("filter" in ctx)||graphics?.isBoundsChecker?.())
+      // A layout-thumbnail pass may legitimately have an empty destination.
+      // Native path drawing is a no-op there; drawImage of an empty capture
+      // throws and would abort opening the entire presentation.
+      if(!ctx?.canvas||ctx.canvas.width<1||ctx.canvas.height<1||!("filter" in ctx)||graphics?.isBoundsChecker?.())
         return native.call(this,graphics,...args);
       if(this.checkNeedRecalculate?.() || graphics.updatedRect && this.bounds && !graphics.updatedRect.isIntersectOther(this.bounds))
         return native.call(this,graphics,...args);

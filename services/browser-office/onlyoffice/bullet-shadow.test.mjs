@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0 */
+import {PinnedNativeWriterFixture as Writer} from './native-writer.fixture.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import {installOnlyOfficeNativeComplements} from "./native-complements.mjs";
@@ -18,7 +19,6 @@ for(const deferred of [false,true])test(`native effect import and ${deferred?"de
   class CommentData{createDuplicate(){return new CommentData();}}
   class Presentation{internalCalculateData(){}}
   class Transition{parseXmlParameters(){}fillXmlParams(){}}
-  class Writer{constructor(){this.records=[];this.WriteRunProperties=pr=>{this.written=pr;};this.WriteRecord1=(type,value,write)=>{this.records.push({type,value});write(value);};this.WriteEffectLst=value=>{this.effects=value;};}}
   class Loader{}
   class Xfrm{setOffX(value){this.calls=(this.calls??0)+1;this.offX=value;}}
   class Memory{Init(){}WriteLong(value){this.value=value;}sha256(){return String(this.value);}}

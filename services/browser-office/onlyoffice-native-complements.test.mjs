@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0 */
+import {PinnedNativeWriterFixture as Writer} from './onlyoffice/native-writer.fixture.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 import {installOnlyOfficeNativeComplements} from "./onlyoffice/native-complements.mjs";
@@ -14,7 +15,6 @@ for(const deferred of [false,true])test(`native effect import and ${deferred?"de
   class CommentData{createDuplicate(){return new CommentData();}}
   class Presentation{internalCalculateData(){}}
   class Transition{parseXmlParameters(){}fillXmlParams(){}}
-  class Writer{constructor(){this.records=[];this.WriteRunProperties=pr=>{this.written=pr;};this.WriteRecord1=(type,value,write)=>{this.records.push({type,value});write(value);};this.WriteEffectLst=value=>{this.effects=value;};}}
   class Loader{}
   class Xfrm{setOffX(value){this.calls=(this.calls??0)+1;this.offX=value;}}
   class Memory{Init(){}WriteLong(value){this.value=value;}sha256(){return String(this.value);}}
@@ -77,6 +77,19 @@ for(const deferred of [false,true])test(`native effect import and ${deferred?"de
     const effects={outerShdw:{dist:36000}};
     detached({spellbookEffects:{EffectLst:effects}});
     assert.deepEqual(writer.records,[{type:2,value:effects}]);assert.equal(writer.effects,effects);
+    const xfrm={offX:-10.169999999999998,offY:10.169999999999998,extX:120.15000000000008,extY:10.169999999999998,chOffX:-1/72000,chOffY:1/72000,chExtX:0,chExtY:1/36000,rot:0};
+    const originalTransform={...xfrm};
+    for(const name of ['WriteXfrm','WriteXfrmRot']){
+      writer.integerRecords=[];writer[name](xfrm);
+      assert.deepEqual(writer.integerRecords,[{type:0,value:-366120},{type:1,value:366120},{type:2,value:4325400},{type:3,value:366120},{type:4,value:-0},{type:5,value:1},{type:6,value:0},{type:7,value:1},{type:10,value:0}]);
+      assert.deepEqual(xfrm,originalTransform);
+    }
+    writer.integerRecords=[];const writerFailure=Error('transform writer failed');
+    assert.throws(()=>writer.WriteXfrm({extY:10.169999999999998,fail:writerFailure}),error=>error===writerFailure);
+    writer._WriteInt4(3,10.169999999999998,36000);
+    assert.equal(writer.integerRecords.at(-1).value,366119); // Scope restored after failure.
+    for(const invalid of [NaN,Infinity,2147483648/36000])assert.throws(()=>writer.WriteXfrm({extY:invalid}),/transform_coordinate_invalid/);
+    writer.integerRecords=[];writer.WriteXfrm({extY:366119/36000});assert.deepEqual(writer.integerRecords,[{type:3,value:366119}]); // Exact authored integer stays exact.
     const run=new Run();run.Pr={spellbookEffects:{EffectLst:{outerShdw:{color:{color:{RGBA:{R:1,G:2,B:3}}}}}}};
     const context=()=>({canvas:{width:8,height:8},shadowColor:"transparent",shadowOffsetX:0,shadowOffsetY:0,shadowBlur:0,getTransform(){return {a:1,b:0,c:0,d:1,e:0,f:0};},setTransform(){},clearRect(){},save(){this.prior=[this.shadowColor,this.shadowOffsetX,this.shadowOffsetY,this.shadowBlur];},restore(){[this.shadowColor,this.shadowOffsetX,this.shadowOffsetY,this.shadowBlur]=this.prior;},drawImage(...args){this.args=args;this.composedShadow=this.shadowColor;}});
     globalThis.document={createElement:()=>{const target=context();return {width:8,height:8,getContext:()=>target};}};
