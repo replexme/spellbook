@@ -600,3 +600,19 @@ when `auxiliaryWasmRebuildVerified` is true. Historical unverified statements ab
 describe earlier candidates. Full editor/x2t independent reproduction and public
 release admission remain separate. The continuation report is
 `docs/delivery/onlyoffice-auxiliary-source-rebuild-2026-10-06.md`.
+
+## Missing list SmartArt drawing caches
+
+The shared product SDK overlay restores missing `vList5` and `hList1` drawing
+caches with the pinned native algorithms. An existing authored drawing cache
+is retained; other unsupported layouts keep their existing behavior. Recovered
+diagrams retain generation eligibility through native clones. Explicit content
+point bounds also govern the native text layout, with temporary algorithm
+bounds restored even when layout throws.
+
+`CBodyPr` defaults use numeric zero for column spacing, matching its native
+file readback. After recovered diagrams finish font fitting, their derived
+paragraph spacing uses the shared writer-representable paragraph formatter
+without adding authored history. The browser editor, server renderer and
+product verifier use the same SDK overlay. This does not claim PowerPoint
+matching card geometry, 3D bevels or every SmartArt layout.

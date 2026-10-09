@@ -3,6 +3,9 @@ import { installOnlyOfficeNativeComplements, bootstrapOnlyOfficeNativeComplement
 import { attachOnlyOfficeResourceHost } from "./product-resources.mjs";
 import { installOnlyOfficeDocumentFontCatalog, installOnlyOfficeDocumentFontLoader } from "./document-fonts.mjs";
 
+import { installOnlyOfficeMissingSmartArtLayouts } from "./missing-smartart-layouts.mjs";
+import { onlyOfficeParagraphFormat } from "./paragraph-format.mjs";
+
 import { installOnlyOfficeShapeEffects } from "./shape-effects.mjs";
 // Source-pinned interpreted additions; no rebuild or generated vendor files.
 // Hosts must record these served overlays along with the retained distribution.
@@ -10,8 +13,8 @@ export function addOnlyOfficeProductBootstrap(html) {
   if(typeof html!=="string"||!html.includes("<head>"))throw Error("onlyoffice_product_bootstrap_html_invalid");
   return html.replace("<head>","<head><script>("+installOnlyOfficeDocumentFontCatalog.toString()+")();"+"("+bootstrapOnlyOfficeNativeComplements.toString()+")("+"function(){("+installOnlyOfficeNativeComplements.toString()+")();("+installOnlyOfficeShapeEffects.toString()+")();});</script>");
 }
-export function addOnlyOfficeDocumentFontLoader(source) {
-  return source+"\n;("+installOnlyOfficeDocumentFontLoader.toString()+")();\n";
+export function addOnlyOfficeProductSdk(source) {
+  return source+"\n;("+installOnlyOfficeDocumentFontLoader.toString()+")();\n"+";("+installOnlyOfficeMissingSmartArtLayouts.toString()+")("+onlyOfficeParagraphFormat.toString()+");\n";
 }
 export function addOnlyOfficeProductResourceHost(source) {
   const anchor="G=await Tn(An,r),tr(),cr(`READY`,G.getState())";

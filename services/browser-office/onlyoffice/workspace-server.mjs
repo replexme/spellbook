@@ -8,7 +8,7 @@ import { localUiFiles } from "../local-ui-assets.mjs";
 import {
   addOnlyOfficeProductBootstrap,
   addOnlyOfficeProductResourceHost,
-  addOnlyOfficeDocumentFontLoader,
+  addOnlyOfficeProductSdk,
 } from "./product-runtime-addon.mjs";
 import { patchOnlyOfficeDocumentFontConversionWorker } from "./document-fonts.mjs";
 import { onlyOfficeDocumentFontPrograms } from "./product-programs.mjs";
@@ -157,7 +157,7 @@ export function createOnlyOfficeWorkspaceServer({
         throw Error("path_invalid");
       let bytes = await fs.readFile(file);
       if (pathname === "/sdkjs/slide/sdk-all.js")
-        bytes = Buffer.from(addOnlyOfficeDocumentFontLoader(patchOnlyOfficeDistributedAlignment(bytes.toString())));
+        bytes = Buffer.from(addOnlyOfficeProductSdk(patchOnlyOfficeDistributedAlignment(bytes.toString())));
       if (pathname === "/wasm/x2t/conversion-worker-lKNm6_YF.js")
         bytes = Buffer.from(patchOnlyOfficeDocumentFontConversionWorker(bytes.toString()));
       if (pathname === "/web-apps/apps/presentationeditor/main/index.html")

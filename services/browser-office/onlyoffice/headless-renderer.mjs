@@ -8,7 +8,7 @@ import { createOnlyOfficeWorkspaceServer } from "./workspace-server.mjs";
 import { admitSelectedOnlyOffice } from "../engine-selection.mjs";
 import { captureOnlyOfficeSlide } from "./slide-capture.mjs";
 import { patchOnlyOfficeDistributedAlignment } from "./distributed-alignment.mjs";
-import { addOnlyOfficeDocumentFontLoader } from "./product-runtime-addon.mjs";
+import { addOnlyOfficeProductSdk } from "./product-runtime-addon.mjs";
 
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const host = (
@@ -74,7 +74,7 @@ export async function createOnlyOfficeHeadlessRenderer({
   );
   const productSdkSha256 = sha(
     Buffer.from(
-      addOnlyOfficeDocumentFontLoader(patchOnlyOfficeDistributedAlignment(
+      addOnlyOfficeProductSdk(patchOnlyOfficeDistributedAlignment(
         await fs.readFile(
           path.join(distributionDirectory, "sdkjs/slide/sdk-all.js"),
           "utf8",

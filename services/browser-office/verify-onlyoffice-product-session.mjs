@@ -17,7 +17,7 @@ import { onlyOfficeExtendedCommandCase } from "./onlyoffice/product-command-case
 import { createOnlyOfficeResourcePreparation } from "./onlyoffice/product-resource-preparation.mjs";
 import { onlyOfficeSourceTargets } from "./onlyoffice/source-targets.mjs";
 import { createOnlyOfficeComparisonHost } from "./onlyoffice/comparison-host.mjs";
-import { addOnlyOfficeProductBootstrap, addOnlyOfficeProductResourceHost, addOnlyOfficeDocumentFontLoader } from "./onlyoffice/product-runtime-addon.mjs";
+import { addOnlyOfficeProductBootstrap, addOnlyOfficeProductResourceHost, addOnlyOfficeProductSdk } from "./onlyoffice/product-runtime-addon.mjs";
 import { onlyOfficeDocumentFontPrograms } from "./onlyoffice/product-programs.mjs";
 import { patchOnlyOfficeDocumentFontConversionWorker } from "./onlyoffice/document-fonts.mjs";
 import { patchOnlyOfficeDistributedAlignment } from "./onlyoffice/distributed-alignment.mjs";
@@ -210,7 +210,7 @@ const candidateServer = createServer(async (req, res) => {
       throw Error("invalid_path");
     const bytes = await fs.readFile(file);
     let served=bytes;
-    if(name === "sdkjs/slide/sdk-all.js")served=Buffer.from(addOnlyOfficeDocumentFontLoader(patchOnlyOfficeDistributedAlignment(bytes.toString("utf8"))));
+    if(name === "sdkjs/slide/sdk-all.js")served=Buffer.from(addOnlyOfficeProductSdk(patchOnlyOfficeDistributedAlignment(bytes.toString("utf8"))));
     if(name === "wasm/x2t/conversion-worker-lKNm6_YF.js")served=Buffer.from(patchOnlyOfficeDocumentFontConversionWorker(bytes.toString("utf8")));
     if(name === "web-apps/apps/presentationeditor/main/index.html")served=Buffer.from(addOnlyOfficeProductBootstrap(bytes.toString("utf8")));
     if(name === "assets/officeHost-C2hljZhH.js")served=Buffer.from(addOnlyOfficeProductResourceHost(bytes.toString("utf8")));
