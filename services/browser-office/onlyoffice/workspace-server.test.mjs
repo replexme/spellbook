@@ -1,9 +1,11 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import vm from "node:vm";
+import { createHash } from "node:crypto";
 import { createOnlyOfficeWorkspaceServer } from "./workspace-server.mjs";
 import { chromium } from "@playwright/test";
 const origins = {
@@ -26,89 +28,190 @@ test("candidate requires three distinct exact origins and a parent allowlist", (
     );
 });
 
-test("real worker reuses public programs, rejects stale online bytes and preserves offline/private boundaries", {timeout: 30000}, async () => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "spellbook-cache-browser-"));
-  for (const file of ["sdk.bundle.js", "distribution-manifest.json", "workspace-source-receipt.json"])
-    await writeFile(path.join(directory, file), "first release");
-  const server = createOnlyOfficeWorkspaceServer({distributionDirectory: directory, bundleDirectory: directory, ...origins});
-  const route = server.listeners("request")[0];
-  server.removeAllListeners("request");
-  let version = "first program";
-  const requested = [];
-  server.on("request", (req, res) => {
-    const url = new URL(req.url, "http://localhost");
-    requested.push(url.pathname);
-    if (url.pathname === "/sw.js") return route(req, res);
-    res.setHeader("cache-control", "no-store");
-    if (url.pathname === "/onlyoffice-browser-font-assets.json") {
-      res.setHeader("content-type", "application/json");
-      res.end(JSON.stringify({allFonts: "sdkjs/common/AllFonts.js", fontSelection: "server/FileConverter/bin/font_selection.bin", fontSourceMap: "onlyoffice-browser-font-source-map.json", fonts: []}));
-    } else if (url.pathname === "/office-host.html") {
-      res.setHeader("content-type", "text/html");
-      res.end("<!doctype html><title>Cache lifecycle test</title>");
-    } else res.end(version);
-  });
-  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  let browser;
-  try {
-    browser = await chromium.launch({headless: true, executablePath: process.env.SPELLBOOK_CHROMIUM_EXECUTABLE || undefined});
-    const context = await browser.newContext({serviceWorkers: "allow"});
-    const first = await context.newPage();
-    await first.goto(base + "/office-host.html");
-    const install = async page => {
-      await page.evaluate(async () => {
-        const registration = await navigator.serviceWorker.register("/sw.js", {scope: "/", updateViaCache: "none"});
-        await registration.update();
-        const replacement = registration.installing ?? registration.waiting;
-        if (replacement && replacement.state !== "activated") await new Promise((resolve, reject) => {
-          replacement.addEventListener("statechange", () => {
-            if (replacement.state === "activated") resolve();
-            if (replacement.state === "redundant") reject(Error("worker install failed"));
-          });
-        });
-        await navigator.serviceWorker.ready;
-        if (navigator.serviceWorker.controller !== registration.active) await new Promise(resolve => {
-          navigator.serviceWorker.addEventListener("controllerchange", () => {
-            if (navigator.serviceWorker.controller === registration.active) resolve();
-          });
-        });
-      });
+test(
+  "real worker reuses public programs, rejects stale online bytes and preserves offline/private boundaries",
+  { timeout: 30000 },
+  async () => {
+    const directory = await mkdtemp(
+      path.join(os.tmpdir(), "spellbook-cache-browser-"),
+    );
+    for (const file of [
+      "sdk.bundle.js",
+      "distribution-manifest.json",
+      "workspace-source-receipt.json",
+    ])
+      await writeFile(path.join(directory, file), "first release");
+    const server = createOnlyOfficeWorkspaceServer({
+      distributionDirectory: directory,
+      bundleDirectory: directory,
+      ...origins,
+    });
+    const route = server.listeners("request")[0];
+    server.removeAllListeners("request");
+    let version = "first program";
+    const cacheSource = await readFile(
+      new URL("./workspace-cache-worker.js", import.meta.url),
+      "utf8",
+    );
+    const required = vm.runInNewContext(
+      cacheSource.match(/const requiredPrograms = \[[\s\S]*?\];/)[0] +
+        "requiredPrograms",
+    );
+    const fontManifest = {
+      allFonts: "sdkjs/common/AllFonts.js",
+      fontSelection: "server/FileConverter/bin/font_selection.bin",
+      fontSourceMap: "onlyoffice-browser-font-source-map.json",
+      fonts: [],
     };
-    const get = (page, url) => page.evaluate(async url => (await fetch(url)).text(), url);
-    await install(first);
-    assert.equal(await get(first, "/assets/cache-probe.js"), "first program");
-    requested.length = 0;
-    assert.equal(await get(first, "/assets/cache-probe.js"), "first program");
-    assert(!requested.includes("/assets/cache-probe.js"));
-    for (const url of ["/api/documents/private", "/assets/private.js?file=private", "/assets/private.js?src=private"])
-      assert.equal(await get(first, url), "first program");
-    const keys = await first.evaluate(async () => (await Promise.all((await caches.keys()).map(async name => (await (await caches.open(name)).keys()).map(r => r.url)))).flat());
-    assert(!keys.some(url => url.includes("private")));
-    version = "second program";
-    await writeFile(path.join(directory, "workspace-source-receipt.json"), "second native patch release");
-    const second = await context.newPage();
-    await second.goto(base + "/office-host.html");
-    assert.equal(await get(second, "/assets/cache-probe.js"), "second program");
-    assert.equal(await get(first, "/assets/cache-probe.js"), "first program");
-    await install(second);
-    assert.equal(await get(second, "/assets/cache-probe.js"), "second program");
-    // Prime this HTML for a wholly new offline client, not just an already-open tab.
-    const warm = await context.newPage();
-    await warm.goto(base + "/office-host.html");
-    await context.setOffline(true);
-    const offline = await context.newPage();
-    await offline.goto(base + "/office-host.html");
-    assert.equal(await get(offline, "/assets/cache-probe.js"), "second program");
-    await assert.rejects(get(offline, "/api/documents/private"));
-    await assert.rejects(get(offline, "/assets/never-cached.js"));
-  } finally {
-    await browser?.close();
-    server.closeAllConnections();
-    await new Promise(resolve => server.close(resolve));
-    await rm(directory, {recursive: true, force: true});
-  }
-});
+    const bodyFor = (pathname) =>
+      pathname === "/onlyoffice-browser-font-assets.json"
+        ? JSON.stringify(fontManifest)
+        : pathname === "/office-host.html"
+          ? "<!doctype html><title>Cache lifecycle test</title>"
+          : version;
+    const requested = [];
+    server.on("request", async (req, res) => {
+      const url = new URL(req.url, "http://localhost");
+      requested.push(url.pathname);
+      if (url.pathname === "/sw.js") return route(req, res);
+      if (url.pathname === "/public-programs.json") {
+        const identity = (
+          await fetch(base + "/sw.js", { method: "HEAD" })
+        ).headers.get("X-Spellbook-Runtime-Identity");
+        const paths = [
+          ...required,
+          "/onlyoffice-browser-font-assets.json",
+          ...Object.values(fontManifest)
+            .flat()
+            .map((p) => "/" + p),
+          "/assets/cache-probe.js",
+          "/office-host.html",
+        ];
+        res.setHeader("content-type", "application/json");
+        res.end(
+          JSON.stringify({
+            runtimeIdentity: identity,
+            hashes: Object.fromEntries(
+              paths.map((p) => [
+                p,
+                createHash("sha256").update(bodyFor(p)).digest("hex"),
+              ]),
+            ),
+          }),
+        );
+        return;
+      }
+      res.setHeader("cache-control", "no-store");
+      if (url.pathname === "/onlyoffice-browser-font-assets.json") {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify(fontManifest));
+      } else if (url.pathname === "/office-host.html") {
+        res.setHeader("content-type", "text/html");
+        res.end("<!doctype html><title>Cache lifecycle test</title>");
+      } else res.end(version);
+    });
+    await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    let browser;
+    try {
+      browser = await chromium.launch({
+        headless: true,
+        executablePath: process.env.SPELLBOOK_CHROMIUM_EXECUTABLE || undefined,
+      });
+      const context = await browser.newContext({ serviceWorkers: "allow" });
+      const first = await context.newPage();
+      await first.goto(base + "/office-host.html");
+      const install = async (page) => {
+        await page.evaluate(async () => {
+          const registration = await navigator.serviceWorker.register(
+            "/sw.js",
+            { scope: "/", updateViaCache: "none" },
+          );
+          await registration.update();
+          const replacement = registration.installing ?? registration.waiting;
+          if (replacement && replacement.state !== "activated")
+            await new Promise((resolve, reject) => {
+              replacement.addEventListener("statechange", () => {
+                if (replacement.state === "activated") resolve();
+                if (replacement.state === "redundant")
+                  reject(Error("worker install failed"));
+              });
+            });
+          await navigator.serviceWorker.ready;
+          if (navigator.serviceWorker.controller !== registration.active)
+            await new Promise((resolve) => {
+              navigator.serviceWorker.addEventListener(
+                "controllerchange",
+                () => {
+                  if (
+                    navigator.serviceWorker.controller === registration.active
+                  )
+                    resolve();
+                },
+              );
+            });
+        });
+      };
+      const get = (page, url) =>
+        page.evaluate(async (url) => (await fetch(url)).text(), url);
+      await install(first);
+      assert.equal(await get(first, "/assets/cache-probe.js"), "first program");
+      requested.length = 0;
+      assert.equal(await get(first, "/assets/cache-probe.js"), "first program");
+      assert(!requested.includes("/assets/cache-probe.js"));
+      for (const url of [
+        "/api/documents/private",
+        "/assets/private.js?file=private",
+        "/assets/private.js?src=private",
+      ])
+        assert.equal(await get(first, url), "first program");
+      const keys = await first.evaluate(async () =>
+        (
+          await Promise.all(
+            (await caches.keys()).map(async (name) =>
+              (await (await caches.open(name)).keys()).map((r) => r.url),
+            ),
+          )
+        ).flat(),
+      );
+      assert(!keys.some((url) => url.includes("private")));
+      version = "second program";
+      await writeFile(
+        path.join(directory, "workspace-source-receipt.json"),
+        "second native patch release",
+      );
+      const second = await context.newPage();
+      await second.goto(base + "/office-host.html");
+      assert.equal(
+        await get(second, "/assets/cache-probe.js"),
+        "second program",
+      );
+      assert.equal(await get(first, "/assets/cache-probe.js"), "first program");
+      await install(second);
+      assert.equal(
+        await get(second, "/assets/cache-probe.js"),
+        "second program",
+      );
+      // Prime this HTML for a wholly new offline client, not just an already-open tab.
+      const warm = await context.newPage();
+      await warm.goto(base + "/office-host.html");
+      await context.setOffline(true);
+      const offline = await context.newPage();
+      await offline.goto(base + "/office-host.html");
+      assert.equal(
+        await get(offline, "/assets/cache-probe.js"),
+        "second program",
+      );
+      await assert.rejects(get(offline, "/api/documents/private"));
+      await assert.rejects(get(offline, "/assets/never-cached.js"));
+    } finally {
+      await browser?.close();
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
 test("candidate serves local files, exact parent policy, source disclosure and rejects encoded traversal", async () => {
   const directory = await mkdtemp(
     path.join(os.tmpdir(), "spellbook-host-routes-"),
@@ -169,7 +272,10 @@ test("offline program cache identity changes when auxiliary runtime identity cha
     path.join(directory, "sdk.bundle.js"),
     "same SDK integration",
   );
-  await writeFile(path.join(directory, "workspace-source-receipt.json"), "same host and native patch source");
+  await writeFile(
+    path.join(directory, "workspace-source-receipt.json"),
+    "same host and native patch source",
+  );
   await writeFile(
     path.join(directory, "onlyoffice-runtime-assets.json"),
     JSON.stringify({ selected: 1681 }),
@@ -201,27 +307,98 @@ test("offline program cache identity changes when auxiliary runtime identity cha
       second.replace(/[a-f0-9]{64}/gu, "version"),
       first.replace(/[a-f0-9]{64}/gu, "version"),
     );
-    await writeFile(path.join(directory, "workspace-source-receipt.json"), "changed host or native patch source");
+    await writeFile(
+      path.join(directory, "workspace-source-receipt.json"),
+      "changed host or native patch source",
+    );
     const third = await (await fetch(base + "/sw.js")).text();
     assert.notEqual(third, second);
     const response = await fetch(base + "/sw.js");
-    assert.match(response.headers.get("X-Spellbook-Runtime-Identity"), /^[a-f0-9]{64}$/);
+    assert.match(
+      response.headers.get("X-Spellbook-Runtime-Identity"),
+      /^[a-f0-9]{64}$/,
+    );
     assert.equal(response.headers.get("cache-control"), "no-store");
     const other = createOnlyOfficeWorkspaceServer({
-      distributionDirectory: directory, bundleDirectory: directory, ...origins,
+      distributionDirectory: directory,
+      bundleDirectory: directory,
+      ...origins,
       hostOrigins: ["https://different.spellbook.my"],
     });
-    await new Promise(resolve => other.listen(0, "127.0.0.1", resolve));
+    await new Promise((resolve) => other.listen(0, "127.0.0.1", resolve));
     try {
-      const otherWorker = await fetch(`http://127.0.0.1:${other.address().port}/sw.js`);
-      assert.notEqual(otherWorker.headers.get("X-Spellbook-Runtime-Identity"), response.headers.get("X-Spellbook-Runtime-Identity"));
+      const otherWorker = await fetch(
+        `http://127.0.0.1:${other.address().port}/sw.js`,
+      );
+      assert.notEqual(
+        otherWorker.headers.get("X-Spellbook-Runtime-Identity"),
+        response.headers.get("X-Spellbook-Runtime-Identity"),
+      );
     } finally {
       other.closeAllConnections();
-      await new Promise(resolve => other.close(resolve));
+      await new Promise((resolve) => other.close(resolve));
     }
   } finally {
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("published public identities bind transformed SDK, host overlays and document-font programs to exact served bytes", async () => {
+  const server = createOnlyOfficeWorkspaceServer({
+    distributionDirectory: new URL("./distribution", import.meta.url).pathname,
+    ...origins,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const response = await fetch(base + "/public-programs.json");
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-store");
+    const manifest = await response.json(),
+      identity = await fetch(base + "/sw.js", { method: "HEAD" });
+    assert.equal(
+      manifest.runtimeIdentity,
+      identity.headers.get("X-Spellbook-Runtime-Identity"),
+    );
+    assert.equal((await identity.arrayBuffer()).byteLength, 0);
+    for (const pathname of [
+      "/sdkjs/slide/sdk-all.js",
+      "/web-apps/apps/presentationeditor/main/index.html",
+      "/assets/officeHost-C2hljZhH.js",
+      "/wasm/x2t/conversion-worker-lKNm6_YF.js",
+      "/document-font-worker.js",
+      "/comparison-repair.js",
+      "/fonts/000.ttf",
+    ]) {
+      const program = await fetch(base + pathname);
+      assert.equal(program.status, 200, pathname);
+      assert.equal(
+        createHash("sha256")
+          .update(Buffer.from(await program.arrayBuffer()))
+          .digest("hex"),
+        manifest.hashes[pathname],
+        pathname,
+      );
+    }
+    const retained = JSON.parse(
+      await readFile(
+        new URL("./distribution/distribution-manifest.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    assert.notEqual(
+      manifest.hashes["/sdkjs/slide/sdk-all.js"],
+      retained.files.find((p) => p.path === "sdkjs/slide/sdk-all.js").sha256,
+    );
+    assert(
+      !Object.keys(manifest.hashes).some(
+        (p) => p.startsWith("/fonts/document-") || p.startsWith("/api/"),
+      ),
+    );
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
   }
 });

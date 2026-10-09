@@ -53,6 +53,128 @@ export function createOnlyOfficeWorkspaceServer({
     throw Error("workspace_isolation_origins_required");
   hostOrigins = [...new Set([...hostOrigins, workspaceOrigin])];
   const config = { sdkOrigin, inspectionOrigin, hostOrigins };
+  const localRoot = path.resolve(sourceRoot, "..");
+  const names = {
+    ...localUiFiles,
+    ...onlyOfficeDocumentFontPrograms(base),
+    "/comparison-repair.js": path.join(
+      repositoryRoot,
+      "services/browser-office/runtime/ooxml-worker.js",
+    ),
+    "/workspace-sources.tar.gz": path.join(base, "workspace-sources.tar.gz"),
+    "/workspace-source-receipt.json": path.join(
+      base,
+      "workspace-source-receipt.json",
+    ),
+    "/local": path.join(localRoot, "local-workspace.html"),
+    "/local-workspace.mjs": path.join(localRoot, "local-workspace.mjs"),
+    "/local-phone-view.mjs": path.join(localRoot, "local-phone-view.mjs"),
+    "/local-ai.bundle.js": path.join(base, "local-ai.bundle.js"),
+    "/local-file.mjs": path.join(localRoot, "local-file.mjs"),
+    "/workspace.bundle.js": path.join(base, "workspace.bundle.js"),
+    "/sdk.bundle.js": path.join(base, "sdk.bundle.js"),
+  };
+  const readProgram = async (pathname) => {
+    const file = names[pathname] ?? path.resolve(dist, "." + pathname);
+    if (!names[pathname] && !file.startsWith(dist + path.sep))
+      throw Error("path_invalid");
+    let bytes = await fs.readFile(file);
+    if (pathname === "/sdkjs/slide/sdk-all.js")
+      bytes = Buffer.from(
+        addOnlyOfficeProductSdk(
+          patchOnlyOfficeDistributedAlignment(bytes.toString()),
+        ),
+      );
+    if (pathname === "/wasm/x2t/conversion-worker-lKNm6_YF.js")
+      bytes = Buffer.from(
+        patchOnlyOfficeDocumentFontConversionWorker(bytes.toString()),
+      );
+    if (pathname === "/web-apps/apps/presentationeditor/main/index.html")
+      bytes = Buffer.from(
+        addOnlyOfficeProductBootstrap(bytes.toString()).replace(
+          "</head>",
+          '<script type="module" src="/sdk.bundle.js?clientOrigin=' +
+            encodeURIComponent(workspaceOrigin) +
+            '"></script></head>',
+        ),
+      );
+    if (pathname === "/assets/officeHost-C2hljZhH.js") {
+      let text = addOnlyOfficeProductResourceHost(bytes.toString());
+      for (const [before, after] of [
+        [
+          "e.map(e=>e.unregister())",
+          'e.filter(r=>!["/verification-cache-worker.js","/document_editor_service_worker.js","/sw.js"].some(p=>(r.active??r.waiting??r.installing)?.scriptURL.includes(p))).map(e=>e.unregister())',
+        ],
+        [
+          "e.map(e=>window.caches.delete(e))",
+          'e.filter(n=>!n.startsWith("spellbook-office-public-assets-")).map(e=>window.caches.delete(e))',
+        ],
+      ]) {
+        if (text.split(before).length !== 2)
+          throw Error("pinned_cache_cleanup_patch_mismatch");
+        text = text.replace(before, after);
+      }
+      bytes = Buffer.from(text);
+    }
+    return { file, bytes };
+  };
+  const runtimeIdentity = async () =>
+    createHash("sha256")
+      .update(await fs.readFile(path.join(dist, "distribution-manifest.json")))
+      .update(await fs.readFile(path.join(base, "sdk.bundle.js")))
+      .update(
+        await fs.readFile(path.join(base, "workspace-source-receipt.json")),
+      )
+      .update(
+        await fs.readFile(path.join(sourceRoot, "workspace-cache-worker.js")),
+      )
+      .update(JSON.stringify(config))
+      .digest("hex");
+  let publishedManifest, publishedVersion;
+  const publicPrograms = async (identity) => {
+    if (identity === publishedVersion) return publishedManifest;
+    publishedVersion = identity;
+    publishedManifest = (async () => {
+      const distribution = JSON.parse(
+        await fs.readFile(
+          path.join(dist, "distribution-manifest.json"),
+          "utf8",
+        ),
+      );
+      if (!Array.isArray(distribution.files))
+        throw Error("public_program_distribution_manifest_invalid");
+      const hashes = Object.create(null);
+      for (const entry of distribution.files) {
+        if (
+          typeof entry.path !== "string" ||
+          entry.path.startsWith("/") ||
+          entry.path.split("/").includes("..") ||
+          /[?#\\]/.test(entry.path) ||
+          !/^[a-f0-9]{64}$/.test(entry.sha256)
+        )
+          throw Error("public_program_distribution_entry_invalid");
+        hashes["/" + entry.path] = entry.sha256;
+      }
+      for (const pathname of new Set([
+        ...Object.keys(names),
+        "/sdkjs/slide/sdk-all.js",
+        "/wasm/x2t/conversion-worker-lKNm6_YF.js",
+        "/web-apps/apps/presentationeditor/main/index.html",
+        "/assets/officeHost-C2hljZhH.js",
+      ])) {
+        try {
+          hashes[pathname] = createHash("sha256")
+            .update((await readProgram(pathname)).bytes)
+            .digest("hex");
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+          delete hashes[pathname];
+        }
+      }
+      return { runtimeIdentity: identity, hashes };
+    })();
+    return publishedManifest;
+  };
   return createServer(async (req, res) => {
     try {
       const pathname = decodeURIComponent(
@@ -98,15 +220,7 @@ export function createOnlyOfficeWorkspaceServer({
         ].includes(pathname)
       ) {
         res.setHeader("Service-Worker-Allowed", "/");
-        const identity = createHash("sha256")
-          .update(
-            await fs.readFile(path.join(dist, "distribution-manifest.json")),
-          )
-          .update(await fs.readFile(path.join(base, "sdk.bundle.js")))
-          .update(await fs.readFile(path.join(base, "workspace-source-receipt.json")))
-          .update(await fs.readFile(path.join(sourceRoot, "workspace-cache-worker.js")))
-          .update(JSON.stringify(config))
-          .digest("hex");
+        const identity = await runtimeIdentity();
         const code = (
           await fs.readFile(
             path.join(sourceRoot, "workspace-cache-worker.js"),
@@ -116,6 +230,12 @@ export function createOnlyOfficeWorkspaceServer({
         res.setHeader("X-Spellbook-Runtime-Identity", identity);
         res.writeHead(200, { "content-type": "text/javascript" });
         res.end(code);
+        return;
+      }
+      if (pathname === "/public-programs.json") {
+        const manifest = await publicPrograms(await runtimeIdentity());
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(manifest));
         return;
       }
       if (pathname === "/licenses") {
@@ -131,62 +251,7 @@ export function createOnlyOfficeWorkspaceServer({
         );
         return;
       }
-      const localRoot = path.resolve(sourceRoot, "..");
-      const names = {
-        ...localUiFiles,
-        ...onlyOfficeDocumentFontPrograms(base),
-        "/comparison-repair.js": path.join(repositoryRoot, "services/browser-office/runtime/ooxml-worker.js"),
-        "/workspace-sources.tar.gz": path.join(
-          base,
-          "workspace-sources.tar.gz",
-        ),
-        "/workspace-source-receipt.json": path.join(
-          base,
-          "workspace-source-receipt.json",
-        ),
-        "/local": path.join(localRoot, "local-workspace.html"),
-        "/local-workspace.mjs": path.join(localRoot, "local-workspace.mjs"),
-        "/local-phone-view.mjs": path.join(localRoot, "local-phone-view.mjs"),
-        "/local-ai.bundle.js": path.join(base, "local-ai.bundle.js"),
-        "/local-file.mjs": path.join(localRoot, "local-file.mjs"),
-        "/workspace.bundle.js": path.join(base, "workspace.bundle.js"),
-        "/sdk.bundle.js": path.join(base, "sdk.bundle.js"),
-      };
-      const file = names[pathname] ?? path.resolve(dist, "." + pathname);
-      if (!names[pathname] && !file.startsWith(dist + path.sep))
-        throw Error("path_invalid");
-      let bytes = await fs.readFile(file);
-      if (pathname === "/sdkjs/slide/sdk-all.js")
-        bytes = Buffer.from(addOnlyOfficeProductSdk(patchOnlyOfficeDistributedAlignment(bytes.toString())));
-      if (pathname === "/wasm/x2t/conversion-worker-lKNm6_YF.js")
-        bytes = Buffer.from(patchOnlyOfficeDocumentFontConversionWorker(bytes.toString()));
-      if (pathname === "/web-apps/apps/presentationeditor/main/index.html")
-        bytes = Buffer.from(
-          addOnlyOfficeProductBootstrap(bytes.toString()).replace(
-            "</head>",
-            '<script type="module" src="/sdk.bundle.js?clientOrigin=' +
-              encodeURIComponent(workspaceOrigin) +
-              '"></script></head>',
-          ),
-        );
-      if (pathname === "/assets/officeHost-C2hljZhH.js") {
-        let text = addOnlyOfficeProductResourceHost(bytes.toString());
-        for (const [before, after] of [
-          [
-            "e.map(e=>e.unregister())",
-            'e.filter(r=>!["/verification-cache-worker.js","/document_editor_service_worker.js","/sw.js"].some(p=>(r.active??r.waiting??r.installing)?.scriptURL.includes(p))).map(e=>e.unregister())',
-          ],
-          [
-            "e.map(e=>window.caches.delete(e))",
-            'e.filter(n=>!n.startsWith("spellbook-office-public-assets-")).map(e=>window.caches.delete(e))',
-          ],
-        ]) {
-          if (text.split(before).length !== 2)
-            throw Error("pinned_cache_cleanup_patch_mismatch");
-          text = text.replace(before, after);
-        }
-        bytes = Buffer.from(text);
-      }
+      const { file, bytes } = await readProgram(pathname);
       const type =
         {
           ".html": "text/html",

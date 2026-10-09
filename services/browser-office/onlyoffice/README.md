@@ -616,3 +616,19 @@ paragraph spacing uses the shared writer-representable paragraph formatter
 without adding authored history. The browser editor, server renderer and
 product verifier use the same SDK overlay. This does not claim PowerPoint
 matching card geometry, 3D bevels or every SmartArt layout.
+
+## Verified public program reuse across releases
+
+`/public-programs.json` binds the release identity to program SHA-256 values.
+The server uses the same reader for SDK adaptations and host programs as for
+their HTTP responses; retained distribution hashes cover immutable vendor
+files. Customer document bytes and document-owned fonts are absent.
+
+A replacement worker verifies each reusable required or already warm public
+response against the new release. Changed or corrupt programs are fetched
+again. Concurrent install writes settle before a failed new cache is removed;
+the prior active release remains available. SDK worker aliases also retain
+an existing verified cache for that same release. New clients check server
+identity with HEAD; stale online clients use server bytes and offline clients
+retain their previously cached programs. Bandwidth savings and complete native
+opening latency are separate measurements.

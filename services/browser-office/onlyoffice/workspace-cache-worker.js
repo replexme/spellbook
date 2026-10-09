@@ -66,21 +66,126 @@ const requiredPrograms = [
 self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
+      const cacheNames = await caches.keys();
+      const existed = cacheNames.includes(CACHE);
       const cache = await caches.open(CACHE);
-      // Font previews can load before the first SDK page is controlled by
-      // this worker. Korean UI initialization checks the East Asian previews
-      // again on reopen, so caching only later observed requests is incomplete.
-      const fontManifestUrl = "/onlyoffice-browser-font-assets.json";
-      const response = await fetch(fontManifestUrl);
-      if (!response.ok) throw Error("offline_font_manifest_unavailable");
-      const fonts = await response.json();
-      const fontPrograms = [fonts.allFonts, fonts.fontSelection, fonts.fontSourceMap,
-        ...(fonts.fontThumbnails ?? []), ...(fonts.fonts ?? [])];
-      if (fontPrograms.some(path => typeof path !== "string" ||
-        !/^(?:sdkjs|server|fonts|onlyoffice-browser-font-source-map\.json)/.test(path) ||
-        path.startsWith("/") || path.split("/").includes("..") || /[?#\\]/.test(path)))
-        throw Error("offline_font_program_invalid");
-      await cache.addAll([...requiredPrograms, fontManifestUrl, ...fontPrograms.map(path => "/" + path)]);
+      try {
+        const identitiesResponse = await fetch("/public-programs.json", {
+          cache: "no-store",
+        });
+        if (!identitiesResponse.ok)
+          throw Error("public_program_manifest_unavailable");
+        const manifest = await identitiesResponse.json();
+        if (
+          manifest.runtimeIdentity !== VERSION ||
+          !manifest.hashes ||
+          typeof manifest.hashes !== "object"
+        )
+          throw Error("public_program_manifest_version_mismatch");
+        const previous = cacheNames
+          .filter((name) => name.startsWith("spellbook-office-public-assets-"))
+          .reverse();
+        const priorCaches = await Promise.all(
+          previous.map((name) => caches.open(name)),
+        );
+        const digest = async (response) =>
+          Array.from(
+            new Uint8Array(
+              await crypto.subtle.digest(
+                "SHA-256",
+                await response.clone().arrayBuffer(),
+              ),
+            ),
+            (n) => n.toString(16).padStart(2, "0"),
+          ).join("");
+        const retain = async (pathname) => {
+          const url = new URL(pathname, self.location.origin),
+            expected = manifest.hashes[pathname];
+          if (!allowed(url) || !/^[a-f0-9]{64}$/.test(expected ?? ""))
+            throw Error("public_program_identity_invalid");
+          let accepted;
+          for (const prior of priorCaches) {
+            const response = await prior.match(key(url));
+            if (
+              response?.status === 200 &&
+              (await digest(response)) === expected
+            ) {
+              accepted = response;
+              break;
+            }
+          }
+          if (!accepted) {
+            accepted = await fetch(pathname, { cache: "reload" });
+            if (
+              accepted.status !== 200 ||
+              (await digest(accepted)) !== expected
+            )
+              throw Error("public_program_identity_mismatch");
+          }
+          await cache.put(key(url), accepted.clone());
+          return accepted;
+        };
+        const fontManifestUrl = "/onlyoffice-browser-font-assets.json";
+        const fonts = await (await retain(fontManifestUrl)).json();
+        const fontPrograms = [
+          fonts.allFonts,
+          fonts.fontSelection,
+          fonts.fontSourceMap,
+          ...(fonts.fontThumbnails ?? []),
+          ...(fonts.fonts ?? []),
+        ];
+        if (
+          fontPrograms.some(
+            (path) =>
+              typeof path !== "string" ||
+              !/^(?:sdkjs|server|fonts|onlyoffice-browser-font-source-map\.json)/.test(
+                path,
+              ) ||
+              path.startsWith("/") ||
+              path.split("/").includes("..") ||
+              /[?#\\]/.test(path),
+          )
+        )
+          throw Error("offline_font_program_invalid");
+        const paths = new Set([
+          ...requiredPrograms,
+          ...fontPrograms.map((path) => "/" + path),
+        ]);
+        // Retain already warm public editor files too. Every copied response
+        // must match this release; private URLs and obsolete paths are omitted.
+        for (const prior of priorCaches)
+          for (const request of await prior.keys()) {
+            const url = new URL(request.url);
+            if (allowed(url) && manifest.hashes[url.pathname])
+              paths.add(url.pathname);
+          }
+        paths.delete(fontManifestUrl);
+        const entries = [...paths];
+        let next = 0,
+          failed = false;
+        const results = await Promise.allSettled(
+          Array.from({ length: 6 }, async () => {
+            while (!failed && next < entries.length) {
+              const pathname = entries[next++];
+              try {
+                await retain(pathname);
+              } catch (error) {
+                failed = true;
+                throw error;
+              }
+            }
+          }),
+        );
+        const failure = results.find((result) => result.status === "rejected");
+        if (failure) throw failure.reason;
+      } catch (error) {
+        // Wait for all install writes to settle before deleting the partial
+        // cache. A failed replacement never activates or damages the old one.
+        // The SDK has worker URL aliases. Re-registering the same release
+        // may already own this verified cache; never delete that active one.
+        if (!existed) await caches.delete(CACHE);
+        throw error;
+      }
       await self.skipWaiting();
     })(),
   );
@@ -96,13 +201,16 @@ async function currentVersion(event) {
   const client = event.resultingClientId || event.clientId;
   let check = client && clientVersions.get(client);
   if (!check) {
-    check = fetch("/sw.js", { cache: "no-store" }).then(
-      response => response.ok && response.headers.get("X-Spellbook-Runtime-Identity") === VERSION,
+    check = fetch("/sw.js", { method: "HEAD", cache: "no-store" }).then(
+      (response) =>
+        response.ok &&
+        response.headers.get("X-Spellbook-Runtime-Identity") === VERSION,
       // A previously verified program remains usable while offline.
       () => true,
     );
     if (client) {
-      if (clientVersions.size >= 256) clientVersions.delete(clientVersions.keys().next().value);
+      if (clientVersions.size >= 256)
+        clientVersions.delete(clientVersions.keys().next().value);
       clientVersions.set(client, check);
     }
   }
@@ -113,7 +221,7 @@ self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET" || !allowed(url)) return;
   event.respondWith(
     (async () => {
-      if (!await currentVersion(event)) return fetch(event.request);
+      if (!(await currentVersion(event))) return fetch(event.request);
       const cache = await caches.open(CACHE);
       const cached = await cache.match(key(url));
       if (cached) return cached;
