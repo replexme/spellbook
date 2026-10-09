@@ -617,6 +617,17 @@ without adding authored history. The browser editor, server renderer and
 product verifier use the same SDK overlay. This does not claim PowerPoint
 matching card geometry, 3D bevels or every SmartArt layout.
 
+## Omitted 3D bar-chart rotation
+
+The shared product SDK uses PowerPoint's observed 15-degree elevation and
+20-degree rotation when an authored 3D bar-chart scene omits those angles.
+Native PowerPoint controls with these explicit values match the original;
+explicit zero produces a different scene. The adaptation changes only the
+derived native view copy. Authored values, explicit zero, 2D bars, other chart
+types and the source package retain their existing behavior. Both the browser
+editor and server renderer use this same adaptation. Title typography and
+plot bounds remain separate fidelity issues.
+
 ## Verified public program reuse across releases
 
 `/public-programs.json` binds the release identity to program SHA-256 values.
