@@ -2,6 +2,7 @@
 import { createSfntGlyphLookup } from './sfnt-glyph-lookup.mjs';
 import { sfntTables } from './document-font-selection.mjs';
 import {createOnlyOfficeVectorGlyphOutliner} from './vector-glyph-outlines.mjs';
+import {prepareOnlyOfficeNativeMetafile} from './native-metafile-images.mjs';
 
 // This changes only the decoded display image. The native RasterImageId and
 // source SVG/WMF/EMF bytes remain the authority for history and PPTX export.
@@ -119,7 +120,7 @@ export async function bindOnlyOfficeSvgFonts(source, {catalog, readFace, pickFon
   return {source:new XMLSerializer().serializeToString(xml),mappedGlyphs,outlinedGlyphs,fonts:used.map(face=>({family:face.family,sha256:face.sha256,bytes:face.bytes.length,style:face.style,weight:face.weight,embedded:embeddedFaces.has(face)}))};
 }
 
-export function installOnlyOfficeVectorImageFonts(glyphs,bindSvg=bindOnlyOfficeSvgFonts,glyphLookup=createSfntGlyphLookup,readTables=sfntTables,createOutliner=createOnlyOfficeVectorGlyphOutliner) {
+export function installOnlyOfficeVectorImageFonts(glyphs,bindSvg=bindOnlyOfficeSvgFonts,glyphLookup=createSfntGlyphLookup,readTables=sfntTables,createOutliner=createOnlyOfficeVectorGlyphOutliner,prepareMetafile=prepareOnlyOfficeNativeMetafile) {
   const key=Symbol.for('spellbook.onlyoffice.vectorImageFonts/v1');
   if(window[key])return;
   const loader=window.AscCommon?.g_image_loader,native=loader?.loadImageByUrl;
@@ -151,11 +152,13 @@ export function installOnlyOfficeVectorImageFonts(glyphs,bindSvg=bindOnlyOfficeS
       const blob=await response.blob();active();
       if(!blob.type.toLowerCase().includes('image/svg+xml'))return url;
       if(blob.size>8*1024*1024)throw Error('onlyoffice_vector_svg_size_invalid');
-      const source=await blob.text();active();
+      const metafile=await prepareMetafile(url,{ownedUrls:window.AscCommon.g_oDocumentUrls?.urls,origin:location.origin,signal:controller.signal});active();
+      const source=metafile?.source??await blob.text();active();
       const bound=await bindSvg(source,{catalog,readFace,glyphs,outlineGlyph:outliner.glyph,pickFont:(name,style)=>AscFonts.g_fontApplication.GetFontInfo(name,style)?.Name});
-      active();if(!bound.fonts.length)return url;
+      active();if(!bound.fonts.length&&!metafile)return url;
       const prepared=URL.createObjectURL(new Blob([bound.source],{type:'image/svg+xml'}));urls.add(prepared);
-      report.images.push({mappedGlyphs:bound.mappedGlyphs,outlinedGlyphs:bound.outlinedGlyphs,fonts:bound.fonts,sourceBytes:blob.size,displayBytes:new Blob([bound.source]).size});
+      const nativeMetafile=metafile?{sourceName:metafile.sourceName,sourceSha256:metafile.sourceSha256,sourceBytes:metafile.sourceBytes}:undefined;
+      report.images.push({mappedGlyphs:bound.mappedGlyphs,outlinedGlyphs:bound.outlinedGlyphs,fonts:bound.fonts,sourceBytes:blob.size,displayBytes:new Blob([bound.source]).size,...(nativeMetafile?{nativeMetafile}:{})});
       return prepared;
     })());
     return cache.get(url);

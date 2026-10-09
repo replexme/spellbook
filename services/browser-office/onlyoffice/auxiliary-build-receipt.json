@@ -6,7 +6,7 @@
   "compilerVersion": "4.0.11",
   "platform": "linux/amd64",
   "sourceArchive": "auxiliary-preferred-source.tar.gz",
-  "sourceArchiveSha256": "d1dda6ec815839d898375f7a91b0e87f9101b404d15957b58545274a017cd58c",
+  "sourceArchiveSha256": "88904f0ae0e505488a34dcd6fb9d14e0bd51927221e57dfebc76610572b50a9b",
   "upstreamSources": [
     {
       "id": "x2t",
@@ -104,12 +104,12 @@
     {
       "module": "font",
       "path": "sdkjs/common/libfont/engine/fonts.js",
-      "sha256": "d774dc935a7a1a14389843a119d65693be03ff5ebfb0be725379f0ba76c19242"
+      "sha256": "56aa8d3dc74aa51269b587f4e6c983eb11fe61537054d4ebcbb022f3e4250444"
     },
     {
       "module": "font",
       "path": "sdkjs/common/libfont/engine/fonts.wasm",
-      "sha256": "e6e8fc0d1787e61789cfa9af4e7d85d3bf0d24fe4c53cbabe8876dc4876e79d3"
+      "sha256": "0984b067940115ea3cf40b038af46c4278515d78b6a56741aa19818a583badd8"
     }
   ],
   "recipeChanges": {
@@ -160,14 +160,15 @@
     {
       "file": "freetype-upstream-signedness.patch",
       "sha256": "b885198fef439a6a559426c84450968afc5eac2ced5139ab91ff36dd47d29d94"
+    },
+    {
+      "file": "0023-native-metafile-pie-and-owned-render-api.patch",
+      "sha256": "46923123eaee4a258602025a71469bec2a03550f56a6bb1b4dd2be854cd64d72"
     }
   ],
-  "fontWrapperChange": "Bind exported font API inside runtime initialization callback, retaining both original loader signals.",
+  "fontWrapperChange": "Bind native font and bounded owned WMF/EMF-to-SVG API after runtime initialization; retain both original loader signals and native buffer cleanup.",
   "buildLogs": [
-    "zlib-build.log",
-    "spell-build.log",
-    "hash-build-v2.log",
-    "font-build-v4.log"
+    "font.log"
   ],
   "cleanRebuildVerified": true,
   "sourceSnapshotCleanup": {
@@ -175,9 +176,26 @@
     "removedEntryListSha256": "4d0c8aa8fa0dda07b5e689abc8b4742e5b68eeaaf153e03b0e7b250cd34956ed",
     "compilerInputsChanged": false
   },
+  "nativeMetafileSourceChanges": [
+    {
+      "path": "core/DesktopEditor/raster/Metafile/Emf/EmfInterpretator/CEmfInterpretatorSvg.cpp",
+      "beforeSha256": "003b873f1521e7958e0925942fb1e57e6c5c08d9836215702eb10dde586aa548",
+      "afterSha256": "b3661d2205f950c8d517b23c996192e0468140f7af7c10395d16a0deb46cfed8"
+    },
+    {
+      "path": "core/DesktopEditor/raster/Metafile/Emf/EmfParser/CEmfPlusParser.cpp",
+      "beforeSha256": "10aad85c088f2abc547ac8c5f13f3af32a8e3f956329898054f152c04ce5cbe3",
+      "afterSha256": "00759d55dc23fb8964503273e56314655a71de1b56b2033d61761a0e1fe612ff"
+    },
+    {
+      "path": "core/DesktopEditor/fontengine/js/engine/module_js.js",
+      "beforeSha256": "c537852ce837e93a49afd218fa4c689c6113fa45b7a62d787bcae77c3a01770a",
+      "afterSha256": "01181dfb73764236941cc616eadc452f83d196f71fd024c143954dafbe1b82c5"
+    }
+  ],
   "reproductionStatus": "exact-reproduction-verified",
   "reproductionReport": "auxiliary-reproduction.json",
-  "reproductionReportSha256": "d1f21e9cb78c2501f147aec577b0392fbde310cc972e3769b243881975bd76e9",
+  "reproductionReportSha256": "992036be0909d99207411694dd47e04f43855831a4eeb9ee60e9f09ffafd169e",
   "reproductionOutputs": [
     {
       "module": "zlib",
@@ -218,32 +236,35 @@
     {
       "module": "font",
       "path": "sdkjs/common/libfont/engine/fonts.js",
-      "sha256": "d774dc935a7a1a14389843a119d65693be03ff5ebfb0be725379f0ba76c19242",
+      "sha256": "56aa8d3dc74aa51269b587f4e6c983eb11fe61537054d4ebcbb022f3e4250444",
       "reproduced": true
     },
     {
       "module": "font",
       "path": "sdkjs/common/libfont/engine/fonts.wasm",
-      "sha256": "e6e8fc0d1787e61789cfa9af4e7d85d3bf0d24fe4c53cbabe8876dc4876e79d3",
+      "sha256": "0984b067940115ea3cf40b038af46c4278515d78b6a56741aa19818a583badd8",
       "reproduced": true
     }
   ],
+  "cpuLimit": 2,
+  "reproductionRunnerSha256": "0adc6b734650b0f68b2536a0144a5595f7210e2dfa50ce0ff0f63735fd175316",
   "reproductionLogs": [
     {
-      "file": "zlib.log",
+      "file": "auxiliary-zlib-reproduction.log",
       "sha256": "90e72136d87edfa878da1f1f59304c3b5384fe9daf3b9faaa9ab3cf8c6a3819a"
     },
     {
-      "file": "spell.log",
+      "file": "auxiliary-spell-reproduction.log",
       "sha256": "be08dc1be3ead0785cd1785e44cf1a227b93699e8380d9e85d6df4126d71fa66"
     },
     {
-      "file": "hash.log",
+      "file": "auxiliary-hash-reproduction.log",
       "sha256": "be593540b159449246dbaa16c706bad8a9052eb1db21122ef37d98440aaea96f"
     },
     {
-      "file": "font.log",
+      "file": "auxiliary-font-reproduction.log",
       "sha256": "95c3df0f7eee9504e4c2406adf28f8af30f87d4fb67910bb0207a038f615846c"
     }
-  ]
+  ],
+  "buildLogScope": "Initial changed font pair prototype compiled locally; four independent module logs above are complete fresh reproduction."
 }

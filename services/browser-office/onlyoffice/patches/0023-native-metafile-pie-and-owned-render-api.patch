@@ -1,0 +1,142 @@
+--- a/core/DesktopEditor/raster/Metafile/Emf/EmfInterpretator/CEmfInterpretatorSvg.cpp
++++ b/core/DesktopEditor/raster/Metafile/Emf/EmfInterpretator/CEmfInterpretatorSvg.cpp
+@@ -1407,10 +1407,44 @@
+ 		WriteNode(L"path" , arAttributes);
+ 	}
+ 
++
++    // EMF+ angles are clockwise in the SVG y-down plane. A complete ellipse
++    // needs two arcs because coincident SVG arc endpoints draw nothing.
++    static std::wstring CreateEmfPlusPiePath(double start, double sweep, const TEmfPlusRectF& rect)
++    {
++        if (!std::isfinite(start) || !std::isfinite(sweep) ||
++            !std::isfinite(rect.dX) || !std::isfinite(rect.dY) ||
++            !std::isfinite(rect.dWidth) || !std::isfinite(rect.dHeight) ||
++            rect.dWidth <= 0 || rect.dHeight <= 0 || sweep == 0) return L"";
++        sweep = std::max(-360., std::min(360., sweep));
++        const double radians = std::acos(-1.) / 180.;
++        const double rx = rect.dWidth / 2, ry = rect.dHeight / 2;
++        const double cx = rect.dX + rx, cy = rect.dY + ry;
++        const double angle = std::fmod(start, 360.) * radians;
++        const double sx = cx + rx * std::cos(angle), sy = cy + ry * std::sin(angle);
++        const auto point = [](double x, double y) { return ConvertToWString(x) + L"," + ConvertToWString(y); };
++        const std::wstring arc = L" A " + point(rx, ry) + L" 0 ";
++        const std::wstring direction = sweep > 0 ? L"1 " : L"0 ";
++        if (std::fabs(sweep) == 360.)
++            return L"M " + point(sx, sy) + arc + L"0 " + direction + point(2 * cx - sx, 2 * cy - sy) +
++                arc + L"0 " + direction + point(sx, sy) + L" Z";
++        const double end = angle + sweep * radians;
++        return L"M " + point(cx, cy) + L" L " + point(sx, sy) + arc +
++            (std::fabs(sweep) > 180 ? L"1 " : L"0 ") + direction +
++            point(cx + rx * std::cos(end), cy + ry * std::sin(end)) + L" Z";
++    }
+ 	void CEmfInterpretatorSvg::HANDLE_EMFPLUS_FILLPIE(unsigned int unBrushId, double dStartAngle, double dSweepAngle, const TEmfPlusRectF &oRect)
+-	{
+-
+-	}
++    {
++        if (NULL == m_pParser) return;
++        const std::wstring path = CreateEmfPlusPiePath(dStartAngle, dSweepAngle, oRect);
++        if (path.empty()) return;
++        NodeAttributes attributes = {{L"d", path}};
++        AddFill(attributes, oRect.dWidth, oRect.dHeight);
++        AddShapeRendering(attributes);
++        AddTransform(attributes);
++        AddClip();
++        WriteNode(L"path", attributes);
++    }
+ 
+ 	void CEmfInterpretatorSvg::HANDLE_EMFPLUS_FILLPOLYGON(unsigned int unBrushId, const std::vector<TEmfPlusPointF> &arPoints)
+ 	{
+--- a/core/DesktopEditor/raster/Metafile/Emf/EmfParser/CEmfPlusParser.cpp
++++ b/core/DesktopEditor/raster/Metafile/Emf/EmfParser/CEmfPlusParser.cpp
+@@ -2654,22 +2654,38 @@
+ 	}
+ 
+ 	template<typename T>
+-	void CEmfPlusParser::Read_EMFPLUS_FILLPIE_BASE(unsigned short unShFlags)
+-	{
+-		unsigned int unBrushId;
+-		double dStartAngle, dSweepAngle;
+-		T oRect;
+-
+-		m_oStream >> unBrushId;
+-		m_oStream >> dStartAngle;
+-		m_oStream >> dSweepAngle;
+-		m_oStream >> oRect;
+-
+-		if (NULL != m_pInterpretator)
+-			m_pInterpretator->HANDLE_EMFPLUS_FILLPIE(unBrushId, dStartAngle, dSweepAngle, GetConvertedRectangle(oRect));
+-
+-		//TODO: реализовать
+-	}
++    void CEmfPlusParser::Read_EMFPLUS_FILLPIE_BASE(unsigned short unShFlags)
++    {
++        unsigned int brushId;
++        double start, sweep;
++        T rectangle;
++        m_oStream >> brushId;
++        m_oStream >> start;
++        m_oStream >> sweep;
++        m_oStream >> rectangle;
++        if (NULL == m_pInterpretator) return;
++        CEmfPlusBrush colorBrush;
++        CEmfPlusBrush* brush = NULL;
++        if ((unShFlags >> 15) & 1) {
++            colorBrush.oColor.chBlue = brushId & 0xFF;
++            colorBrush.oColor.chGreen = (brushId >> 8) & 0xFF;
++            colorBrush.oColor.chRed = (brushId >> 16) & 0xFF;
++            colorBrush.oColor.chAlpha = (brushId >> 24) & 0xFF;
++            brush = &colorBrush;
++        } else brush = GetBrush(brushId);
++        if (NULL == brush) return;
++        // Filling does not inherit a preceding pen's brush. Restore both
++        // selected objects even if the SVG writer throws.
++        struct RestoreSelectedObjects {
++            CEmfDC* dc;
++            IBrush* brush;
++            IPen* pen;
++            ~RestoreSelectedObjects() { dc->SetBrush(brush); dc->SetPen(pen); }
++        } restore{m_pDC, const_cast<IBrush*>(m_pDC->GetBrush()), const_cast<IPen*>(m_pDC->GetPen())};
++        m_pDC->SetBrush(brush);
++        m_pDC->SetPen(NULL);
++        m_pInterpretator->HANDLE_EMFPLUS_FILLPIE(brushId, start, sweep, GetConvertedRectangle(rectangle));
++    }
+ 
+ 	void CEmfPlusParser::Read_EMFPLUS_FILLPOLYGON(unsigned short unShFlags)
+ 	{
+--- a/core/DesktopEditor/fontengine/js/engine/module_js.js
++++ b/core/DesktopEditor/fontengine/js/engine/module_js.js
+@@ -62,6 +62,32 @@
+ //module
+ 
+ function bindFontApi() {
++// Decode an owned native WMF/EMF through the same initialized module that
++// supplies editor font outlines. This does not mutate ZIP or editor state.
++AscFonts.RenderMetafileSvg = function(bytes) {
++    if (!ArrayBuffer.isView(bytes) || bytes.BYTES_PER_ELEMENT !== 1 ||
++        bytes.byteLength < 18 || bytes.byteLength > 25000000)
++        throw Error("onlyoffice_metafile_input_size_invalid");
++    var input = Module["_Zlib_Malloc"](bytes.byteLength), encoded = 0;
++    if (!input) throw Error("onlyoffice_metafile_allocation_failed");
++    try {
++        Module["HEAPU8"].set(bytes, input);
++        var format = Module["_Image_GetFormat"](input, bytes.byteLength);
++        if (format !== 10 && format !== 21)
++            throw Error("onlyoffice_metafile_format_invalid");
++        encoded = Module["_Raster_Encode"](input, bytes.byteLength, 24);
++        if (!encoded) throw Error("onlyoffice_metafile_encode_failed");
++        var size = Module["_Raster_GetEncodedSize"](encoded);
++        var data = Module["_Raster_GetEncodedBuffer"](encoded);
++        if (!data || size < 1 || size > 8388608 || data + size > Module["HEAPU8"].length)
++            throw Error("onlyoffice_metafile_output_size_invalid");
++        return new TextDecoder("utf-8", {fatal:true}).decode(new Uint8Array(Module["HEAPU8"].buffer, data, size));
++    } finally {
++        if (encoded) Module["_Raster_DestroyEncodedData"](encoded);
++        Module["_Zlib_Free"](input);
++    }
++};
++
+ function CReturnObject()
+ {
+ 	this.error = 0;

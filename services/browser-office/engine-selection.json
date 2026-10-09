@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "defaultEngine": "onlyoffice",
   "onlyoffice": {
-    "distributionSha256": "35e9594f3a24b38f99e3acc9dcdadfc0ed41f577e8f452e303068d4da525a633",
+    "distributionSha256": "36abf91812382df72854b28a92a3f372eb018060faa2c7e1229e8710a3b23f59",
     "directory": "onlyoffice/distribution",
     "publicReleaseAdmitted": true,
     "releaseHold": null,

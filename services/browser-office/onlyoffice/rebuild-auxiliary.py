@@ -67,7 +67,7 @@ def main():
         for module, (recipe, _) in MODULES.items():
             with (args.output / (module + '.log')).open('w') as log:
                 result = subprocess.run(['docker', 'run', '--rm', '--name', name,
-                    '--platform', receipt['platform'], '--network', 'none', '--cap-drop', 'ALL',
+                    '--platform', receipt['platform'], '--cpus', '2', '--network', 'none', '--cap-drop', 'ALL',
                     '--security-opt', 'no-new-privileges', '--mount',
                     f'type=bind,source={work},target=/work', '--workdir', '/work/core/Common/js',
                     image, 'python3', 'make.py', '/work/core/' + recipe], stdout=log, stderr=subprocess.STDOUT)

@@ -299,7 +299,7 @@ await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
 const origin = "http://127.0.0.1:" + server.address().port;
 const browser = await chromium.launch({
   headless: true,
-  args: ["--use-gl=angle", "--use-angle=swiftshader"],
+  // Use Chromium defaults: a forced SwiftShader path distorts decoded native vectors.
 });
 const report = {
   programFonts: programSymbolAssets.identity,

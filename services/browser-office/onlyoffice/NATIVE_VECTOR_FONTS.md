@@ -38,3 +38,30 @@ spacing: a font-size change must undo to the exact previous visual state.
 
 Use the canonical cohort and full original-source corpus for release admission;
 an isolated SVG or successful render is not complete PowerPoint fidelity proof.
+
+The native converter also leaves each original WMF/EMF beside its SVG in the
+document-owned URL map. When an SVG has one unambiguous corresponding original,
+`prepareOnlyOfficeNativeMetafile` sends those exact local bytes to the initialized
+font/drawing module through `AscFonts.RenderMetafileSvg`. Its EMF+ FillPie parser
+now selects the authored inline or object brush and emits native elliptical pie
+arcs, including clockwise, counterclockwise and full-circle cases. The font gate
+then applies the same catalog/outline rules to the resulting SVG. Geometry-only
+SVG output is retained too. No temporary ZIP archive or export edit is needed.
+
+The direct API validates byte-view, size, native format, output size and UTF-8,
+and releases its input and encoded buffers in `finally`. Matching originals
+must be document-owned local blobs; ambiguous, missing-API or decode failures
+are explicit errors. The image loader deduplicates work and aborts owned reads
+on disposal. Source names and SHA-256 identities appear in the rendering report,
+without publishing media payloads or private font bytes. The preferred-source
+patch is `patches/0023-native-metafile-pie-and-owned-render-api.patch`; auxiliary
+source packaging and all four independent JS/WASM reproduction pairs must be
+verified before selecting those new vendor bytes.
+
+Headless rendering and product lifecycle checks use Chromium's default graphics
+path. A controlled two-document native-iframe comparison found that forcing
+ANGLE/SwiftShader caused large Mac/Linux vector raster differences despite
+identical SVG, fonts and geometry. Removing those forced options reduced the
+matrix slide difference from 61,100 pixels to two one-channel rounding pixels
+and the EMF slide difference from 2,888 pixels to zero. Whole-corpus verification
+and fresh native PowerPoint references remain separate acceptance requirements.

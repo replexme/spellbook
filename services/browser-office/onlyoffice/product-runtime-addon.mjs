@@ -7,6 +7,7 @@ import { installOnlyOfficeVectorImageFonts, bindOnlyOfficeSvgFonts } from "./vec
 import { createSfntGlyphLookup } from "./sfnt-glyph-lookup.mjs";
 import { sfntTables } from "./document-font-selection.mjs";
 import {createOnlyOfficeVectorGlyphOutliner} from "./vector-glyph-outlines.mjs";
+import {prepareOnlyOfficeNativeMetafile} from "./native-metafile-images.mjs";
 
 import { installOnlyOfficeMissingSmartArtLayouts } from "./missing-smartart-layouts.mjs";
 import { installOnlyOfficeChart3dDefaults } from "./chart-3d-defaults.mjs";
@@ -24,7 +25,7 @@ export function addOnlyOfficeProductBootstrap(html) {
 export function addOnlyOfficeProductSdk(source) {
   return source+"\n;("+installOnlyOfficeDocumentFontLoader.toString()+")();\n"+";("+installOnlyOfficeMissingSmartArtLayouts.toString()+")("+onlyOfficeParagraphFormat.toString()+");\n"+";("+installOnlyOfficeChart3dDefaults.toString()+")();\n"+";("+installOnlyOfficeLegacySymbolBullets.toString()+")("+JSON.stringify(symbolRecipe.glyphs)+");\n"+
     ";("+installOnlyOfficePercentParagraphSpacing.toString()+")();\n"+
-    ";("+installOnlyOfficeVectorImageFonts.toString()+")("+JSON.stringify(symbolRecipe.glyphs)+",("+bindOnlyOfficeSvgFonts.toString()+"),("+createSfntGlyphLookup.toString()+"),("+sfntTables.toString()+"),("+createOnlyOfficeVectorGlyphOutliner.toString()+"));\n";
+    ";("+installOnlyOfficeVectorImageFonts.toString()+")("+JSON.stringify(symbolRecipe.glyphs)+",("+bindOnlyOfficeSvgFonts.toString()+"),("+createSfntGlyphLookup.toString()+"),("+sfntTables.toString()+"),("+createOnlyOfficeVectorGlyphOutliner.toString()+"),("+prepareOnlyOfficeNativeMetafile.toString()+"));\n";
 }
 export function addOnlyOfficeProductResourceHost(source) {
   const anchor="G=await Tn(An,r),tr(),cr(`READY`,G.getState())";

@@ -170,7 +170,7 @@ export async function createOnlyOfficeHeadlessRenderer({
     browser = await chromium.launch({
       headless: true,
       executablePath: process.env.SPELLBOOK_CHROMIUM_EXECUTABLE || undefined,
-      args: ["--use-gl=angle", "--use-angle=swiftshader"],
+      // Use Chromium defaults: a forced SwiftShader path distorts decoded native vectors.
     });
     let rendering = false;
     return {
