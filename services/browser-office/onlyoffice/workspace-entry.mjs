@@ -1,3 +1,4 @@
+import {createPptxRenderResourceContext} from "../linked-render-resources.mjs";
 import {validateOperationArguments} from "../../../contracts/native-edit-tools.cjs";
 import Ajv from "ajv";
 import { createOfficeEditor } from "/npm/public-api.js";
@@ -34,6 +35,7 @@ const runtime = JSON.parse(
 const candidateOrigin = new URL(runtime.sdkOrigin).origin;
 const inspectionOrigin = new URL(runtime.inspectionOrigin).origin;
 let documentName = "문서.pptx";
+let renderResourceContext=null;
 const origin = new URL(location.href).searchParams.get("hostOrigin");
 if (
   !origin ||
@@ -247,6 +249,7 @@ async function component(bytes, hidden = false) {
   try {
     value.editor = await createOfficeEditor(container, {
       hostUrl: engineOrigin + "/office-host.html",
+      spellbookRenderResources:await renderResourceContext?.forInput(bytes),
       file: new File([bytes], documentName, {
         type: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
       }),
@@ -543,7 +546,11 @@ async function handle(message) {
       ? message.fileName.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 255)
       : "문서.pptx";
     opening = true;
+    try {
     ownedAssets.clear();
+    renderResourceContext?.close();
+    renderResourceContext=null;
+    renderResourceContext=await createPptxRenderResourceContext(new Uint8Array(message.bytes),message.renderResources);
     hostRevision = message.revision;
     journal = await openBrowserDocumentJournal({
       identity: "document:" + message.documentId,
@@ -566,7 +573,6 @@ async function handle(message) {
         },
       }),
     });
-    try {
       await session.open(new Uint8Array(message.bytes));
       const recovered = await session.recover();
       const observed = await session.observe();

@@ -9,6 +9,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY contracts ./contracts
 COPY services/browser-office ./services/browser-office
+COPY services/document-resources ./services/document-resources
 COPY services/office-session-spike ./services/office-session-spike
 COPY services/office-editor/extension ./services/office-editor/extension
 COPY apps/web/src/lib/local-ai-connector.ts apps/web/src/lib/ai-connector-config.ts ./apps/web/src/lib/

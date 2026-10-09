@@ -5,8 +5,10 @@ RUN corepack enable
 WORKDIR /workspace
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/web/package.json ./apps/web/
-RUN pnpm install --frozen-lockfile --filter @spellbook/web...
+RUN pnpm install --frozen-lockfile --filter @spellbook/web... --filter spellbook
 COPY contracts ./contracts
+COPY services/document-resources ./services/document-resources
+COPY services/browser-office/external-raster.mjs ./services/browser-office/external-raster.mjs
 COPY apps/web ./apps/web
 RUN pnpm --filter @spellbook/web build
 

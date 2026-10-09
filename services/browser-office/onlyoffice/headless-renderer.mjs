@@ -1,5 +1,7 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import fs from "node:fs/promises";
+import * as resourceObjectStore from "../../document-resources/object-store.mjs";
+import {readOwnedLinkedImages} from "../../document-resources/linked-image-snapshots.mjs";
 import path from "node:path";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
@@ -17,8 +19,12 @@ const host = (
 import {createOfficeEditor} from ${JSON.stringify(sdkOrigin + "/npm/public-api.js")};
 window.renderError=null;
 try {
+const index=await (await fetch('/__render-resources')).json();
+const payloads=new Map();
+for(const image of index?.manifest?.images??[]){if(!payloads.has(image.sha256))payloads.set(image.sha256,await(await fetch('/__render-resources?sha256='+image.sha256)).arrayBuffer());}
+const renderResources=index?{manifest:index.manifest,assets:index.manifest.images.map(image=>({...image,sourceSha256:index.manifest.sourceSha256,bytes:payloads.get(image.sha256)}))}:null;
 const file=new File([await (await fetch('/__document')).arrayBuffer()],'preview.pptx',{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'});
-window.previewEditor=await createOfficeEditor(document.querySelector('#editor'),{hostUrl:${JSON.stringify(sdkOrigin + "/office-host.html")},file,fileName:file.name,lang:'ko',mode:'view',saveBehavior:'callback',onError:e=>window.renderError=e.message});
+window.previewEditor=await createOfficeEditor(document.querySelector('#editor'),{hostUrl:${JSON.stringify(sdkOrigin + "/office-host.html")},file,spellbookRenderResources:renderResources,fileName:file.name,lang:'ko',mode:'view',saveBehavior:'callback',onError:e=>window.renderError=e.message});
 } catch(e){window.renderError=e.message;}
 </script>`;
 
@@ -95,7 +101,7 @@ export async function createOnlyOfficeHeadlessRenderer({
   }
   const servers = [createServer(), createServer(), createServer()];
   let browser,
-    currentDocument = null;
+    currentDocument = null, currentResources = null;
   try {
     for (const server of servers)
       await new Promise((resolve, reject) => {
@@ -138,6 +144,16 @@ export async function createOnlyOfficeHeadlessRenderer({
             "cache-control": "no-store",
           });
           response.end(host(sdkOrigin));
+        } else if (pathname === "/__render-resources") {
+          const requested=new URL(request.url,"http://localhost").searchParams.get("sha256");
+          if(requested===null){
+            response.writeHead(200,{"content-type":"application/json","cache-control":"private, no-store"});
+            response.end(JSON.stringify(currentResources?{manifest:currentResources.manifest}:null));
+          }else{
+            const image=currentResources?.assets.find(asset=>asset.sha256===requested);
+            response.writeHead(image?200:404,{"content-type":image?.contentType??"application/json","cache-control":"private, no-store"});
+            response.end(image?image.bytes:JSON.stringify({error:"external_image_snapshot_relationship_missing"}));
+          }
         } else if (request.url === "/__document" && currentDocument) {
           response.writeHead(200, {
             "content-type":
@@ -164,7 +180,7 @@ export async function createOnlyOfficeHeadlessRenderer({
       },
       async renderFile(
         inputPath,
-        { outputDirectory, slideIndexes = null } = {},
+        { outputDirectory, slideIndexes = null, resourceScope = null } = {},
       ) {
         if (rendering) throw Error("onlyoffice_render_busy");
         rendering = true;
@@ -179,6 +195,8 @@ export async function createOnlyOfficeHeadlessRenderer({
           const bytes = await fs.readFile(inputPath);
           if (!bytes.length || bytes.length > 64 * 1024 * 1024)
             throw Error("onlyoffice_render_input_size_invalid");
+          if(resourceScope?.dataDirectory)process.env.SPELLBOOK_DATA_DIR=resourceScope.dataDirectory;
+          currentResources=resourceScope?await readOwnedLinkedImages({...resourceScope,sourceBytes:bytes,objectStore:resourceObjectStore}):null;
           currentDocument = bytes;
           await fs.mkdir(outputDirectory, { recursive: true });
           context = await browser.newContext({
@@ -431,6 +449,7 @@ export async function createOnlyOfficeHeadlessRenderer({
         } finally {
           await context?.close();
           currentDocument = null;
+          currentResources = null;
           rendering = false;
         }
       },
@@ -458,10 +477,14 @@ if (process.argv[1] === import.meta.filename) {
     throw Error(
       "Usage: headless-renderer.mjs INPUT.pptx OUTPUT [SLIDE_INDEX...]",
     );
+  let resourceScope=null;
+  try {resourceScope=JSON.parse(await fs.readFile(inputPath+'.render-resources.json','utf8'));}
+  catch(error){if(error.code!=='ENOENT')throw error;}
   const renderer = await createOnlyOfficeHeadlessRenderer();
   try {
     const result = await renderer.renderFile(inputPath, {
       outputDirectory,
+      resourceScope,
       slideIndexes: selected.length ? selected.map(Number) : null,
     });
     process.stdout.write(

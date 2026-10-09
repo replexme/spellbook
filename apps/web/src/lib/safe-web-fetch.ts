@@ -1,5 +1,6 @@
 import { lookup } from "node:dns/promises";
-import ipaddr from "ipaddr.js";
+import {isPublicAddress} from "../../../../services/document-resources/public-address.mjs";
+export {isPublicAddress} from "../../../../services/document-resources/public-address.mjs";
 import { Agent, fetch } from "undici";
 
 /*
@@ -9,15 +10,6 @@ import { Agent, fetch } from "undici";
 
 const MAX_BODY_BYTES = 1_000_000;
 const MAX_TEXT_CHARACTERS = 10_000;
-
-/** No browser credentials or internal destinations may cross this boundary. */
-export function isPublicAddress(address: string): boolean {
-  try {
-    return ipaddr.process(address).range() === "unicast";
-  } catch {
-    return false;
-  }
-}
 
 export async function fetchPublicPage(
   rawUrl: string,

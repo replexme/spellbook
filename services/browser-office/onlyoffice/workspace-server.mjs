@@ -9,6 +9,7 @@ import {
   addOnlyOfficeProductBootstrap,
   addOnlyOfficeProductResourceHost,
   addOnlyOfficeProductSdk,
+  addOnlyOfficeProductApi,
 } from "./product-runtime-addon.mjs";
 import { patchOnlyOfficeDocumentFontConversionWorker } from "./document-fonts.mjs";
 import { onlyOfficeDocumentFontPrograms } from "./product-programs.mjs";
@@ -79,6 +80,7 @@ export function createOnlyOfficeWorkspaceServer({
     if (!names[pathname] && !file.startsWith(dist + path.sep))
       throw Error("path_invalid");
     let bytes = await fs.readFile(file);
+    if (pathname === "/npm/public-api.js") bytes=Buffer.from(addOnlyOfficeProductApi(bytes.toString()));
     if (pathname === "/sdkjs/slide/sdk-all.js")
       bytes = Buffer.from(
         addOnlyOfficeProductSdk(
@@ -158,6 +160,7 @@ export function createOnlyOfficeWorkspaceServer({
       for (const pathname of new Set([
         ...Object.keys(names),
         "/sdkjs/slide/sdk-all.js",
+        "/npm/public-api.js",
         "/wasm/x2t/conversion-worker-lKNm6_YF.js",
         "/web-apps/apps/presentationeditor/main/index.html",
         "/assets/officeHost-C2hljZhH.js",

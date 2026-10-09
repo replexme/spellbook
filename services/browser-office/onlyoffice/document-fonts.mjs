@@ -88,3 +88,5 @@ export function installOnlyOfficeDocumentFontLoader(){
 export function patchOnlyOfficeDocumentFontConversionWorker(source){
   return `let __documentFonts=null;const __programFetch=self.fetch.bind(self);self.addEventListener('message',event=>{if(event.data?.protocol==='onlyoffice-browser-conversion-v1'&&event.data.documentFonts)__documentFonts=event.data.documentFonts;});self.fetch=(input,init)=>{const url=new URL(typeof input==='string'||input instanceof URL?input:input.url,self.location.href),asset=url.origin===self.location.origin&&(!init?.method||init.method==='GET')&&__documentFonts?.[url.pathname];if(asset)return Promise.resolve(new Response(asset.bytes,{status:200,headers:{'content-type':asset.type,'cache-control':'no-store'}}));return __programFetch(input,init);};\n`+source;
 }
+
+export {preparePptxRenderInput} from "../linked-render-resources.mjs";

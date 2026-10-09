@@ -74,13 +74,14 @@ async function collect(directory) {
     } else if (
       entry.isFile() &&
       (name.startsWith("services/browser-office/onlyoffice/eot/") ||
-        /\.(mjs|cjs|js|json|html|md|ts|cts|txt|patch|sh|py|css)$/.test(name) ||
+        /\.(mjs|cjs|js|json|html|md|ts|mts|cts|txt|patch|sh|py|css)$/.test(name) ||
         entry.name.startsWith("Dockerfile"))
     )
       sources.push(name);
   }
 }
 await collect("services/browser-office");
+await collect("services/document-resources");
 await collect("services/office-session-spike");
 await collect("contracts");
 await collect("LICENSES");

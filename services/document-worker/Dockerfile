@@ -10,6 +10,7 @@ COPY .dockerignore docker-compose.yml ./
 RUN pnpm install --frozen-lockfile
 COPY contracts ./contracts
 COPY services/browser-office ./services/browser-office
+COPY services/document-resources ./services/document-resources
 COPY services/office-session-spike ./services/office-session-spike
 COPY services/office-editor/extension ./services/office-editor/extension
 COPY apps/web/src/lib/local-ai-connector.ts apps/web/src/lib/ai-connector-config.ts ./apps/web/src/lib/
@@ -64,6 +65,7 @@ COPY --from=build /app/tool ./tool
 COPY --from=office /usr/local/bin/node /usr/local/bin/node
 COPY --from=office /workspace/node_modules ./node_modules
 COPY --from=office /workspace/services/browser-office ./services/browser-office
+COPY --from=office /workspace/services/document-resources ./services/document-resources
 COPY --from=office /workspace/services/office-session-spike ./services/office-session-spike
 COPY --from=office /workspace/apps/web/src/design-system ./apps/web/src/design-system
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080 \

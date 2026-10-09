@@ -24,5 +24,11 @@ export function addOnlyOfficeProductResourceHost(source) {
   // The product host owns the document title. Keep the original native logo,
   // menus and editing controls while avoiding a second title/action row.
   const customized=source.replace(header,header+",compactHeader:!0,toolbarHideFileName:!0");
-  return 'import {prepareOnlyOfficeDocumentFonts as __prepareDocumentFonts} from "/document-fonts.bundle.js";\n'+customized.replace(anchor,"await __prepareDocumentFonts(r.buffer),G=await Tn(An,r),("+attachOnlyOfficeResourceHost.toString()+")(G,c),tr(),cr(`READY`,G.getState())");
+  return 'import {prepareOnlyOfficeDocumentFonts as __prepareDocumentFonts,preparePptxRenderInput as __prepareRenderInput} from "/document-fonts.bundle.js";\n'+customized.replace(anchor,"await __prepareDocumentFonts(r.buffer),G=await Tn(An,{...r,buffer:await __prepareRenderInput(r.buffer,n.spellbookRenderResources)}),("+attachOnlyOfficeResourceHost.toString()+")(G,c),tr(),cr(`READY`,G.getState())");
+}
+
+export function addOnlyOfficeProductApi(source) {
+  const anchor="source: a";
+  if(typeof source!=="string"||source.split(anchor).length!==2)throw Error("onlyoffice_product_api_source_mismatch");
+  return source.replace(anchor,"source: {...a,spellbookRenderResources:e.spellbookRenderResources??null}");
 }

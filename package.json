@@ -55,7 +55,7 @@
     "test:docs": "node scripts/check-docs.mjs",
     "test:contracts": "node scripts/validate-contracts.mjs",
     "test:harness": "node --test scripts/*.test.mjs",
-    "test:office": "pnpm --filter @spellbook/ai-connector build && node --test services/office-editor/*.test.mjs services/office-editor/libreoffice/*.test.mjs services/office-session-spike/*.test.mjs services/browser-office/*.test.mjs services/browser-office/libreoffice/*.test.mjs && node scripts/test-office-gateway.mjs",
+    "test:office": "pnpm --filter @spellbook/ai-connector build && node --test services/office-editor/*.test.mjs services/office-editor/libreoffice/*.test.mjs services/office-session-spike/*.test.mjs services/browser-office/*.test.mjs services/document-resources/*.test.mjs services/browser-office/libreoffice/*.test.mjs && node scripts/test-office-gateway.mjs",
     "test:e2e": "pnpm --filter @spellbook/web test:e2e",
     "test:selfhost": "pnpm --filter @spellbook/web test:selfhost",
     "typecheck": "pnpm -r --if-present typecheck",
@@ -97,5 +97,8 @@
       "source-map-js": "1.2.2",
       "proxy-addr": "2.0.8"
     }
+  },
+  "dependencies": {
+    "ipaddr.js": "1.9.1"
   }
 }

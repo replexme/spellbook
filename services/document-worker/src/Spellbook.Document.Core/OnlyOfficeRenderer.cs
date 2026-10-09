@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace Spellbook.Document.Core;
 
 /// <summary>Uses the same pinned browser SDK and native slide drawing as the editor.</summary>
-public sealed class OnlyOfficeRenderer : IPresentationRenderer
+public sealed class OnlyOfficeRenderer : IPresentationRenderer, IOwnedPresentationResources
 {
     private readonly string script;
     private readonly PptxImagePixelBudget pixelBudget = PptxImagePixelBudget.FromEnvironment();
@@ -34,6 +34,23 @@ public sealed class OnlyOfficeRenderer : IPresentationRenderer
     public string Name => "ONLYOFFICE";
     public string Version { get; }
 
+    public async Task PrepareOwnedResourcesAsync(string inputPath, string inputObject,
+        string? baselinePath, CancellationToken cancellationToken)
+    {
+        string? parentSha256 = null;
+        if (baselinePath is not null)
+        {
+            await using var baseline = File.OpenRead(baselinePath);
+            parentSha256 = Convert.ToHexStringLower(await SHA256.HashDataAsync(baseline, cancellationToken));
+        }
+        var preparation = Environment.GetEnvironmentVariable("SPELLBOOK_ONLYOFFICE_RESOURCE_SCRIPT")
+            ?? Path.GetFullPath(Path.Combine(Path.GetDirectoryName(script)!,
+                "../../document-resources/prepare-owned-pptx.mjs"));
+        var arguments = new List<string> { Path.GetFullPath(inputPath), inputObject };
+        if (parentSha256 is not null) arguments.Add(parentSha256);
+        await RunNodeAsync(preparation, arguments, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<string>> RenderAsync(string pptxPath, string outputDirectory,
         CancellationToken cancellationToken, IReadOnlyList<int>? slideIndexes = null)
     {
@@ -44,15 +61,29 @@ public sealed class OnlyOfficeRenderer : IPresentationRenderer
         pixelBudget.Check(pptxPath);
         var outputRoot = Path.GetFullPath(outputDirectory);
         Directory.CreateDirectory(outputRoot);
+        var arguments = new List<string> { Path.GetFullPath(pptxPath), outputRoot };
+        arguments.AddRange((slideIndexes ?? []).Select(index => index.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+        using var result = JsonDocument.Parse(await RunNodeAsync(script, arguments, cancellationToken));
+        if (result.RootElement.GetProperty("renderer").GetProperty("name").GetString() != Name)
+            throw new InvalidDataException("Preview renderer identity mismatch.");
+        var images = result.RootElement.GetProperty("images").EnumerateArray()
+            .Select(value => Path.GetFullPath(value.GetString()!)).ToArray();
+        if (images.Any(file => !file.StartsWith(outputRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || !File.Exists(file))) throw new InvalidDataException("Preview image is outside the owned output directory.");
+        if (slideIndexes is not null && images.Length != slideIndexes.Count)
+            throw new InvalidDataException("Preview selected slide count mismatch.");
+        return images;
+    }
+
+    private async Task<string> RunNodeAsync(string entry, IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
         using var process = new Process { StartInfo = new ProcessStartInfo {
             FileName = "node", RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false } };
-        process.StartInfo.ArgumentList.Add(script);
-        process.StartInfo.ArgumentList.Add(Path.GetFullPath(pptxPath));
-        process.StartInfo.ArgumentList.Add(outputRoot);
-        foreach (var index in slideIndexes ?? [])
-            process.StartInfo.ArgumentList.Add(index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        process.StartInfo.ArgumentList.Add(entry);
+        foreach (var argument in arguments) process.StartInfo.ArgumentList.Add(argument);
         process.Start();
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
@@ -66,15 +97,6 @@ public sealed class OnlyOfficeRenderer : IPresentationRenderer
         }
         var errorOutput = await stderr;
         if (process.ExitCode != 0) throw new InvalidOperationException($"ONLYOFFICE preview failed: {errorOutput[..Math.Min(errorOutput.Length, 2000)]}");
-        using var result = JsonDocument.Parse(await stdout);
-        if (result.RootElement.GetProperty("renderer").GetProperty("name").GetString() != Name)
-            throw new InvalidDataException("Preview renderer identity mismatch.");
-        var images = result.RootElement.GetProperty("images").EnumerateArray()
-            .Select(value => Path.GetFullPath(value.GetString()!)).ToArray();
-        if (images.Any(file => !file.StartsWith(outputRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-            || !File.Exists(file))) throw new InvalidDataException("Preview image is outside the owned output directory.");
-        if (slideIndexes is not null && images.Length != slideIndexes.Count)
-            throw new InvalidDataException("Preview selected slide count mismatch.");
-        return images;
+        return await stdout;
     }
 }

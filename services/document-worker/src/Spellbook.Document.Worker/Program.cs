@@ -83,6 +83,8 @@ app.MapPost("/internal/jobs/scan-render", (
                     validationObject,
                     validation.CandidateDocumentSha256);
         }
+        if (adapter.FormatId == "pptx" && renderer is IOwnedPresentationResources resources)
+            await resources.PrepareOwnedResourcesAsync(inputPath, job.InputObject, baselinePath, cancellationToken);
         var scan = adapter.Scan(inputPath);
         var graph = adapter.Inspect(inputPath, scan);
         var (graphWithPreviews, renderedSlideCount) = await SavedPreviewRenderer.RenderAsync(
@@ -104,6 +106,7 @@ app.MapPost("/internal/jobs/patch-render", (
     PatchRenderJob job,
     LocalObjectStore storage,
     IEnumerable<IDocumentFormatAdapter> adapters,
+    IPresentationRenderer renderer,
     IHttpClientFactory clients) =>
 {
     Authorize(request);
@@ -125,6 +128,8 @@ app.MapPost("/internal/jobs/patch-render", (
         var patch = adapter.Patch(inputPath, outputPath, job.Command, assets);
         if (!patch.Validation.Valid)
             throw new InvalidDataException(string.Join(" ", patch.Validation.Errors));
+        if (adapter.FormatId == "pptx" && renderer is IOwnedPresentationResources resources)
+            await resources.PrepareOwnedResourcesAsync(outputPath, job.OutputDocumentObject, inputPath, cancellationToken);
         var images = await adapter.RenderAsync(outputPath, Path.Combine(workspace.Path, "slides"), cancellationToken);
         var graphWithPreviews = AddPreviewObjects(patch.CandidateGraph, job.OutputPrefix, images.Count, adapter);
         var graphObject = $"{job.OutputPrefix}/element-graph.json";

@@ -1,3 +1,5 @@
+import * as renderResourceStore from "./storage";
+import {readLinkedImageManifest,type LinkedImageManifest} from "../../../../services/document-resources/linked-image-snapshots.mjs";
 import { createHash, randomUUID } from "node:crypto";
 
 import { currentPresentationFormat } from "./document-formats";
@@ -164,25 +166,29 @@ export async function createBrowserDocumentLaunch(
   };
 }
 
-export async function getBrowserDocument(
-  session: Session,
-  documentId: string,
-): Promise<{ fileName: string; revision: string; data: Buffer }> {
+async function activeBrowserDocument(session: Session,documentId: string) {
   await ensureSchema();
-  const [row] = await db()`
-    select d.file_name,s.working_version_id,s.working_sha256,v.document_object
+  const [row]=await db()`
+    select d.file_name,s.working_version_id,s.working_sha256,v.document_object,v.document_bytes
     from spellbook_native_sessions s
     join spellbook_documents d on d.id=s.document_id and d.account_id=s.account_id
     join spellbook_versions v on v.id=s.working_version_id and v.status='ready'
     where s.document_id=${documentId} and s.account_id=${session.accountId}
       and s.editor_mode='browser' and s.status='active' and s.expires_at > now()
   `;
-  if (!row) throw new HttpError(409, "browser_session_not_active");
-  return {
-    fileName: row.file_name,
-    revision: browserRevision(row.working_version_id, row.working_sha256),
-    data: await getObject(row.document_object),
-  };
+  if(!row)throw new HttpError(409,"browser_session_not_active");
+  return row;
+}
+
+/** The same active owned revision authorizes file and render-resource reads. */
+export async function browserDocumentIdentity(session: Session,documentId: string) {
+  const row=await activeBrowserDocument(session,documentId);
+  return {revision:browserRevision(row.working_version_id,row.working_sha256),sourceSha256:row.working_sha256 as string};
+}
+
+export async function getBrowserDocument(session: Session,documentId: string): Promise<{fileName: string; revision: string; data: Buffer}> {
+  const row=await activeBrowserDocument(session,documentId);
+  return {fileName:row.file_name,revision:browserRevision(row.working_version_id,row.working_sha256),data:await getObject(row.document_object)};
 }
 
 export async function saveBrowserDocument(
@@ -229,18 +235,15 @@ export async function browserDocumentSource(
   revision: string;
   bytes: number | null;
   url: string | null;
+  renderResources: LinkedImageManifest|null;
 }> {
-  await ensureSchema();
-  const [row] = await db()`
-    select d.file_name,s.working_version_id,s.working_sha256,v.document_object,v.document_bytes
-    from spellbook_native_sessions s
-    join spellbook_documents d on d.id=s.document_id and d.account_id=s.account_id
-    join spellbook_versions v on v.id=s.working_version_id and v.status='ready'
-    where s.document_id=${documentId} and s.account_id=${session.accountId}
-      and s.editor_mode='browser' and s.status='active' and s.expires_at > now()
-  `;
-  if (!row) throw new HttpError(409, "browser_session_not_active");
+  const row=await activeBrowserDocument(session,documentId);
+  const renderResources=await readLinkedImageManifest({accountId:session.accountId,documentId,sourceSha256:row.working_sha256,objectStore:renderResourceStore}).catch(error=>{
+    if(error.code==='ENOENT')return null;
+    throw error;
+  });
   return {
+    renderResources,
     revision: browserRevision(row.working_version_id, row.working_sha256),
     bytes: row.document_bytes === null ? null : Number(row.document_bytes),
     url: await directReadUrl(row.document_object, {

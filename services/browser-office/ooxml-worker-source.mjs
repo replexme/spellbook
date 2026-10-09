@@ -1,3 +1,4 @@
+import {inspectExternalRaster,validateExternalRaster} from "./external-raster.mjs";
 /* SPDX-License-Identifier: MPL-2.0 */
 
 import { validSectionId, validSectionName, normalizedSections } from "./slide-sections.mjs";
@@ -7531,3 +7532,120 @@ if (typeof DedicatedWorkerGlobalScope !== "undefined" && self instanceof Dedicat
       });
     }
   };
+
+// Image discovery and native-only projection share the bounded package/XML reader.
+const externalImageSha = async bytes => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), n => n.toString(16).padStart(2, '0')).join('');
+
+export function inspectPptxLinkedImages(input) {
+  if (!(input instanceof Uint8Array) || input.length > maximumInputBytes) throw Error('external_image_package_size_invalid');
+  inspectZipPackage(input);
+  const entries = unzipSync(input, {filter: ({name, originalSize}) => {
+    if (!name.endsWith('.rels')) return false;
+    if (originalSize > 8 * 1024 * 1024) throw Error('external_image_xml_size_invalid');
+    return true;
+  }});
+  const links = [], skipped = [];
+  for (const relationshipPart of Object.keys(entries).filter(name => name.endsWith('.rels'))) {
+    const match = relationshipPart.match(/^(.*\/)?_rels\/([^/]+)\.rels$/);
+    if (!match) continue;
+    const ownerPart = (match[1] ?? '') + match[2];
+    if (!/^ppt\/.*\.xml$/.test(ownerPart)) continue;
+    let owner;
+    const seen = new Set();
+    for (const rel of relationshipElements(parseXml(entries, relationshipPart))) {
+      const relationshipId = rel.getAttribute('Id');
+      if (!relationshipId || seen.has(relationshipId)) throw Error('external_image_relationship_identity_invalid');
+      seen.add(relationshipId);
+      if (rel.getAttribute('Type') !== relationshipAttributeNamespace + '/image' || (rel.getAttribute('TargetMode') ?? '').toLowerCase() !== 'external') continue;
+      if(!owner){
+        const owned=unzipSync(input,{filter:({name,originalSize})=>{
+          if(name!==ownerPart)return false;
+          if(originalSize>8*1024*1024)throw Error('external_image_xml_size_invalid');
+          return true;
+        }});
+        if(!owned[ownerPart])continue;
+        owner=parseXml(owned,ownerPart);
+      }
+      const consumers = [...owner.getElementsByTagNameNS(drawingNamespace, 'blip')].filter(blip => blip.getAttributeNS(relationshipAttributeNamespace, 'link') === relationshipId);
+      if (!consumers.length) continue;
+      const url = rel.getAttribute('Target');
+      const record = {ownerPart, relationshipPart, relationshipId, url, consumers: consumers.length};
+      let parsed;
+      try { parsed = new URL(url); } catch { skipped.push({...record, reason: 'external_image_uri_invalid'}); continue; }
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) {
+        skipped.push({...record, reason: 'external_image_uri_not_passive_http'}); continue;
+      }
+      links.push(record);
+      if (links.length > 64) throw Error('external_image_count_exceeded');
+    }
+  }
+  return {links, skipped};
+}
+
+
+export async function preparePptxLinkedRenderInput(input, {resolveImage, validateImage = validateExternalRaster, signal, timeoutMs = 10000} = {}) {
+  if (!(input instanceof Uint8Array) || input.length > maximumInputBytes) throw Error("external_image_package_size_invalid");
+  input = input.slice();
+  const inspected = inspectPptxLinkedImages(input);
+  if (!inspected.links.length) return {bytes: input, sourceSha256: await externalImageSha(input), images: [], skipped: inspected.skipped};
+  if (typeof resolveImage !== 'function') throw Error('external_image_owned_resolver_required');
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw Error('external_image_timeout_invalid');
+  if (signal?.aborted) throw Error('external_image_context_closed');
+  const sourceSha256 = await externalImageSha(input), images = [];
+  const controller = new AbortController();
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => { controller.abort(); reject(Error('external_image_resolver_timeout')); }, timeoutMs);
+  });
+  let close;
+  const cancelled = new Promise((_, reject) => { close = () => { controller.abort(); reject(Error('external_image_context_closed')); }; signal?.addEventListener('abort', close, {once:true}); });
+  try {
+    let total = 0;
+    const decodedImages=new Map();
+    for (const link of inspected.links) {
+      const request = Object.freeze({...link, sourceSha256});
+      const asset = await Promise.race([Promise.resolve().then(() => resolveImage(request, {signal:controller.signal})), deadline, cancelled]);
+      if (signal?.aborted || controller.signal.aborted) throw Error('external_image_context_closed');
+      for (const key of ['sourceSha256','ownerPart','relationshipId','url']) if (asset?.[key] !== request[key]) throw Error('external_image_source_binding_mismatch');
+      if (!(asset.bytes instanceof Uint8Array) || !asset.bytes.length || asset.bytes.length > 5_000_000) throw Error('external_image_payload_size_invalid');
+      const bytes = asset.bytes.slice(), sha256 = await externalImageSha(bytes);
+      if (asset.sha256 !== sha256) throw Error('external_image_payload_hash_mismatch');
+      let admitted=decodedImages.get(sha256);
+      if(!admitted){
+        total += bytes.length;
+        if (total > 32_000_000) throw Error('external_image_document_budget_exceeded');
+        const header=inspectExternalRaster(bytes);
+        const decoded = await Promise.race([validateImage(bytes, {signal:controller.signal}), deadline, cancelled]);
+        if (signal?.aborted || controller.signal.aborted) throw Error('external_image_context_closed');
+        if (decoded?.width !== header.width || decoded?.height !== header.height || decoded?.contentType !== header.contentType) throw Error('external_image_decoded_dimensions_mismatch');
+        admitted={...header,sha256,bytes};decodedImages.set(sha256,admitted);
+      }
+      images.push({...link,...admitted});
+    }
+    const entries = unzipSync(input), changed = new Map();
+    const xml = part => { if (!changed.has(part)) changed.set(part, parseXml(entries, part)); return changed.get(part); };
+    const types = xml(contentTypesPath);
+    for (const image of images) {
+      const mediaPart = `ppt/media/spellbook-external-${image.sha256}.${image.extension}`;
+      if (entries[mediaPart] && !samePartBytes(entries[mediaPart], image.bytes)) throw Error('external_image_media_identity_collision');
+      entries[mediaPart] = image.bytes;
+      const rel = relationshipElements(xml(image.relationshipPart)).find(r => r.getAttribute('Id') === image.relationshipId);
+      if (!rel || rel.getAttribute('Target') !== image.url) throw Error('external_image_relationship_binding_changed');
+      const relative = relativePart(image.ownerPart,mediaPart);
+      rel.setAttribute('Target', relative); rel.removeAttribute('TargetMode');
+      for (const blip of xml(image.ownerPart).getElementsByTagNameNS(drawingNamespace,'blip')) {
+        if (blip.getAttributeNS(relationshipAttributeNamespace,'link') !== image.relationshipId) continue;
+        blip.removeAttributeNS(relationshipAttributeNamespace,'link');
+        blip.setAttributeNS(relationshipAttributeNamespace,'r:embed',image.relationshipId);
+      }
+      const defaults = [...types.getElementsByTagNameNS(contentTypeNamespace,'Default')].filter(e => e.getAttribute('Extension').toLowerCase() === image.extension);
+      if (defaults.length > 1 || defaults.some(e => e.getAttribute('ContentType') !== image.contentType)) throw Error('external_image_content_type_conflict');
+      if (!defaults.length) {
+        const declaration = types.createElementNS(contentTypeNamespace, 'Default');
+        declaration.setAttribute('Extension', image.extension); declaration.setAttribute('ContentType', image.contentType); types.documentElement.appendChild(declaration);
+      }
+    }
+    for (const [part, document] of changed) entries[part] = strToU8(new XMLSerializer().serializeToString(document));
+    return {bytes: zipSync(entries, {level:6, mtime:deterministicZipModifiedAt}), sourceSha256, images: images.map(({bytes,...receipt}) => receipt), skipped: inspected.skipped};
+  } finally { clearTimeout(timer); signal?.removeEventListener('abort',close); controller.abort(); }
+}

@@ -1,3 +1,4 @@
+import type {LinkedImageManifest} from "../../../../services/document-resources/linked-image-snapshots.mjs";
 /*
  * Moves the editor's PPTX between the browser and storage. Where storage
  * gives a short-lived link, the file goes straight to or from storage, so a
@@ -48,7 +49,8 @@ export async function readBrowserDocument(
   expectedRevision: string,
   maxBytes: number,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ revision: string; bytes: ArrayBuffer }> {
+): Promise<{ revision: string; bytes: ArrayBuffer; renderResources?: LinkedImageManifest|null }> {
+  let renderResources: LinkedImageManifest|null|undefined;
   const source = await fetchImpl(`${contentApiBase}/source`, {
     cache: "no-store",
   }).catch(() => null);
@@ -56,7 +58,9 @@ export async function readBrowserDocument(
     const value = (await source.json().catch(() => ({}))) as {
       revision?: unknown;
       url?: unknown;
+      renderResources?: LinkedImageManifest|null;
     };
+    if(value.revision===expectedRevision)renderResources=value.renderResources;
     if (typeof value.url === "string" && value.revision === expectedRevision) {
       const stored = await fetchImpl(value.url, { cache: "no-store" }).catch(
         () => null,
@@ -69,7 +73,7 @@ export async function readBrowserDocument(
           !expectedRevision.endsWith(`:${digest}"`)
         )
           throw new TransferError("browser_document_identity_mismatch");
-        return { revision: expectedRevision, bytes };
+        return { revision: expectedRevision, bytes, ...(renderResources===undefined?{}:{renderResources}) };
       }
       // The storage host is unreachable from here; use the app instead.
     }
@@ -90,7 +94,7 @@ export async function readBrowserDocument(
     !isPackage(bytes, maxBytes)
   )
     throw new TransferError("browser_document_identity_mismatch");
-  return { revision, bytes };
+  return { revision, bytes, ...(renderResources===undefined?{}:{renderResources}) };
 }
 
 /**
