@@ -17,6 +17,11 @@ async function fixture(){
   [related]:strToU8(strFromU8(original[related]).replace('Id="authorExternal"','Id="nativeImage"').replace('Target="https://media.example/image.png" TargetMode="External"','Target="../media/projected.png"')),
   'ppt/media/projected.png':Uint8Array.of(137,80,78,71,13,10,26,10),
  };
+ // The native converter creates notes whose relationship points back to the
+ // slide being moved. The dependency closure must handle that real cycle.
+ baseline[related]=strToU8(strFromU8(baseline[related]).replace('</Relationships>','<Relationship Id="nativeNotes" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/notesSlide" Target="../notesSlides/native.xml"/></Relationships>'));
+ baseline['ppt/notesSlides/native.xml']=strToU8('<p:notes xmlns:p="'+p+'"><p:cSld/></p:notes>');
+ baseline['ppt/notesSlides/_rels/native.xml.rels']=strToU8('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="slide" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="../slides/slide1.xml"/></Relationships>');
  return {original,baseline};
 }
 const save=(original,baseline,edited)=>preserveOriginalPptxParts(zipSync(original),zipSync(baseline),zipSync(edited),null);

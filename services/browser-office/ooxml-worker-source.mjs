@@ -623,7 +623,9 @@ function mergeHumanGeometryIntoOriginal(part, original, noEdit, edited) {
     for (const relationship of relationshipElements(parseXml(noEdit, relationships))) {
       if (relationship.getAttribute("TargetMode") === "External") continue;
       const dependency = resolvePart(owner, relationship.getAttribute("Target"));
-      if (!samePartBytes(noEdit[dependency], edited[dependency])) return null;
+      // A notes slide points back to its owning slide. Its geometry is the
+      // delta being checked below; every other reachable part stays exact.
+      if (dependency !== part && !samePartBytes(noEdit[dependency], edited[dependency])) return null;
       pending.push(dependency);
     }
   }
