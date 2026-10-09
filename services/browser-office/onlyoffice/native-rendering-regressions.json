@@ -18,7 +18,7 @@
       "sourceSha256": "0295a51f63150e3ee680154d07dab88062ba2306030b790561f85436f3ded7c8",
       "operation": "move",
       "slideIndex": 7,
-      "elementIndex": 0,
+      "elementIndex": 1,
       "checks": "Native OLE vector move, Undo/Redo, keyboard edit, recovery and save retain owned symbol/text display and original authored vector parts."
     },
     {

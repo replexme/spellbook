@@ -608,28 +608,149 @@ function hasRelationshipReference(node) {
   return false;
 }
 
+// A geometry edit does not authorize the importer's linked-to-embedded OLE
+// rewrite. Prove the two native saves keep every referenced payload stable,
+// then retain the author's relationship IDs and original link/embed choice.
+function nativeDependenciesUnchanged(part, baseline, edited, shape = null) {
+  const related = relationshipsPath(part);
+  if (!samePartBytes(baseline[related], edited[related])) return false;
+  if (!baseline[related]) return !shape || !hasRelationshipReference(shape);
+  const relationships = new Map(relationshipElements(parseXml(baseline, related))
+    .map(node => [node.getAttribute("Id"), node]));
+  const pending = shape ? [] : [part];
+  for (const node of shape ? [shape, ...shape.getElementsByTagName("*")] : []) {
+    for (const attribute of [...node.attributes]) {
+      if (attribute.namespaceURI !== relationshipAttributeNamespace) continue;
+      const relationship = relationships.get(attribute.value);
+      if (!relationship) return false;
+      if (relationship.getAttribute("TargetMode") !== "External")
+        pending.push(resolvePart(part, relationship.getAttribute("Target")));
+    }
+  }
+  const visited = new Set();
+  while (pending.length) {
+    const owner = pending.pop();
+    if (visited.has(owner)) continue;
+    visited.add(owner);
+    if (owner !== part && !samePartBytes(baseline[owner], edited[owner])) return false;
+    const relationshipsPart = relationshipsPath(owner);
+    if (!samePartBytes(baseline[relationshipsPart], edited[relationshipsPart])) return false;
+    if (!baseline[relationshipsPart]) continue;
+    for (const relationship of relationshipElements(parseXml(baseline, relationshipsPart))) {
+      if (relationship.getAttribute("TargetMode") !== "External")
+        pending.push(resolvePart(owner, relationship.getAttribute("Target")));
+    }
+  }
+  return true;
+}
+
+function olePreviewShapes(shape) {
+  if (shape.localName !== "graphicFrame") return null;
+  const objects = [...shape.getElementsByTagNameNS(presentationNamespace, "oleObj")];
+  if (!objects.length) return null;
+  const programs = new Set(objects.map(node => node.getAttribute("progId")));
+  if (programs.size !== 1 || programs.has("")) return null;
+  const pictures = [...shape.getElementsByTagNameNS(presentationNamespace, "pic")];
+  if (pictures.some(node => node.parentNode?.namespaceURI !== presentationNamespace ||
+      node.parentNode?.localName !== "oleObj")) return null;
+  return { program: [...programs][0], shapes: [shape, ...pictures] };
+}
+
+function applyAuthoredOleGeometryDelta(source, baseline, edited, operations, geometrySources) {
+  if (!operations.length || !operations.every(op => ["move", "resize"].includes(op)) ||
+      !geometrySources) return false;
+  const groups = [source, baseline, edited].map(olePreviewShapes);
+  if (groups.some(group => !group) || groups.some(group => group.program !== groups[0].program) ||
+      groups[1].shapes.length !== groups[2].shapes.length ||
+      !nativeDependenciesUnchanged(geometrySources.part,
+        geometrySources.entries[1], geometrySources.entries[2], baseline)) return false;
+  const copies = [baseline, edited].map(node => node.cloneNode(true));
+  for (const copy of copies) {
+    for (const shape of olePreviewShapes(copy).shapes) {
+      const transform = optionalShapeTransform(shape);
+      if (!transform) return false;
+      for (const [tag, attributes, op] of [["off", ["x", "y"], "move"], ["ext", ["cx", "cy"], "resize"]]) {
+        if (!operations.includes(op)) continue;
+        const child = optionalDirectXmlChild(transform, drawingNamespace, tag);
+        if (!child || attributes.some(attribute => !child.hasAttribute(attribute))) return false;
+        for (const attribute of attributes) child.removeAttribute(attribute);
+      }
+    }
+  }
+  // Crop, rotation, text, OLE identity, image references and all other fields
+  // remain significant; only admitted position/size coordinates were removed.
+  if (comparableXml(copies[0]) !== comparableXml(copies[1])) return false;
+  if (groups[0].shapes.length !== 1 && groups[0].shapes.length !== groups[1].shapes.length)
+    return false;
+  for (let index = 0; index < groups[0].shapes.length; index++) {
+    const authored = groups[0].shapes[index];
+    if (!applyAuthoredGeometryDelta(authored, authored.cloneNode(true),
+        groups[1].shapes[index], groups[2].shapes[index], operations, geometrySources)) return false;
+  }
+  return true;
+}
+
+// Keep a one-to-one human edit in the author's slide ID space. An unchanged
+// OLE frame must not introduce its importer's preview relationship into a
+// slide that originally stores that preview through VML.
+function mergeHumanShapeChangesIntoOriginal(part, original, noEdit, edited) {
+  if (!/^ppt\/slides\/slide[^/]+\.xml$/u.test(part) ||
+      !original[part] || !noEdit[part] || !edited[part]) return null;
+  const documents = [original, noEdit, edited].map(entries => parseXml(entries, part));
+  const groups = documents.map(topLevelSlideShapes);
+  if (groups.some(shapes => !shapes) || groups.some(shapes => shapes.length !== groups[0].length)) return null;
+  if (!groups[0].some(shape => olePreviewShapes(shape)) ||
+      !nativeDependenciesUnchanged(part, noEdit, edited)) return null;
+  const identity = shape => {
+    const properties = shape.getElementsByTagNameNS(presentationNamespace, "cNvPr")[0];
+    return properties && `${shape.localName}|${properties.getAttribute("name")}`;
+  };
+  const keys = groups.map(shapes => shapes.map(identity));
+  if (keys.some(names => names.some(name => !name) || new Set(names).size !== names.length) ||
+      keys.some(names => names.some((name, index) => name !== keys[0][index]))) return null;
+  const outside = documents.slice(1).map(document => {
+    const copy = document.cloneNode(true);
+    for (const shape of topLevelSlideShapes(copy)) shape.parentNode.removeChild(shape);
+    return serializeXml(copy);
+  });
+  if (!sameEngineExportPart(part, outside[0], outside[1], true)) return null;
+  let changed = false;
+  for (let index = 0; index < groups[0].length; index++) {
+    const [source, baseline, candidate] = groups.map(shapes => shapes[index]);
+    if (!nativeDependenciesUnchanged(part, noEdit, edited, baseline)) return null;
+    if (comparableXml(baseline) === comparableXml(candidate)) continue;
+    if ([source, baseline, candidate].some(shape => shapeReferences(shape).length)) return null;
+    if ([source, baseline, candidate].some(hasRelationshipReference)) {
+      if (!applyAuthoredOleGeometryDelta(source, baseline, candidate, ["move", "resize"],
+          {part, entries: [original, noEdit, edited]})) return null;
+    } else {
+      if (source.localName === "grpSp") return null;
+      const merged = mergeElementThreeWay(documents[0], source, baseline, candidate);
+      if (!merged) return null;
+      const transforms = [baseline, candidate].map(optionalShapeTransform);
+      const geometry = [];
+      if (transforms.every(Boolean)) {
+        for (const [tag, attributes, operation] of [["off", ["x", "y"], "move"], ["ext", ["cx", "cy"], "resize"]]) {
+          const nodes = transforms.map(node => optionalDirectXmlChild(node, drawingNamespace, tag));
+          if (nodes.every(Boolean) && attributes.some(attribute =>
+              nodes[0].getAttribute(attribute) !== nodes[1].getAttribute(attribute))) geometry.push(operation);
+        }
+      }
+      if (geometry.length && !applyAuthoredGeometryDelta(merged, source, baseline, candidate,
+          geometry, {part, entries: [original, noEdit, edited]})) return null;
+      source.parentNode.replaceChild(merged, source);
+    }
+    changed = true;
+  }
+  return changed ? serializeXml(documents[0]) : null;
+}
+
 // Authored XML is safe only when the two native exports differ exclusively
 // in position/size and every referenced payload keeps the same bytes.
 function mergeHumanGeometryIntoOriginal(part, original, noEdit, edited) {
   if (!/^ppt\/slides\/slide[^/]+\.xml$/u.test(part) ||
       !original[part] || !noEdit[part] || !edited[part]) return null;
-  const pending = [part], visited = new Set();
-  while (pending.length) {
-    const owner = pending.pop();
-    if (visited.has(owner)) continue;
-    visited.add(owner);
-    const relationships = relationshipsPath(owner);
-    if (!samePartBytes(noEdit[relationships], edited[relationships])) return null;
-    if (!noEdit[relationships]) continue;
-    for (const relationship of relationshipElements(parseXml(noEdit, relationships))) {
-      if (relationship.getAttribute("TargetMode") === "External") continue;
-      const dependency = resolvePart(owner, relationship.getAttribute("Target"));
-      // A notes slide points back to its owning slide. Its geometry is the
-      // delta being checked below; every other reachable part stays exact.
-      if (dependency !== part && !samePartBytes(noEdit[dependency], edited[dependency])) return null;
-      pending.push(dependency);
-    }
-  }
+  if (!nativeDependenciesUnchanged(part, noEdit, edited)) return null;
   const documents = [original, noEdit, edited].map(entries => parseXml(entries, part));
   const groups = documents.map(topLevelSlideShapes);
   if (groups.some(shapes => !shapes) ||
@@ -854,6 +975,11 @@ function preserveUnaffectedSlideShapes(
       const prior = source.cloneNode(true);
       if (hasRelationshipReference(source)) {
         if (!geometrySources) return null;
+        if (olePreviewShapes(source) &&
+            sourceOperations.every(operation => ["move", "resize"].includes(operation))) {
+          if (!applyAuthoredOleGeometryDelta(source, baseline, editedShape, sourceOperations, geometrySources)) return null;
+          continue;
+        }
         const related = relationshipsPath(part);
         if (!remapPartRelationshipIds(part, serializeXml(source),
             geometrySources.entries[1][related], geometrySources.entries[0][related],
@@ -4538,9 +4664,10 @@ export function preserveOriginalPptxParts(
           sourceOperations,
         )
       : null;
-    const semanticHumanGeometryPatch = authoredChange && humanEdit
-      ? mergeHumanGeometryIntoOriginal(part, original, noEdit, edited) : null;
-    const semanticShapePatch = semanticHumanGeometryPatch ?? (authoredChange
+    const semanticHumanShapePatch = authoredChange && humanEdit
+      ? (mergeHumanShapeChangesIntoOriginal(part, original, noEdit, edited) ??
+        mergeHumanGeometryIntoOriginal(part, original, noEdit, edited)) : null;
+    const semanticShapePatch = semanticHumanShapePatch ?? (authoredChange
       ? directDeletionPart === part
         ? removeDirectShapeFromOriginal(
             part,
@@ -4589,7 +4716,7 @@ export function preserveOriginalPptxParts(
       !presentationPatch &&
       // Scoped text/geometry/deletion builds XML in the authored ID space
       // and keeps its original .rels; no engine relationship IDs remain.
-      !authoredDirectShape && !semanticHumanGeometryPatch
+      !authoredDirectShape && !semanticHumanShapePatch
     ) {
       if (
         !replacedMediaRelationships.has(related) &&
