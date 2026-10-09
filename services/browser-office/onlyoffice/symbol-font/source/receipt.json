@@ -1,0 +1,30 @@
+{
+  "repository": "https://github.com/google/fonts",
+  "commit": "8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5",
+  "entries": [
+    {
+      "name": "NotoSansSymbols2-Regular.ttf",
+      "url": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf",
+      "bytes": 1233128,
+      "sha256": "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21"
+    },
+    {
+      "name": "OFL.txt",
+      "url": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notosanssymbols2/OFL.txt",
+      "bytes": 4383,
+      "sha256": "b118dd41337806a5d4797052c77caf3bd096aed783e5eb21b4d11154351e1ac0"
+    },
+    {
+      "name": "METADATA.pb",
+      "url": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notosanssymbols2/METADATA.pb",
+      "bytes": 1852,
+      "sha256": "0734e946584fe0373e311105bac25085a8e75f819f3e169d5938017a28217c94"
+    },
+    {
+      "name": "upstream_info.md",
+      "url": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notosanssymbols2/upstream_info.md",
+      "bytes": 934,
+      "sha256": "e19829081a0628ff2ec8096278000eb9d7252e964d53a961455a05be12ab4dce"
+    }
+  ]
+}

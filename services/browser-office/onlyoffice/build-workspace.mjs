@@ -74,6 +74,7 @@ async function collect(directory) {
     } else if (
       entry.isFile() &&
       (name.startsWith("services/browser-office/onlyoffice/eot/") ||
+        name.startsWith("services/browser-office/onlyoffice/symbol-font/") ||
         /\.(mjs|cjs|js|json|html|md|ts|mts|cts|txt|patch|sh|py|css)$/.test(name) ||
         entry.name.startsWith("Dockerfile"))
     )

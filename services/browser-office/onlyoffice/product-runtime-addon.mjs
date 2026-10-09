@@ -5,6 +5,8 @@ import { installOnlyOfficeDocumentFontCatalog, installOnlyOfficeDocumentFontLoad
 
 import { installOnlyOfficeMissingSmartArtLayouts } from "./missing-smartart-layouts.mjs";
 import { installOnlyOfficeChart3dDefaults } from "./chart-3d-defaults.mjs";
+import { installOnlyOfficeLegacySymbolBullets } from "./legacy-symbol-bullets.mjs";
+import symbolRecipe from "./symbol-font/font-recipe.json" with { type: "json" };
 import { onlyOfficeParagraphFormat } from "./paragraph-format.mjs";
 
 import { installOnlyOfficeShapeEffects } from "./shape-effects.mjs";
@@ -15,7 +17,7 @@ export function addOnlyOfficeProductBootstrap(html) {
   return html.replace("<head>","<head><script>("+installOnlyOfficeDocumentFontCatalog.toString()+")();"+"("+bootstrapOnlyOfficeNativeComplements.toString()+")("+"function(){("+installOnlyOfficeNativeComplements.toString()+")();("+installOnlyOfficeShapeEffects.toString()+")();});</script>");
 }
 export function addOnlyOfficeProductSdk(source) {
-  return source+"\n;("+installOnlyOfficeDocumentFontLoader.toString()+")();\n"+";("+installOnlyOfficeMissingSmartArtLayouts.toString()+")("+onlyOfficeParagraphFormat.toString()+");\n"+";("+installOnlyOfficeChart3dDefaults.toString()+")();\n";
+  return source+"\n;("+installOnlyOfficeDocumentFontLoader.toString()+")();\n"+";("+installOnlyOfficeMissingSmartArtLayouts.toString()+")("+onlyOfficeParagraphFormat.toString()+");\n"+";("+installOnlyOfficeChart3dDefaults.toString()+")();\n"+";("+installOnlyOfficeLegacySymbolBullets.toString()+")("+JSON.stringify(symbolRecipe.glyphs)+");\n";
 }
 export function addOnlyOfficeProductResourceHost(source) {
   const anchor="G=await Tn(An,r),tr(),cr(`READY`,G.getState())";

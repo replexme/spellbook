@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "family": "Spellbook Symbols",
+  "unitsPerEm": 2048,
+  "source": {
+    "url": "https://raw.githubusercontent.com/google/fonts/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf",
+    "sha256": "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21",
+    "license": "OFL-1.1"
+  },
+  "glyphs": [
+    {
+      "family": "wingdings",
+      "code": 108,
+      "unicode": 9679,
+      "targetCodePoint": 58880,
+      "advance": 1529,
+      "bounds": [
+        173,
+        148,
+        1358,
+        1332
+      ]
+    },
+    {
+      "family": "wingdings",
+      "code": 167,
+      "unicode": 9642,
+      "targetCodePoint": 58881,
+      "advance": 937,
+      "bounds": [
+        173,
+        444,
+        765,
+        1036
+      ]
+    },
+    {
+      "family": "wingdings",
+      "code": 252,
+      "unicode": 10004,
+      "targetCodePoint": 58882,
+      "advance": 1609,
+      "bounds": [
+        148,
+        251,
+        1535,
+        1568
+      ]
+    },
+    {
+      "family": "wingdings",
+      "code": 118,
+      "unicode": 10070,
+      "targetCodePoint": 58883,
+      "advance": 1825,
+      "bounds": [
+        173,
+        0,
+        1653,
+        1480
+      ]
+    },
+    {
+      "family": "wingdings2",
+      "code": 161,
+      "unicode": 9632,
+      "targetCodePoint": 58884,
+      "advance": 1135,
+      "bounds": [
+        173,
+        345,
+        962,
+        1135
+      ]
+    },
+    {
+      "family": "wingdings3",
+      "code": 117,
+      "unicode": 9654,
+      "targetCodePoint": 58885,
+      "advance": 1801,
+      "bounds": [
+        173,
+        -114,
+        1653,
+        1595
+      ]
+    },
+    {
+      "family": "symbol",
+      "code": 45,
+      "unicode": 8722,
+      "targetCodePoint": 58886,
+      "advance": 1124,
+      "bounds": [
+        37,
+        477,
+        1087,
+        576
+      ]
+    }
+  ]
+}

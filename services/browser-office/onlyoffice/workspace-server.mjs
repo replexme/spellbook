@@ -14,6 +14,7 @@ import {
 import { patchOnlyOfficeDocumentFontConversionWorker } from "./document-fonts.mjs";
 import { onlyOfficeDocumentFontPrograms } from "./product-programs.mjs";
 import { patchOnlyOfficeDistributedAlignment } from "./distributed-alignment.mjs";
+import { createOnlyOfficeProgramSymbolAssets, onlyOfficeProgramSymbolPaths } from "./program-symbol-font.mjs";
 const sourceRoot = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(sourceRoot, "../../..");
 function validOrigin(value) {
@@ -55,6 +56,8 @@ export function createOnlyOfficeWorkspaceServer({
   hostOrigins = [...new Set([...hostOrigins, workspaceOrigin])];
   const config = { sdkOrigin, inspectionOrigin, hostOrigins };
   const localRoot = path.resolve(sourceRoot, "..");
+  let symbolAssets;
+  const programSymbols = () => symbolAssets ??= createOnlyOfficeProgramSymbolAssets(dist);
   const names = {
     ...localUiFiles,
     ...onlyOfficeDocumentFontPrograms(base),
@@ -76,6 +79,10 @@ export function createOnlyOfficeWorkspaceServer({
     "/sdk.bundle.js": path.join(base, "sdk.bundle.js"),
   };
   const readProgram = async (pathname) => {
+    if (onlyOfficeProgramSymbolPaths.includes(pathname)) {
+      const bytes = (await programSymbols()).assets.get(pathname);
+      if (bytes) return {file:path.resolve(dist,'.'+pathname),bytes};
+    }
     const file = names[pathname] ?? path.resolve(dist, "." + pathname);
     if (!names[pathname] && !file.startsWith(dist + path.sep))
       throw Error("path_invalid");
@@ -159,6 +166,7 @@ export function createOnlyOfficeWorkspaceServer({
       }
       for (const pathname of new Set([
         ...Object.keys(names),
+        ...onlyOfficeProgramSymbolPaths,
         "/sdkjs/slide/sdk-all.js",
         "/npm/public-api.js",
         "/wasm/x2t/conversion-worker-lKNm6_YF.js",
@@ -244,7 +252,7 @@ export function createOnlyOfficeWorkspaceServer({
       if (pathname === "/licenses") {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         res.end(
-          '<!doctype html><meta charset="utf-8"><title>Spellbook licenses and source</title><h1>Licenses and corresponding source</h1><p><a href="/licensing.html">Pinned ONLYOFFICE distribution licenses, fonts and upstream source archives</a></p><p><a href="/workspace-sources.tar.gz">Current host and native SDK adaptation source archive</a> · <a href="/workspace-source-receipt.json">Bundle and source identity receipt</a></p><p>The archive also includes the MPL-2.0 libeot decoder source, notices, bounded-output patch and local Emscripten rebuild script. Customer embedded fonts are document-owned private inputs and are not included.</p><p>Host integration source carries MPL-2.0 notices. Native SDK adaptations and the ONLYOFFICE distribution carry AGPL-3.0 notices. ' +
+          '<!doctype html><meta charset="utf-8"><title>Spellbook licenses and source</title><h1>Licenses and corresponding source</h1><p><a href="/licensing.html">Pinned ONLYOFFICE distribution licenses, fonts and upstream source archives</a></p><p><a href="/workspace-sources.tar.gz">Current host and native SDK adaptation source archive</a> · <a href="/workspace-source-receipt.json">Bundle and source identity receipt</a></p><p>Spellbook Symbols is a modified Noto font under OFL-1.1. Its open source font, numeric recipe, builder and notices are included in the host archive and <a href="/font-licenses.json">served font permissions</a>.</p><p>The archive also includes the MPL-2.0 libeot decoder source, notices, bounded-output patch and local Emscripten rebuild script. Customer embedded fonts are document-owned private inputs and are not included.</p><p>Host integration source carries MPL-2.0 notices. Native SDK adaptations and the ONLYOFFICE distribution carry AGPL-3.0 notices. ' +
             (admission?.auxiliaryWasmRebuildVerified
               ? '<a href="/sources/auxiliary-build-receipt.json">Four auxiliary JS/WASM pairs reproduced from the provided source.</a> '
               : "Auxiliary WASM reproduction remains unverified. ") +

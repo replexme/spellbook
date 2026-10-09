@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import fs from "node:fs/promises";
+import { createOnlyOfficeProgramSymbolAssets } from "./program-symbol-font.mjs";
 import * as resourceObjectStore from "../../document-resources/object-store.mjs";
 import {readOwnedLinkedImages} from "../../document-resources/linked-image-snapshots.mjs";
 import path from "node:path";
@@ -79,6 +80,7 @@ export async function createOnlyOfficeHeadlessRenderer({
       path.join(bundleDirectory, "workspace-source-receipt.json"),
     ),
   );
+  const programSymbols = await createOnlyOfficeProgramSymbolAssets(distributionDirectory);
   const productSdkSha256 = sha(
     Buffer.from(
       addOnlyOfficeProductSdk(patchOnlyOfficeDistributedAlignment(
@@ -177,6 +179,7 @@ export async function createOnlyOfficeHeadlessRenderer({
         distributionSha256: admission.distributionSha256,
         hostSourceSha256,
         productSdkSha256,
+        programFonts: programSymbols.identity,
         ...(fontOverlay ? { diagnosticFontAssets: fontOverlay } : {}),
       },
       async renderFile(

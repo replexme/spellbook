@@ -1,0 +1,46 @@
+{
+  "fontSha256": "464a03cdf3300f8c311a38b3ff87d75bc445e33fe416de9844c508788b33e05e",
+  "nativeInfo": {
+    "units_per_EM": 2048,
+    "ascender": 1841,
+    "descender": -432,
+    "height": 2273,
+    "face_flags": 2585,
+    "num_faces": 1,
+    "num_glyphs": 9,
+    "num_charmaps": 2,
+    "style_flags": 0,
+    "face_index": 0,
+    "family_name": "Spellbook Symbols",
+    "style_name": "Regular",
+    "os2_version": 3,
+    "os2_usWeightClass": 400,
+    "os2_fsSelection": 64,
+    "os2_usWinAscent": 1841,
+    "os2_usWinDescent": 432,
+    "os2_usDefaultChar": 0,
+    "os2_sTypoAscender": 1841,
+    "os2_sTypoDescender": -432,
+    "os2_sTypoLineGap": 0,
+    "os2_ulUnicodeRange1": 1,
+    "os2_ulUnicodeRange2": 268435456,
+    "os2_ulUnicodeRange3": 0,
+    "os2_ulUnicodeRange4": 0,
+    "os2_ulCodePageRange1": 0,
+    "os2_ulCodePageRange2": 0,
+    "os2_nSymbolic": -1,
+    "header_yMin": -114,
+    "header_yMax": 1595,
+    "monochromeSizes": []
+  },
+  "inspectionEngine": [
+    {
+      "name": "fonts.js",
+      "sha256": "d774dc935a7a1a14389843a119d65693be03ff5ebfb0be725379f0ba76c19242"
+    },
+    {
+      "name": "fonts.wasm",
+      "sha256": "e6e8fc0d1787e61789cfa9af4e7d85d3bf0d24fe4c53cbabe8876dc4876e79d3"
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0 */
 import fs from "node:fs/promises";
+import {createOnlyOfficeProgramSymbolAssets} from "./onlyoffice/program-symbol-font.mjs";
 import path from "node:path";
 import { createServer } from "node:http";
 import { createHash } from "node:crypto";
@@ -82,6 +83,7 @@ const distribution = await readOfficeDistributionEvidence(
   distributionRoot,
 );
 assert(distribution.valid, "Candidate distribution evidence invalid");
+const programSymbolAssets = await createOnlyOfficeProgramSymbolAssets(distributionRoot);
 const input = await fs.readFile(
   path.resolve(
     flags("--input", "eval/public/fixtures/general-native-surface.pptx"),
@@ -208,7 +210,7 @@ const candidateServer = createServer(async (req, res) => {
     const file = ownedProgram ?? path.resolve(distributionRoot, name || "index.html");
     if (!ownedProgram && !file.startsWith(distributionRoot + path.sep))
       throw Error("invalid_path");
-    const bytes = await fs.readFile(file);
+    const bytes = programSymbolAssets.assets.get('/'+name) ?? await fs.readFile(file);
     let served=bytes;
     if(name === "sdkjs/slide/sdk-all.js")served=Buffer.from(addOnlyOfficeProductSdk(patchOnlyOfficeDistributedAlignment(bytes.toString("utf8"))));
     if(name === "wasm/x2t/conversion-worker-lKNm6_YF.js")served=Buffer.from(patchOnlyOfficeDocumentFontConversionWorker(bytes.toString("utf8")));
@@ -300,6 +302,7 @@ const browser = await chromium.launch({
   args: ["--use-gl=angle", "--use-angle=swiftshader"],
 });
 const report = {
+  programFonts: programSymbolAssets.identity,
   sourceIdentities,
   distribution,
   inputSha256: hash(input),
