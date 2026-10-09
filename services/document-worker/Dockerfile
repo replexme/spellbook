@@ -64,6 +64,7 @@ COPY --from=build /app/publish .
 COPY --from=build /app/tool ./tool
 COPY --from=office /usr/local/bin/node /usr/local/bin/node
 COPY --from=office /workspace/node_modules ./node_modules
+COPY --from=office /workspace/contracts ./contracts
 COPY --from=office /workspace/services/browser-office ./services/browser-office
 COPY --from=office /workspace/services/document-resources ./services/document-resources
 COPY --from=office /workspace/services/office-session-spike ./services/office-session-spike
@@ -74,5 +75,7 @@ ENV ASPNETCORE_URLS=http://0.0.0.0:8080 \
     SPELLBOOK_CHROMIUM_EXECUTABLE=/usr/bin/chromium \
     HOME=/tmp/spellbook-user
 USER 1000:1000
+# Check the final runtime's dependency closure, after build-only files are gone.
+RUN node --input-type=module -e "await import('./services/browser-office/onlyoffice/headless-renderer.mjs');"
 EXPOSE 8080
 ENTRYPOINT ["./Spellbook.Document.Worker"]
