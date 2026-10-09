@@ -473,6 +473,14 @@ function mergeElementThreeWay(document, source, baseline, edited) {
   return merged;
 }
 
+function optionalShapeTransform(shape) {
+  const frame = optionalDirectXmlChild(shape, presentationNamespace, "xfrm");
+  if (frame) return frame;
+  const properties = optionalDirectXmlChild(shape, presentationNamespace,
+    shape.localName === "grpSp" ? "grpSpPr" : "spPr");
+  return properties && optionalDirectXmlChild(properties, drawingNamespace, "xfrm");
+}
+
 // Impress rounds an imported shape's original position on its first export.
 // A direct keyboard move must apply the exported delta to the author's
 // coordinates, otherwise the rounding offset is added to the saved shape.
@@ -484,14 +492,7 @@ function applyAuthoredGeometryDelta(
   operations,
   geometrySources = null,
 ) {
-  const transform = (shape) => {
-    const frame = optionalDirectXmlChild(shape, presentationNamespace, "xfrm");
-    if (frame) return frame;
-    const properties = optionalDirectXmlChild(shape, presentationNamespace,
-      shape.localName === "grpSp" ? "grpSpPr" : "spPr");
-    return properties && optionalDirectXmlChild(properties, drawingNamespace, "xfrm");
-  };
-  const transforms = [merged, source, baseline, edited].map(transform);
+  const transforms = [merged, source, baseline, edited].map(optionalShapeTransform);
   if (geometrySources) {
     const { part, entries } = geometrySources;
     for (const [index, shape] of [source, baseline, edited].entries()) {
@@ -604,6 +605,73 @@ function hasRelationshipReference(node) {
       )
         return true;
   return false;
+}
+
+// Authored XML is safe only when the two native exports differ exclusively
+// in position/size and every referenced payload keeps the same bytes.
+function mergeHumanGeometryIntoOriginal(part, original, noEdit, edited) {
+  if (!/^ppt\/slides\/slide[^/]+\.xml$/u.test(part) ||
+      !original[part] || !noEdit[part] || !edited[part]) return null;
+  const pending = [part], visited = new Set();
+  while (pending.length) {
+    const owner = pending.pop();
+    if (visited.has(owner)) continue;
+    visited.add(owner);
+    const relationships = relationshipsPath(owner);
+    if (!samePartBytes(noEdit[relationships], edited[relationships])) return null;
+    if (!noEdit[relationships]) continue;
+    for (const relationship of relationshipElements(parseXml(noEdit, relationships))) {
+      if (relationship.getAttribute("TargetMode") === "External") continue;
+      const dependency = resolvePart(owner, relationship.getAttribute("Target"));
+      if (!samePartBytes(noEdit[dependency], edited[dependency])) return null;
+      pending.push(dependency);
+    }
+  }
+  const documents = [original, noEdit, edited].map(entries => parseXml(entries, part));
+  const groups = documents.map(topLevelSlideShapes);
+  if (groups.some(shapes => !shapes) ||
+      groups.some(shapes => shapes.length !== groups[0].length)) return null;
+  const identity = shape => {
+    const properties = shape.getElementsByTagNameNS(presentationNamespace, "cNvPr")[0];
+    return properties && `${shape.localName}|${properties.getAttribute("name")}`;
+  };
+  // Shape names alone cannot identify a duplicate. Order, kind, and uniqueness
+  // must agree across the authored source and both native saves.
+  const identities = groups.map(shapes => shapes.map(identity));
+  if (identities.some(keys => keys.some(key => !key) || new Set(keys).size !== keys.length) ||
+      identities.some(keys => keys.some((key, index) => key !== identities[0][index]))) return null;
+  const changes = [];
+  for (let index = 0; index < groups[0].length; index++) {
+    const before = optionalShapeTransform(groups[1][index]);
+    const after = optionalShapeTransform(groups[2][index]);
+    if (!before && !after) continue;
+    if (!before || !after) return null;
+    const operations = [];
+    for (const [tag, attributes, operation] of [
+      ["off", ["x", "y"], "move"],
+      ["ext", ["cx", "cy"], "resize"],
+    ]) {
+      const nodes = [before, after].map(node => optionalDirectXmlChild(node, drawingNamespace, tag));
+      if (nodes.every(node => !node)) continue;
+      if (nodes.some(node => !node)) return null;
+      if (attributes.some(attribute => nodes.some(node => !node.hasAttribute(attribute)))) return null;
+      const differs = attributes.some(attribute => nodes[0].getAttribute(attribute) !== nodes[1].getAttribute(attribute));
+      if (differs) operations.push(operation);
+      // Remove only the coordinates that the semantic delta can reapply.
+      // Rotation, flip, crop, fill, text, relationships and timing stay significant.
+      for (const node of nodes) for (const attribute of attributes) node.removeAttribute(attribute);
+    }
+    if (operations.length) changes.push({index, operations});
+  }
+  if (!changes.length || !sameEngineExportPart(part, serializeXml(documents[1]), serializeXml(documents[2]), true)) return null;
+  // Read intact baselines again after the comparison stripped coordinates.
+  const intact = [noEdit, edited].map(entries => topLevelSlideShapes(parseXml(entries, part)));
+  for (const {index, operations} of changes) {
+    const shape = groups[0][index], prior = shape.cloneNode(true);
+    if (!applyAuthoredGeometryDelta(shape, prior, intact[0][index], intact[1][index],
+        operations, {part, entries: [original, noEdit, edited]})) return null;
+  }
+  return serializeXml(documents[0]);
 }
 
 function preserveUnaffectedSlideShapes(
@@ -4467,7 +4535,9 @@ export function preserveOriginalPptxParts(
           sourceOperations,
         )
       : null;
-    const semanticShapePatch = authoredChange
+    const semanticHumanGeometryPatch = authoredChange && humanEdit
+      ? mergeHumanGeometryIntoOriginal(part, original, noEdit, edited) : null;
+    const semanticShapePatch = semanticHumanGeometryPatch ?? (authoredChange
       ? directDeletionPart === part
         ? removeDirectShapeFromOriginal(
             part,
@@ -4487,7 +4557,7 @@ export function preserveOriginalPptxParts(
             targetIndexesBySlide?.get(part) ?? null,
             { part, entries: [original, noEdit, edited], targets: tableTopologyTargetsByPart.get(part), sourceTargets },
           )
-      : null;
+      : null);
     if (targetIndexesBySlide?.has(part) && semanticShapePatch === null)
       throw new Error(
         `Native snapshot cannot isolate direct ${sourceOperations[0] === "replace_text" ? "text" : sourceOperations[0] === "delete_element" ? "deletion" : "move"} in ${part}.`,
@@ -4516,7 +4586,7 @@ export function preserveOriginalPptxParts(
       !presentationPatch &&
       // Scoped text/geometry/deletion builds XML in the authored ID space
       // and keeps its original .rels; no engine relationship IDs remain.
-      !authoredDirectShape
+      !authoredDirectShape && !semanticHumanGeometryPatch
     ) {
       if (
         !replacedMediaRelationships.has(related) &&
