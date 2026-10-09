@@ -350,12 +350,14 @@ export async function exportPowerPointReferences({
         const renderSourceSha256 = createHash("sha256")
           .update(renderSource.bytes)
           .digest("hex");
+        const exportStartedAt = new Date().toISOString();
         const background = runPowerPointExport(
           stagedSource,
           pdfPath,
           timeoutMs,
           ownsPowerPoint,
         );
+        const exportFinishedAt = new Date().toISOString();
         requireCommand("pdftoppm", [
           "-png",
           "-r",
@@ -383,6 +385,14 @@ export async function exportPowerPointReferences({
               renderSourceSha256,
               hiddenSlideIndexes: renderSource.hiddenSlideIndexes,
               referenceRenderer,
+              referenceClock: {
+                exportStartedAt,
+                exportFinishedAt,
+                hostTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+              },
+              referencePdfSha256: createHash("sha256")
+                .update(await fs.readFile(path.join(temporaryDirectory, "reference.pdf")))
+                .digest("hex"),
               slides,
               sourceSlides,
               allSlides: true,

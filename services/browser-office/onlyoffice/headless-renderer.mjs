@@ -11,6 +11,7 @@ import { admitSelectedOnlyOffice } from "../engine-selection.mjs";
 import { captureOnlyOfficeSlide } from "./slide-capture.mjs";
 import { patchOnlyOfficeDistributedAlignment } from "./distributed-alignment.mjs";
 import { addOnlyOfficeProductSdk } from "./product-runtime-addon.mjs";
+import { presentationReferenceEpoch, installPresentationReferenceDate } from "./presentation-render-clock.mjs";
 
 const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const host = (
@@ -180,7 +181,7 @@ export async function createOnlyOfficeHeadlessRenderer({
       },
       async renderFile(
         inputPath,
-        { outputDirectory, slideIndexes = null, resourceScope = null } = {},
+        { outputDirectory, slideIndexes = null, resourceScope = null, referenceDateTime = null } = {},
       ) {
         if (rendering) throw Error("onlyoffice_render_busy");
         rendering = true;
@@ -192,6 +193,8 @@ export async function createOnlyOfficeHeadlessRenderer({
         let privateFontHttpRequests = 0;
         const started = performance.now();
         try {
+          const referenceEpoch = presentationReferenceEpoch(referenceDateTime);
+          const renderedAt = new Date().toISOString();
           const bytes = await fs.readFile(inputPath);
           if (!bytes.length || bytes.length > 64 * 1024 * 1024)
             throw Error("onlyoffice_render_input_size_invalid");
@@ -202,7 +205,10 @@ export async function createOnlyOfficeHeadlessRenderer({
           context = await browser.newContext({
             viewport: { width: 1280, height: 900 },
             serviceWorkers: "block",
+            timezoneId: process.env.SPELLBOOK_RENDER_TIME_ZONE || "Asia/Seoul",
           });
+          if (referenceEpoch !== null)
+            await context.addInitScript(installPresentationReferenceDate, referenceEpoch);
           context.on("request", request => {
             if (new URL(request.url()).pathname.startsWith("/fonts/document-"))
               privateFontHttpRequests += 1;
@@ -353,6 +359,11 @@ export async function createOnlyOfficeHeadlessRenderer({
             ),
           );
           const result = {
+            renderContext: {
+              renderedAt,
+              referenceDateTime: referenceEpoch === null ? null : new Date(referenceEpoch).toISOString(),
+              ...await frame.evaluate(() => ({ dateTime: new Date().toISOString(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone })),
+            },
             inputSha256: sha(bytes),
             renderer: this.identity,
             slideCount,
