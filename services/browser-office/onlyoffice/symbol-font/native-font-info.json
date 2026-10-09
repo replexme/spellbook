@@ -1,5 +1,5 @@
 {
-  "fontSha256": "464a03cdf3300f8c311a38b3ff87d75bc445e33fe416de9844c508788b33e05e",
+  "fontSha256": "eded8571ad1205bea18789f767c078c057e60e53ecb5199fe431a9fd97eb1e74",
   "nativeInfo": {
     "units_per_EM": 2048,
     "ascender": 1841,
@@ -7,7 +7,7 @@
     "height": 2273,
     "face_flags": 2585,
     "num_faces": 1,
-    "num_glyphs": 9,
+    "num_glyphs": 11,
     "num_charmaps": 2,
     "style_flags": 0,
     "face_index": 0,
@@ -29,8 +29,8 @@
     "os2_ulCodePageRange1": 0,
     "os2_ulCodePageRange2": 0,
     "os2_nSymbolic": -1,
-    "header_yMin": -114,
-    "header_yMax": 1595,
+    "header_yMin": -410,
+    "header_yMax": 1638,
     "monochromeSizes": []
   },
   "inspectionEngine": [

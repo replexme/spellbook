@@ -361,7 +361,10 @@ export async function createOnlyOfficeHeadlessRenderer({
                 ),
             ),
           );
+          const vectorFonts = await frame.evaluate(() => window[Symbol.for('spellbook.onlyoffice.vectorImageFonts/v1')]?.report ?? null);
+          if (vectorFonts?.errors.length) throw Error('onlyoffice_vector_font_preparation_failed: '+vectorFonts.errors.map(error=>error.code).join(','));
           const result = {
+            vectorFonts,
             renderContext: {
               renderedAt,
               referenceDateTime: referenceEpoch === null ? null : new Date(referenceEpoch).toISOString(),

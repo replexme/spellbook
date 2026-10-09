@@ -2,6 +2,11 @@
 import { installOnlyOfficeNativeComplements, bootstrapOnlyOfficeNativeComplements } from "./native-complements.mjs";
 import { attachOnlyOfficeResourceHost } from "./product-resources.mjs";
 import { installOnlyOfficeDocumentFontCatalog, installOnlyOfficeDocumentFontLoader } from "./document-fonts.mjs";
+import { installOnlyOfficePercentParagraphSpacing } from "./percent-paragraph-spacing.mjs";
+import { installOnlyOfficeVectorImageFonts, bindOnlyOfficeSvgFonts } from "./vector-image-fonts.mjs";
+import { createSfntGlyphLookup } from "./sfnt-glyph-lookup.mjs";
+import { sfntTables } from "./document-font-selection.mjs";
+import {createOnlyOfficeVectorGlyphOutliner} from "./vector-glyph-outlines.mjs";
 
 import { installOnlyOfficeMissingSmartArtLayouts } from "./missing-smartart-layouts.mjs";
 import { installOnlyOfficeChart3dDefaults } from "./chart-3d-defaults.mjs";
@@ -17,7 +22,9 @@ export function addOnlyOfficeProductBootstrap(html) {
   return html.replace("<head>","<head><script>("+installOnlyOfficeDocumentFontCatalog.toString()+")();"+"("+bootstrapOnlyOfficeNativeComplements.toString()+")("+"function(){("+installOnlyOfficeNativeComplements.toString()+")();("+installOnlyOfficeShapeEffects.toString()+")();});</script>");
 }
 export function addOnlyOfficeProductSdk(source) {
-  return source+"\n;("+installOnlyOfficeDocumentFontLoader.toString()+")();\n"+";("+installOnlyOfficeMissingSmartArtLayouts.toString()+")("+onlyOfficeParagraphFormat.toString()+");\n"+";("+installOnlyOfficeChart3dDefaults.toString()+")();\n"+";("+installOnlyOfficeLegacySymbolBullets.toString()+")("+JSON.stringify(symbolRecipe.glyphs)+");\n";
+  return source+"\n;("+installOnlyOfficeDocumentFontLoader.toString()+")();\n"+";("+installOnlyOfficeMissingSmartArtLayouts.toString()+")("+onlyOfficeParagraphFormat.toString()+");\n"+";("+installOnlyOfficeChart3dDefaults.toString()+")();\n"+";("+installOnlyOfficeLegacySymbolBullets.toString()+")("+JSON.stringify(symbolRecipe.glyphs)+");\n"+
+    ";("+installOnlyOfficePercentParagraphSpacing.toString()+")();\n"+
+    ";("+installOnlyOfficeVectorImageFonts.toString()+")("+JSON.stringify(symbolRecipe.glyphs)+",("+bindOnlyOfficeSvgFonts.toString()+"),("+createSfntGlyphLookup.toString()+"),("+sfntTables.toString()+"),("+createOnlyOfficeVectorGlyphOutliner.toString()+"));\n";
 }
 export function addOnlyOfficeProductResourceHost(source) {
   const anchor="G=await Tn(An,r),tr(),cr(`READY`,G.getState())";

@@ -28,8 +28,8 @@ function runWorker(url,data,{ready=false,timeoutMs=20000,processingMs=5000,worke
 }
 export async function prepareOnlyOfficeDocumentFonts(buffer){
   window[key]?.dispose();
-  const workers=new Set(),controller=new AbortController(),assets=Object.create(null),report={admitted:[],skipped:[]};let wrapper,disposed=false;
-  const context={catalog:null,assets,report,dispose(){if(disposed)return;disposed=true;controller.abort();for(const worker of workers)worker.terminate();workers.clear();for(const asset of Object.values(assets))asset.bytes?.fill(0);for(const name of Object.keys(assets))delete assets[name];context.catalog=null;if(window.Worker===wrapper)window.Worker=NativeWorker;if(window[key]===context)delete window[key];}};
+  const workers=new Set(),disposables=new Set(),controller=new AbortController(),assets=Object.create(null),report={admitted:[],skipped:[]};let wrapper,disposed=false;
+  const context={catalog:null,assets,report,onDispose(callback){if(typeof callback!=='function')throw Error('document_font_disposable_invalid');if(disposed){callback();return()=>{};}disposables.add(callback);return()=>disposables.delete(callback);},dispose(){if(disposed)return;disposed=true;controller.abort();for(const callback of disposables)callback();disposables.clear();for(const worker of workers)worker.terminate();workers.clear();for(const asset of Object.values(assets))asset.bytes?.fill(0);for(const name of Object.keys(assets))delete assets[name];context.catalog=null;if(window.Worker===wrapper)window.Worker=NativeWorker;if(window[key]===context)delete window[key];}};
   const active=()=>{if(disposed||window[key]!==context)throw Error('document_font_context_closed');};
   const NativeWorker=window.Worker;window[key]=context;
   window.addEventListener('pagehide',()=>context.dispose(),{once:true});
@@ -75,9 +75,13 @@ export async function prepareOnlyOfficeDocumentFonts(buffer){
 }
 // Called in the SDK frame's first <head> script, before AllFonts/native init.
 export function installOnlyOfficeDocumentFontCatalog(){
-  const context=window.parent[Symbol.for('spellbook.onlyoffice.documentFonts/v1')];if(!context?.catalog)return;
-  const catalog=context.catalog;window[Symbol.for('spellbook.onlyoffice.documentFonts/v1')]=context;
-  for(const name of ['__fonts_files','__fonts_infos','g_fonts_selection_bin'])Object.defineProperty(window,name,{configurable:true,get:()=>catalog[name],set:()=>{}});
+  const context=window.parent[Symbol.for('spellbook.onlyoffice.documentFonts/v1')];
+  const catalog=context?.catalog??{};
+  // The SDK removes its import globals after initialization. Retain the exact
+  // admitted catalog for native vector images without rebuilding font policy.
+  window[Symbol.for('spellbook.onlyoffice.fontCatalog/v1')]=catalog;
+  if(context?.catalog)window[Symbol.for('spellbook.onlyoffice.documentFonts/v1')]=context;
+  for(const name of ['__fonts_files','__fonts_infos','__fonts_ranges','g_fonts_selection_bin'])Object.defineProperty(window,name,{configurable:true,get:()=>catalog[name],set:value=>{if(!context?.catalog)catalog[name]=value;}});
 }
 // Called after the pinned native SDK defines its stream/font-loader classes.
 export function installOnlyOfficeDocumentFontLoader(){

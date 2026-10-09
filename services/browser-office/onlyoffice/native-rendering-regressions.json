@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "scope": "Additional real-source regressions; retain the complete canonical 94-operation cohort separately. Run each case with verify-onlyoffice-product-session.mjs --manual-flow --require-visible-change and the same admitted renderer/tool.",
+  "cases": [
+    {
+      "id": "percent-spacing-font-size-undo",
+      "input": "eval/public/downloads/poi-comments.pptx",
+      "sourceSha256": "0295a51f63150e3ee680154d07dab88062ba2306030b790561f85436f3ded7c8",
+      "operation": "font_size",
+      "slideIndex": 1,
+      "elementIndex": 1,
+      "command": {"op": "font_size", "elementId": "1/1", "size": 24},
+      "checks": "Native font-size 32 to 24 changes percentage paragraph spacing and inherited bullet shadow; Undo and Redo restore exact visual/package states."
+    },
+    {
+      "id": "wmf-svg-fonts-history-save",
+      "input": "eval/public/downloads/poi-comments.pptx",
+      "sourceSha256": "0295a51f63150e3ee680154d07dab88062ba2306030b790561f85436f3ded7c8",
+      "operation": "move",
+      "slideIndex": 7,
+      "elementIndex": 0,
+      "checks": "Native OLE vector move, Undo/Redo, keyboard edit, recovery and save retain owned symbol/text display and original authored vector parts."
+    },
+    {
+      "id": "emf-svg-fonts-history-save",
+      "input": "eval/public/downloads/lo-ole-emf.pptx",
+      "sourceSha256": "99d27ff56b7c2f2568bac1fb4fb4d5ece7c6a97aeb7e949db4e0a9c541f027d0",
+      "operation": "move",
+      "slideIndex": 0,
+      "elementIndex": 0,
+      "checks": "Native OLE vector move, Undo/Redo, keyboard edit, recovery and save retain the admitted Calibri/Carlito vector font policy and original vector parts."
+    }
+  ]
+}

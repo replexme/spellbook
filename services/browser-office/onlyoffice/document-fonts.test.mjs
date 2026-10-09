@@ -29,7 +29,11 @@ test('closing a document cancels pending font work and clears its private buffer
  const oldWindow=globalThis.window,oldWorker=globalThis.Worker,key=Symbol.for('spellbook.onlyoffice.documentFonts/v1');let terminated=0;
  class PendingWorker{postMessage(){}terminate(){terminated++;}}
  try{globalThis.Worker=PendingWorker;globalThis.window={Worker:PendingWorker,addEventListener(){}};
-  const opening=prepareOnlyOfficeDocumentFonts(new Uint8Array([0x50,0x4b,3,4]).buffer),context=window[key],privateBytes=new Uint8Array([1,2,3]);context.assets['private']={bytes:privateBytes};context.dispose();
+  const opening=prepareOnlyOfficeDocumentFonts(new Uint8Array([0x50,0x4b,3,4]).buffer),context=window[key],privateBytes=new Uint8Array([1,2,3]);let disposed=0;context.onDispose(()=>{disposed++;assert.equal(privateBytes[0],1);});const remove=context.onDispose(()=>{throw Error('removed disposable ran');});remove();context.assets['private']={bytes:privateBytes};context.dispose();assert.equal(disposed,1);context.dispose();assert.equal(disposed,1);context.onDispose(()=>disposed++);assert.equal(disposed,2);
   await assert.rejects(opening,/document_font_context_closed/);assert(terminated>=1);assert.deepEqual([...privateBytes],[0,0,0]);assert.equal(window[key],undefined);
  }finally{globalThis.window=oldWindow;globalThis.Worker=oldWorker;}
+});
+test('public catalog survives native deletion of import globals for vector font selection',()=>{
+ const previous=globalThis.window,key=Symbol.for('spellbook.onlyoffice.fontCatalog/v1');
+ try{globalThis.window={parent:{}};installOnlyOfficeDocumentFontCatalog();const files=['000.ttf'],infos=[['Carlito',0,0,-1,-1,-1,-1,-1,-1]];window.__fonts_files=files;window.__fonts_infos=infos;window.__fonts_ranges=[32,127,0];delete window.__fonts_files;delete window.__fonts_infos;assert.strictEqual(window[key].__fonts_files,files);assert.strictEqual(window[key].__fonts_infos,infos);assert.deepEqual(window[key].__fonts_ranges,[32,127,0]);}finally{globalThis.window=previous;}
 });

@@ -98,6 +98,32 @@
         1087,
         576
       ]
+    },
+    {
+      "family": "webdings",
+      "code": 110,
+      "unicode": 9679,
+      "targetCodePoint": 58887,
+      "advance": 2048,
+      "bounds": [
+        0,
+        -410,
+        2048,
+        1638
+      ]
+    },
+    {
+      "family": "webdings",
+      "code": 103,
+      "unicode": 9632,
+      "targetCodePoint": 58888,
+      "advance": 2048,
+      "bounds": [
+        0,
+        -410,
+        2048,
+        1638
+      ]
     }
   ]
 }
