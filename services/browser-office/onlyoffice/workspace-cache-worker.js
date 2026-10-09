@@ -3,12 +3,17 @@
 // remain governed by the exact-artifact and OPFS journal contracts.
 const VERSION = "__RUNTIME_ID__";
 const CACHE = "spellbook-office-public-assets-" + VERSION;
+// The native theme loader can emit a doubled slash. The static server resolves
+// it to the same program; use that same key, including private-path exclusions.
+const programPath = (url) => url.pathname.replace(/\/{2,}/g, "/");
 const allowed = (url) =>
   url.origin === self.location.origin &&
   !url.searchParams.has("file") &&
   !url.searchParams.has("src") &&
-  !url.pathname.startsWith("/fonts/document-") &&
-  (/^\/(?:assets|npm|sdkjs|web-apps|wasm|fonts|libs)\//.test(url.pathname) ||
+  !programPath(url).startsWith("/fonts/document-") &&
+  (/^\/(?:assets|npm|sdkjs|web-apps|wasm|fonts|libs)\//.test(
+    programPath(url),
+  ) ||
     [
       "/local-workspace.css",
       "/local-phone-view.mjs",
@@ -38,8 +43,8 @@ const allowed = (url) =>
       "/onlyoffice-browser-font-source-map.json",
       "/server/FileConverter/bin/font_selection.bin",
       "/reset.html",
-    ].includes(url.pathname));
-const key = (url) => url.origin + url.pathname;
+    ].includes(programPath(url)));
+const key = (url) => url.origin + programPath(url);
 // Worker-internal converter requests do not appear in Window performance
 // entries. Retain these pinned public programs before claiming offline control.
 const requiredPrograms = [
@@ -156,8 +161,8 @@ self.addEventListener("install", (event) => {
         for (const prior of priorCaches)
           for (const request of await prior.keys()) {
             const url = new URL(request.url);
-            if (allowed(url) && manifest.hashes[url.pathname])
-              paths.add(url.pathname);
+            if (allowed(url) && manifest.hashes[programPath(url)])
+              paths.add(programPath(url));
           }
         paths.delete(fontManifestUrl);
         const entries = [...paths];

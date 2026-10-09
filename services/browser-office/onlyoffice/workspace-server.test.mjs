@@ -382,6 +382,14 @@ test("published public identities bind transformed SDK, host overlays and docume
         pathname,
       );
     }
+    const alias = await fetch(base + "/sdkjs/slide/themes//themes.js");
+    assert.equal(alias.status, 200);
+    assert.equal(
+      createHash("sha256")
+        .update(Buffer.from(await alias.arrayBuffer()))
+        .digest("hex"),
+      manifest.hashes["/sdkjs/slide/themes/themes.js"],
+    );
     const retained = JSON.parse(
       await readFile(
         new URL("./distribution/distribution-manifest.json", import.meta.url),

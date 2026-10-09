@@ -262,6 +262,7 @@ test("program worker never intercepts writes, private inputs or external origins
     ["GET", origin + "/assets/example.js?file=private"],
     ["GET", origin + "/assets/example.js?src=private"],
     ["GET", origin + "/fonts/document-private.ttf"],
+    ["GET", origin + "/fonts//document-private.ttf"],
     ["GET", "https://other.example/fonts/000.ttf"],
   ])
     w.handlers.fetch({
@@ -294,5 +295,22 @@ test("a failed alias installation never deletes the already active release cache
   assert.equal(
     await (await current.match("/document-font-worker.js")).text(),
     w.bodies.get("/document-font-worker.js"),
+  );
+});
+
+test("native doubled-slash theme requests use the exact canonical warm program", async () => {
+  const w = worker(),
+    cache = await w.open(prefix + version);
+  await cache.put(
+    "/sdkjs/slide/themes/themes.js",
+    new Response("native theme catalog"),
+  );
+  assert.equal(
+    await (await request(w.handlers, "/sdkjs/slide/themes//themes.js")).text(),
+    "native theme catalog",
+  );
+  assert.deepEqual(
+    w.calls.map((c) => c.path),
+    ["/sw.js"],
   );
 });
