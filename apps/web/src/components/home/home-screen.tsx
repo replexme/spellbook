@@ -119,6 +119,9 @@ export function HomeScreen({
   const [importing, setImporting] = useState<File | null>(null);
   const [renaming, setRenaming] = useState<LibraryDocument | null>(null);
   const [deleting, setDeleting] = useState<LibraryDocument | null>(null);
+  // A new, empty document being made (its format), or whether making one failed.
+  const [creating, setCreating] = useState<"pptx" | "idml" | null>(null);
+  const [createFailed, setCreateFailed] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -232,6 +235,33 @@ export function HomeScreen({
   }, [documents, query, sort]);
 
   const pickFile = () => fileInput.current?.click();
+  const createNew = async (formatId: "pptx" | "idml") => {
+    setCreating(formatId);
+    setCreateFailed(false);
+    try {
+      const response = await fetch("/api/documents/new", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ formatId }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { id?: unknown };
+      if (!response.ok || typeof body.id !== "string") throw new Error("create_failed");
+      window.location.assign(`/documents/${body.id}`);
+    } catch {
+      setCreateFailed(true);
+      setCreating(null);
+    }
+  };
+  const createButtons = (
+    <>
+      <Button icon="plus" disabled={creating !== null} onClick={() => void createNew("pptx")}>
+        {creating === "pptx" ? "만드는 중…" : "새 프레젠테이션"}
+      </Button>
+      <Button icon="plus" disabled={creating !== null} onClick={() => void createNew("idml")}>
+        {creating === "idml" ? "만드는 중…" : "새 InDesign 문서"}
+      </Button>
+    </>
+  );
   const changeView = (next: View) => {
     setView(next);
     try {
@@ -255,6 +285,11 @@ export function HomeScreen({
         ) : null}
       </AppTop>
       <main className="app-main">
+        {createFailed ? (
+          <Banner tone="danger" role="alert">
+            새 문서를 만들지 못했어요. 잠시 뒤 다시 시도해 주세요.
+          </Banner>
+        ) : null}
         {browserSupported === false ? (
           <Banner tone="warn" role="alert">
             이 브라우저에서는 PPTX를 편집할 수 없어요. 파일을 가져오기 전에 PC의
@@ -291,6 +326,7 @@ export function HomeScreen({
                 <ButtonLink variant="quiet" href="/local">
                   업로드 없이 로컬 파일 열기
                 </ButtonLink>
+                <div className="home-create">{createButtons}</div>
                 <small>
                   .pptx·.idml · {limit}까지 · 옛 형식(.ppt)은 PowerPoint에서 .pptx로
                   저장한 뒤 가져오세요
@@ -405,8 +441,9 @@ export function HomeScreen({
                     },
                   ]}
                 />
+                {createButtons}
                 <Button variant="primary" icon="upload" onClick={pickFile}>
-                  PowerPoint 가져오기
+                  파일 가져오기
                 </Button>
               </div>
             </div>
