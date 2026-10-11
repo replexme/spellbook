@@ -1,9 +1,7 @@
+import { contentTypeForName } from "@/lib/document-formats";
 import { directDownloadUrl, downloadCurrent } from "@/lib/orchestration";
 import { HttpError, requireSession, routeError } from "@/lib/http";
 import { recordUsageEvent } from "@/lib/usage-events";
-
-const PPTX =
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 export async function GET(
   request: Request,
@@ -16,7 +14,7 @@ export async function GET(
       throw new HttpError(400, "invalid_download_source");
     const session = await requireSession(request);
     // Large files go straight from storage to the browser when it can.
-    const direct = await directDownloadUrl(session, id, source, PPTX);
+    const direct = await directDownloadUrl(session, id, source);
     if (direct) {
       await recordUsageEvent(session.accountId, {
         type: "download",
@@ -36,7 +34,7 @@ export async function GET(
     });
     return new Response(new Uint8Array(file.data), {
       headers: {
-        "content-type": PPTX,
+        "content-type": contentTypeForName(file.name),
         "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,
         "cache-control": "private, no-store",
       },

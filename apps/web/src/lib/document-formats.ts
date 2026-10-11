@@ -1,6 +1,6 @@
 import registry from "../../../../contracts/document-formats.json";
 
-export type DocumentFormatId = "pptx" | "docx" | "spellbook";
+export type DocumentFormatId = "pptx" | "idml" | "docx" | "spellbook";
 export type DocumentFormatAvailability =
   | "beta"
   | "experimental"
@@ -52,3 +52,36 @@ export function availableDocumentFormatForFile(
 }
 
 export const currentPresentationFormat = documentFormat("pptx");
+
+/** A document's format by its stored id; rows from before formats were recorded are PowerPoint. */
+export function documentFormatOf(id: string | null | undefined): DocumentFormat {
+  return formats.find((format) => format.id === id) ?? currentPresentationFormat;
+}
+
+/** Formats the browser document view opens: PowerPoint decks and InDesign (IDML) documents. */
+export const browserViewFormatIds: readonly DocumentFormatId[] = ["pptx", "idml"];
+
+/** Extensions and media types the file picker offers (formats that can be imported). */
+export const importAccept = formats
+  .filter((format) => ["beta", "experimental"].includes(format.availability))
+  .flatMap((format) => [...format.extensions, ...format.mimeTypes])
+  .join(",");
+
+/** The media type of a document file, by its extension (PowerPoint when unknown). */
+export function contentTypeForName(name: string): string {
+  const lower = name.trim().toLowerCase();
+  const format = formats.find((f) => f.extensions.some((e) => lower.endsWith(e))) ?? currentPresentationFormat;
+  return format.mimeTypes[0]!;
+}
+
+/** Media types of the formats the browser document view opens. */
+export const browserViewMediaTypes: readonly string[] = formats
+  .filter((format) => browserViewFormatIds.includes(format.id))
+  .flatMap((format) => format.mimeTypes);
+
+/** `name` without its document extension (.pptx, .idml). */
+export function documentBaseName(name: string): string {
+  const lower = name.toLowerCase();
+  const extension = formats.flatMap((format) => format.extensions).find((e) => lower.endsWith(e));
+  return extension ? name.slice(0, -extension.length) : name;
+}

@@ -14,6 +14,7 @@ import {
 } from "@/design-system";
 import type { LibraryDocument } from "@/lib/history-types";
 import { retryableFailure } from "@/lib/upload-reasons";
+import { documentBaseName } from "@/lib/document-formats";
 
 export function documentHref(document: LibraryDocument) {
   return `/documents/${document.id}`;
@@ -128,7 +129,7 @@ export function RenameDialog({
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!document) return;
-    setValue(document.fileName.replace(/\.pptx$/i, ""));
+    setValue(documentBaseName(document.fileName));
     setError("");
   }, [document]);
   async function submit() {
@@ -193,7 +194,7 @@ export function RenameDialog({
           label="파일 이름"
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          hint="끝의 .pptx는 저절로 붙어요"
+          hint="끝의 .pptx나 .idml은 저절로 붙어요"
           maxLength={175}
           required
           autoFocus

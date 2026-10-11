@@ -11,6 +11,8 @@ builder.Services.AddSingleton<PresentationInspector>();
 builder.Services.AddSingleton<PptxPatcher>();
 builder.Services.AddSingleton<IPresentationRenderer, OnlyOfficeRenderer>();
 builder.Services.AddSingleton<IDocumentFormatAdapter, PptxDocumentFormatAdapter>();
+if (IdmlDocumentFormatAdapter.ConfiguredEngine() is { } idmlEngine)
+    builder.Services.AddSingleton<IDocumentFormatAdapter>(new IdmlDocumentFormatAdapter(idmlEngine));
 builder.Services.AddHttpClient();
 
 var app = builder.Build();
@@ -54,6 +56,12 @@ app.MapPost("/internal/jobs/scan-render", (
         else
         {
             await storage.DownloadAsync(job.InputObject, inputPath, cancellationToken);
+            // A format that checks its own saves compares them with the version they were edited from.
+            if (adapter is IPackageChangeValidator && !string.IsNullOrWhiteSpace(job.BaselineInputObject))
+            {
+                baselinePath = Path.Combine(workspace.Path, $"baseline{adapter.FileExtension}");
+                await storage.DownloadAsync(job.BaselineInputObject, baselinePath, cancellationToken);
+            }
         }
         WorkerFailure.RejectCompoundFile(inputPath);
         string? validationObject = null;
@@ -70,8 +78,9 @@ app.MapPost("/internal/jobs/scan-render", (
                     || job.ChangeBudget.TargetSlideIndexes is null
                     || job.ChangeBudget.TargetSlideIndexes.Count == 0))
                 throw new InvalidDataException("native_ai_change_evidence_missing");
-            validation = new PptxPackageChangeBudgetValidator()
-                .Validate(baselinePath, inputPath, job.ChangeBudget);
+            validation = adapter is IPackageChangeValidator own
+                ? own.Validate(baselinePath, inputPath)
+                : new PptxPackageChangeBudgetValidator().Validate(baselinePath, inputPath, job.ChangeBudget);
             validationObject = $"{job.OutputPrefix}/validation.json";
             await storage.UploadJsonAsync(
                 validationObject,

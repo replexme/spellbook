@@ -1,6 +1,7 @@
 import type {LinkedImageManifest} from "../../../../services/document-resources/linked-image-snapshots.mjs";
+import { browserViewMediaTypes } from "./document-formats";
 /*
- * Moves the editor's PPTX between the browser and storage. Where storage
+ * Moves the editor's file (a PPTX or IDML package) between the browser and storage. Where storage
  * gives a short-lived link, the file goes straight to or from storage, so a
  * large file never passes through the app (whose requests stop at 32 MiB).
  * Otherwise, or when the network blocks the storage host, it goes through
@@ -9,6 +10,13 @@ import type {LinkedImageManifest} from "../../../../services/document-resources/
 
 const PPTX_TYPE =
   "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+const IDML_TYPE = "application/vnd.adobe.indesign-idml-package";
+
+/** An IDML package starts with its stored mimetype entry; any other package here is a PPTX. */
+function packageType(bytes: ArrayBuffer): string {
+  const head = new TextDecoder().decode(new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 96)));
+  return head.slice(30, 38) === "mimetype" && head.includes(IDML_TYPE) ? IDML_TYPE : PPTX_TYPE;
+}
 
 /** Largest file the app itself relays (its requests stop at 32 MiB). */
 export const RELAYED_FILE_MAX_BYTES = 30 * 1024 * 1024;
@@ -90,7 +98,8 @@ export async function readBrowserDocument(
   const bytes = await response.arrayBuffer();
   if (
     revision !== expectedRevision ||
-    contentType !== PPTX_TYPE ||
+    !contentType ||
+    !browserViewMediaTypes.includes(contentType) ||
     !isPackage(bytes, maxBytes)
   )
     throw new TransferError("browser_document_identity_mismatch");
@@ -156,7 +165,7 @@ export async function writeBrowserDocument(
     await fetchImpl(`${contentApiBase}/contents`, {
       method: "PUT",
       headers: {
-        "content-type": PPTX_TYPE,
+        "content-type": packageType(bytes),
         "if-match": revision,
         ...intentHeaders,
       },

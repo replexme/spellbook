@@ -22,6 +22,24 @@
       }
     },
     {
+      "id": "idml",
+      "label": "InDesign document (IDML)",
+      "availability": "experimental",
+      "extensions": [".idml"],
+      "mimeTypes": ["application/vnd.adobe.indesign-idml-package"],
+      "maxBytes": 52428800,
+      "editor": {
+        "kind": "native",
+        "wopiApp": null,
+        "wopiAction": null
+      },
+      "semantics": {
+        "unit": "page",
+        "rootCollection": "pages",
+        "outputKind": "editable_idml"
+      }
+    },
+    {
       "id": "docx",
       "label": "Word document",
       "availability": "planned",

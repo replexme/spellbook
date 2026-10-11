@@ -80,7 +80,7 @@ export async function runMigrations(): Promise<void> {
       id uuid primary key,
       account_id text not null,
       file_name text not null,
-      format_id text not null default 'pptx' check (format_id in ('pptx','docx','spellbook')),
+      format_id text not null default 'pptx' check (format_id in ('pptx','idml','docx','spellbook')),
       status text not null check (status in ('processing','ready','editing','candidate_ready','failed')),
       original_version_id uuid,
       current_version_id uuid,
@@ -150,6 +150,8 @@ export async function runMigrations(): Promise<void> {
     create index if not exists spellbook_events_document_id_idx on spellbook_events(document_id, id);
 
     alter table spellbook_documents add column if not exists format_id text not null default 'pptx';
+    alter table spellbook_documents drop constraint if exists spellbook_documents_format_id_check;
+    alter table spellbook_documents add constraint spellbook_documents_format_id_check check (format_id in ('pptx','idml','docx','spellbook'));
     alter table spellbook_edit_requests add column if not exists selected_slide_indexes jsonb not null default '[]'::jsonb;
     alter table spellbook_edit_requests add column if not exists input_version_id uuid references spellbook_versions(id);
     alter table spellbook_edit_requests add column if not exists parent_edit_request_id uuid references spellbook_edit_requests(id);

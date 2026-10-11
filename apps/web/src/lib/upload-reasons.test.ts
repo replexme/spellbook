@@ -59,6 +59,7 @@ describe("upload reasons", () => {
       "file_too_large",
     );
     expect(precheckUpload({ name: "A.PPTX", size: 10 }, MAX)).toBeNull();
+    expect(precheckUpload({ name: "issue.idml", size: 10 }, MAX)).toBeNull();
   });
 
   it("tells a full account how to make room", () => {

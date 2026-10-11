@@ -1,4 +1,5 @@
 import { getBrowserDocument, saveBrowserDocument } from "@/lib/browser-session";
+import { contentTypeForName } from "@/lib/document-formats";
 import { requireSession, routeError } from "@/lib/http";
 import type { Session } from "@/lib/models";
 import { recordUsageEvent } from "@/lib/usage-events";
@@ -14,8 +15,7 @@ export async function GET(
     );
     return new Response(new Uint8Array(file.data), {
       headers: {
-        "content-type":
-          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "content-type": contentTypeForName(file.fileName),
         "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(file.fileName)}`,
         "cache-control": "private, no-store",
         etag: file.revision,

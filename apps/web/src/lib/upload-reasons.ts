@@ -2,6 +2,7 @@
  * Why a file could not be imported, in two plain sentences: what is wrong,
  * and what to do. Keys are the reason codes the upload route returns.
  */
+import { availableDocumentFormatForFile } from "./document-formats";
 
 export type UploadFailure = {
   reason: string;
@@ -30,8 +31,8 @@ export function uploadFailure(
       return /\.ppt$/i.test(fileName.trim())
         ? { reason: "옛 PowerPoint 형식(.ppt)이에요.", fix: SAVE_AS_PPTX }
         : {
-            reason: "PowerPoint 파일(.pptx)만 가져올 수 있어요.",
-            fix: "PowerPoint에서 .pptx로 저장한 파일을 골라 주세요.",
+            reason: "PowerPoint(.pptx)나 InDesign(.idml) 파일만 가져올 수 있어요.",
+            fix: "PowerPoint에서 .pptx로 저장하거나, InDesign에서 ‘파일 › 내보내기 › InDesign Markup(IDML)’로 내보낸 파일을 골라 주세요.",
           };
     case "browser_unsupported":
       return {
@@ -55,7 +56,7 @@ export function uploadFailure(
       };
     case "invalid_package":
       return {
-        reason: "PPTX 파일 구조가 아니에요. 파일이 손상됐을 수 있어요.",
+        reason: "PPTX·IDML 파일 구조가 아니에요. 파일이 손상됐을 수 있어요.",
         fix: "PowerPoint에서 열어 다시 저장한 뒤 가져오세요.",
       };
     case "broken_presentation":
@@ -172,7 +173,7 @@ export function precheckUpload(
   file: { name: string; size: number },
   maxBytes: number,
 ): string | null {
-  if (!/\.pptx$/i.test(file.name.trim())) return "unsupported_format";
+  if (!availableDocumentFormatForFile(file.name)) return "unsupported_format";
   if (file.size <= 0) return "empty_file";
   if (file.size > maxBytes) return "file_too_large";
   return null;
