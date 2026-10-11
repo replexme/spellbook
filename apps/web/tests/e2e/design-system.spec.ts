@@ -372,7 +372,7 @@ test.describe("file home", () => {
     ).toBeVisible();
     await expect(
       dialog.getByText(
-        "글자 문구와 도형의 위치·크기·색은 편집기에서 직접, 또는 AI로 고칠 수 있어요",
+        "글자 문구와 도형의 위치·크기·색은 AI로 고칠 수 있어요",
       ),
     ).toBeVisible();
     await expect(
@@ -981,7 +981,7 @@ test.describe("workspace", () => {
     await page.goto(`/documents/${id}`);
     const slides = page.getByRole("region", { name: "슬라이드 미리보기" });
     await expect(
-      slides.getByText("보기만 가능 · 직접 편집은 큰 화면에서", {
+      slides.getByText("보기만 가능", {
         exact: false,
       }),
     ).toBeVisible();
@@ -1031,7 +1031,7 @@ test.describe("workspace", () => {
     ).toBeVisible();
     await expect(panel.getByLabel("AI에게 요청")).toHaveCount(0);
     await expect(
-      panel.getByText("AI 연결 전에도 편집기에서 직접 고칠 수 있어요."),
+      panel.getByText("문서는 AI를 연결한 뒤 요청해서 고쳐요."),
     ).toBeVisible();
     await panel.getByRole("button", { name: "연결 코드 받기" }).click();
     await expect(panel.getByText("PRES-ENT1")).toBeVisible();

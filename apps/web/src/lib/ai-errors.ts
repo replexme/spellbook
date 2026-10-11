@@ -140,7 +140,7 @@ export function isKoreanSentence(text: string): boolean {
 
 const REQUEST_ERRORS: Record<string, string> = {
   ai_rate_limited:
-    "AI 요청이 많아 잠시 쉬어 갑니다. 조금 뒤에 다시 요청해 주세요. 직접 편집과 저장은 계속할 수 있습니다.",
+    "AI 요청이 많아 잠시 쉬어 갑니다. 조금 뒤에 다시 요청해 주세요.",
   native_ai_unavailable:
     "AI 작업기에 연결하지 못했어요. 잠시 뒤 다시 요청해 주세요.",
   native_session_not_active:

@@ -335,7 +335,7 @@ export function HomeScreen({
                     </ButtonLink>
                   </div>
                   <small className="dialog-note">
-                    연결 전에도 직접 편집은 할 수 있어요.
+                    문서 수정은 연결한 뒤 AI에게 요청해서 해요.
                   </small>
                 </>
               )}

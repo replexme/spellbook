@@ -111,10 +111,10 @@ const messages: Record<string, string> = {
 
   // AI
   ai_rate_limited:
-    "AI 요청이 많아 잠시 쉬어 가요. 조금 뒤에 다시 요청해 주세요. 직접 편집과 저장은 계속할 수 있어요.",
+    "AI 요청이 많아 잠시 쉬어 가요. 조금 뒤에 다시 요청해 주세요.",
   ai_subscription_busy:
     "연결한 AI 계정이 이전 요청을 아직 처리하고 있어요. 잠시 뒤 다시 요청해 주세요.",
-  native_ai_unavailable: `AI 서버에 연결하지 못했어요. ${TRY_AGAIN} 직접 편집은 계속할 수 있어요.`,
+  native_ai_unavailable: `AI 서버에 연결하지 못했어요. ${TRY_AGAIN}`,
   native_turn_already_running:
     "AI가 이전 요청을 처리하고 있어요. 끝난 뒤 다시 요청해 주세요.",
   no_active_native_turn: "진행 중인 AI 작업이 없어요.",
