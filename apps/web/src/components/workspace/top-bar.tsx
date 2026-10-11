@@ -1,6 +1,7 @@
 "use client";
 
 import { Button, Icon, IconButton } from "@/design-system";
+import { documentBaseName } from "@/lib/document-formats";
 
 export type SaveView = {
   kind: "saved" | "dirty" | "busy" | "error" | "opening";
@@ -56,7 +57,7 @@ export function WorkspaceTopBar({
   /** Before the editor exists (opening, failure): show the bar, allow nothing. */
   disabled?: boolean;
 }) {
-  const baseName = fileName.replace(/\.pptx$/i, "");
+  const baseName = documentBaseName(fileName);
   const extension = fileName.slice(baseName.length);
   const actionable = save?.kind === "dirty" || save?.kind === "error";
   return (
@@ -120,7 +121,7 @@ export function WorkspaceTopBar({
         </Button>
         <Button
           icon="download"
-          aria-label="PPTX 내려받기"
+          aria-label="파일 내려받기"
           disabled={!editorReady}
           onClick={onDownload}
         >

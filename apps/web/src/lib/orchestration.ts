@@ -59,6 +59,8 @@ import {
   availableDocumentFormatForFile,
   currentPresentationFormat,
   documentFormat,
+  documentFormatOf,
+  contentTypeForName,
   type DocumentFormat,
 } from "./document-formats";
 import { internalAppBaseUrl } from "./runtime-urls";
@@ -131,9 +133,10 @@ function uploadObjects(
   session: Session,
   documentId: string,
   versionId: string,
+  format: DocumentFormat,
 ) {
   const prefix = accountPrefix(session.accountId, documentId);
-  const documentObject = `${prefix}/versions/${versionId}/document.pptx`;
+  const documentObject = `${prefix}/versions/${versionId}/document${format.extensions[0]}`;
   return {
     documentObject,
     // The browser writes here first; a bucket rule removes what is never
@@ -160,6 +163,7 @@ async function registerUpload(
     session,
     documentId,
     versionId,
+    format,
   );
   const dispatch: Dispatch = {
     jobId,
@@ -214,7 +218,7 @@ export async function uploadDocument(
   if (problem) throw new HttpError(400, problem);
   const documentId = randomUUID();
   const versionId = randomUUID();
-  const { documentObject } = uploadObjects(session, documentId, versionId);
+  const { documentObject } = uploadObjects(session, documentId, versionId, format);
   await putObject(documentObject, data, format.mimeTypes[0]!);
   return registerUpload(session, {
     documentId,
@@ -259,7 +263,7 @@ export async function startDirectUpload(
   });
   const documentId = randomUUID();
   const versionId = randomUUID();
-  const { incomingObject } = uploadObjects(session, documentId, versionId);
+  const { incomingObject } = uploadObjects(session, documentId, versionId, format);
   const target = await directWriteTarget(
     incomingObject,
     format.mimeTypes[0]!,
@@ -309,6 +313,7 @@ export async function completeDirectUpload(session: Session, token: unknown) {
     session,
     claims.documentId,
     claims.versionId,
+    format,
   );
   // A retried completion finds the file already moved into place.
   const incoming = await objectHead(incomingObject, 4);
@@ -1049,10 +1054,9 @@ export async function directDownloadUrl(
   session: Session,
   documentId: string,
   source: "current" | "original" | "candidate",
-  contentType: string,
 ): Promise<string | null> {
   const file = await downloadSource(session, documentId, source);
-  return directReadUrl(file.objectName, { fileName: file.name, contentType });
+  return directReadUrl(file.objectName, { fileName: file.name, contentType: contentTypeForName(file.name) });
 }
 
 async function completeScan(
@@ -2104,6 +2108,7 @@ export async function retryDocumentProcessing(
       session,
       documentId,
       document.original_version_id,
+      documentFormatOf(document.format_id),
     );
     // A fresh output folder: the failed attempt's stored result belongs to
     // the old job and must not answer for this one.

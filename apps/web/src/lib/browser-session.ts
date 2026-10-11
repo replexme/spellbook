@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { currentPresentationFormat } from "./document-formats";
+import { browserViewFormatIds, documentFormatOf, type DocumentFormatId } from "./document-formats";
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./http";
 import type { Session } from "./models";
@@ -99,7 +99,7 @@ export async function createBrowserDocumentLaunch(
       for update of d
     `;
     if (!current) throw new HttpError(404, "document_not_found");
-    if (current.format_id !== currentPresentationFormat.id)
+    if (!browserViewFormatIds.includes(current.format_id as DocumentFormatId))
       throw new HttpError(409, "format_editor_not_available");
     if (current.status === "candidate_ready")
       throw new HttpError(409, "candidate_review_required");
@@ -159,7 +159,7 @@ export async function createBrowserDocumentLaunch(
     expiresAt,
     apiBase: `/api/documents/${documentId}/native`,
     contentApiBase: `/api/documents/${documentId}/browser`,
-    maxBytes: currentPresentationFormat.maxBytes,
+    maxBytes: documentFormatOf(document.format_id).maxBytes,
     aiConnector: aiConnectorConfig(),
   };
 }
@@ -170,7 +170,7 @@ export async function getBrowserDocument(
 ): Promise<{ fileName: string; revision: string; data: Buffer }> {
   await ensureSchema();
   const [row] = await db()`
-    select d.file_name,s.working_version_id,s.working_sha256,v.document_object
+    select d.file_name,d.format_id,s.working_version_id,s.working_sha256,v.document_object
     from spellbook_native_sessions s
     join spellbook_documents d on d.id=s.document_id and d.account_id=s.account_id
     join spellbook_versions v on v.id=s.working_version_id and v.status='ready'
@@ -194,13 +194,14 @@ export async function saveBrowserDocument(
   requireBrowserOrigin(request);
   const expectedRevision = request.headers.get("if-match") ?? "";
   if (!expectedRevision) throw new HttpError(428, "browser_revision_required");
+  const format = await sessionFormat(session, documentId);
   const length = Number(request.headers.get("content-length") ?? 0);
-  if (length > currentPresentationFormat.maxBytes)
+  if (length > format.maxBytes)
     throw new HttpError(413, "document_too_large");
   const data = Buffer.from(await request.arrayBuffer());
   if (
     !data.length ||
-    data.length > currentPresentationFormat.maxBytes ||
+    data.length > format.maxBytes ||
     data[0] !== 0x50 ||
     data[1] !== 0x4b
   )
@@ -210,7 +211,7 @@ export async function saveBrowserDocument(
     digest: createHash("sha256").update(data).digest("hex"),
     bytes: data.length,
     store: (object) =>
-      putObject(object, data, currentPresentationFormat.mimeTypes[0]!),
+      putObject(object, data, format.mimeTypes[0]!),
     discard: async () => undefined,
     humanConfirmed:
       request.headers.get("x-spellbook-save-intent") === "human_confirmed",
@@ -232,7 +233,7 @@ export async function browserDocumentSource(
 }> {
   await ensureSchema();
   const [row] = await db()`
-    select d.file_name,s.working_version_id,s.working_sha256,v.document_object,v.document_bytes
+    select d.file_name,d.format_id,s.working_version_id,s.working_sha256,v.document_object,v.document_bytes
     from spellbook_native_sessions s
     join spellbook_documents d on d.id=s.document_id and d.account_id=s.account_id
     join spellbook_versions v on v.id=s.working_version_id and v.status='ready'
@@ -245,7 +246,7 @@ export async function browserDocumentSource(
     bytes: row.document_bytes === null ? null : Number(row.document_bytes),
     url: await directReadUrl(row.document_object, {
       fileName: row.file_name,
-      contentType: currentPresentationFormat.mimeTypes[0]!,
+      contentType: documentFormatOf(row.format_id).mimeTypes[0]!,
     }),
   };
 }
@@ -290,9 +291,10 @@ export async function startBrowserSave(
   const size = typeof body.size === "number" ? body.size : 0;
   if (!Number.isSafeInteger(size) || size <= 0)
     throw new HttpError(400, "invalid_document_package");
-  if (size > currentPresentationFormat.maxBytes)
-    throw new HttpError(413, "document_too_large");
   const current = await activeBrowserSession(session, documentId);
+  const format = documentFormatOf(current.format_id);
+  if (size > format.maxBytes)
+    throw new HttpError(413, "document_too_large");
   if (
     browserRevision(current.working_version_id, current.working_sha256) !==
     expectedRevision
@@ -304,9 +306,9 @@ export async function startBrowserSave(
   // Reject pending review before uploading a file that cannot become a version.
   await requireSavePolicy(current.id, current.save_revision, humanConfirmed);
   const target = await directWriteTarget(
-    incomingObjectName(savedObjects(session, documentId, versionId).object),
-    currentPresentationFormat.mimeTypes[0]!,
-    currentPresentationFormat.maxBytes,
+    incomingObjectName(savedObjects(session, documentId, versionId, format.id).object),
+    format.mimeTypes[0]!,
+    format.maxBytes,
   );
   if (!target) return { direct: false };
   const claims: BrowserSaveClaims = {
@@ -358,14 +360,15 @@ export async function completeBrowserSave(
     claims.expiresAt <= Date.now()
   )
     throw new HttpError(400, "invalid_browser_save");
+  const format = await sessionFormat(session, documentId);
   const incoming = incomingObjectName(
-    savedObjects(session, documentId, claims.versionId).object,
+    savedObjects(session, documentId, claims.versionId, format.id).object,
   );
   const stored = await objectDigest(incoming, 2);
   if (!stored) throw new HttpError(409, "upload_not_found");
   if (
     stored.size !== claims.size ||
-    stored.size > currentPresentationFormat.maxBytes ||
+    stored.size > format.maxBytes ||
     stored.head[0] !== 0x50 ||
     stored.head[1] !== 0x4b
   ) {
@@ -382,10 +385,20 @@ export async function completeBrowserSave(
   });
 }
 
-function savedObjects(session: Session, documentId: string, versionId: string) {
+/** The format of an owned document (the size limit and stored type of its saves). */
+async function sessionFormat(session: Session, documentId: string) {
+  const [row] = await db()`
+    select format_id from spellbook_documents
+    where id=${documentId} and account_id=${session.accountId}
+  `;
+  if (!row) throw new HttpError(404, "document_not_found");
+  return documentFormatOf(row.format_id);
+}
+
+function savedObjects(session: Session, documentId: string, versionId: string, formatId: string) {
   const prefix = accountPrefix(session.accountId, documentId);
   return {
-    object: `${prefix}/versions/${versionId}/document.pptx`,
+    object: `${prefix}/versions/${versionId}/document${documentFormatOf(formatId).extensions[0]}`,
     outputPrefix: `${prefix}/versions/${versionId}/render`,
   };
 }
@@ -393,7 +406,7 @@ function savedObjects(session: Session, documentId: string, versionId: string) {
 async function activeBrowserSession(session: Session, documentId: string) {
   const [current] = await db()`
     select s.id,s.working_version_id,s.working_sha256,s.status,s.wopi_lock,s.save_revision,
-      current.document_object as preservation_object
+      d.format_id,current.document_object as preservation_object
     from spellbook_native_sessions s
     join spellbook_documents d on d.id=s.document_id and d.account_id=s.account_id
     join spellbook_versions current on current.id=d.current_version_id and current.status='ready'
@@ -479,7 +492,7 @@ async function acceptBrowserSave(
   }
   const versionId = file.versionId;
   const jobId = randomUUID();
-  const { object, outputPrefix } = savedObjects(session, documentId, versionId);
+  const { object, outputPrefix } = savedObjects(session, documentId, versionId, current.format_id);
   await file.store(object);
   let payload: Record<string, unknown>;
   try {
@@ -507,6 +520,7 @@ async function acceptBrowserSave(
         outputPrefix,
         digest,
         preservationObject: current.preservation_object,
+        formatId: documentFormatOf(current.format_id).id,
         saveRevision: locked.save_revision,
         bytes: file.bytes,
         humanConfirmed: file.humanConfirmed === true,

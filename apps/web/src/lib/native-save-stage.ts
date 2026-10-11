@@ -17,6 +17,8 @@ interface NativeSaveStage {
   outputPrefix: string;
   digest: string;
   preservationObject: string;
+  /** The document's format (PowerPoint when absent: the office editor path). */
+  formatId?: string;
   saveRevision: number;
   /** What the editor reported: did a person change the file since the last save? */
   editorModified?: boolean | null;
@@ -55,7 +57,7 @@ export async function stageNativeSave(
     jobId: stage.jobId,
     callbackUrl: `${internalAppBaseUrl()}/api/internal/jobs/callback`,
     storageNamespace: storageNamespace(),
-    formatId: currentPresentationFormat.id,
+    formatId: stage.formatId ?? currentPresentationFormat.id,
     inputObject: stage.object,
     baselineInputObject: stage.preservationObject,
     baselineGraphObject: baseline?.graph_object ?? null,

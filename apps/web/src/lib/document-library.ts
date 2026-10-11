@@ -1,4 +1,5 @@
 import { db, ensureSchema } from "./db";
+import { documentBaseName, documentFormatOf } from "./document-formats";
 import { HttpError } from "./http";
 import type {
   ElementGraph,
@@ -61,9 +62,17 @@ export async function renameDocument(
     throw new HttpError(400, "invalid_file_name");
   let name = requested.replace(invalidName, " ").replace(/\s+/g, " ").trim();
   if (!name) throw new HttpError(400, "invalid_file_name");
-  if (!/\.pptx$/i.test(name)) name = `${name}.pptx`;
-  if (name.length > 180) throw new HttpError(400, "file_name_too_long");
   await ensureSchema();
+  // The name keeps the document's own extension (.pptx or .idml).
+  const [owned] = await db()`
+    select format_id from spellbook_documents
+    where id=${documentId} and account_id=${session.accountId}
+  `;
+  if (!owned) throw new HttpError(404, "document_not_found");
+  const base = documentBaseName(name).trim();
+  if (!base) throw new HttpError(400, "invalid_file_name");
+  name = `${base}${documentFormatOf(owned.format_id).extensions[0]}`;
+  if (name.length > 180) throw new HttpError(400, "file_name_too_long");
   const [updated] = await db()`
     update spellbook_documents set file_name=${name}, updated_at=now()
     where id=${documentId} and account_id=${session.accountId}

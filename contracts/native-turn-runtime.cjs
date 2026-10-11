@@ -43,6 +43,11 @@ function isPng(base64) {
     (value, index) => head.charCodeAt(index) === value,
   );
 }
+// An InDesign (IDML) document is observed like a deck: each "slide" is a page
+// and each element a page item; only some operations apply.
+const INDESIGN_INSTRUCTION =
+  "This is an InDesign (IDML) document. Each slide in the observation is a page and each element a page item (text frame, image frame, shape, line or group). Only the operations in engine.supportedOperations work on it (replace_text, replace_text_range, move, resize, delete_element). A story's text is on its first frame; an element with continuedFrom shows more of that same story, and replace_text on either replaces the whole story, with \\n between paragraphs. oversetText is text that does not fit the story's frames; when the issue says fontsSubstituted, the page was laid out with a substitute font and InDesign with the document's own fonts may fit it, so do not cut or shrink text only for that.";
+
 function slideHeadings(state) {
   return JSON.stringify(
     state.slides.map((slide) => {
@@ -846,7 +851,8 @@ ${await input.web.readPage(url, signal)}`,
             ? `Live document revision: ${observed.revision}. Active slide: ${observed.activeSlide + 1}번. Slide headings for navigation only: ${slideHeadings(observed)}. The attached page images and full page data are the editing evidence. Request native_observe for any target page not attached before editing it.`
             : reviewOnly
               ? `This is a review-only step. The user's request was already applied to the SAME open PowerPoint document in this turn: ${JSON.stringify(input.requestText)}. Only native_observe and native_review are available; you cannot edit.`
-              : "You are editing the SAME open PowerPoint document as the user. Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
+              : "You are editing the SAME open document as the user (a PowerPoint deck or an InDesign document). Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
+          ...(observed?.documentFormat === "idml" ? [INDESIGN_INSTRUCTION] : []),
           `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
           "The slide heading list is a navigation index, not enough evidence to edit. The initial attachment and native_observe return actual page image and full element details. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. The edit result includes fresh changed-slide screenshots; inspect them and include review in the final JSON with your message, without a separate native_review call. Only observe if more detail is needed. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Correct any regression, then include the final review. Do not claim an edit happened without a successful tool result.",
           webPolicy.WEB_TOOLS_INSTRUCTION,

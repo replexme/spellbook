@@ -29,6 +29,7 @@ import {
   RenameDialog,
 } from "./file-actions";
 import { ImportDialog } from "./import-dialog";
+import { importAccept } from "@/lib/document-formats";
 
 type Sort = "updated" | "name" | "created";
 type View = "grid" | "list";
@@ -40,8 +41,6 @@ const sortTitles: Record<Sort, string> = {
 };
 
 const VIEW_KEY = "spellbook.home.view";
-const PPTX_ACCEPT =
-  ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 function sorted(documents: LibraryDocument[], sort: Sort) {
   const list = [...documents];
@@ -285,7 +284,7 @@ export function HomeScreen({
                 <span className="ds-empty-mark" aria-hidden="true">
                   <Icon name="upload" size={22} />
                 </span>
-                <strong>PowerPoint 파일을 끌어 놓거나 선택하세요</strong>
+                <strong>PowerPoint나 InDesign(IDML) 파일을 끌어 놓거나 선택하세요</strong>
                 <Button variant="primary" onClick={pickFile}>
                   파일 선택
                 </Button>
@@ -293,7 +292,7 @@ export function HomeScreen({
                   업로드 없이 로컬 파일 열기
                 </ButtonLink>
                 <small>
-                  .pptx · {limit}까지 · 옛 형식(.ppt)은 PowerPoint에서 .pptx로
+                  .pptx·.idml · {limit}까지 · 옛 형식(.ppt)은 PowerPoint에서 .pptx로
                   저장한 뒤 가져오세요
                 </small>
               </div>
@@ -476,7 +475,7 @@ export function HomeScreen({
               </ul>
             )}
             <p className="home-note">
-              PPTX 파일을 이 화면 아무 곳에나 끌어 놓아도 가져올 수 있어요.
+              PPTX·IDML 파일을 이 화면 아무 곳에나 끌어 놓아도 가져올 수 있어요.
             </p>
           </>
         )}
@@ -484,7 +483,7 @@ export function HomeScreen({
       <input
         ref={fileInput}
         type="file"
-        accept={PPTX_ACCEPT}
+        accept={importAccept}
         className="ds-visually-hidden"
         tabIndex={-1}
         aria-hidden="true"
