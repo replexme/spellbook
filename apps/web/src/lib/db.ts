@@ -150,7 +150,17 @@ export async function runMigrations(): Promise<void> {
     create index if not exists spellbook_events_document_id_idx on spellbook_events(document_id, id);
 
     alter table spellbook_documents add column if not exists format_id text not null default 'pptx';
-    alter table spellbook_documents drop constraint if exists spellbook_documents_format_id_check;
+    -- Format checks may carry an older table's name (renamed tables keep constraint names).
+    do $$
+    declare c record;
+    begin
+      for c in select conname from pg_constraint
+        where conrelid = 'spellbook_documents'::regclass and contype = 'c'
+          and pg_get_constraintdef(oid) like '%format_id%'
+      loop
+        execute format('alter table spellbook_documents drop constraint %I', c.conname);
+      end loop;
+    end $$;
     alter table spellbook_documents add constraint spellbook_documents_format_id_check check (format_id in ('pptx','idml','docx','spellbook'));
     alter table spellbook_edit_requests add column if not exists selected_slide_indexes jsonb not null default '[]'::jsonb;
     alter table spellbook_edit_requests add column if not exists input_version_id uuid references spellbook_versions(id);
