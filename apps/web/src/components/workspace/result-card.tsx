@@ -874,7 +874,7 @@ export function RunningCard({
       ) : null}
 
       <p className="run-hint">
-        작업 중에 문서를 직접 고치면 AI가 바뀐 문서를 다시 확인해야 해서
+        작업 중에 되돌리거나 다른 버전으로 돌아가면 AI가 바뀐 문서를 다시 확인해야 해서
         늦어지거나 멈출 수 있어요.
       </p>
       <div>

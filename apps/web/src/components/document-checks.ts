@@ -58,7 +58,7 @@ export function editScopeLines(summary: DocumentSummary | null): CheckItem[] {
     {
       tone: "info",
       label:
-        "글자 문구와 도형의 위치·크기·색은 편집기에서 직접, 또는 AI로 고칠 수 있어요",
+        "글자 문구와 도형의 위치·크기·색은 AI로 고칠 수 있어요",
       evidence: "edit contract operations with minEnginePatch 0",
     },
   ];

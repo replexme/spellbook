@@ -56,7 +56,7 @@ export function PhoneSlides({
           <span className="ds-tabular">
             {count ? current + 1 : 0} / {count}
           </span>{" "}
-          · 보기만 가능 · 직접 편집은 큰 화면에서
+          · 보기만 가능
         </p>
         <IconButton
           icon="arrowRight"

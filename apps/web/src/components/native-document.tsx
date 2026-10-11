@@ -598,7 +598,7 @@ export default function NativeDocument({
             />
           ) : (
             <p className="composer-hint">
-              AI 연결 전에도 편집기에서 직접 고칠 수 있어요.
+              문서는 AI를 연결한 뒤 요청해서 고쳐요.
             </p>
           )}
         </footer>

@@ -144,7 +144,7 @@ test("a PPTX reaches the live canvas, edits, saves and downloads", async ({
     await panel.getByRole("heading", { name: "AI를 연결해 주세요" }).isVisible()
   )
     await expect(
-      panel.getByText("AI 연결 전에도 편집기에서 직접 고칠 수 있어요."),
+      panel.getByText("문서는 AI를 연결한 뒤 요청해서 고쳐요."),
     ).toBeVisible();
 
   const replacement = `Spellbook round trip ${Date.now()}`;
@@ -212,7 +212,7 @@ test("a phone shows saved slides and the AI panel while the editor keeps running
   });
   const slides = page.getByRole("region", { name: "슬라이드 미리보기" });
   await expect(
-    slides.getByText("보기만 가능 · 직접 편집은 큰 화면에서", { exact: false }),
+    slides.getByText("보기만 가능", { exact: false }),
   ).toBeVisible();
   await expect(
     page.getByRole("complementary", { name: "AI와 버전 기록" }),
