@@ -1591,6 +1591,14 @@ ol.connect {
   font-size: var(--ds-text-xs);
 }
 
+/* Buttons that start a new, empty document. */
+.home-create {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--ds-space-2);
+}
+
 .how-steps {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

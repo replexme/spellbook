@@ -60,9 +60,12 @@ import {
   currentPresentationFormat,
   documentFormat,
   documentFormatOf,
+  documentFormats,
+  browserViewFormatIds,
   contentTypeForName,
   type DocumentFormat,
 } from "./document-formats";
+import { blankDocument } from "./blank-documents";
 import { internalAppBaseUrl } from "./runtime-urls";
 import { retryableFailure } from "./upload-reasons";
 import { incomingObjectName } from "./incoming-objects";
@@ -201,6 +204,32 @@ async function registerUpload(
   });
   await dispatchOrFail(dispatch, documentId).catch(() => undefined);
   return { id: documentId };
+}
+
+/** A new, empty document of a format the browser view opens, processed like an upload. */
+export async function createBlankDocument(
+  session: Session,
+  formatId: unknown,
+): Promise<{ id: string }> {
+  const format = documentFormats().find((f) => f.id === formatId);
+  const blank = format && browserViewFormatIds.includes(format.id) ? blankDocument(format.id) : null;
+  if (!format || !blank) throw new HttpError(400, "unsupported_format");
+  await ensureSchema();
+  await assertStorageAvailable(session, {
+    newDocument: true,
+    addingBytes: blank.bytes.length,
+  });
+  const documentId = randomUUID();
+  const versionId = randomUUID();
+  const { documentObject } = uploadObjects(session, documentId, versionId, format);
+  await putObject(documentObject, blank.bytes, format.mimeTypes[0]!);
+  return registerUpload(session, {
+    documentId,
+    versionId,
+    fileName: blank.fileName,
+    format,
+    bytes: blank.bytes.length,
+  });
 }
 
 export async function uploadDocument(
