@@ -1,4 +1,4 @@
-import capabilities from "../../../../contracts/native-edit-capabilities.json";
+import { engineSupports } from "../../../../contracts/native-edit-tools.cjs";
 
 /*
  * What AI cannot change in a file, said before the file is opened. Each
@@ -19,32 +19,14 @@ export type AiEditLimit = {
 
 /** The editor engine as its observations reported it. */
 export type EditorEngineFacts = {
-  patchLevel: string | null;
   supportedOperations: string[];
 };
 
 type GraphElement = { graphicKind?: unknown; externalData?: unknown };
 type GraphSlide = { slideIndex: number; elements?: GraphElement[] };
 
-const operations = capabilities.mutationModel.operations as Record<
-  string,
-  { minEnginePatch?: number }
->;
-
-function patchNumber(patchLevel: string | null) {
-  const match = /^(?:browser-)?undo-v([1-9][0-9]*)$/.exec(patchLevel ?? "");
-  return match ? Number(match[1]) : 0;
-}
-
-/** Same rule the AI connector applies before it sends an edit. */
-export function engineSupports(engine: EditorEngineFacts, operation: string) {
-  const contract = operations[operation];
-  if (!contract) return false;
-  return (
-    (contract.minEnginePatch ?? 0) <= patchNumber(engine.patchLevel) ||
-    engine.supportedOperations.includes(operation)
-  );
-}
+/** Same rule the AI runtime applies before it sends an edit. */
+export { engineSupports };
 
 export function aiEditLimits(
   slides: GraphSlide[],

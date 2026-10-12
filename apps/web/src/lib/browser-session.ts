@@ -28,7 +28,6 @@ import {
 const browserSessionMs = 6 * 60 * 60 * 1000;
 
 export interface BrowserDocumentLaunch {
-  editorKind: "browser";
   documentId: string;
   fileName: string;
   editorUrl: string;
@@ -110,21 +109,11 @@ export async function createBrowserDocumentLaunch(
     if (!current.document_sha256)
       throw new HttpError(409, "document_context_not_ready");
 
-    await sql`
-      update spellbook_native_sessions set
-        wopi_lock=null,lock_updated_at=null,lock_expires_at=null,updated_at=now()
-      where document_id=${documentId} and account_id=${session.accountId}
-        and wopi_lock is not null
-        and coalesce(lock_expires_at,lock_updated_at + interval '30 minutes') <= now()
-    `;
-
     const [existing] = await sql`
       select * from spellbook_native_sessions
       where document_id=${documentId} and account_id=${session.accountId}
       for update
     `;
-    if (existing?.wopi_lock)
-      throw new HttpError(409, "office_editor_save_required");
     if (existing?.status === "validating")
       throw new HttpError(409, "document_processing");
     if (existing) {
@@ -137,7 +126,7 @@ export async function createBrowserDocumentLaunch(
           account_email=${session.email}, editor_mode='browser',
           working_version_id=${current.current_version_id},
           working_sha256=${current.document_sha256}, status='active',
-          wopi_lock=null, lock_updated_at=null, lock_expires_at=null, last_error=null,
+          last_error=null,
           save_revision = s.save_revision + case when exists (
               select 1 from spellbook_native_tasks task
               where task.session_id=s.id and task.save_revision_at_create=s.save_revision
@@ -159,7 +148,6 @@ export async function createBrowserDocumentLaunch(
     return current;
   });
   return {
-    editorKind: "browser",
     documentId,
     fileName: document.file_name,
     editorUrl,
@@ -417,7 +405,7 @@ function savedObjects(session: Session, documentId: string, versionId: string, f
 
 async function activeBrowserSession(session: Session, documentId: string) {
   const [current] = await db()`
-    select s.id,s.working_version_id,s.working_sha256,s.status,s.wopi_lock,s.save_revision,
+    select s.id,s.working_version_id,s.working_sha256,s.status,s.save_revision,
       d.format_id,current.document_object as preservation_object
     from spellbook_native_sessions s
     join spellbook_documents d on d.id=s.document_id and d.account_id=s.account_id
@@ -426,8 +414,6 @@ async function activeBrowserSession(session: Session, documentId: string) {
       and s.editor_mode='browser' and s.expires_at > now()
   `;
   if (!current) throw new HttpError(409, "browser_session_not_active");
-  if (current.wopi_lock)
-    throw new HttpError(409, "office_editor_save_required");
   if (current.status !== "active")
     throw new HttpError(409, "document_processing");
   return current;
@@ -460,14 +446,13 @@ async function acceptBrowserSave(
   if (digest === current.working_sha256) {
     await db().begin(async (sql) => {
       const [locked] = await sql`
-        select working_version_id,working_sha256,status,editor_mode,wopi_lock
+        select working_version_id,working_sha256,status,editor_mode
         from spellbook_native_sessions where id=${current.id} for update
       `;
       if (
         !locked ||
         locked.editor_mode !== "browser" ||
-        locked.status !== "active" ||
-        locked.wopi_lock
+        locked.status !== "active"
       )
         throw new HttpError(409, "browser_session_changed");
       if (
@@ -510,12 +495,12 @@ async function acceptBrowserSave(
   try {
     await db().begin(async (sql) => {
       const [locked] = await sql`
-        select working_version_id,working_sha256,status,wopi_lock,editor_mode,save_revision
+        select working_version_id,working_sha256,status,editor_mode,save_revision
         from spellbook_native_sessions where id=${current.id} for update
       `;
       if (!locked || locked.editor_mode !== "browser")
         throw new HttpError(409, "browser_session_changed");
-      if (locked.status !== "active" || locked.wopi_lock)
+      if (locked.status !== "active")
         throw new HttpError(409, "browser_session_changed");
       if (
         browserRevision(locked.working_version_id, locked.working_sha256) !==

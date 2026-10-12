@@ -2,7 +2,7 @@ import { db, ensureSchema } from "./db";
 import { sessionFromRequest } from "./auth";
 import { HttpError } from "./http";
 import type { Session } from "./models";
-import { verifyWopiToken } from "./wopi-token";
+import { verifyCapabilityToken } from "./capability-token";
 
 // Opening a document requires the central SSO session. Once opened, every
 // editor request carries a signed, document-scoped capability so long-running
@@ -22,7 +22,7 @@ export async function requireNativeRequestSession(
   if (!match) throw new HttpError(401, "invalid_native_capability");
   let claims;
   try {
-    claims = verifyWopiToken(match[1], documentId);
+    claims = verifyCapabilityToken(match[1], documentId);
   } catch {
     throw new HttpError(401, "invalid_native_capability");
   }

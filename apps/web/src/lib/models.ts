@@ -52,13 +52,6 @@ export interface ElementGraph {
   warnings: string[];
 }
 
-export interface EditCommandBatch {
-  contractVersion: "1.0";
-  baseDocumentSha256: string;
-  summary: string;
-  commands: Array<Record<string, unknown>>;
-}
-
 export interface WorkerCallback {
   jobId: string;
   status: "succeeded" | "failed";

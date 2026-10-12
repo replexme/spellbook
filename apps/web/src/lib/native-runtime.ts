@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./http";
+import { subscribeNativeChanges } from "./native-event-signal";
 import type {
   ElementGraph,
   PackageChangeBudgetReport,
@@ -61,6 +62,9 @@ type PermissionMode = "read_only" | "selection" | "slides" | "document";
 // review. Observed edit_batch p90 was 17s (max 20s) on the managed editor;
 // the AI worker waits up to 120s for a task.
 export const NATIVE_TASK_TTL_SECONDS = 300;
+// Longest a runner's task_status call waits for the editor's answer.
+const NATIVE_TASK_STATUS_WAIT_MS = 20_000;
+const TERMINAL_TASK_STATUSES = new Set(["completed", "failed", "expired"]);
 
 // The page's first look at the document (with slide pictures) can be several
 // megabytes. A queued job body is limited to about 1 MiB and the job row is
@@ -418,11 +422,6 @@ export async function pollNativeSession(
       saveRevision: native.save_revision,
       error: native.last_error,
       workingVersionId: native.working_version_id,
-      editorLocked: Boolean(
-        native.wopi_lock &&
-          (!native.lock_expires_at ||
-            new Date(native.lock_expires_at).getTime() > Date.now()),
-      ),
     },
   };
 }
@@ -521,22 +520,13 @@ async function queuedTurnPosition(
   return position > 0 ? { position } : null;
 }
 
-/**
- * Session state without consuming events or tasks. Used while the editor is
- * closed (e.g. before a restore) to learn when the editor released its lock.
- */
+/** Session state without consuming events or tasks. */
 export async function nativeSessionState(session: Session, documentId: string) {
   const native = await ownedSession(session, documentId, undefined, true);
   return {
     status: native.status as string,
     saveRevision: native.save_revision as number,
-    editorSaveCount: Number(native.wopi_put_count ?? 0),
     workingVersionId: native.working_version_id as string,
-    editorLocked: Boolean(
-      native.wopi_lock &&
-        (!native.lock_expires_at ||
-          new Date(native.lock_expires_at).getTime() > Date.now()),
-    ),
   };
 }
 
@@ -704,12 +694,9 @@ export async function completeNativeTask(
  * the file is opened. One row per editor mode; written only when it changes.
  */
 async function recordEditorEngine(editorMode: unknown, engine: unknown) {
-  const facts = engine as {
-    patchLevel?: unknown;
-    supportedOperations?: unknown;
-  } | null;
+  const facts = engine as { supportedOperations?: unknown } | null;
   if (
-    (editorMode !== "wopi" && editorMode !== "browser") ||
+    editorMode !== "browser" ||
     !facts ||
     !Array.isArray(facts.supportedOperations)
   )
@@ -721,14 +708,13 @@ async function recordEditorEngine(editorMode: unknown, engine: unknown) {
     )
     .slice(0, 500)
     .sort();
-  const patchLevel =
-    typeof facts.patchLevel === "string" ? facts.patchLevel.slice(0, 64) : null;
+  // The engine reports what it runs; the historical patch_level column stays empty.
   await db()`
     insert into spellbook_editor_engines (editor_mode, patch_level, supported_operations, seen_at)
-    values (${editorMode}, ${patchLevel}, ${db().json(operations)}, now())
+    values (${editorMode}, null, ${db().json(operations)}, now())
     on conflict (editor_mode) do update set
-      patch_level=excluded.patch_level, supported_operations=excluded.supported_operations, seen_at=now()
-    where spellbook_editor_engines.patch_level is distinct from excluded.patch_level
+      patch_level=null, supported_operations=excluded.supported_operations, seen_at=now()
+    where spellbook_editor_engines.patch_level is not null
       or spellbook_editor_engines.supported_operations is distinct from excluded.supported_operations
   `.catch(() => undefined);
 }
@@ -834,10 +820,49 @@ export async function executeNativeTool(input: Record<string, unknown>) {
   }
   if (input.operation === "task_status") {
     const taskId = typeof input.taskId === "string" ? input.taskId : "";
-    const [task] =
-      await db()`select status,result,error from spellbook_native_tasks
-      where id=${taskId} and session_id=${sessionId} and turn_id=${turnId}`;
-    if (!task) throw new HttpError(404, "native_task_not_found");
+    const read = async () => {
+      const [task] =
+        await db()`select status,result,error from spellbook_native_tasks
+        where id=${taskId} and session_id=${sessionId} and turn_id=${turnId}`;
+      if (!task) throw new HttpError(404, "native_task_not_found");
+      return task;
+    };
+    let task = await read();
+    // The runner may wait here for the editor's answer (up to 20 s), woken
+    // by the task's change notification, instead of asking again and again.
+    const waitMs = Math.min(
+      Math.max(
+        typeof input.waitMs === "number" && Number.isFinite(input.waitMs)
+          ? input.waitMs
+          : 0,
+        0,
+      ),
+      NATIVE_TASK_STATUS_WAIT_MS,
+    );
+    if (waitMs > 0 && !TERMINAL_TASK_STATUSES.has(String(task.status))) {
+      let wake: (() => void) | null = null;
+      const unsubscribe = await subscribeNativeChanges(sessionId, () =>
+        wake?.(),
+      );
+      try {
+        const deadline = Date.now() + waitMs;
+        task = await read(); // after subscribing, so no change is missed
+        while (
+          !TERMINAL_TASK_STATUSES.has(String(task.status)) &&
+          Date.now() < deadline
+        ) {
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+            // A lost notification costs at most a second.
+            setTimeout(resolve, Math.min(deadline - Date.now(), 1_000));
+          });
+          wake = null;
+          task = await read();
+        }
+      } finally {
+        unsubscribe();
+      }
+    }
     return task;
   }
   if (input.operation === "event") {

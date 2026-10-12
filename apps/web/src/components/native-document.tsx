@@ -32,8 +32,6 @@ import {
   type DocumentFormat,
 } from "@/lib/document-formats";
 
-type LaunchPhase = "checking" | "starting" | "slow" | "failed";
-
 type Failure = {
   title: string;
   /** Plain text, or text that names the file's own program. */
@@ -114,12 +112,10 @@ const noop = () => undefined;
  */
 export default function NativeDocument({
   documentId,
-  launchMode,
   aiConnector,
   showAds = false,
 }: {
   documentId: string;
-  launchMode: "wopi" | "browser";
   aiConnector: AiConnectorConfig;
   /** The account's plan shows the managed service's ad strip. */
   showAds?: boolean;
@@ -128,7 +124,6 @@ export default function NativeDocument({
   const [failure, setFailure] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [tries, setTries] = useState(1);
-  const [phase, setPhase] = useState<LaunchPhase>("checking");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [summary, setSummary] = useState<DocumentSummary | null>(null);
   const [history, setHistory] = useState<TurnHistoryItem[]>([]);
@@ -180,12 +175,8 @@ export default function NativeDocument({
   const load = useCallback(
     async (signal: AbortSignal) => {
       const response = await fetch(
-        `/api/documents/${documentId}/${launchMode === "browser" ? "browser" : "native"}/launch`,
-        {
-          method: launchMode === "browser" ? "POST" : "GET",
-          cache: "no-store",
-          signal,
-        },
+        `/api/documents/${documentId}/browser/launch`,
+        { method: "POST", cache: "no-store", signal },
       );
       const value = (await response.json()) as NativeLaunch & {
         error?: string;
@@ -201,29 +192,22 @@ export default function NativeDocument({
           value.error ?? "",
         )
       ) {
-        setPhase("checking");
         return "retry" as const;
       }
-      if (response.status === 503 && value.error === "office_editor_starting") {
-        setPhase("starting");
-        return "retry" as const;
-      }
-      setPhase("failed");
       setFailure(
         value.error && failures[value.error] ? value.error : "unknown",
       );
       return "failed" as const;
     },
-    [documentId, launchMode],
+    [documentId],
   );
   const refuseBrowser = useCallback(() => {
     setLaunch(null);
-    setPhase("failed");
     setFailure("browser_unsupported");
   }, []);
   useEffect(() => {
     // Checked before anything is downloaded or a session is opened.
-    if (launchMode === "browser" && !browserEngineSupported()) {
+    if (!browserEngineSupported()) {
       refuseBrowser();
       return;
     }
@@ -238,7 +222,6 @@ export default function NativeDocument({
           timer = setTimeout(check, 2_000);
       } catch (caught) {
         if (!controller.signal.aborted) {
-          setPhase("failed");
           setFailure(
             caught instanceof TypeError || !navigator.onLine
               ? "network"
@@ -252,7 +235,7 @@ export default function NativeDocument({
       controller.abort();
       clearTimeout(timer);
     };
-  }, [load, attempt, launchMode, refuseBrowser]);
+  }, [load, attempt, refuseBrowser]);
   useEffect(() => {
     const startedAt = Date.now();
     setElapsedSeconds(0);
@@ -265,7 +248,6 @@ export default function NativeDocument({
     setLaunch(null);
     setFailure(null);
     setRetryIn(null);
-    setPhase("checking");
     setAttempt((value) => value + 1);
   }, []);
   const retryAgain = useCallback(() => {
@@ -368,7 +350,6 @@ export default function NativeDocument({
         initialHistory={history}
         initialQueued={queued}
         onReload={retry}
-        onUnsupported={refuseBrowser}
         showAds={showAds}
       />
     );
@@ -384,7 +365,7 @@ export default function NativeDocument({
     ? "인터넷 연결이 끊겼어요. 연결되면 이어서 열어요."
     : slow
       ? "평소보다 오래 걸려요. 계속 시도하고 있어요."
-      : phase === "starting" || elapsedSeconds >= 8
+      : elapsedSeconds >= 8
         ? "편집기 준비 중 · 처음 열 때는 1분쯤 걸려요"
         : "파일을 확인하고 있어요";
   const retryLine =

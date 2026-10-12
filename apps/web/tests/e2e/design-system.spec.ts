@@ -4,9 +4,10 @@ import path from "node:path";
 
 /*
  * The redesigned product screens, driven by mocked APIs. The workspace test
- * uses a stand-in editor page that speaks the real bridge handshake
- * (document loaded → extension ready → port) so the AI panel receives the
- * same events it would from Collabora.
+ * uses a stand-in document view that speaks the real bridge (protocol
+ * version 2: spellbook.document-view-ready → spellbook.document-view-connect
+ * with a port → ready / open / open-complete), so the AI panel receives the
+ * same events it would from the document view.
  */
 
 const screenshotDir = path.resolve(
@@ -141,43 +142,46 @@ async function slidePng(page: Page, title: string, bold: boolean) {
 const editorPage = `<!doctype html><html lang="ko"><head><meta charset="utf-8"></head>
 <body style="margin:0;height:100vh;display:grid;place-items:center;background:#e5e9ec;font-family:sans-serif">
   <div style="width:min(760px,80%);aspect-ratio:16/9;background:#fff;box-shadow:0 8px 24px rgb(0 0 0 / 12%);padding:40px;box-sizing:border-box">
-    <h1 style="margin:0;font-size:32px">하반기 시장 현황</h1><p style="color:#555">편집기 자리</p>
+    <h1 style="margin:0;font-size:32px">하반기 시장 현황</h1><p style="color:#555">문서 화면 자리</p>
   </div>
   <script>
-    const send = (value) => parent.postMessage(value, "*");
-    // What the page asked the editor to do, for the test to read.
+    // What the page asked the document view to do, for the test to read.
     const calls = (window.calls = []);
-    send(JSON.stringify({ MessageId: "App_LoadingStatus", Values: { Status: "Document_Loaded" } }));
     addEventListener("message", (event) => {
-      let data = event.data;
-      if (typeof data === "string") { try { data = JSON.parse(data); } catch { return; } }
-      if (data && data.MessageId) calls.push(data.MessageId + (data.Values && data.Values.Command ? " " + data.Values.Command : ""));
-      if (data && data.type === "spellbook.open-extension")
-        send({ type: "spellbook.extension-ready", bridgeSessionId: "e2e-bridge" });
-      if (data && data.type === "spellbook.ensure-edit") {
-        calls.push("ensure-edit");
-        send({ type: "spellbook.edit-mode", edit: true });
-      }
-      if (data && data.type === "spellbook.connect" && event.ports[0]) {
-        const port = event.ports[0];
-        port.onmessage = (message) => {
-          const request = message.data && message.data.request;
-          if (!request || typeof message.data.id !== "string") return;
-          calls.push(request.operation);
-          if (request.operation === "undo_turn")
-            port.postMessage(window.failUndo
-              ? { id: message.data.id, error: "document_changed_since_turn" }
-              : { id: message.data.id, value: { undone: request.steps } });
-          else port.postMessage({ id: message.data.id, value: { activeSlide: request.slideIndex ?? 0, revealed: request.elementId ?? null } });
-        };
-        port.postMessage({ type: "ready" });
-        port.postMessage({ type: "selection", value: {
-          activeSlide: 2, slideCount: 12, selectionCount: 1,
-          selected: [{ elementId: "2/0", name: "Title 1", kind: "com.sun.star.presentation.TitleTextShape", text: "하반기 시장 현황" }],
-          editableOperations: ["replace_text"],
-        } });
-      }
+      const data = event.data;
+      if (!data || data.type !== "spellbook.document-view-connect" || data.protocolVersion !== 2 || !event.ports[0]) return;
+      const port = (window.port = event.ports[0]);
+      port.onmessage = (message) => {
+        const data = message.data || {};
+        if (data.type === "open") {
+          port.postMessage({ type: "open-complete" });
+          port.postMessage({ type: "selection", value: {
+            activeSlide: 2, slideCount: 12, selectionCount: 1,
+            selected: [{ elementId: "2/0", name: "Title 1", kind: "title", text: "하반기 시장 현황" }],
+            editableOperations: ["replace_text"],
+          } });
+          return;
+        }
+        if (data.type === "save-now" || data.type === "undo" || data.type === "redo" || data.type === "show-page") {
+          calls.push(data.type);
+          // The mocked poll reports every save done; a test that needs the
+          // changes to count as saved sets window.saveClears.
+          if (data.type === "save-now" && window.saveClears)
+            port.postMessage({ type: "modified", modified: false });
+          return;
+        }
+        const request = data.request;
+        if (!request || typeof data.id !== "string") return;
+        calls.push(request.operation);
+        if (request.operation === "undo_turn")
+          port.postMessage(window.failUndo
+            ? { id: data.id, error: "document_changed_since_turn" }
+            : { id: data.id, value: { undone: request.steps } });
+        else port.postMessage({ id: data.id, value: { activeSlide: request.slideIndex ?? 0, revealed: request.elementId ?? null } });
+      };
+      port.postMessage({ type: "ready" });
     });
+    parent.postMessage({ type: "spellbook.document-view-ready", protocolVersion: 2, bridgeSessionId: "e2e-bridge" }, "*");
   </script>
 </body></html>`;
 
@@ -200,8 +204,6 @@ test.describe("file home", () => {
         return route.fulfill({ json: { documents: library } });
       if (url.pathname === "/api/ai/account/status")
         return route.fulfill({ json: connectedAi });
-      if (url.pathname === "/api/office/warm")
-        return route.fulfill({ status: 204 });
       return route.fulfill({ status: 404, json: {} });
     });
   });
@@ -406,6 +408,7 @@ test.describe("file home", () => {
 test.describe("workspace", () => {
   const id = "66666666-6666-4666-8666-666666666666";
   const turnId = "77777777-7777-4777-8777-777777777777";
+  const deckRevision = `"v-after:${"a".repeat(64)}"`;
   const taskBefore = "88888888-8888-4888-8888-888888888888";
   const taskAfter = "99999999-9999-4999-8999-999999999999";
   const summary = {
@@ -484,17 +487,29 @@ test.describe("workspace", () => {
       const base = `/api/documents/${id}`;
       if (pathname === "/api/ai/account/status")
         return route.fulfill({ json: connectedAi });
-      if (pathname === `${base}/native/launch`)
+      if (pathname === `${base}/browser/launch`)
         return route.fulfill({
           json: {
             documentId: id,
             fileName: "2026 하반기 사업계획.pptx",
-            editorKind: "wopi",
             editorUrl: "http://localhost:3112/mock-office",
-            accessToken: "e2e-token",
+            accessToken: "",
+            revision: deckRevision,
             expiresAt: Date.now() + 600_000,
             apiBase: `http://localhost:3112${base}/native`,
+            contentApiBase: `http://localhost:3112${base}/browser`,
+            maxBytes: 50 * 1024 * 1024,
             aiConnector: { mode: "internal" },
+          },
+        });
+      // The deck the document view opens; no direct storage link here.
+      if (pathname === `${base}/browser/contents`)
+        return route.fulfill({
+          body: Buffer.from("PK-e2e-deck"),
+          headers: {
+            etag: deckRevision,
+            "content-type":
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           },
         });
       if (pathname === `${base}/summary`)
@@ -551,7 +566,6 @@ test.describe("workspace", () => {
               saveRevision: ++saveRevision,
               error: options.saveFailed?.() ? "test_save_validation_failed" : null,
               workingVersionId: "v-after",
-              editorLocked: false,
             },
           },
         });
@@ -587,7 +601,7 @@ test.describe("workspace", () => {
         chatCalls.push({
           body: route.request().postDataJSON(),
           savesBefore: (await editorCalls(page)).filter(
-            (call) => call === "Action_Save",
+            (call) => call === "save-now",
           ).length,
         });
         return route.fulfill({
@@ -609,7 +623,6 @@ test.describe("workspace", () => {
             status: "active",
             saveRevision: 1,
             workingVersionId: "v-after",
-            editorLocked: false,
           },
         });
       if (pathname === `${base}/versions`)
@@ -690,12 +703,12 @@ test.describe("workspace", () => {
     await page.goto(`/documents/${id}`);
     await expect(page.getByRole("status").filter({ hasText: "저장됨" })).toBeVisible();
     await page.frame({ name: "spellbook-office" })!.evaluate(() => {
-      parent.postMessage(JSON.stringify({ MessageId: "Doc_ModifiedStatus", Values: { Modified: true } }), "*");
+      (window as unknown as { port: MessagePort }).port.postMessage({ type: "modified", modified: true });
     });
     await page.getByRole("button", { name: "PPTX 내려받기" }).click();
     const dialog = page.getByRole("dialog", { name: "내려받기" });
     await dialog.getByRole("button", { name: "저장하고 내려받기" }).click();
-    await expect.poll(() => editorCalls(page)).toContain("Action_Save");
+    await expect.poll(() => editorCalls(page)).toContain("save-now");
     failed = true;
     await expect(dialog.getByRole("alert")).toContainText("이번 변경은 저장되지 않았어요");
     await expect(dialog.getByRole("link", { name: "마지막 저장본 내려받기" })).toHaveAttribute("href", `/api/documents/${id}/download`);
@@ -846,7 +859,7 @@ test.describe("workspace", () => {
     await expect(
       card.getByRole("button", { name: "되돌리기", exact: true }),
     ).toHaveCount(0);
-    await expect.poll(() => editorCalls(page)).toContain("Action_Save");
+    await expect.poll(() => editorCalls(page)).toContain("save-now");
     await shot(page, "workspace-undone");
   });
 
@@ -916,11 +929,19 @@ test.describe("workspace", () => {
     await expect.poll(() => editorCalls(page)).toContain("reveal");
   });
 
-  test("the first request of an editor load saves before the AI starts", async ({
+  test("unsaved changes are saved before the AI starts", async ({
     page,
   }) => {
     const { chatCalls } = await mockWorkspace(page);
     await page.goto(`/documents/${id}`);
+    await expect(
+      page.getByRole("status").filter({ hasText: "저장됨" }),
+    ).toBeVisible({ timeout: 20_000 });
+    await page.frame({ name: "spellbook-office" })!.evaluate(() => {
+      const view = window as unknown as { port: MessagePort; saveClears: boolean };
+      view.saveClears = true;
+      view.port.postMessage({ type: "modified", modified: true });
+    });
     const box = page.getByRole("textbox", { name: "AI에게 요청" });
     await page
       .getByRole("button", { name: /^AI가 바꿀 수 있는 범위:/ })
@@ -938,7 +959,7 @@ test.describe("workspace", () => {
     await box.fill("제목을 한 줄로 줄여 줘");
     await box.press("Enter");
     await expect.poll(() => chatCalls.length).toBe(1);
-    // The save the AI's edits are checked against happened first, in this editor load.
+    // The changes on screen were saved first, so the AI's edits are checked against them.
     expect(chatCalls[0]!.savesBefore).toBe(1);
     expect(chatCalls[0]!.body).toMatchObject({
       text: "제목을 한 줄로 줄여 줘",
@@ -955,8 +976,8 @@ test.describe("workspace", () => {
       page.getByRole("status").filter({ hasText: "저장됨" }),
     ).toBeVisible({ timeout: 20_000 });
     const saves = async () =>
-      (await editorCalls(page)).filter((call) => call === "Action_Save").length;
-    // Opening the editor does not save by itself; the first AI request of a load does.
+      (await editorCalls(page)).filter((call) => call === "save-now").length;
+    // Opening the document does not save by itself.
     await page.waitForTimeout(1_000);
     expect(await saves()).toBe(0);
     await page.locator(".ws-topbar").click({ position: { x: 400, y: 10 } });
@@ -965,7 +986,7 @@ test.describe("workspace", () => {
     await page.keyboard.press("ControlOrMeta+z");
     await expect
       .poll(() => editorCalls(page))
-      .toContain("Send_UNO_Command .uno:Undo");
+      .toContain("undo");
     // In the request box the keys stay with the text.
     const calls = (await editorCalls(page)).length;
     await page.getByRole("textbox", { name: "AI에게 요청" }).click();
@@ -996,9 +1017,8 @@ test.describe("workspace", () => {
     await expect(
       page.getByRole("button", { name: "PPTX 내려받기" }),
     ).toBeVisible();
-    // The editor keeps running out of sight and is asked into edit mode.
+    // The document view keeps running out of sight for AI requests.
     await expect(page.getByTitle("PPT 편집기")).toBeAttached();
-    await expect.poll(() => editorCalls(page)).toContain("ensure-edit");
     await panel
       .locator("article.rc")
       .getByRole("button", { name: "슬라이드에서 보기" })

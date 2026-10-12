@@ -251,9 +251,9 @@ export async function listVersions(
 
 /**
  * Makes an earlier version current by adding a new version with the same
- * bytes. Nothing is deleted; the replaced state stays in history. The WOPI
- * lock is cleared so an editor still holding the old document cannot save
- * over the restored one.
+ * bytes. Nothing is deleted; the replaced state stays in history. The
+ * session's working version changes, so a page still holding the old
+ * document cannot save over the restored one.
  */
 export async function restoreVersion(
   session: Session,
@@ -304,7 +304,6 @@ export async function restoreVersion(
       await sql`
         update spellbook_native_sessions set working_version_id=${restoredId},
           working_sha256=${target.document_sha256}, status='active', last_error=null,
-          wopi_lock=null, lock_updated_at=null, lock_expires_at=null,
           save_revision=save_revision+1, updated_at=now()
         where id=${native.id}
       `;

@@ -43,11 +43,12 @@
           "editor": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["kind", "wopiApp", "wopiAction"],
+            "required": ["kind"],
             "properties": {
-              "kind": { "enum": ["wopi", "native", "none"] },
-              "wopiApp": { "type": ["string", "null"] },
-              "wopiAction": { "type": ["string", "null"] }
+              "kind": {
+                "enum": ["browser", "native", "none"],
+                "description": "browser: opened in the browser document view; native: a planned Spellbook editor; none: no editor yet."
+              }
             }
           },
           "semantics": {

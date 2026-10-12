@@ -189,13 +189,13 @@ describe("request scope", () => {
     );
   });
 
-  it("keeps the always-editable list inside what every engine can run", () => {
+  it("keeps the always-suggested list inside the edit contract", () => {
     const operations = capabilities.mutationModel.operations as Record<
       string,
-      { minEnginePatch: number }
+      unknown
     >;
     for (const operation of ALWAYS_EDITABLE)
-      expect(operations[operation]?.minEnginePatch).toBe(0);
+      expect(operations[operation]).toBeDefined();
   });
 });
 

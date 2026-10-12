@@ -612,12 +612,13 @@ export class AppServerClient {
             typeof params.callId !== "string"
           )
             throw new Error("Unknown tool.");
-          return options.onTool(
+          const result = await options.onTool(
             params.tool,
             params.arguments,
             params.callId,
             abort.signal,
           );
+          return this.withImagesAsInput(result, threadId, turnId, params);
         });
         options.signal?.addEventListener("abort", cancel, { once: true });
         if (options.signal?.aborted) {
@@ -653,6 +654,46 @@ export class AppServerClient {
           reject(error instanceof Error ? error : new Error(String(error)));
         });
     });
+  }
+
+  /**
+   * The model does not see an image inside a tool result (verified 2026-10-12
+   * with Codex 0.160.1: it reads the text and gets no picture), but it does see
+   * images given as input. The result keeps its text and the pictures follow at
+   * once as input steered into the same turn, before the model's next step.
+   */
+  private async withImagesAsInput(
+    result: Awaited<ReturnType<AgentTurnOptions["onTool"]>>,
+    threadId: string,
+    turnId: string | undefined,
+    params: Record<string, unknown>,
+  ) {
+    const images = result.contentItems.filter(
+      (item): item is { type: "inputImage"; imageUrl: string } =>
+        item.type === "inputImage",
+    );
+    if (!images.length || !turnId) return result;
+    await this.request("turn/steer", {
+      threadId,
+      expectedTurnId: turnId,
+      input: [
+        {
+          type: "text",
+          text: `Screenshots returned by ${String(params.tool)} (call ${String(params.callId)}), in the order its result lists them:`,
+        },
+        ...images.map((image) => ({ type: "image", url: image.imageUrl })),
+      ],
+    });
+    return {
+      ...result,
+      contentItems: [
+        ...result.contentItems.filter((item) => item.type !== "inputImage"),
+        {
+          type: "inputText" as const,
+          text: `${images.length} screenshot(s) of this result follow as the next input message.`,
+        },
+      ],
+    };
   }
 
   onNotification(

@@ -72,9 +72,8 @@ export type Suggestion = { text: string; scope: PermissionMode; note?: string };
 export type SuggestionGroup = { title: string; items: Suggestion[] };
 
 /**
- * Edits every engine can run (patch level 0 in the edit contract; a test
- * holds this list to the contract). Used when an older editor does not
- * report its editable operations.
+ * Edits suggested even before the document view reports a selection's
+ * editable operations (a test holds this list to the edit contract).
  */
 export const ALWAYS_EDITABLE = new Set([
   "replace_text",

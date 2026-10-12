@@ -9,7 +9,6 @@ import type {
 import { deleteDocumentObjects, getJsonObject } from "./storage";
 import { assetUrl, isUuid, previewUrl } from "./document-history";
 import { aiEditLimits, type EditorEngineFacts } from "./ai-edit-limits";
-import { configuredEditorMode } from "./editor-mode";
 import type { DocumentSummary, LibraryDocument } from "./history-types";
 
 export type { DocumentSummary, LibraryDocument };
@@ -137,11 +136,10 @@ export async function documentSummary(
     : null;
   const [engineRow] = await db()`
     select patch_level, supported_operations from spellbook_editor_engines
-    where editor_mode=${configuredEditorMode()}
+    where editor_mode='browser'
   `;
   const engine: EditorEngineFacts | null = engineRow
     ? {
-        patchLevel: engineRow.patch_level ?? null,
         supportedOperations: Array.isArray(engineRow.supported_operations)
           ? engineRow.supported_operations
           : [],

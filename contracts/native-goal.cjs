@@ -26,10 +26,6 @@ function normalizeActiveGoal(value, scope) {
       kind: check.kind,
       elementId: check.elementId,
       shape: check.shape,
-      ...(typeof check.mediaFingerprint === "string" &&
-      /^sha256:[a-f0-9]{64}$/.test(check.mediaFingerprint)
-        ? { mediaFingerprint: check.mediaFingerprint }
-        : {}),
     });
   }
   return { version: 1, scope, request: value.request, checks };
@@ -54,9 +50,7 @@ function goalChecks(request, observation, permission) {
     .flatMap((slide) => flatten(slide.elements))
     .filter(
       (element) =>
-        ["image", "picture"].includes(
-          element.kind ?? element.type ?? element.onlyoffice?.type,
-        ) &&
+        element.kind === "image" &&
         (permission.mode !== "selection" ||
           permission.elementIds.includes(element.elementId)),
     );
@@ -77,25 +71,7 @@ function goalChecks(request, observation, permission) {
     kind: "image_shape",
     elementId: element.elementId,
     shape: circle ? "circle" : "rectangle",
-    ...(fingerprint(element.elementId, observation)
-      ? { mediaFingerprint: fingerprint(element.elementId, observation) }
-      : {}),
   }));
-}
-function fingerprint(elementId, observation) {
-  const [slideIndex, ...indexes] = elementId.split("/").map(Number);
-  let value = observation.slides.find(
-    (slide) => slide.slideIndex === slideIndex,
-  )?.onlyoffice;
-  let drawing;
-  for (const index of indexes) {
-    drawing = (drawing?.groupChildren ?? value?.drawings)?.[index];
-    value = null;
-  }
-  return typeof drawing?.imagePath === "string" &&
-    /^sha256:[a-f0-9]{64}$/.test(drawing.imagePath)
-    ? drawing.imagePath
-    : null;
 }
 function verifyGoalChecks(checks, observation) {
   const failures = [];
@@ -106,15 +82,10 @@ function verifyGoalChecks(checks, observation) {
     );
     let element = slide;
     for (const index of parts.slice(1)) element = element?.elements?.[index];
-    const preset =
-      element?.onlyoffice?.geometry?.preset ??
-      (parts.length === 2
-        ? slide?.onlyoffice?.drawings?.[parts[1]]?.geometry?.preset
-        : null);
+    // The picture's outline as the engine describes it (no outline is a rectangle).
+    const preset = element?.geometry ?? "rect";
     if (
       !element ||
-      (check.mediaFingerprint &&
-        fingerprint(check.elementId, observation) !== check.mediaFingerprint) ||
       preset !== (check.shape === "circle" ? "ellipse" : "rect") ||
       (check.shape === "circle" &&
         (!Number.isFinite(element.width) ||
@@ -143,40 +114,7 @@ function prepareActiveGoal(request, previous, scope) {
     ? { version: 1, scope, request: request.slice(0, 2000), checks: [] }
     : normalized;
 }
-// A complete, unambiguous primitive request needs no model planning round.
-// Additional actions, ambiguous pictures and non-square framing use the agent.
-function simpleGoalCommands(request, checks, observation, permission) {
-  if (
-    permission.mode === "read_only" ||
-    checks.length !== 1 ||
-    checks[0].shape !== "circle" ||
-    !/^(?:(?:이|현재|프로필)\s*)?사진(?:을|은)?\s*원형으로\s*(?:잘라(?:서\s*들어가게)?|바꿔|변경해|만들어)\s*(?:해\s*)?(?:줘|주세요)(?:[.!]|\s*(?:지금은|현재는)\s*(?:너무\s*)?(?:네모(?:라|여서)|사각형(?:이라|이라서))\s*(?:부자연스러워|부자연스러워요)[.!]?)?$/u.test(
-      request.trim(),
-    )
-  )
-    return null;
-  const check = checks[0];
-  const slide = observation.slides.find((slide) =>
-    slide.elements.some((element) => element.elementId === check.elementId),
-  );
-  const element = slide?.elements.find(
-    (element) => element.elementId === check.elementId,
-  );
-  if (
-    !element ||
-    !Number.isFinite(element.width) ||
-    Math.abs(element.width - element.height) > 1 ||
-    element.onlyoffice?.locks?.noCrop ||
-    element.onlyoffice?.locks?.noChangeShapeType ||
-    verifyGoalChecks(checks, observation).passed
-  )
-    return null;
-  return [
-    { op: "crop_image", elementId: check.elementId, geometry: "ellipse" },
-  ];
-}
 module.exports = {
-  simpleGoalCommands,
   prepareActiveGoal,
   normalizeActiveGoal,
   goalChecks,

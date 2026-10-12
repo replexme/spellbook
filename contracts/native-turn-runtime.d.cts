@@ -16,7 +16,7 @@ export interface NativeObservation {
     pngBytes?: number[];
     pngBase64?: string;
   }>;
-  engine?: { patchLevel?: string; supportedOperations?: string[] };
+  engine?: { supportedOperations?: string[] };
   changedSlideIndexes: number[];
   visualEvidenceComplete: boolean;
   layoutAudit?: {

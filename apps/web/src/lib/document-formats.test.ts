@@ -14,12 +14,12 @@ import {
 describe("document format registry", () => {
   it("keeps the current PPTX vertical available", () => {
     expect(availableDocumentFormatForFile("deck.PPTX")?.id).toBe("pptx");
-    expect(currentPresentationFormat.editor.wopiApp).toBe("impress");
+    expect(currentPresentationFormat.editor.kind).toBe("browser");
   });
 
   it("opens InDesign documents in the browser document view", () => {
     expect(availableDocumentFormatForFile("issue.IDML")?.id).toBe("idml");
-    expect(browserViewFormatIds).toContain("idml");
+    expect(browserViewFormatIds).toEqual(["pptx", "idml"]);
     expect(importAccept).toContain(".idml");
     expect(contentTypeForName("issue.idml")).toBe("application/vnd.adobe.indesign-idml-package");
     expect(contentTypeForName("deck.pptx")).toBe(currentPresentationFormat.mimeTypes[0]);

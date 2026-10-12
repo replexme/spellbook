@@ -4,7 +4,6 @@ import { aiRequestError } from "@/lib/ai-errors";
 import { reportSaveFailure } from "@/lib/save-failure-report";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Banner, Icon, IconButton, Tabs } from "@/design-system";
-import { collaboraCssVariables } from "@/design-system/editor-theme";
 import type { AvailableModel, ModelSettings } from "@/lib/ai-models";
 import type {
   DocumentSummary,
@@ -71,25 +70,19 @@ import { restoreLead, type VersionEntry } from "./workspace/version-entries";
 import { VersionPanel } from "./workspace/version-panel";
 import { WorkspaceAd, workspaceAdEnabled } from "./workspace/workspace-ad";
 
-interface LaunchBase {
+/** An opened document: the document view to load and the APIs it uses. */
+export interface NativeLaunch {
   documentId: string;
   fileName: string;
+  /** The document view page, loaded in this page's frame. */
   editorUrl: string;
   accessToken: string;
   expiresAt: number;
   apiBase: string;
-  aiConnector: AiConnectorConfig;
-}
-
-interface WopiLaunch extends LaunchBase {
-  editorKind: "wopi";
-}
-
-interface BrowserLaunch extends LaunchBase {
-  editorKind: "browser";
   contentApiBase: string;
   revision: string;
   maxBytes: number;
+  aiConnector: AiConnectorConfig;
 }
 
 // Save refusals that a person can act on; each has its own explanation.
@@ -98,8 +91,6 @@ const SAVE_REFUSALS = new Set([
   "document_limit_reached",
   "direct_upload_blocked",
 ]);
-
-export type NativeLaunch = WopiLaunch | BrowserLaunch;
 
 type Message = LiveMessage;
 export type PendingTurn = {
@@ -196,7 +187,6 @@ export function NativeWorkspace({
   initialHistory = [],
   initialQueued = null,
   onReload,
-  onUnsupported,
   showAds = false,
 }: {
   launch: NativeLaunch;
@@ -208,36 +198,27 @@ export function NativeWorkspace({
   /** A request written on the opening screen, sent once the editor is ready. */
   initialQueued?: PendingTurn | null;
   onReload?: () => void;
-  /** The browser editor frame found this browser cannot run it. */
-  onUnsupported?: () => void;
   /** The account's plan shows the managed service's ad strip. */
   showAds?: boolean;
 }) {
-  const office = useRef<HTMLIFrameElement>(null),
-    form = useRef<HTMLFormElement>(null);
+  const office = useRef<HTMLIFrameElement>(null);
   const port = useRef<MessagePort | null>(null),
-    bridgeSession = useRef<string | null>(null),
-    submitted = useRef(false);
+    bridgeSession = useRef<string | null>(null);
   const input = useRef<HTMLTextAreaElement>(null),
     bottom = useRef<HTMLDivElement>(null),
     assetInput = useRef<HTMLInputElement>(null);
   const turnRequested = useRef(false),
-    /** This editor load saved once before AI edits, so they are checked against its own export. */
-    baselineSaved = useRef(false),
-    baselineSaveCount = useRef<number | null>(null),
     saveRevision = useRef(0),
     pendingSaveRevision = useRef<number | null>(null),
     pendingTurn = useRef<PendingTurn | null>(null),
     editorModified = useRef(false),
-    /** Saves a person's browser-editor edits shortly after they start. */
+    /** Saves unsaved changes in the document view shortly after they start. */
     browserAutosave = useRef<ReturnType<typeof setTimeout> | null>(null),
     aiRunning = useRef(false),
     reviewPending = useRef(false),
     downloadAfterRevision = useRef<number | null>(null),
     browserOpening = useRef(false),
-    browserRevision = useRef(
-      launch.editorKind === "browser" ? launch.revision : "",
-    ),
+    browserRevision = useRef(launch.revision),
     pendingBrowserSave = useRef<{
       requestId: string;
       revision: string | null;
@@ -343,7 +324,6 @@ export function NativeWorkspace({
   const [undoing, setUndoing] = useState<string | null>(null);
   const [freshTurns, setFreshTurns] = useState<Set<string>>(new Set());
   const [phoneSlide, setPhoneSlide] = useState(0);
-  const [editModeConfirmed, setEditModeConfirmed] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<RestoreTarget | null>(
     null,
@@ -550,37 +530,32 @@ export function NativeWorkspace({
     },
     [ai.browserKey, ai.mode, api, dispatchLocalJob],
   );
-  const sendOffice = useCallback(
-    (MessageId: string, Values: unknown = {}) => {
-      if (launch.editorKind === "browser") {
-        port.current?.postMessage({
-          type: "command",
-          messageId: MessageId,
-          values: Values,
-        });
-        return;
-      }
-      office.current?.contentWindow?.postMessage(
-        JSON.stringify({ MessageId, SendTime: Date.now(), Values }),
-        origin,
-      );
+  /**
+   * A command to the document view over its port (protocol version 2):
+   * save-now, undo, redo or show-page (a 0-based slide index).
+   */
+  const sendView = useCallback(
+    (
+      command:
+        | { type: "save-now"; onlyIfModified: boolean; humanConfirmed: boolean }
+        | { type: "undo" }
+        | { type: "redo" }
+        | { type: "show-page"; slideIndex: number },
+    ) => {
+      port.current?.postMessage(command);
     },
-    [launch.editorKind, origin],
+    [],
   );
   const requestSave = useCallback(
     (state = "저장 중…", humanConfirmed = false) => {
       if (humanConfirmed) reviewPending.current = false;
       pendingSaveRevision.current = saveRevision.current + 1;
       setSaveState(state);
-      sendOffice("Action_Save", {
-        Notify: true,
-        DontSaveIfUnmodified: false,
-        HumanConfirmedChanges: humanConfirmed,
-      });
+      sendView({ type: "save-now", onlyIfModified: false, humanConfirmed });
     },
-    [sendOffice],
+    [sendView],
   );
-  // The browser editor keeps a person's edits in this browser until they are
+  // The document view keeps unsaved changes in this browser until they are
   // saved, so it saves them 20 seconds later. While an AI request runs the
   // server refuses saves (its edits are not reviewed yet), so the save waits.
   const armBrowserAutosave = useCallback(() => {
@@ -600,13 +575,6 @@ export function NativeWorkspace({
     };
     wait();
   }, [requestSave]);
-  useEffect(() => {
-    if (!engineReady) return;
-    const heartbeat = setInterval(() => {
-      sendOffice("User_Active");
-    }, 20_000);
-    return () => clearInterval(heartbeat);
-  }, [engineReady, sendOffice]);
   /** Runs one editor operation for this page (not for the AI) and waits for it. */
   const callEditor = useCallback(
     (
@@ -838,7 +806,7 @@ export function NativeWorkspace({
   );
   const openBrowserDocument = useCallback(
     async (channel: MessagePort) => {
-      if (launch.editorKind !== "browser" || browserOpening.current) return;
+      if (browserOpening.current) return;
       browserOpening.current = true;
       try {
         const { revision, bytes } = await readBrowserDocument(
@@ -881,7 +849,6 @@ export function NativeWorkspace({
       },
     ) => {
       if (
-        launch.editorKind !== "browser" ||
         typeof message.requestId !== "string" ||
         message.revision !== browserRevision.current ||
         !(message.bytes instanceof ArrayBuffer) ||
@@ -973,8 +940,8 @@ export function NativeWorkspace({
     if (saveState === "저장됨") setSavedAt(when(Date.now()));
     // The server never sees a save the editor could not hand over.
     if (saveState === "저장 실패")
-      reportSaveFailure(launch.documentId, launch.editorKind);
-  }, [saveState, launch.documentId, launch.editorKind]);
+      reportSaveFailure(launch.documentId, "browser");
+  }, [saveState, launch.documentId]);
   useEffect(() => {
     if (!busy) setLookingAt(null);
   }, [busy]);
@@ -989,388 +956,227 @@ export function NativeWorkspace({
     [],
   );
   useEffect(() => {
+    // Handshake (protocol version 2): the document view in this page's frame
+    // announces itself with spellbook.document-view-ready; this page answers
+    // with spellbook.document-view-connect and a MessagePort, and everything
+    // after that goes over the port.
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== origin) return;
       if (
-        launch.editorKind === "browser" &&
-        event.data?.type === "spellbook.browser-office-unsupported"
-      ) {
-        onUnsupported?.();
+        event.source !== office.current?.contentWindow ||
+        !event.source ||
+        event.data?.type !== "spellbook.document-view-ready" ||
+        event.data?.protocolVersion !== 2 ||
+        typeof event.data.bridgeSessionId !== "string" ||
+        !event.data.bridgeSessionId.length
+      )
         return;
-      }
-      const browserBridge =
-        launch.editorKind === "browser" &&
-        event.data?.type === "spellbook.browser-office-ready" &&
-        event.data?.protocolVersion === 1 &&
-        typeof event.data.bridgeSessionId === "string" &&
-        event.data.bridgeSessionId.length > 0;
-      const wopiBridge =
-        launch.editorKind === "wopi" &&
-        event.data?.type === "spellbook.extension-ready";
-      // The browser editor is this page's own frame; accept its handshake
-      // only from that window.
-      if (
-        ((browserBridge && event.source === office.current?.contentWindow) ||
-          wopiBridge) &&
-        event.source
-      ) {
-        const sessionId = browserBridge
-          ? event.data.bridgeSessionId
-          : typeof event.data.bridgeSessionId === "string"
-            ? event.data.bridgeSessionId
-            : "legacy";
-        if (port.current && bridgeSession.current === sessionId) return;
-        port.current?.close();
-        port.current = null;
-        bridgeSession.current = sessionId;
-        setBridgeReady(false);
-        const channel = new MessageChannel();
-        port.current = channel.port1;
-        channel.port1.onmessage = (result) => {
-          if (port.current !== channel.port1) return;
-          if (result.data?.type === "selection") {
-            const value = result.data.value as EditorSelection | undefined;
+      const sessionId: string = event.data.bridgeSessionId;
+      if (port.current && bridgeSession.current === sessionId) return;
+      port.current?.close();
+      port.current = null;
+      bridgeSession.current = sessionId;
+      setBridgeReady(false);
+      const channel = new MessageChannel();
+      port.current = channel.port1;
+      channel.port1.onmessage = (result) => {
+        if (port.current !== channel.port1) return;
+        if (result.data?.type === "selection") {
+          const value = result.data.value as EditorSelection | undefined;
+          if (
+            value &&
+            Number.isInteger(value.activeSlide) &&
+            Array.isArray(value.selected)
+          )
+            setSelection(value);
+          return;
+        }
+        const hostCall =
+          typeof result.data?.id === "string"
+            ? hostCalls.current.get(result.data.id)
+            : undefined;
+        if (hostCall) {
+          hostCalls.current.delete(result.data.id);
+          clearTimeout(hostCall.timer);
+          if (typeof result.data.error === "string")
+            hostCall.reject(new Error(result.data.error));
+          else hostCall.resolve(result.data.value);
+          return;
+        }
+        if (result.data?.type === "ready") {
+          void openBrowserDocument(channel.port1);
+          return;
+        }
+        if (result.data?.type === "open-complete") {
+          browserOpening.current = false;
+          setEngineReady(true);
+          setBridgeReady(true);
+          setSaveState(
+            result.data.recovered ? "복구된 변경 사항 있음" : "저장됨",
+          );
+          return;
+        }
+        if (result.data?.type === "modified") {
+          editorModified.current = result.data.modified === true;
+          setSaveState((current) =>
+            result.data.modified
+              ? reviewPending.current
+                ? "AI 변경 확인 필요"
+                : "변경 사항 있음"
+              : pendingSaveRevision.current !== null
+                ? current
+                : "저장됨",
+          );
+          if (result.data.modified) armBrowserAutosave();
+          else if (browserAutosave.current) {
+            clearTimeout(browserAutosave.current);
+            browserAutosave.current = null;
+          }
+          return;
+        }
+        if (result.data?.type === "save") {
+          void saveBrowserDocument(channel.port1, result.data);
+          return;
+        }
+        if (result.data?.type === "save-response") {
+          if (!result.data.success) {
             if (
-              value &&
-              Number.isInteger(value.activeSlide) &&
-              Array.isArray(value.selected)
-            )
-              setSelection(value);
-            return;
-          }
-          const hostCall =
-            typeof result.data?.id === "string"
-              ? hostCalls.current.get(result.data.id)
-              : undefined;
-          if (hostCall) {
-            hostCalls.current.delete(result.data.id);
-            clearTimeout(hostCall.timer);
-            if (typeof result.data.error === "string")
-              hostCall.reject(new Error(result.data.error));
-            else hostCall.resolve(result.data.value);
-            return;
-          }
-          if (browserBridge) {
-            if (result.data?.type === "ready") {
-              void openBrowserDocument(channel.port1);
-              return;
-            }
-            if (result.data?.type === "open-complete") {
-              browserOpening.current = false;
-              setEngineReady(true);
-              setBridgeReady(true);
-              setSaveState(
-                result.data.recovered ? "복구된 변경 사항 있음" : "저장됨",
-              );
-              return;
-            }
-            if (result.data?.type === "modified") {
-              editorModified.current = result.data.modified === true;
-              setSaveState((current) =>
-                result.data.modified
-                  ? reviewPending.current
-                    ? "AI 변경 확인 필요"
-                    : "변경 사항 있음"
-                  : pendingSaveRevision.current !== null
-                    ? current
-                    : "저장됨",
-              );
-              // The server editor saves a person's edits by itself.
-              if (result.data.modified) armBrowserAutosave();
-              else if (browserAutosave.current) {
-                clearTimeout(browserAutosave.current);
-                browserAutosave.current = null;
-              }
-              return;
-            }
-            if (result.data?.type === "save") {
-              void saveBrowserDocument(channel.port1, result.data);
-              return;
-            }
-            if (result.data?.type === "save-response") {
-              if (!result.data.success) {
-                if (
-                  pendingBrowserSave.current?.requestId ===
-                  result.data.requestId
-                ) {
-                  pendingBrowserSave.current = null;
-                  pendingSaveRevision.current = null;
-                  downloadAfterRevision.current = null;
-                  setDownload((current) =>
-                    current ? { ...current, busy: false } : current,
-                  );
-                  editorModified.current = true;
-                  const waiting = pendingTurn.current;
-                  pendingTurn.current = null;
-                  if (waiting) {
-                    setBusy(false);
-                    setText(waiting.draft);
-                  }
-                }
-                setSaveState(
-                  reviewPending.current ? "AI 변경 확인 필요" : "저장 실패",
-                );
-                return;
-              }
-              const saved = pendingBrowserSave.current;
-              if (!saved || saved.requestId !== result.data.requestId) return;
+              pendingBrowserSave.current?.requestId === result.data.requestId
+            ) {
               pendingBrowserSave.current = null;
               pendingSaveRevision.current = null;
-              const modified = result.data.modified === true;
-              editorModified.current = modified;
-              setSaveState(modified ? "변경 사항 있음" : "저장됨");
-              const waiting = pendingTurn.current;
-              const downloadWaiting = downloadAfterRevision.current !== null;
-              if (modified && (waiting || downloadWaiting)) {
-                pendingSaveRevision.current = saveRevision.current + 1;
-                setSaveState("추가 변경 사항 저장 중…");
-                sendOffice("Action_Save", {
-                  Notify: true,
-                  DontSaveIfUnmodified: false,
-                });
-              } else if (!modified) {
-                if (waiting) {
-                  pendingTurn.current = null;
-                  void dispatchTurn(waiting);
-                }
-                if (downloadWaiting) {
-                  downloadAfterRevision.current = null;
-                  setDownload(null);
-                  window.location.assign(
-                    `/api/documents/${launch.documentId}/download`,
-                  );
-                }
-              }
-              return;
-            }
-            if (result.data?.type === "error") {
-              browserOpening.current = false;
-              if (pendingSaveRevision.current !== null) {
-                pendingSaveRevision.current = null;
-                downloadAfterRevision.current = null;
-                editorModified.current = true;
-                setDownload((current) =>
-                  current ? { ...current, busy: false } : current,
-                );
-                setSaveState("저장 실패");
-                const waiting = pendingTurn.current;
-                pendingTurn.current = null;
-                if (waiting) {
-                  setBusy(false);
-                  setText(waiting.draft);
-                }
-                setError(
-                  "이 파일의 변경을 안전하게 저장하지 못했어요. 편집 내용을 확인하고 다시 시도해 주세요.",
-                );
-                return;
-              }
-              setError(
-                typeof result.data.error === "string"
-                  ? result.data.error
-                  : "브라우저 편집기에서 오류가 생겼어요.",
+              downloadAfterRevision.current = null;
+              setDownload((current) =>
+                current ? { ...current, busy: false } : current,
               );
-              return;
+              editorModified.current = true;
+              const waiting = pendingTurn.current;
+              pendingTurn.current = null;
+              if (waiting) {
+                setBusy(false);
+                setText(waiting.draft);
+              }
             }
-          }
-          if (result.data?.type === "ready") {
-            setBridgeReady(true);
-            port.current?.postMessage({
-              id: "warmup-observe",
-              request: { operation: "observe" },
-            });
+            setSaveState(
+              reviewPending.current ? "AI 변경 확인 필요" : "저장 실패",
+            );
             return;
           }
-          if (typeof result.data?.id === "string") {
-            const timing = editorTaskStarts.current.get(result.data.id);
-            if (timing) {
-              editorTaskStarts.current.delete(result.data.id);
-              measuredEditorTasks.current.add(result.data.id);
-              while (measuredEditorTasks.current.size > 100)
-                measuredEditorTasks.current.delete(
-                  measuredEditorTasks.current.values().next().value!,
-                );
-              measureEditorOperation(
-                timing.operation,
-                timing.startedAt,
-                result.data.value,
+          const saved = pendingBrowserSave.current;
+          if (!saved || saved.requestId !== result.data.requestId) return;
+          pendingBrowserSave.current = null;
+          pendingSaveRevision.current = null;
+          const modified = result.data.modified === true;
+          editorModified.current = modified;
+          setSaveState(modified ? "변경 사항 있음" : "저장됨");
+          const waiting = pendingTurn.current;
+          const downloadWaiting = downloadAfterRevision.current !== null;
+          if (modified && (waiting || downloadWaiting)) {
+            pendingSaveRevision.current = saveRevision.current + 1;
+            setSaveState("추가 변경 사항 저장 중…");
+            sendView({
+              type: "save-now",
+              onlyIfModified: false,
+              humanConfirmed: false,
+            });
+          } else if (!modified) {
+            if (waiting) {
+              pendingTurn.current = null;
+              void dispatchTurn(waiting);
+            }
+            if (downloadWaiting) {
+              downloadAfterRevision.current = null;
+              setDownload(null);
+              window.location.assign(
+                `/api/documents/${launch.documentId}/download`,
               );
             }
-            if (result.data?.value && typeof result.data.value === "object") {
-              latestObservation.current = result.data.value as Record<
-                string,
-                unknown
-              >;
-            }
-            if (result.data.id === "warmup-observe") {
-              return;
-            }
-            const list = result.data?.value?.images;
-            if (Array.isArray(list) && list.length) {
-              const url = rememberImages(result.data.id, list);
-              if (url)
-                setLookingAt({
-                  slideIndex: Number(list[0]?.slideIndex) || 0,
-                  url,
-                });
-            }
-            void api(
-              "result",
-              compactNativeTaskResultForTransport(result.data),
-            ).catch((e) => setError(e.message));
           }
-        };
-        (event.source as Window).postMessage(
-          browserBridge
-            ? { type: "spellbook.browser-office-connect", protocolVersion: 1 }
-            : {
-                type: "spellbook.connect",
-                bridgeSessionId: sessionId === "legacy" ? undefined : sessionId,
-              },
-          origin,
-          [channel.port2],
-        );
-        return;
-      }
-      if (event.source !== office.current?.contentWindow) return;
-      if (event.data?.type === "spellbook.edit-mode") {
-        setEditModeConfirmed(event.data.edit === true);
-        return;
-      }
-      let value;
-      try {
-        value =
-          typeof event.data === "string" ? JSON.parse(event.data) : event.data;
-      } catch {
-        return;
-      }
-      if (value?.MessageId === "App_LoadingStatus") {
-        sendOffice("Host_PostmessageReady");
-        if (value.Values?.Status === "Document_Loaded") setEngineReady(true);
-      }
-      if (value?.MessageId === "Action_Save_Resp") {
-        if (value.Values?.success) {
-          setSaveState("저장 확인 중…");
-          if (
-            pendingTurn.current &&
-            !editorModified.current &&
-            baselineSaveCount.current !== null
-          ) {
-            // Collabora answers before its upload reaches the server, so
-            // wait until the server has counted this save. A save identical
-            // to the working version leaves the revision unchanged and no
-            // poll would release the request: release it here. A new
-            // revision is still being checked, and the poll releases the
-            // request once that check finishes.
-            const expected = pendingSaveRevision.current;
-            const before = baselineSaveCount.current;
-            baselineSaveCount.current = null;
-            void (async () => {
-              const deadline = Date.now() + 90_000;
-              while (Date.now() < deadline) {
-                const saved = (await api("state")) as {
-                  saveRevision?: number;
-                  editorSaveCount?: number;
-                };
-                if ((saved.editorSaveCount ?? 0) > before) {
-                  if (
-                    expected !== null &&
-                    typeof saved.saveRevision === "number" &&
-                    saved.saveRevision >= expected
-                  )
-                    return;
-                  const waiting = pendingTurn.current;
-                  if (!waiting || pendingSaveRevision.current !== expected)
-                    return;
-                  pendingTurn.current = null;
-                  pendingSaveRevision.current = null;
-                  setSaveState("저장됨");
-                  void dispatchTurn(waiting);
-                  return;
-                }
-                await new Promise((resolve) => setTimeout(resolve, 500));
-              }
-              throw new Error("editor_save_not_received");
-            })().catch((cause) => setError(cause.message));
-          }
-        } else {
-          const waiting = pendingTurn.current;
-          pendingTurn.current = null;
-          pendingSaveRevision.current = null;
-          downloadAfterRevision.current = null;
-          setSaveState("저장 실패");
-          if (waiting) {
-            setBusy(false);
-            setText(waiting.draft);
-            setError("AI 작업 전에 지금 편집 내용을 저장하지 못했어요.");
-          }
+          return;
         }
-      }
-      if (value?.MessageId === "Doc_ModifiedStatus") {
-        editorModified.current = value.Values?.Modified === true;
-        setSaveState((current) =>
-          value.Values?.Modified
-            ? "변경 사항 있음"
-            : pendingSaveRevision.current !== null
-              ? current
-              : "저장됨",
-        );
-      }
+        if (result.data?.type === "error") {
+          browserOpening.current = false;
+          if (pendingSaveRevision.current !== null) {
+            pendingSaveRevision.current = null;
+            downloadAfterRevision.current = null;
+            editorModified.current = true;
+            setDownload((current) =>
+              current ? { ...current, busy: false } : current,
+            );
+            setSaveState("저장 실패");
+            const waiting = pendingTurn.current;
+            pendingTurn.current = null;
+            if (waiting) {
+              setBusy(false);
+              setText(waiting.draft);
+            }
+            setError(
+              "이 파일의 변경을 안전하게 저장하지 못했어요. 편집 내용을 확인하고 다시 시도해 주세요.",
+            );
+            return;
+          }
+          setError(
+            typeof result.data.error === "string"
+              ? result.data.error
+              : "브라우저 편집기에서 오류가 생겼어요.",
+          );
+          return;
+        }
+        if (typeof result.data?.id === "string") {
+          const timing = editorTaskStarts.current.get(result.data.id);
+          if (timing) {
+            editorTaskStarts.current.delete(result.data.id);
+            measuredEditorTasks.current.add(result.data.id);
+            while (measuredEditorTasks.current.size > 100)
+              measuredEditorTasks.current.delete(
+                measuredEditorTasks.current.values().next().value!,
+              );
+            measureEditorOperation(
+              timing.operation,
+              timing.startedAt,
+              result.data.value,
+            );
+          }
+          if (result.data?.value && typeof result.data.value === "object") {
+            latestObservation.current = result.data.value as Record<
+              string,
+              unknown
+            >;
+          }
+          const list = result.data?.value?.images;
+          if (Array.isArray(list) && list.length) {
+            const url = rememberImages(result.data.id, list);
+            if (url)
+              setLookingAt({
+                slideIndex: Number(list[0]?.slideIndex) || 0,
+                url,
+              });
+          }
+          void api(
+            "result",
+            compactNativeTaskResultForTransport(result.data),
+          ).catch((e) => setError(e.message));
+        }
+      };
+      (event.source as Window).postMessage(
+        { type: "spellbook.document-view-connect", protocolVersion: 2 },
+        origin,
+        [channel.port2],
+      );
     };
     window.addEventListener("message", onMessage);
-    if (launch.editorKind === "wopi" && !submitted.current && editorMounted) {
-      submitted.current = true;
-      form.current?.submit();
-    }
     return () => window.removeEventListener("message", onMessage);
   }, [
     origin,
     api,
-    launch.editorKind,
     openBrowserDocument,
     saveBrowserDocument,
-    sendOffice,
+    sendView,
     armBrowserAutosave,
     dispatchTurn,
     launch.documentId,
-    editorMounted,
     rememberImages,
-    onUnsupported,
   ]);
-  useEffect(() => {
-    if (launch.editorKind !== "wopi" || !engineReady || bridgeReady) return;
-    const open = () => {
-      // CODE can show a first-run release dialog even when welcome.enable is
-      // disabled. Close it through the editor's own message contract so the
-      // document canvas, not an upstream product tour, is the first frame.
-      sendOffice("welcome-close");
-      office.current?.contentWindow?.postMessage(
-        { type: "spellbook.open-extension" },
-        origin,
-      );
-    };
-    open();
-    const timer = setInterval(open, 500);
-    return () => clearInterval(timer);
-  }, [engineReady, bridgeReady, launch.editorKind, origin, sendOffice]);
-  // Phones open the editor in its read-only mobile mode; AI edits and the
-  // saves around them need edit mode, so ask for it until it is confirmed.
-  useEffect(() => {
-    if (
-      !phone ||
-      launch.editorKind !== "wopi" ||
-      !engineReady ||
-      editModeConfirmed
-    )
-      return;
-    const ask = () =>
-      office.current?.contentWindow?.postMessage(
-        { type: "spellbook.ensure-edit" },
-        origin,
-      );
-    ask();
-    const timer = setInterval(ask, 1_000);
-    return () => clearInterval(timer);
-  }, [phone, launch.editorKind, engineReady, editModeConfirmed, origin]);
   useEffect(() => {
     void refreshHistory();
     void refreshVersions();
@@ -1447,9 +1253,10 @@ export function NativeWorkspace({
               if (editorModified.current) {
                 pendingSaveRevision.current = saveRevision.current + 1;
                 setSaveState("AI 작업 전 저장 중…");
-                sendOffice("Action_Save", {
-                  Notify: true,
-                  DontSaveIfUnmodified: false,
+                sendView({
+                  type: "save-now",
+                  onlyIfModified: false,
+                  humanConfirmed: false,
                 });
               } else {
                 pendingTurn.current = null;
@@ -1595,9 +1402,10 @@ export function NativeWorkspace({
             setBusy(false);
             if (event.changed && turnRequested.current) {
               setSaveState("저장 중…");
-              sendOffice("Action_Save", {
-                Notify: true,
-                DontSaveIfUnmodified: false,
+              sendView({
+                type: "save-now",
+                onlyIfModified: false,
+                humanConfirmed: false,
               });
             }
             if (turnRequested.current && typeof event.turnId === "string")
@@ -1605,7 +1413,7 @@ export function NativeWorkspace({
             const firstChanged = event.summary?.changedSlides?.[0];
             if (Number.isInteger(firstChanged)) {
               if (turnRequested.current) setPhoneSlide(firstChanged);
-              sendOffice("Action_GoToPage", { Page: firstChanged + 1 });
+              sendView({ type: "show-page", slideIndex: firstChanged });
             }
             turnRequested.current = false;
           }
@@ -1700,7 +1508,7 @@ export function NativeWorkspace({
     browserRunning,
     api,
     deliverTask,
-    sendOffice,
+    sendView,
     requestSave,
     launch.apiBase,
     launch.accessToken,
@@ -1727,17 +1535,13 @@ export function NativeWorkspace({
   useEffect(() => {
     if (panel && panelTab === "versions") void refreshVersions();
   }, [panel, panelTab, refreshVersions]);
-  const editorAccepts =
-    bridgeReady &&
-    sessionObserved &&
-    (!phone || launch.editorKind !== "wopi" || editModeConfirmed);
+  const editorAccepts = bridgeReady && sessionObserved;
 
   /* Sending: save unsaved edits first so the request starts from a version. */
   const startTurn = useCallback(
     async (pending: PendingTurn) => {
       setError("");
       setBusy(true);
-      sendOffice("User_Active");
       setMessages((items) => [
         ...items,
         {
@@ -1750,42 +1554,30 @@ export function NativeWorkspace({
           at: new Date().toISOString(),
         },
       ]);
-      // A save still in flight (for example the baseline save that starts
-      // as the editor becomes ready) must finish first: the server refuses
-      // AI edits while it checks a save. The poll sends the request after it.
+      // A save still in flight must finish first: the server refuses AI
+      // edits while it checks a save. The poll sends the request after it.
       if (pendingSaveRevision.current !== null) {
         pendingTurn.current = pending;
         return;
       }
-      // The save AI edits are checked against must come from the editor that
-      // is open now: a file the editor wrote earlier and opened again exports
-      // with different chart ids and layout numbers, which the server's
-      // edit-scope check would count as changes the AI made. So the first
-      // request of every editor load saves first, even when nothing changed.
-      if (
-        editorModified.current ||
-        (launch.editorKind === "wopi" && !baselineSaved.current)
-      ) {
-        baselineSaved.current = true;
+      // Unsaved changes are saved first, so AI edits are checked against
+      // what is on screen.
+      if (editorModified.current) {
         pendingTurn.current = pending;
-        if (!editorModified.current) {
-          const state = (await api("state")) as { editorSaveCount?: number };
-          baselineSaveCount.current = state.editorSaveCount ?? 0;
-        }
         requestSave("AI 작업 전 저장 중…");
         return;
       }
       await dispatchTurn(pending);
     },
-    [api, dispatchTurn, launch.editorKind, requestSave],
+    [dispatchTurn, requestSave],
   );
   function submit() {
     if (!text.trim() || busy || queued || !aiConnected) return;
     const pending: PendingTurn = { draft: text, permission, model };
     setText("");
     setError("");
-    // Written before the editor is ready (on a phone: before it switched
-    // to edit mode, which saving needs): keep it and send it once it is.
+    // Written before the document view is ready: keep it and send it once
+    // it is.
     if (!editorAccepts) {
       setQueued(pending);
       return;
@@ -1867,14 +1659,6 @@ export function NativeWorkspace({
       setBridgeReady(false);
       setEngineReady(false);
       setEditorMounted(false);
-      if (launch.editorKind === "wopi") {
-        const deadline = Date.now() + 20_000;
-        while (Date.now() < deadline) {
-          const state = (await api("state")) as { editorLocked: boolean };
-          if (!state.editorLocked) break;
-          await new Promise((resolve) => setTimeout(resolve, 700));
-        }
-      }
       await documentApi(`versions/${versionId}/restore`, {
         method: "POST",
         body: "{}",
@@ -1918,11 +1702,7 @@ export function NativeWorkspace({
     setDownload((current) => (current ? { ...current, busy: true } : current));
     setSaveState("다운로드 준비 중…");
     reviewPending.current = false;
-    sendOffice("Action_Save", {
-      Notify: true,
-      DontSaveIfUnmodified: false,
-      HumanConfirmedChanges: true,
-    });
+    sendView({ type: "save-now", onlyIfModified: false, humanConfirmed: true });
   }
 
   /* ── Conversation ───────────────────────────────────────────────── */
@@ -2144,7 +1924,7 @@ export function NativeWorkspace({
       setPhoneSlide(slideIndex);
       return;
     }
-    sendOffice("Action_GoToPage", { Page: slideIndex + 1 });
+    sendView({ type: "show-page", slideIndex });
     void callEditor({ operation: "reveal", slideIndex, elementId }).catch(
       () => undefined,
     );
@@ -2166,15 +1946,15 @@ export function NativeWorkspace({
       if (!engineReady || phone) return;
       if (key === "z" && !event.shiftKey) {
         event.preventDefault();
-        sendOffice("Send_UNO_Command", { Command: ".uno:Undo" });
+        sendView({ type: "undo" });
       } else if ((key === "z" && event.shiftKey) || key === "y") {
         event.preventDefault();
-        sendOffice("Send_UNO_Command", { Command: ".uno:Redo" });
+        sendView({ type: "redo" });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [engineReady, phone, requestSave, restoring, sendOffice]);
+  }, [engineReady, phone, requestSave, restoring, sendView]);
 
   function openTurnCompare(turn: CardTurn) {
     const summary = turn.summary;
@@ -2266,8 +2046,8 @@ export function NativeWorkspace({
         save={save}
         onSave={() => requestSave("저장 중…", true)}
         editorReady={engineReady}
-        onUndo={() => sendOffice("Send_UNO_Command", { Command: ".uno:Undo" })}
-        onRedo={() => sendOffice("Send_UNO_Command", { Command: ".uno:Redo" })}
+        onUndo={() => sendView({ type: "undo" })}
+        onRedo={() => sendView({ type: "redo" })}
         versionsOpen={panelOpen && panelTab === "versions"}
         onVersions={() => {
           if (!phone && panel && panelTab === "versions") setPanel(false);
@@ -2303,34 +2083,12 @@ export function NativeWorkspace({
         aria-label="프레젠테이션 편집"
         aria-hidden={phone || undefined}
       >
-        {launch.editorKind === "wopi" ? (
-          <form
-            ref={form}
-            target="spellbook-office"
-            method="post"
-            action={launch.editorUrl}
-            hidden
-          >
-            <input name="access_token" value={launch.accessToken} readOnly />
-            <input name="access_token_ttl" value={launch.expiresAt} readOnly />
-            <input
-              name="css_variables"
-              value={collaboraCssVariables()}
-              readOnly
-            />
-            <input
-              name="ui_defaults"
-              value="UIMode=tabbed;PresentationSidebar=false;"
-              readOnly
-            />
-          </form>
-        ) : null}
         {editorMounted ? (
           <iframe
             ref={office}
             name="spellbook-office"
             title="PPT 편집기"
-            src={launch.editorKind === "browser" ? launch.editorUrl : undefined}
+            src={launch.editorUrl}
             allow="clipboard-read; clipboard-write; cross-origin-isolated; local-fonts"
             tabIndex={phone ? -1 : undefined}
           />
