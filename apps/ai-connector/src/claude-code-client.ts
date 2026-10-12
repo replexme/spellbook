@@ -269,6 +269,11 @@ export async function readClaudeModelCatalog(
         clearTimeout(timer);
         reject(error);
       });
+      // Exiting before it answers (an old or broken program) ends the wait at once.
+      child.once("exit", () => {
+        clearTimeout(timer);
+        reject(new Error("claude_models_unanswered"));
+      });
       child.stdout.on("data", (chunk: Buffer) => {
         buffer += chunk.toString("utf8");
         let newline;
