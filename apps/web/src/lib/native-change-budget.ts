@@ -157,6 +157,9 @@ export async function loadNativeSaveChangePolicy(
     join spellbook_native_turns turn on turn.id=task.turn_id
     where task.session_id=${sessionId}
       and task.save_revision_at_create=${saveRevision}
+      -- An undone request was checked back to its starting state in the editor
+      -- (markNativeUndo): its edits are not in the file being saved.
+      and turn.undone_at is null
     order by task.created_at,task.id
   `;
   return nativeSavePolicyFromTasks(

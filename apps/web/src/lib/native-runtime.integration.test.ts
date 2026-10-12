@@ -1354,12 +1354,24 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       await db()`select patch_level from spellbook_editor_engines where editor_mode='wopi'`;
     expect(engine.patch_level).toBe("stock");
 
+    // An edit whose review did not finish holds the save until the person
+    // undoes that request; the undone edit is not in the file being saved.
+    await db()`update spellbook_native_turns set reviewed=false where id=${submitted.turnId}`;
+    const savePolicy = () =>
+      db().begin((sql) =>
+        loadNativeSaveChangePolicy(sql, f.nativeSessionId, 0),
+      );
+    await expect(savePolicy()).rejects.toThrow(
+      "native_ai_change_review_pending",
+    );
+
     // Undo is recorded once and names the next save.
     const marked = await markNativeUndo(
       session,
       f.documentId,
       submitted.turnId,
     );
+    await expect(savePolicy()).resolves.toBeDefined();
     expect(marked.turnId).toBe(submitted.turnId);
     expect(
       (await markNativeUndo(session, f.documentId, submitted.turnId)).undoneAt,
