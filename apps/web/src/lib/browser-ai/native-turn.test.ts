@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import capabilities from "../../../../../contracts/native-edit-capabilities.json";
 import {
   runNativeTurn,
   UNCONFIRMED_EDIT_NOTICE,
@@ -16,7 +17,9 @@ const before: NativeObservation = {
   revision: "r1",
   activeSlide: 0,
   selectedElementIds: ["0/0"],
-  engine: { patchLevel: "undo-v18", supportedOperations: [] },
+  engine: {
+    supportedOperations: capabilities.toolInputSchema.properties.op.enum,
+  },
   slides: [
     {
       slideIndex: 0,

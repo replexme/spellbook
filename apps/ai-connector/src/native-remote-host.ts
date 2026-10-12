@@ -46,14 +46,17 @@ export class NativeRemoteHost implements NativeHost {
     // Match the native task lifetime; large PPTX edits can take minutes.
     const deadline = Date.now() + 300_000;
     while (Date.now() < deadline) {
+      const asked = Date.now();
+      // The web app answers as soon as the editor has (or after 15 s).
       const task = (await this.post(
-        { operation: "task_status", taskId: created.taskId },
+        { operation: "task_status", taskId: created.taskId, waitMs: 15_000 },
         signal,
       )) as { status?: string; result?: NativeObservation; error?: string };
       if (task.status === "completed" && task.result) return task.result;
       if (["failed", "expired"].includes(task.status ?? ""))
         throw new Error(task.error || "native_document_operation_failed");
-      await wait(250, signal);
+      // A web app that does not wait answers at once: ask again shortly.
+      if (Date.now() - asked < 200) await wait(250, signal);
     }
     throw new Error("native_document_operation_timed_out");
   }

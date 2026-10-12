@@ -1,7 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { collaboraCssVariables, editorThemeTokens } from "./editor-theme";
 
 const sourceRoot = path.resolve(__dirname, "..");
 const tokensFile = path.join(sourceRoot, "design-system", "tokens.css");
@@ -12,19 +11,10 @@ const tokensFile = path.join(sourceRoot, "design-system", "tokens.css");
  * belong here.
  */
 const legacyAllowlist = new Set(
-  [
-    "app/globals.css",
-    "components/document-editor.tsx",
-    "components/direct-edit-tools.tsx",
-    "components/conversation-timeline.tsx",
-    "components/permission-control.tsx",
-  ].map((file) => path.join(sourceRoot, file)),
+  ["app/globals.css"].map((file) => path.join(sourceRoot, file)),
 );
 
-const exempt = new Set([
-  tokensFile,
-  path.join(sourceRoot, "design-system", "editor-theme.ts"),
-]);
+const exempt = new Set([tokensFile]);
 
 const systemCss = [
   "tokens.css",
@@ -32,15 +22,6 @@ const systemCss = [
   "components.css",
   "patterns.css",
 ].map((file) => path.join(sourceRoot, "design-system", file));
-
-/** Legacy components that only the legacy allowlist renders. */
-const legacyComponents = new Set(
-  [
-    "components/chat-icon.tsx",
-    "components/model-control.tsx",
-    "components/spellbook-ui.tsx",
-  ].map((file) => path.join(sourceRoot, file)),
-);
 
 function walk(directory: string): string[] {
   return readdirSync(directory).flatMap((name) => {
@@ -116,12 +97,7 @@ describe("design system", () => {
     const classes = definedClasses();
     const unknown: string[] = [];
     for (const file of walk(sourceRoot)) {
-      if (
-        !file.endsWith(".tsx") ||
-        legacyAllowlist.has(file) ||
-        legacyComponents.has(file)
-      )
-        continue;
+      if (!file.endsWith(".tsx") || legacyAllowlist.has(file)) continue;
       for (const name of classNamesIn(readFileSync(file, "utf8")))
         if (!classes.has(name))
           unknown.push(`${path.relative(sourceRoot, file)}: .${name}`);
@@ -154,17 +130,6 @@ describe("design system", () => {
     expect(base).toContain(".ds-visually-hidden");
   });
 
-  it("opens the editor with the tabbed ribbon and no slide sidebar", () => {
-    const workspace = readFileSync(
-      path.join(sourceRoot, "components", "native-workspace.tsx"),
-      "utf8",
-    );
-    expect(workspace).toContain("UIMode=tabbed");
-    expect(workspace).toContain("PresentationSidebar=false");
-    expect(workspace).not.toContain("UIMode=notebookbar");
-    expect(workspace).toContain("collaboraCssVariables()");
-  });
-
   it("keeps colour literals inside tokens.css", () => {
     const violations: string[] = [];
     for (const file of walk(sourceRoot)) {
@@ -178,37 +143,6 @@ describe("design system", () => {
       });
     }
     expect(violations).toEqual([]);
-  });
-
-  it("gives the editor iframe exactly the token values", () => {
-    const values = tokenValues();
-    for (const [name, entry] of Object.entries(editorThemeTokens))
-      expect(values.get(entry.token), `${name} → ${entry.token}`).toBe(
-        entry.value,
-      );
-    expect(collaboraCssVariables()).toContain("--color-primary=#35404a");
-    expect(collaboraCssVariables()).not.toContain("d24726");
-  });
-
-  it("drives the editor's own accent from the value Spellbook passes", () => {
-    const hostCss = readFileSync(
-      path.resolve(
-        sourceRoot,
-        "../../../services/office-editor/host-bridge.css",
-      ),
-      "utf8",
-    );
-    expect(collaboraCssVariables()).toContain(
-      "--spellbook-editor-accent-rgb=53,64,74",
-    );
-    expect(hostCss).toContain("--doc-type: var(--spellbook-editor-accent-rgb");
-    for (const duplicate of [
-      "#document-titlebar",
-      ".unoSave",
-      ".unoUndo",
-      ".unoRedo",
-    ])
-      expect(hostCss).toContain(duplicate);
   });
 
   it("sets type in the seven steps only", () => {

@@ -48,6 +48,24 @@ function isPng(base64) {
 const INDESIGN_INSTRUCTION =
   "This is an InDesign (IDML) document. Each slide in the observation is a page and each element a page item (text frame, image frame, shape, line or group). Only the operations in engine.supportedOperations work on it: text edits (replace_text, replace_text_range), move, resize, delete_element, insert_slide/delete_slide (add a page after slideIndex / remove a page), add_text_box, add_shape (rectangle, ellipse, line), insert_image (PNG or JPEG), fill_color, line_color, line_width, font_size, font_color, bold, italic, font_family and paragraph_alignment. A story's text is on its first frame; an element with continuedFrom shows more of that same story, and replace_text on either replaces the whole story, with \\n between paragraphs. Text styling applies to the whole story. Korean text needs a font with Hangul: the default Source Han Sans SC (Regular) and Adobe Myungjo Std (style M) come with every InDesign, but neither has a Bold or Italic style there, so emphasise Korean text with size or colour unless the document already uses a family with those styles. oversetText is text that does not fit the story's frames; when the issue says fontsSubstituted, the page was laid out with a substitute font and InDesign with the document's own fonts may fit it, so do not cut or shrink text only for that.";
 
+// What the layout check reports and which of it holds up approval.
+const LAYOUT_ISSUE_INSTRUCTION =
+  "layoutAudit comes from the engine that draws the page: text_overflow (text running past its box, overflowPt in points), text_overset (InDesign text that does not fit its frames), out_of_slide_bounds and invalid_size are problems; one your edit introduced must be fixed before the result can be approved. Issues with severity warning or info (possible_element_overlap, a guess from box geometry; font_substituted and fontsSubstituted, text drawn with a substitute font) do not block approval: judge them on the screenshot.";
+
+/** An issue's identity across observations: what and where, not its measurements. */
+function issueKey(issue) {
+  return JSON.stringify([
+    issue?.code ?? null,
+    issue?.slideIndex ?? null,
+    issue?.elementId ?? null,
+    issue?.elementIds ?? null,
+  ]);
+}
+/** Problems hold up approval; warnings and information do not. */
+function blocking(issue) {
+  return issue?.severity !== "warning" && issue?.severity !== "info";
+}
+
 function slideHeadings(state) {
   return JSON.stringify(
     state.slides.map((slide) => {
@@ -100,12 +118,13 @@ async function executeNativeTurn(model, input) {
   let baselineIssues = Array.isArray(
     input.initialObservation?.layoutAudit?.issues,
   )
-    ? new Set(
-        input.initialObservation.layoutAudit.issues.map((issue) =>
-          JSON.stringify(issue),
-        ),
-      )
+    ? new Set(input.initialObservation.layoutAudit.issues.map(issueKey))
     : null;
+  // The operations the open document's engine runs: the model is offered
+  // only these, with only their fields.
+  const editTools = edit.editToolsFor(
+    input.initialObservation?.engine?.supportedOperations,
+  );
   let requestSatisfied = false;
   let toolTail = Promise.resolve();
   const outputInfo = new WeakMap();
@@ -276,17 +295,23 @@ async function executeNativeTurn(model, input) {
         "Mutation result does not include one fresh PNG for every changed slide.",
       );
     for (const index of slideIndexes) changedSlides.add(index);
+    // Only problems this turn introduced block approval; warnings (a guess
+    // that boxes overlap, text drawn with a substitute font) are for the
+    // model to judge on the screenshot.
+    const introducedIssues =
+      baselineIssues && Array.isArray(state.layoutAudit?.issues)
+        ? state.layoutAudit.issues.filter(
+            (issue) => blocking(issue) && !baselineIssues.has(issueKey(issue)),
+          )
+        : Array.isArray(state.layoutAudit?.introducedIssues)
+          ? state.layoutAudit.introducedIssues.filter(blocking)
+          : null;
     pendingReview = {
       revision: state.revision,
       slideIndexes,
+      introducedIssues: introducedIssues ?? [],
       introducedIssueCount:
-        baselineIssues && Array.isArray(state.layoutAudit?.issues)
-          ? state.layoutAudit.issues.filter(
-              (issue) => !baselineIssues.has(JSON.stringify(issue)),
-            ).length
-          : (state.layoutAudit?.introducedIssueCount ??
-            state.layoutAudit?.introducedIssues?.length ??
-            0),
+        introducedIssues?.length ?? state.layoutAudit?.introducedIssueCount ?? 0,
     };
     lastMutationObservation = state;
     return true;
@@ -298,7 +323,6 @@ async function executeNativeTurn(model, input) {
       edit.nativeEditContract.mutationModel.operations[operation];
     if (
       !operationContract ||
-      operationContract.availability === "format_excluded" ||
       (!edit.nativeDocumentOperations.has(operation) &&
         !edit.nativeSlideOperations.has(operation) &&
         !edit.nativeCreateOperations.has(operation) &&
@@ -306,22 +330,9 @@ async function executeNativeTurn(model, input) {
         !edit.nativeElementOperations.has(operation))
     )
       throw new Error("Unsupported native edit operation.");
-    const supportedOperations = state.engine?.supportedOperations;
-    if (
-      !(0, edit.engineSupports)(
-        {
-          patchLevel: state.engine?.patchLevel ?? null,
-          supportedOperations:
-            Array.isArray(supportedOperations) &&
-            supportedOperations.every((value) => typeof value === "string")
-              ? supportedOperations
-              : [],
-        },
-        operation,
-      )
-    )
+    if (!edit.engineSupports(state.engine, operation))
       throw new Error(
-        `${operation}에는 undo-v${operationContract.minEnginePatch} 이상의 편집 엔진이 필요합니다.`,
+        `이 문서의 편집 엔진은 ${operation}을(를) 실행하지 않습니다. engine.supportedOperations의 명령만 쓸 수 있습니다.`,
       );
     if (edit.nativePlatformAssetOperations.has(operation)) {
       const expectedKind = operation.endsWith("_image") ? "image" : "media";
@@ -472,6 +483,24 @@ async function executeNativeTurn(model, input) {
       throw error;
     }
   };
+  /**
+   * Runs an edit; when the editor refuses it before anything changed, the
+   * last observation stays current and the model is told so, instead of
+   * having to observe again.
+   */
+  const keepOnRefusal = async (previous, run) => {
+    try {
+      return await run();
+    } catch (error) {
+      if (/^product_mutation_rejected:/.test(error?.message ?? "")) {
+        observed = previous;
+        throw new Error(
+          `${error.message}. Nothing changed and the last observation (revision ${previous.revision}) is still current: correct the named command and send the edit again without observing.`,
+        );
+      }
+      throw error;
+    }
+  };
   const tools = [
     {
       name: "native_observe",
@@ -488,12 +517,12 @@ async function executeNativeTurn(model, input) {
       name: "native_edit",
       description:
         "Insert or replace one image/audio/video using an observed document-scoped assetId through the trusted binary host boundary. For every other native change use native_batch_edit (one command is valid). Preserve native media and identity; never flatten editable objects.",
-      inputSchema: edit.nativeAssetEditSchema,
+      inputSchema: editTools.assetSchema ?? edit.nativeAssetEditSchema,
     },
     {
       name: "native_batch_edit",
       description: `Plan or atomically apply 1-50 validated native edits to the SAME observed presentation. All targets come from one revision and are rebound to their live objects before each command. ${edit.nativeEditContract.transaction.ordering} dryRun validates targets, options, and permission without changing the document. A non-dry-run batch becomes one native Undo action and rolls back completely if any command fails. Do not send executable code. For an existing photo use crop_image with geometry ellipse/rectangle; a circle needs equal width and height (resize in the same batch if needed). Crops preserve original media. Pass null for unused fields.`,
-      inputSchema: edit.nativeBatchEditSchema,
+      inputSchema: editTools.batchSchema,
     },
     {
       name: "native_review",
@@ -578,9 +607,7 @@ async function executeNativeTurn(model, input) {
         !baselineIssues &&
         Array.isArray(observed.layoutAudit?.issues)
       )
-        baselineIssues = new Set(
-          observed.layoutAudit.issues.map((issue) => JSON.stringify(issue)),
-        );
+        baselineIssues = new Set(observed.layoutAudit.issues.map(issueKey));
       if (!changed && !checks.length)
         checks = goal.goalChecks(effectiveRequest, observed, input.permission);
       return content(observed);
@@ -594,8 +621,9 @@ async function executeNativeTurn(model, input) {
       input.onTool("슬라이드 수정");
       const expectedSlides = JSON.stringify(observed.slides);
       const expectedRevision = observed.revision;
+      const previous = observed;
       observed = void 0;
-      observed = await mutate(
+      observed = await keepOnRefusal(previous, () => mutate(
         edit.nativePlatformAssetOperations.has(command.op ?? "")
           ? {
               ...command,
@@ -613,7 +641,7 @@ async function executeNativeTurn(model, input) {
               permission: input.permission,
             },
         signal,
-      );
+      ));
       if (applied(observed)) {
         changed = true;
         reviewed = false;
@@ -662,9 +690,9 @@ async function executeNativeTurn(model, input) {
         dryRun: batch.dryRun,
         permission: input.permission,
       };
-      observed = batch.dryRun
-        ? await call(request, signal)
-        : await mutate(request, signal);
+      observed = await keepOnRefusal(previous, () =>
+        batch.dryRun ? call(request, signal) : mutate(request, signal),
+      );
       if (!batch.dryRun && applied(observed)) {
         changed = true;
         reviewed = false;
@@ -724,7 +752,7 @@ async function executeNativeTurn(model, input) {
         );
       if (result.approved && pendingReview.introducedIssueCount > 0)
         throw new Error(
-          "A visual review cannot approve newly introduced layout issues.",
+          `A visual review cannot approve newly introduced layout issues; fix them first: ${JSON.stringify(pendingReview.introducedIssues)}`,
         );
       const objective = goal.verifyGoalChecks(checks, current);
       if (result.requestSatisfied && !objective.passed)
@@ -755,41 +783,6 @@ ${await input.web.readPage(url, signal)}`,
     throw new Error("Unknown tool.");
   };
 
-  let directlyApplied = false;
-  const planned =
-    observed &&
-    edit.engineSupports(
-      {
-        patchLevel: observed.engine?.patchLevel ?? null,
-        supportedOperations: observed.engine?.supportedOperations ?? [],
-      },
-      "crop_image",
-    )
-      ? goal.simpleGoalCommands(
-          effectiveRequest,
-          checks,
-          observed,
-          input.permission,
-        )
-      : null;
-  if (planned) {
-    try {
-      await runTool(
-        "native_batch_edit",
-        { commands: planned, dryRun: false },
-        input.signal,
-      );
-      directlyApplied = changed;
-      initialPage = content(observed);
-    } catch (error) {
-      input.signal.throwIfAborted();
-      observed = await call(
-        { operation: "observe", detailSlideIndex: null },
-        input.signal,
-      );
-      initialPage = content(observed);
-    }
-  }
   let generatedImageInserted = false;
   const turn = async (prompt, timeoutMs, reviewOnly = false) => {
     const start = performance.now(),
@@ -846,28 +839,24 @@ ${await input.web.readPage(url, signal)}`,
           toolTail = work.catch(() => undefined);
           await work;
         },
+        // Fixed text first and per-request facts after it, so a provider's
+        // prompt cache keeps the long fixed part from one request to the next.
         instructions: [
-          observed && !reviewOnly
-            ? `Live document revision: ${observed.revision}. Active slide: ${observed.activeSlide + 1}번. Slide headings for navigation only: ${slideHeadings(observed)}. The attached page images and full page data are the editing evidence. Request native_observe for any target page not attached before editing it.`
-            : reviewOnly
-              ? `This is a review-only step. The user's request was already applied to the SAME open PowerPoint document in this turn: ${JSON.stringify(input.requestText)}. Only native_observe and native_review are available; you cannot edit.`
-              : "You are editing the SAME open document as the user (a PowerPoint deck or an InDesign document). Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
-          ...(observed?.documentFormat === "idml" ? [INDESIGN_INSTRUCTION] : []),
-          `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
           "The slide heading list is a navigation index, not enough evidence to edit. The initial attachment and native_observe return actual page image and full element details. After an edit, introducedIssues distinguishes problems created by this edit from pre-existing document warnings. The edit result includes fresh changed-slide screenshots; inspect them and include review in the final JSON with your message, without a separate native_review call. Only observe if more detail is needed. Use native_batch_edit for coordinated changes so they are planned and applied atomically as one undo action; use dryRun first for a risky or structural batch. native_edit remains available for one isolated change. Stay within returned permission. Correct any regression, then include the final review. Do not claim an edit happened without a successful tool result.",
+          LAYOUT_ISSUE_INSTRUCTION,
           webPolicy.WEB_TOOLS_INSTRUCTION,
           policy.completionInstruction,
           "Allowed non-null arguments for each operation (all other fields must be omitted or null): " +
-            JSON.stringify(
-              Object.fromEntries(
-                Object.entries(edit.nativeEditContract.mutationModel.operations)
-                  .filter(
-                    ([, metadata]) =>
-                      metadata.availability !== "format_excluded",
-                  )
-                  .map(([name, metadata]) => [name, metadata.arguments]),
-              ),
-            ),
+            JSON.stringify(editTools.operationArguments),
+          ...(reviewOnly ? [] : [webPolicy.EDIT_REQUEST_INSTRUCTION]),
+          `Coordinates are 1/100 mm. IDs refer to the last observed revision; the editor rebinds batch targets to the same live objects before every command. ${edit.nativeEditContract.transaction.ordering} Do not change original text or geometry merely to hide font/rendering differences. Answer in Korean.`,
+          ...(observed?.documentFormat === "idml" ? [INDESIGN_INSTRUCTION] : []),
+          observed && !reviewOnly
+            ? `Live document revision: ${observed.revision}. Active slide: ${observed.activeSlide + 1}번. Slide headings for navigation only: ${slideHeadings(observed)}. The attached page images and full page data are the editing evidence. Request native_observe for any target page not attached before editing it.`
+            : reviewOnly
+              ? `This is a review-only step. The user's request was already applied to the SAME open document in this turn: ${JSON.stringify(input.requestText)}. Only native_observe and native_review are available; you cannot edit.`
+              : "You are editing the SAME open document as the user (a PowerPoint deck or an InDesign document). Always observe first. Human edits may happen between calls: a stale-state error requires observing again, never replaying an edit blindly.",
+          `Previous conversation, oldest first, is context only. It may describe failed, cancelled, reverted, or human-overwritten work. The live observation and revision are the only authority for the current document: ${JSON.stringify(input.conversationHistory ?? [])}`,
           ...(unfinishedGoal
             ? [`Unfinished user goal to continue: ${unfinishedGoal}`]
             : []),
@@ -881,15 +870,14 @@ ${await input.web.readPage(url, signal)}`,
                 `Current user instruction, including any added constraints: ${input.requestText}`,
               ]
             : []),
-          ...(reviewOnly ? [] : [webPolicy.EDIT_REQUEST_INSTRUCTION]),
-          `Coordinates are 1/100 mm. IDs refer to the last observed revision; the editor rebinds batch targets to the same live objects before every command. ${edit.nativeEditContract.transaction.ordering} Do not change original text or geometry merely to hide font/rendering differences. Answer in Korean.`,
           prompt,
         ].join("\n"),
         ...(initialPage ? { initialPage } : {}),
         tools: tools.filter((tool) =>
           reviewOnly
             ? REVIEW_ONLY_TOOLS.has(tool.name)
-            : tool.name !== "native_review",
+            : tool.name !== "native_review" &&
+              (tool.name !== "native_edit" || editTools.assetSchema !== null),
         ),
         onTool: (name, args, signal) => {
           if (reviewOnly && !REVIEW_ONLY_TOOLS.has(name))
@@ -933,11 +921,7 @@ ${await input.web.readPage(url, signal)}`,
       );
     }
   };
-  let text = await turn(
-    `User request: ${effectiveRequest}`,
-    24e4,
-    directlyApplied,
-  );
+  let text = await turn(`User request: ${effectiveRequest}`, 24e4);
   let reviewFailureCode = null;
   const finishReview = async (raw) => {
     await toolTail;
@@ -1038,8 +1022,25 @@ function nativeModelObservation(state) {
     ...state.images.map((image) => image.slideIndex),
   ]);
   const { images, modelView, ...rest } = state;
+  // Layout issues of the pages shown in detail, every one this edit
+  // introduced, and only a count for the rest: a long document lists many
+  // pre-existing warnings the model does not need on every call.
+  const audit = state.layoutAudit;
+  const layoutAudit =
+    audit && Array.isArray(audit.issues)
+      ? {
+          ...audit,
+          issues: audit.issues.filter((issue) =>
+            detailed.has(issue?.slideIndex),
+          ),
+          otherPagesIssueCount: audit.issues.filter(
+            (issue) => !detailed.has(issue?.slideIndex),
+          ).length,
+        }
+      : audit;
   return {
     ...rest,
+    ...(layoutAudit ? { layoutAudit } : {}),
     slides: state.slides.map((slide) =>
       detailed.has(slide.slideIndex)
         ? slide

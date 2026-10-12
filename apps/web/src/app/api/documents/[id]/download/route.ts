@@ -10,7 +10,7 @@ export async function GET(
   const { id } = await context.params;
   try {
     const source = new URL(request.url).searchParams.get("source") ?? "current";
-    if (source !== "current" && source !== "original" && source !== "candidate")
+    if (source !== "current" && source !== "original")
       throw new HttpError(400, "invalid_download_source");
     const session = await requireSession(request);
     // Large files go straight from storage to the browser when it can.

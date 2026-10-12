@@ -32,9 +32,8 @@ interface NativeSaveStage {
 const UNDO_SAVE_WINDOW_SECONDS = 120;
 
 /**
- * WOPI and browser editing have different authorization and concurrency
- * checks. Once either owns the locked session row, the version lineage,
- * validation job and save policy must be identical.
+ * Stages a save once the caller owns the locked session row: the version
+ * lineage, validation job and save policy for every saved file.
  */
 export async function stageNativeSave(
   sql: TransactionSql,

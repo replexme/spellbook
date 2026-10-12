@@ -27,8 +27,8 @@ describe("aiEditLimits", () => {
   });
 
   it("adds SmartArt and table content on an engine without those edits", () => {
-    const stock = { patchLevel: "stock", supportedOperations: [] };
-    expect(aiEditLimits(slides, stock)).toEqual([
+    const without = { supportedOperations: ["replace_text"] };
+    expect(aiEditLimits(slides, without)).toEqual([
       { kind: "diagram", count: 2, slides: [1, 3] },
       { kind: "table", count: 1, slides: [0] },
       { kind: "linked_chart", count: 1, slides: [2] },
@@ -36,21 +36,20 @@ describe("aiEditLimits", () => {
     ]);
   });
 
-  it("drops what a patched engine can edit", () => {
-    const patched = { patchLevel: "undo-v30", supportedOperations: [] };
-    expect(aiEditLimits(slides, patched).map((limit) => limit.kind)).toEqual([
+  it("drops what the engine can edit", () => {
+    const engine = {
+      supportedOperations: ["set_smartart_node", "set_table_cell"],
+    };
+    expect(aiEditLimits(slides, engine).map((limit) => limit.kind)).toEqual([
       "linked_chart",
       "ole",
     ]);
   });
 
-  it("trusts operations a browser runtime reports it supports", () => {
-    const browser = {
-      patchLevel: "browser-stock",
-      supportedOperations: ["set_table_cell"],
-    };
-    expect(engineSupports(browser, "set_table_cell")).toBe(true);
-    expect(engineSupports(browser, "set_smartart_node")).toBe(false);
-    expect(engineSupports(browser, "replace_text")).toBe(true);
+  it("trusts exactly the operations the engine reports", () => {
+    const engine = { supportedOperations: ["set_table_cell"] };
+    expect(engineSupports(engine, "set_table_cell")).toBe(true);
+    expect(engineSupports(engine, "set_smartart_node")).toBe(false);
+    expect(engineSupports(engine, "replace_text")).toBe(false);
   });
 });

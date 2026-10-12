@@ -202,6 +202,9 @@ export async function runMigrations(): Promise<void> {
     );
     create index if not exists spellbook_assets_document_idx on spellbook_assets(document_id);
 
+    -- Historical columns kept for existing data: editor_mode 'wopi', wopi_lock,
+    -- lock_updated_at, lock_expires_at and wopi_put_count were written by the
+    -- earlier server-side editor. Sessions are now always 'browser'.
     create table if not exists spellbook_native_sessions (
       id uuid primary key,
       document_id uuid not null references spellbook_documents(id) on delete cascade,

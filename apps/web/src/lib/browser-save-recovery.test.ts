@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => {
     working_sha256: "a".repeat(64),
     status: "active",
     editor_mode: "browser",
-    wopi_lock: null,
     save_revision: 0,
     preservation_object: "original.pptx",
   };

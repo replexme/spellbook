@@ -10,11 +10,7 @@
         "application/vnd.openxmlformats-officedocument.presentationml.presentation"
       ],
       "maxBytes": 52428800,
-      "editor": {
-        "kind": "wopi",
-        "wopiApp": "impress",
-        "wopiAction": "edit"
-      },
+      "editor": { "kind": "browser" },
       "semantics": {
         "unit": "slide",
         "rootCollection": "slides",
@@ -28,11 +24,7 @@
       "extensions": [".idml"],
       "mimeTypes": ["application/vnd.adobe.indesign-idml-package"],
       "maxBytes": 52428800,
-      "editor": {
-        "kind": "native",
-        "wopiApp": null,
-        "wopiAction": null
-      },
+      "editor": { "kind": "browser" },
       "semantics": {
         "unit": "page",
         "rootCollection": "pages",
@@ -48,11 +40,7 @@
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       ],
       "maxBytes": 52428800,
-      "editor": {
-        "kind": "wopi",
-        "wopiApp": "writer",
-        "wopiAction": "edit"
-      },
+      "editor": { "kind": "none" },
       "semantics": {
         "unit": "section",
         "rootCollection": "document",
@@ -66,11 +54,7 @@
       "extensions": [".spellbook"],
       "mimeTypes": ["application/vnd.spellbook.document+zip"],
       "maxBytes": 104857600,
-      "editor": {
-        "kind": "native",
-        "wopiApp": null,
-        "wopiAction": null
-      },
+      "editor": { "kind": "native" },
       "semantics": {
         "unit": "page",
         "rootCollection": "pages",

@@ -11,13 +11,15 @@ vi.mock("./workspace/workspace-ad", () => ({
 const { NativeWorkspace } = await import("./native-workspace");
 
 const launch = {
-  editorKind: "wopi" as const,
   documentId: "doc-1",
   fileName: "deck.pptx",
-  editorUrl: "https://office.example.test/editor",
-  accessToken: "token",
+  editorUrl: "https://view.example.test/workspace",
+  accessToken: "",
   expiresAt: Date.now() + 60_000,
-  apiBase: "/api/documents/doc-1",
+  apiBase: "/api/documents/doc-1/native",
+  contentApiBase: "/api/documents/doc-1/browser",
+  revision: '"v-1:0000"',
+  maxBytes: 100_000_000,
   aiConnector: { mode: "internal" as const },
 };
 

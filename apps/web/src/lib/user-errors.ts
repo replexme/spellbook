@@ -56,8 +56,6 @@ const messages: Record<string, string> = {
     "보관할 수 있는 파일 수를 다 채웠어요. 필요 없는 파일을 내려받은 뒤 삭제하면 다시 가져올 수 있어요.",
 
   // Editor and saving
-  office_editor_starting:
-    "편집기를 준비하고 있어요. 처음 열 때는 1분쯤 걸려요.",
   browser_office_not_configured: `브라우저 편집기가 아직 설정되지 않았어요. ${SAFE}`,
   format_editor_not_available: "이 형식은 아직 편집기로 열 수 없어요.",
   browser_session_not_active: `편집 연결이 끊겼어요. ${RELOAD}`,
@@ -82,7 +80,6 @@ const messages: Record<string, string> = {
   native_scan_outputs_missing: SAVE_CHECK_FAILED,
   native_scan_artifact_identity_mismatch: SAVE_CHECK_FAILED,
   native_scan_validation_identity_mismatch: SAVE_CHECK_FAILED,
-  office_editor_save_required: "먼저 지금 편집 내용을 저장해 주세요.",
   document_save_in_progress:
     "저장하는 중이에요. 저장이 끝나면 다시 시도해 주세요.",
   native_save_validation_in_progress:
@@ -92,7 +89,6 @@ const messages: Record<string, string> = {
   invalid_browser_origin: `편집기 연결을 확인하지 못했어요. ${RELOAD}`,
   editor_timeout: `편집기가 응답하지 않아요. ${RELOAD}`,
   editor_not_connected: `편집기에 아직 연결되지 않았어요. ${TRY_AGAIN}`,
-  editor_save_not_received: `편집기에서 저장 결과를 받지 못했어요. ${TRY_AGAIN}`,
   document_load_failed: `파일을 편집기에 불러오지 못했어요. ${RELOAD}`,
   browser_document_identity_mismatch: `편집기에 불러온 파일이 최신 저장본과 달라요. ${RELOAD}`,
   undo_nothing_changed: "되돌릴 변경이 없어요.",

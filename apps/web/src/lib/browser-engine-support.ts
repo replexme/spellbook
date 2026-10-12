@@ -1,9 +1,8 @@
 /**
- * Whether this browser can run the in-browser Office editor. The editor
- * frame isolates itself with Document-Isolation-Policy, which Chromium ships
- * from version 137 on desktop and 146 on Android. Other browsers are refused
- * rather than served by a server editor; the frame itself reports a Chromium
- * browser that still cannot isolate it.
+ * Whether this browser can run the browser document view. The view's frame
+ * isolates itself with Document-Isolation-Policy, which Chromium ships from
+ * version 137 on desktop and 146 on Android. Other browsers are refused
+ * before anything is downloaded.
  */
 export const ENGINE_MINIMUM_CHROMIUM = { desktop: 137, mobile: 146 } as const;
 

@@ -157,24 +157,16 @@ export function HomeScreen({
     [load],
   );
 
-  const warmEditor = useCallback(() => {
-    // Opening a document keeps its own retry path if prewarming fails.
-    void fetch("/api/office/warm", { method: "POST", keepalive: true }).catch(
-      () => undefined,
-    );
-  }, []);
-
   useEffect(() => {
     setBrowserSupported(browserEngineSupported());
     void load();
-    warmEditor();
     try {
       const saved = window.localStorage.getItem(VIEW_KEY);
       if (saved === "grid" || saved === "list") setView(saved);
     } catch {
       // A remembered view is a convenience only.
     }
-  }, [load, warmEditor]);
+  }, [load]);
 
   // Keep "checking" cards current while the server works on them.
   const checking = documents.some(
@@ -188,10 +180,9 @@ export function HomeScreen({
 
   const startImport = useCallback(
     (file: File) => {
-      warmEditor();
       setImporting(file);
     },
-    [warmEditor],
+    [],
   );
 
   // Drop a PPTX anywhere on the page.

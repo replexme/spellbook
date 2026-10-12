@@ -15,9 +15,8 @@ export interface DocumentFormat {
   mimeTypes: string[];
   maxBytes: number;
   editor: {
-    kind: "wopi" | "native" | "none";
-    wopiApp: string | null;
-    wopiAction: string | null;
+    /** "browser": opened in the browser document view. */
+    kind: "browser" | "native" | "none";
   };
   semantics: {
     unit: string;
@@ -58,8 +57,10 @@ export function documentFormatOf(id: string | null | undefined): DocumentFormat 
   return formats.find((format) => format.id === id) ?? currentPresentationFormat;
 }
 
-/** Formats the browser document view opens: PowerPoint decks and InDesign (IDML) documents. */
-export const browserViewFormatIds: readonly DocumentFormatId[] = ["pptx", "idml"];
+/** Formats the browser document view opens (PowerPoint decks and InDesign IDML documents). */
+export const browserViewFormatIds: readonly DocumentFormatId[] = formats
+  .filter((format) => format.editor.kind === "browser")
+  .map((format) => format.id);
 
 /** Extensions and media types the file picker offers (formats that can be imported). */
 export const importAccept = formats

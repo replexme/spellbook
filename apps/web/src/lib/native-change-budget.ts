@@ -244,8 +244,6 @@ function addOperation(
     throw new Error("native_ai_change_budget_unknown_operation");
   const operation = rawOperation as MutationOperation;
   const contract = capabilities.mutationModel.operations[operation];
-  if (contract.availability === "format_excluded")
-    throw new Error("native_ai_change_budget_excluded_operation");
   operations.add(operation);
   families.add(contract.family as MutationFamily);
 }

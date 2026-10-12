@@ -7,7 +7,6 @@ export type GoalCheck = {
   kind: "image_shape";
   elementId: string;
   shape: "circle" | "rectangle";
-  mediaFingerprint?: string;
 };
 export type ActiveGoal = {
   version: 1;
@@ -41,10 +40,3 @@ export function prepareActiveGoal(
   previous: unknown,
   scope: string,
 ): ActiveGoal | null;
-
-export function simpleGoalCommands(
-  request: string,
-  checks: GoalCheck[],
-  observation: NativeObservation,
-  permission: NativePermission,
-): Array<Record<string, unknown>> | null;

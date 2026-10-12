@@ -55,7 +55,6 @@ import {
   failNativeScan,
   markNativeUndo,
   NATIVE_TASK_TTL_SECONDS,
-  nativeSessionState,
   pollNativeSession,
   submitNativeTurn,
 } from "./native-runtime";
@@ -64,13 +63,7 @@ import {
   listVersions,
   restoreVersion,
 } from "./document-history";
-import { signWopiToken } from "./wopi-token";
-import {
-  createNativeLaunch,
-  wopiGetFile,
-  wopiLock,
-  wopiPutFile,
-} from "./native-session";
+import { signCapabilityToken } from "./capability-token";
 import { requireNativeRequestSession } from "./native-request-auth";
 import { authorizeNativeConnectorJob } from "./native-connector-auth";
 import { getImageAsset } from "./image-assets";
@@ -101,7 +94,7 @@ beforeAll(async () => {
   );
   vi.stubEnv(
     "SPELLBOOK_WOPI_SECRET",
-    "integration-wopi-secret-that-is-long-enough",
+    "integration-capability-secret-long-enough",
   );
   vi.stubEnv("SPELLBOOK_INTERNAL_TOKEN", "integration-internal-token");
   vi.stubEnv("SPELLBOOK_DB_POOL_MAX", "4");
@@ -126,8 +119,8 @@ async function fixture() {
       values (${documentId},${accountId},'native.pptx','ready',${versionId},${versionId})`;
     await sql`insert into spellbook_versions (id,document_id,kind,status,document_object,graph_object,document_sha256,slide_count)
       values (${versionId},${documentId},'original','ready','native/document.pptx',${graphObject},${"a".repeat(64)},1)`;
-    await sql`insert into spellbook_native_sessions (id,document_id,account_id,account_email,working_version_id,working_sha256,status,expires_at)
-      values (${nativeSessionId},${documentId},${accountId},${session.email},${versionId},${"a".repeat(64)},'active',now()+interval '1 hour')`;
+    await sql`insert into spellbook_native_sessions (id,document_id,account_id,account_email,working_version_id,working_sha256,editor_mode,status,expires_at)
+      values (${nativeSessionId},${documentId},${accountId},${session.email},${versionId},${"a".repeat(64)},'browser','active',now()+interval '1 hour')`;
   });
   return { documentId, versionId, nativeSessionId };
 }
@@ -151,6 +144,25 @@ async function addPastNativeTurn(
       (id,session_id,document_id,account_id,job_id,request_text,permission_mode,status,assistant_text,created_at)
       values (${turnId},${context.nativeSessionId},${context.documentId},${accountId},${jobId},${input.request},'document',${input.status},${input.response},${input.createdAt})`;
   });
+}
+
+/** Saves bytes through the document view's save endpoint, as the page does. */
+function browserSave(documentId: string, revision: string, bytes: Buffer) {
+  return saveBrowserDocument(
+    session,
+    documentId,
+    new Request(
+      `https://spellbook.integration.invalid/api/documents/${documentId}/browser/contents`,
+      {
+        method: "PUT",
+        headers: {
+          origin: "https://spellbook.integration.invalid",
+          "if-match": revision,
+        },
+        body: new Uint8Array(bytes),
+      },
+    ),
+  );
 }
 
 const observation = {
@@ -281,7 +293,7 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
 
   it("streams committed events without idle polling and resumes from a durable cursor", async () => {
     const f = await fixture();
-    const token = signWopiToken({
+    const token = signCapabilityToken({
       version: 1,
       sessionId: f.nativeSessionId,
       documentId: f.documentId,
@@ -431,7 +443,7 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
         }
       };
       const abort = new AbortController();
-      const token = signWopiToken({
+      const token = signCapabilityToken({
         version: 1,
         sessionId: streamFixture.nativeSessionId,
         documentId: streamFixture.documentId,
@@ -528,7 +540,7 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
   );
   it("keeps document-scoped editor requests alive without the broader login cookie", async () => {
     const f = await fixture();
-    const token = signWopiToken({
+    const token = signCapabilityToken({
       version: 1,
       sessionId: f.nativeSessionId,
       documentId: f.documentId,
@@ -563,7 +575,7 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     const processing = await fixture();
     await db()`update spellbook_documents set status='processing' where id=${processing.documentId}`;
     await expect(
-      createNativeLaunch(session, processing.documentId),
+      createBrowserDocumentLaunch(session, processing.documentId),
     ).rejects.toMatchObject({ status: 409, message: "document_processing" });
 
     const failed = await fixture();
@@ -572,7 +584,7 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       await sql`update spellbook_versions set status='failed' where id=${failed.versionId}`;
     });
     await expect(
-      createNativeLaunch(session, failed.documentId),
+      createBrowserDocumentLaunch(session, failed.documentId),
     ).rejects.toMatchObject({
       status: 422,
       message: "document_processing_failed",
@@ -593,202 +605,9 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     ]);
   });
 
-  it("enforces a WOPI lock and versions a save without overwriting the original", async () => {
-    const f = await fixture();
-    const token = signWopiToken({
-      version: 1,
-      sessionId: f.nativeSessionId,
-      documentId: f.documentId,
-      accountId,
-      expiresAt: Date.now() + 60_000,
-    });
-    const url = `https://spellbook.integration.invalid/api/wopi/files/${f.documentId}?access_token=${encodeURIComponent(token)}`;
-    expect(
-      await wopiLock(
-        new Request(url, {
-          method: "POST",
-          headers: {
-            "x-wopi-override": "LOCK",
-            "x-wopi-lock": "editor-lock",
-            "x-wopi-lockexpirationtimeout": "90",
-          },
-        }),
-        f.documentId,
-      ),
-    ).toEqual({ status: 200 });
-    const [locked] = await db()`
-      select wopi_lock,
-        extract(epoch from (lock_expires_at-lock_updated_at)) as lock_seconds
-      from spellbook_native_sessions where id=${f.nativeSessionId}
-    `;
-    expect(locked.wopi_lock).toBe("editor-lock");
-    expect(Number(locked.lock_seconds)).toBeCloseTo(90, 3);
-    expect(
-      await wopiLock(
-        new Request(url, {
-          method: "POST",
-          headers: { "x-wopi-override": "LOCK", "x-wopi-lock": "other-lock" },
-        }),
-        f.documentId,
-      ),
-    ).toEqual({ status: 409, lock: "editor-lock" });
-    const savedBytes = Buffer.from("PK-new-native-document");
-    const contentsUrl = new URL(url);
-    contentsUrl.pathname += "/contents";
-    await wopiPutFile(
-      new Request(contentsUrl, {
-        method: "POST",
-        headers: { "x-wopi-lock": "editor-lock" },
-        body: savedBytes,
-      }),
-      f.documentId,
-    );
-    expect(workers.enqueueWorkerJob.mock.calls.at(-1)?.[3]).toEqual(
-      expect.objectContaining({
-        inputObject: expect.stringContaining(
-          `/documents/${f.documentId}/versions/`,
-        ),
-        baselineInputObject: "native/document.pptx",
-        nativeSessionId: f.nativeSessionId,
-        changeOrigin: "human",
-        changeBudget: expect.objectContaining({
-          allowPartCreationOrDeletion: true,
-          targetSlideIndexes: null,
-        }),
-      }),
-    );
-    expect(storage.putObject).toHaveBeenCalledWith(
-      expect.stringContaining(`/documents/${f.documentId}/versions/`),
-      savedBytes,
-      expect.stringContaining("presentationml"),
-    );
-    const [document] =
-      await db()`select current_version_id from spellbook_documents where id=${f.documentId}`;
-    const [native] =
-      await db()`select working_version_id,status from spellbook_native_sessions where id=${f.nativeSessionId}`;
-    expect(document.current_version_id).toBe(f.versionId);
-    expect(native).toMatchObject({ status: "validating" });
-    expect(native.working_version_id).not.toBe(f.versionId);
-
-    // The page waits for the server to count its save; an identical save
-    // must be counted too, without a new revision.
-    const afterChanged = await nativeSessionState(session, f.documentId);
-    expect(afterChanged.editorSaveCount).toBe(1);
-    await wopiPutFile(
-      new Request(contentsUrl, {
-        method: "POST",
-        headers: { "x-wopi-lock": "editor-lock" },
-        body: savedBytes,
-      }),
-      f.documentId,
-    );
-    const afterIdentical = await nativeSessionState(session, f.documentId);
-    expect(afterIdentical.editorSaveCount).toBe(2);
-    expect(afterIdentical.saveRevision).toBe(afterChanged.saveRevision);
-  });
-
-  it("implements WOPI lock transitions, expiry, and extended lock limits", async () => {
-    const f = await fixture();
-    const token = signWopiToken({
-      version: 1,
-      sessionId: f.nativeSessionId,
-      documentId: f.documentId,
-      accountId,
-      expiresAt: Date.now() + 60_000,
-    });
-    const url = `https://spellbook.integration.invalid/api/wopi/files/${f.documentId}?access_token=${encodeURIComponent(token)}`;
-    const lock = (
-      operation: "LOCK" | "REFRESH_LOCK" | "UNLOCK" | "GET_LOCK",
-      value?: string,
-      extra: Record<string, string> = {},
-    ) =>
-      wopiLock(
-        new Request(url, {
-          method: "POST",
-          headers: {
-            "x-wopi-override": operation,
-            ...(value === undefined ? {} : { "x-wopi-lock": value }),
-            ...extra,
-          },
-        }),
-        f.documentId,
-      );
-
-    await expect(lock("GET_LOCK")).resolves.toEqual({ status: 200, lock: "" });
-    await expect(lock("REFRESH_LOCK", "missing")).resolves.toEqual({
-      status: 409,
-      lock: "",
-    });
-    await expect(lock("LOCK", "x".repeat(1025))).rejects.toMatchObject({
-      status: 400,
-      message: "invalid_wopi_lock",
-    });
-    await expect(lock("LOCK", "é")).rejects.toMatchObject({
-      status: 400,
-      message: "invalid_wopi_lock",
-    });
-    await expect(
-      lock("LOCK", "first", { "x-wopi-lockexpirationtimeout": "59" }),
-    ).rejects.toMatchObject({
-      status: 400,
-      message: "invalid_wopi_lock_timeout",
-    });
-    await expect(lock("LOCK", "first")).resolves.toEqual({ status: 200 });
-    let [lifetime] = await db()`
-      select extract(epoch from (lock_expires_at-lock_updated_at)) as seconds
-      from spellbook_native_sessions where id=${f.nativeSessionId}
-    `;
-    expect(Number(lifetime.seconds)).toBeCloseTo(30 * 60, 3);
-    await expect(
-      lock("REFRESH_LOCK", "first", {
-        "x-wopi-lockexpirationtimeout": "120",
-      }),
-    ).resolves.toEqual({ status: 200 });
-    [lifetime] = await db()`
-      select extract(epoch from (lock_expires_at-lock_updated_at)) as seconds
-      from spellbook_native_sessions where id=${f.nativeSessionId}
-    `;
-    expect(Number(lifetime.seconds)).toBeCloseTo(120, 3);
-    await expect(
-      lock("LOCK", "second", { "x-wopi-oldlock": "first" }),
-    ).resolves.toEqual({ status: 200 });
-    await expect(lock("GET_LOCK")).resolves.toEqual({
-      status: 200,
-      lock: "second",
-    });
-    await db()`
-      update spellbook_native_sessions set lock_expires_at=now()-interval '1 second'
-      where id=${f.nativeSessionId}
-    `;
-    await expect(lock("GET_LOCK")).resolves.toEqual({ status: 200, lock: "" });
-    await expect(
-      lock("LOCK", "third", { "x-wopi-oldlock": "second" }),
-    ).resolves.toEqual({ status: 409, lock: "" });
-    const contentsUrl = new URL(url);
-    contentsUrl.pathname += "/contents";
-    await expect(
-      wopiPutFile(
-        new Request(contentsUrl, {
-          method: "POST",
-          headers: { "x-wopi-lock": "second" },
-          body: Buffer.from("PK-stale-lock-save"),
-        }),
-        f.documentId,
-      ),
-    ).rejects.toMatchObject({ message: "wopi_lock_mismatch", lock: "" });
-    const [expired] = await db()`
-      select wopi_lock,lock_updated_at,lock_expires_at
-      from spellbook_native_sessions where id=${f.nativeSessionId}
-    `;
-    expect(expired).toMatchObject({
-      wopi_lock: null,
-      lock_updated_at: null,
-      lock_expires_at: null,
-    });
-  });
-
   it("derives a slide-scoped package budget from the reviewed AI commands", async () => {
     const f = await fixture();
+    const launch = await createBrowserDocumentLaunch(session, f.documentId);
     const submitted = await submitNativeTurn(session, f.documentId, {
       text: "첫 슬라이드 제목을 바꿔줘",
       permission: "document",
@@ -835,30 +654,10 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       },
     );
 
-    const token = signWopiToken({
-      version: 1,
-      sessionId: f.nativeSessionId,
-      documentId: f.documentId,
-      accountId,
-      expiresAt: Date.now() + 60_000,
-    });
-    const url = `https://spellbook.integration.invalid/api/wopi/files/${f.documentId}?access_token=${encodeURIComponent(token)}`;
-    await wopiLock(
-      new Request(url, {
-        method: "POST",
-        headers: { "x-wopi-override": "LOCK", "x-wopi-lock": "ai-save" },
-      }),
+    await browserSave(
       f.documentId,
-    );
-    const contentsUrl = new URL(url);
-    contentsUrl.pathname += "/contents";
-    await wopiPutFile(
-      new Request(contentsUrl, {
-        method: "POST",
-        headers: { "x-wopi-lock": "ai-save" },
-        body: Buffer.from("PK-reviewed-ai-save"),
-      }),
-      f.documentId,
+      launch.revision,
+      Buffer.from("PK-reviewed-ai-save"),
     );
 
     expect(workers.enqueueWorkerJob.mock.calls.at(-1)?.[3]).toMatchObject({
@@ -874,6 +673,7 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
 
   it("refuses to save an AI mutation before its visual review completes", async () => {
     const f = await fixture();
+    await createBrowserDocumentLaunch(session, f.documentId);
     const submitted = await submitNativeTurn(session, f.documentId, {
       text: "첫 슬라이드 제목을 바꿔줘",
       permission: "document",
@@ -900,23 +700,6 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       value: { ...observation, changedSlideIndexes: [0] },
     });
 
-    const token = signWopiToken({
-      version: 1,
-      sessionId: f.nativeSessionId,
-      documentId: f.documentId,
-      accountId,
-      expiresAt: Date.now() + 60_000,
-    });
-    const url = `https://spellbook.integration.invalid/api/wopi/files/${f.documentId}?access_token=${encodeURIComponent(token)}`;
-    await wopiLock(
-      new Request(url, {
-        method: "POST",
-        headers: { "x-wopi-override": "LOCK", "x-wopi-lock": "review-pending" },
-      }),
-      f.documentId,
-    );
-    const contentsUrl = new URL(url);
-    contentsUrl.pathname += "/contents";
     const unchangedBytes = Buffer.from("PK-unchanged-before-ai-review");
     const unchangedDigest = createHash("sha256")
       .update(unchangedBytes)
@@ -925,28 +708,15 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       update spellbook_native_sessions set working_sha256=${unchangedDigest}
       where id=${f.nativeSessionId}
     `;
-    const unchanged = await wopiPutFile(
-      new Request(contentsUrl, {
-        method: "POST",
-        headers: { "x-wopi-lock": "review-pending" },
-        body: unchangedBytes,
-      }),
-      f.documentId,
-    );
+    const revision = `"${f.versionId}:${unchangedDigest}"`;
+    const unchanged = await browserSave(f.documentId, revision, unchangedBytes);
     expect(unchanged.unchanged).toBe(true);
     const [beforeSave] = await db()`
       select save_revision from spellbook_native_sessions where id=${f.nativeSessionId}
     `;
     expect(beforeSave.save_revision).toBe(0);
     const put = () =>
-      wopiPutFile(
-        new Request(contentsUrl, {
-          method: "POST",
-          headers: { "x-wopi-lock": "review-pending" },
-          body: Buffer.from("PK-unreviewed-ai-save"),
-        }),
-        f.documentId,
-      );
+      browserSave(f.documentId, revision, Buffer.from("PK-unreviewed-ai-save"));
     const dispatchCount = workers.enqueueWorkerJob.mock.calls.length;
     await expect(put()).rejects.toThrow("native_ai_change_review_pending");
     expect(workers.enqueueWorkerJob.mock.calls).toHaveLength(dispatchCount);
@@ -1089,55 +859,6 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       status: "validating",
     });
     expect(native.working_version_id).not.toBe(f.versionId);
-
-    const token = signWopiToken({
-      version: 1,
-      sessionId: f.nativeSessionId,
-      documentId: f.documentId,
-      accountId,
-      expiresAt: Date.now() + 60_000,
-    });
-    await expect(
-      wopiGetFile(
-        new Request(
-          `https://spellbook.integration.invalid/api/wopi/files/${f.documentId}?access_token=${encodeURIComponent(token)}`,
-        ),
-        f.documentId,
-      ),
-    ).rejects.toMatchObject({ status: 401, message: "expired_wopi_session" });
-  });
-
-  it("does not switch to browser editing while Collabora owns the WOPI lock", async () => {
-    const f = await fixture();
-    await db()`update spellbook_native_sessions set wopi_lock='editor-lock' where id=${f.nativeSessionId}`;
-    await expect(
-      createBrowserDocumentLaunch(session, f.documentId),
-    ).rejects.toMatchObject({
-      status: 409,
-      message: "office_editor_save_required",
-    });
-  });
-
-  it("expires an abandoned WOPI lock before switching editor modes", async () => {
-    const f = await fixture();
-    await db()`
-      update spellbook_native_sessions set
-        wopi_lock='abandoned-lock',lock_updated_at=now()-interval '31 minutes',
-        lock_expires_at=null
-      where id=${f.nativeSessionId}
-    `;
-    await expect(
-      createBrowserDocumentLaunch(session, f.documentId),
-    ).resolves.toMatchObject({ documentId: f.documentId });
-    const [native] = await db()`
-      select editor_mode,wopi_lock,lock_expires_at
-      from spellbook_native_sessions where id=${f.nativeSessionId}
-    `;
-    expect(native).toMatchObject({
-      editor_mode: "browser",
-      wopi_lock: null,
-      lock_expires_at: null,
-    });
   });
 
   it("leases one AI turn, redelivers a browser task safely, and records completion", async () => {
@@ -1185,10 +906,24 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       id: created.taskId,
       request: { operation: "observe" },
     });
+    // A runner that waits gets the editor's answer as soon as it lands.
+    const asked = Date.now();
+    const waiting = executeNativeTool({
+      ...owner,
+      operation: "task_status",
+      taskId: created.taskId,
+      waitMs: 15_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
     await completeNativeTask(session, f.documentId, {
       id: created.taskId,
       value: observation,
     });
+    expect(await waiting).toMatchObject({
+      status: "completed",
+      result: observation,
+    });
+    expect(Date.now() - asked).toBeLessThan(5_000);
     expect(
       await executeNativeTool({
         ...owner,
@@ -1253,6 +988,7 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
 
   it("keeps AI screenshots only while a request runs and names the save after an undo", async () => {
     const f = await fixture();
+    const launch = await createBrowserDocumentLaunch(session, f.documentId);
     const submitted = await submitNativeTurn(session, f.documentId, {
       text: "제목 바꿔 줘",
       permission: "slides",
@@ -1276,7 +1012,7 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       value: {
         ...observation,
         revision: "before",
-        engine: { patchLevel: "stock", supportedOperations: [] },
+        engine: { supportedOperations: [] },
       },
     });
     const edited = (await executeNativeTool({
@@ -1351,8 +1087,8 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
       ],
     });
     const [engine] =
-      await db()`select patch_level from spellbook_editor_engines where editor_mode='wopi'`;
-    expect(engine.patch_level).toBe("stock");
+      await db()`select supported_operations from spellbook_editor_engines where editor_mode='browser'`;
+    expect(engine.supported_operations).toEqual([]);
 
     // An edit whose review did not finish holds the save until the person
     // undoes that request; the undone edit is not in the file being saved.
@@ -1383,32 +1119,8 @@ describe.skipIf(!enabled)("durable native editor orchestration", () => {
     expect(
       (await listNativeTurns(session, f.documentId)).at(-1)?.undoneAt,
     ).toBe(marked.undoneAt);
-    const token = signWopiToken({
-      version: 1,
-      sessionId: f.nativeSessionId,
-      documentId: f.documentId,
-      accountId,
-      expiresAt: Date.now() + 60_000,
-    });
-    const url = `https://spellbook.integration.invalid/api/wopi/files/${f.documentId}?access_token=${encodeURIComponent(token)}`;
-    await wopiLock(
-      new Request(url, {
-        method: "POST",
-        headers: { "x-wopi-override": "LOCK", "x-wopi-lock": "undo-lock" },
-      }),
-      f.documentId,
-    );
-    const contentsUrl = new URL(url);
-    contentsUrl.pathname += "/contents";
     const bytes = Buffer.from("PK-undone-document");
-    await wopiPutFile(
-      new Request(contentsUrl, {
-        method: "POST",
-        headers: { "x-wopi-lock": "undo-lock" },
-        body: bytes,
-      }),
-      f.documentId,
-    );
+    await browserSave(f.documentId, launch.revision, bytes);
     const [saved] = await db()`
       select v.undone_turn_id, v.document_bytes, s.pending_undo_turn_id
       from spellbook_native_sessions s join spellbook_versions v on v.id=s.working_version_id

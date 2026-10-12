@@ -6,7 +6,12 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * verifies for another.
  */
 
-function secret(): string {
+/**
+ * The HMAC key for every token this app signs. The variable keeps its
+ * deployed name, SPELLBOOK_WOPI_SECRET, so existing configuration still
+ * works; it is the capability-token secret, not tied to any editor.
+ */
+export function signingSecret(): string {
   const value = process.env.SPELLBOOK_WOPI_SECRET?.trim();
   if (!value) throw new Error("SPELLBOOK_WOPI_SECRET is required.");
   if (Buffer.byteLength(value) < 32)
@@ -15,7 +20,7 @@ function secret(): string {
 }
 
 function signature(domain: string, payload: string): Buffer {
-  return createHmac("sha256", secret())
+  return createHmac("sha256", signingSecret())
     .update(domain)
     .update("\0")
     .update(payload)

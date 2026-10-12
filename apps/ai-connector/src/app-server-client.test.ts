@@ -622,6 +622,76 @@ describe("structured turn isolation", () => {
     expect(tool).toHaveBeenCalledTimes(1);
     h.client.close();
   });
+  it("hands a tool result's screenshots to the model as input of the same turn", async () => {
+    const h = await harness();
+    const image = "data:image/png;base64,iVBORw0KGgo=";
+    const pending = h.client.runStructuredTurn([], {}, 1000, {
+      tools: [
+        {
+          type: "function",
+          name: "native_observe",
+          description: "observe",
+          inputSchema: {},
+        },
+      ],
+      onTool: async () => ({
+        success: true,
+        contentItems: [
+          { type: "inputText" as const, text: "page 2" },
+          { type: "inputImage" as const, imageUrl: image },
+        ],
+      }),
+    });
+    await vi.waitFor(() =>
+      expect(h.calls.some((call) => call.method === "turn/start")).toBe(true),
+    );
+    h.send({
+      id: "look",
+      method: "item/tool/call",
+      params: {
+        threadId: "thread-1",
+        turnId: "turn-thread-1",
+        tool: "native_observe",
+        arguments: {},
+        callId: "c1",
+      },
+    });
+    await vi.waitFor(() =>
+      expect(
+        h.calls.some((call) => (call as { id: unknown }).id === "look"),
+      ).toBe(true),
+    );
+    const steer = h.calls.find((call) => call.method === "turn/steer");
+    expect(steer?.params).toMatchObject({
+      threadId: "thread-1",
+      expectedTurnId: "turn-thread-1",
+      input: [{ type: "text" }, { type: "image", url: image }],
+    });
+    const response = h.calls.find(
+      (call) => (call as { id: unknown }).id === "look",
+    ) as unknown as { result: { contentItems: Array<{ type: string }> } };
+    expect(response.result.contentItems.map((item) => item.type)).toEqual([
+      "inputText",
+      "inputText",
+    ]);
+    // The pictures go in before the result that names them.
+    expect(h.calls.indexOf(steer!)).toBeLessThan(
+      h.calls.indexOf(response as never),
+    );
+    h.send({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-thread-1",
+          status: "completed",
+          items: [{ type: "agentMessage", text: "done" }],
+        },
+      },
+    });
+    await expect(pending).resolves.toBe("done");
+    h.client.close();
+  });
   it("abort interrupts the turn and revokes pending tool authority", async () => {
     const h = await harness();
     const abort = new AbortController();
