@@ -28,11 +28,14 @@ import type {
 } from "./app-server-client.js";
 
 const execFileAsync = promisify(execFile);
-const claudeModels: AvailableModel[] = [
+/** Used only when Claude Code cannot be asked for its own list. */
+const fallbackClaudeModels: AvailableModel[] = [
   model("sonnet", "Claude Sonnet", true),
   model("opus", "Claude Opus"),
   model("haiku", "Claude Haiku"),
 ];
+const CLAUDE_FAMILIES = ["opus", "fable", "sonnet", "haiku"] as const;
+const CLAUDE_MODELS_TTL_MS = 10 * 60_000;
 
 interface ClaudeAuthStatus {
   loggedIn: boolean;
@@ -61,6 +64,7 @@ export class ClaudeCodeClient implements AgentTurnClient {
   readonly supportsImageGeneration = false;
   private readonly conversationSessions = new Map<string, string>();
   private loginProcess: ChildProcess | null = null;
+  private modelList: { at: number; models: AvailableModel[] } | null = null;
 
   constructor(private readonly binary = resolveClaudeBinary()) {}
 
@@ -113,12 +117,30 @@ export class ClaudeCodeClient implements AgentTurnClient {
     return { status: "started" };
   }
 
+  /**
+   * The models this Claude Code offers the signed-in account, with their real names
+   * ("Claude Opus 5.5"), read from Claude Code itself so they follow its releases.
+   */
   async models(): Promise<AvailableModel[]> {
-    return structuredClone(claudeModels);
+    if (this.modelList && Date.now() - this.modelList.at < CLAUDE_MODELS_TTL_MS)
+      return structuredClone(this.modelList.models);
+    let models: AvailableModel[];
+    try {
+      models = claudeModelsFromCatalog(
+        await readClaudeModelCatalog(this.binary),
+      );
+    } catch {
+      models = [];
+    }
+    if (!models.length) return structuredClone(fallbackClaudeModels);
+    this.modelList = { at: Date.now(), models };
+    return structuredClone(models);
   }
 
   async validateModelSettings(settings: ModelSettings): Promise<void> {
-    const selected = claudeModels.find((item) => item.model === settings.model);
+    const selected = (await this.models()).find(
+      (item) => item.model === settings.model,
+    );
     if (
       !selected?.supportedReasoningEfforts.some(
         (effort) => effort.reasoningEffort === settings.effort,
@@ -197,8 +219,135 @@ export class ClaudeCodeClient implements AgentTurnClient {
   }
 }
 
+/** Whether a model name (without a provider) names a Claude model: an alias or a full id. */
 export function isClaudeModel(modelName: string | undefined): boolean {
-  return claudeModels.some((model) => model.model === modelName);
+  if (!modelName) return false;
+  const name = modelName.toLowerCase().replace(/\[[^\]]*\]$/, "");
+  return (
+    name.startsWith("claude-") ||
+    (CLAUDE_FAMILIES as readonly string[]).includes(name)
+  );
+}
+
+interface ClaudeCatalogEntry {
+  value: string;
+  displayName?: string;
+  description?: string;
+}
+
+/**
+ * Claude Code's model list, from the answer to its stream-json `initialize` control
+ * request (what the Agent SDK's supportedModels() reads). No turn is run.
+ */
+export async function readClaudeModelCatalog(
+  binary = resolveClaudeBinary(),
+): Promise<ClaudeCatalogEntry[]> {
+  const child = spawn(
+    binary,
+    [
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+    ],
+    {
+      env: restrictedClaudeEnvironment(),
+      stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
+    },
+  );
+  try {
+    return await new Promise<ClaudeCatalogEntry[]>((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error("claude_models_timeout")),
+        20_000,
+      );
+      let buffer = "";
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.stdout.on("data", (chunk: Buffer) => {
+        buffer += chunk.toString("utf8");
+        let newline;
+        while ((newline = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          let message: {
+            type?: string;
+            response?: { response?: { models?: unknown } };
+          };
+          try {
+            message = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (message.type !== "control_response") continue;
+          clearTimeout(timer);
+          const models = message.response?.response?.models;
+          resolve(
+            Array.isArray(models) ? (models as ClaudeCatalogEntry[]) : [],
+          );
+        }
+      });
+      child.stdin.write(
+        JSON.stringify({
+          type: "control_request",
+          request_id: "models",
+          request: { subtype: "initialize" },
+        }) + "\n",
+      );
+    });
+  } finally {
+    child.kill();
+  }
+}
+
+/**
+ * One model per family (Opus, Fable, Sonnet, Haiku), named as Claude Code names it
+ * ("Opus 5.5"; when it gives only "Sonnet", the version from its description), and the
+ * one its "default" entry points to marked as the default.
+ */
+export function claudeModelsFromCatalog(
+  catalog: ClaudeCatalogEntry[],
+): AvailableModel[] {
+  const named = (entry: ClaudeCatalogEntry) => {
+    const display = entry.displayName?.trim() ?? "";
+    const first = entry.description?.split("·")[0]?.trim() ?? "";
+    // A version number ("5.5"), not a context size ("1M").
+    return /\d(?![\d.]*M\b)/.test(display) ? display : first || display;
+  };
+  const defaultEntry = catalog.find((entry) => entry.value === "default");
+  const defaultName = defaultEntry
+    ? (defaultEntry.description ?? "").toLowerCase()
+    : "";
+  const out: AvailableModel[] = [];
+  for (const family of CLAUDE_FAMILIES) {
+    const entry = catalog.find(
+      (item) =>
+        item.value !== "default" &&
+        (item.value === family ||
+          item.value.startsWith(`${family}[`) ||
+          item.value.startsWith(`claude-${family}-`)),
+    );
+    if (!entry) continue;
+    const name = named(entry).replace(/^claude\s+/i, "");
+    out.push(model(entry.value, `Claude ${name}`, false));
+  }
+  const preferred =
+    out.find((item) => {
+      const short = item.displayName
+        .replace(/^Claude\s+/, "")
+        .split(" ")[0]!
+        .toLowerCase();
+      return defaultName.includes(short);
+    }) ??
+    out.find((item) => item.model === "sonnet") ??
+    out[0];
+  if (preferred) preferred.isDefault = true;
+  return out;
 }
 
 export async function readClaudeAuthStatus(

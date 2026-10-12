@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ClaudeCodeClient,
+  claudeModelsFromCatalog,
   claudeTurnArguments,
   isClaudeModel,
   readClaudeAuthStatus,
@@ -189,6 +190,108 @@ describe("Claude Code subscription adapter", () => {
 
   it("identifies only models owned by the Claude adapter", () => {
     expect(isClaudeModel("sonnet")).toBe(true);
+    expect(isClaudeModel("fable")).toBe(true);
+    expect(isClaudeModel("opus[1m]")).toBe(true);
+    expect(isClaudeModel("claude-fable-5-1")).toBe(true);
     expect(isClaudeModel("gpt-5.6-sol")).toBe(false);
+  });
+
+  it("names Claude models as Claude Code lists them for the account", () => {
+    // Claude Code 2.1.294 signed in with a subscription (2026-10-12).
+    const subscription = claudeModelsFromCatalog([
+      {
+        value: "default",
+        displayName: "Default (recommended)",
+        description: "Sonnet 5.5 · Efficient for routine tasks",
+      },
+      {
+        value: "opus",
+        displayName: "Opus 5.5",
+        description: "For complex work and everyday tasks",
+      },
+      {
+        value: "fable",
+        displayName: "Fable 5.1",
+        description: "For your toughest challenges",
+      },
+      {
+        value: "sonnet",
+        displayName: "Sonnet 5.5",
+        description: "Most efficient for simpler tasks",
+      },
+      {
+        value: "haiku",
+        displayName: "Haiku 5.5",
+        description: "Fastest for quick answers",
+      },
+      {
+        value: "claude-opus-4-8",
+        displayName: "Opus 4.8",
+        description: "Best for everyday, complex tasks",
+      },
+    ]);
+    expect(
+      subscription.map((m) => [m.model, m.displayName, m.isDefault]),
+    ).toEqual([
+      ["opus", "Claude Opus 5.5", false],
+      ["fable", "Claude Fable 5.1", false],
+      ["sonnet", "Claude Sonnet 5.5", true],
+      ["haiku", "Claude Haiku 5.5", false],
+    ]);
+    // Claude Code 2.1.280 without a subscription: bare names, versions in the descriptions.
+    const api = claudeModelsFromCatalog([
+      {
+        value: "default",
+        displayName: "Default (recommended)",
+        description:
+          "Use the default model (currently Opus 5.5 (1M context)) · $4",
+      },
+      {
+        value: "opus[1m]",
+        displayName: "Opus (1M context)",
+        description:
+          "Opus 5.5 with 1M context · Best for everyday, complex tasks",
+      },
+      {
+        value: "claude-fable-5-1",
+        displayName: "Fable",
+        description: "Fable 5.1 · Most capable",
+      },
+      {
+        value: "sonnet",
+        displayName: "Sonnet",
+        description: "Sonnet 5 · Efficient for routine tasks",
+      },
+      {
+        value: "haiku",
+        displayName: "Haiku",
+        description: "Haiku 4.5 · Fastest for quick answers",
+      },
+    ]);
+    expect(api.map((m) => [m.model, m.displayName, m.isDefault])).toEqual([
+      ["opus[1m]", "Claude Opus 5.5 with 1M context", true],
+      ["claude-fable-5-1", "Claude Fable 5.1", false],
+      ["sonnet", "Claude Sonnet 5", false],
+      ["haiku", "Claude Haiku 4.5", false],
+    ]);
+    expect(claudeModelsFromCatalog([])).toEqual([]);
+  });
+
+  it("asks the installed Claude Code for its models and falls back when it cannot", async () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "spellbook-claude-"));
+    temporaryDirectories.push(directory);
+    const binary = path.join(directory, "claude");
+    writeFileSync(
+      binary,
+      `#!/bin/sh\nread line\nprintf '%s\\n' '{"type":"control_response","response":{"subtype":"success","request_id":"models","response":{"models":[{"value":"sonnet","displayName":"Sonnet 5.5","description":"x"}]}}}'\n`,
+    );
+    chmodSync(binary, 0o700);
+    expect(
+      (await new ClaudeCodeClient(binary).models()).map((m) => m.displayName),
+    ).toEqual(["Claude Sonnet 5.5"]);
+    const missing = path.join(directory, "missing-claude");
+    expect(
+      (await new ClaudeCodeClient(missing).models()).map((m) => m.model),
+    ).toEqual(["sonnet", "opus", "haiku"]);
   });
 });
