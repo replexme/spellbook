@@ -85,4 +85,31 @@ describe("upload reasons", () => {
     expect(failure.fix).toContain("Chrome");
     expect(failure.fix).toContain("iPhone");
   });
+
+  it("gives InDesign files InDesign's own fixes and keeps PowerPoint's wording", () => {
+    for (const code of [
+      "empty_file",
+      "invalid_package",
+      "broken_presentation",
+      "render_failed",
+      "too_many_slides",
+      "image_too_large",
+      "processing_failed",
+      "document_processing_failed",
+      "encrypted_or_legacy_file",
+    ]) {
+      const idml = uploadFailure(code, "issue.idml", MAX);
+      expect(`${idml.reason} ${idml.fix}`, code).not.toContain("PowerPoint");
+      expect(`${idml.reason} ${idml.fix}`, code).not.toContain("슬라이드");
+    }
+    expect(uploadFailure("processing_failed", "issue.idml", MAX).fix).toContain(
+      "InDesign Markup(IDML)",
+    );
+    expect(uploadFailure("processing_failed", "deck.pptx", MAX).fix).toBe(
+      "PowerPoint에서 열어 다시 저장한 뒤 가져와 보세요. 올린 원본은 파일 목록에 남아 있어요.",
+    );
+    expect(uploadFailure("render_timeout", "deck.pptx", MAX).reason).toBe(
+      "슬라이드를 그리는 데 너무 오래 걸려서 멈췄어요.",
+    );
+  });
 });

@@ -67,11 +67,37 @@ export const importAccept = formats
   .flatMap((format) => [...format.extensions, ...format.mimeTypes])
   .join(",");
 
+/** The format of a document file, by its extension (PowerPoint when unknown). */
+export function documentFormatForName(name: string): DocumentFormat {
+  const lower = name.trim().toLowerCase();
+  return formats.find((f) => f.extensions.some((e) => lower.endsWith(e))) ?? currentPresentationFormat;
+}
+
 /** The media type of a document file, by its extension (PowerPoint when unknown). */
 export function contentTypeForName(name: string): string {
-  const lower = name.trim().toLowerCase();
-  const format = formats.find((f) => f.extensions.some((e) => lower.endsWith(e))) ?? currentPresentationFormat;
-  return format.mimeTypes[0]!;
+  return documentFormatForName(name).mimeTypes[0]!;
+}
+
+const programs: Record<DocumentFormatId, string> = {
+  pptx: "PowerPoint",
+  idml: "InDesign",
+  docx: "Word",
+  spellbook: "Spellbook",
+};
+
+/** The program people make and open files of this format in. */
+export function documentProgram(format: DocumentFormat): string {
+  return programs[format.id];
+}
+
+/** What a file of this format is called ("PowerPoint 프레젠테이션", "InDesign 문서"). */
+export function documentKind(format: DocumentFormat): string {
+  return format.id === "pptx" ? "PowerPoint 프레젠테이션" : `${programs[format.id]} 문서`;
+}
+
+/** How its pages are counted ("장" for slides, "쪽" for pages). */
+export function documentCountWord(format: DocumentFormat): string {
+  return format.semantics.unit === "slide" ? "장" : "쪽";
 }
 
 /** Media types of the formats the browser document view opens. */

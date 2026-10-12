@@ -4,7 +4,12 @@ import http from "node:http";
 import { EditRunner } from "./edit-runner.js";
 import { SessionManager } from "./session-manager.js";
 import { JobResultStore } from "./job-result-store.js";
-import type { AiJob, AiWorkerCallback, NativeJob } from "./types.js";
+import {
+  MAX_JOB_BODY_BYTES,
+  type AiJob,
+  type AiWorkerCallback,
+  type NativeJob,
+} from "./types.js";
 import { runNativeTurn, type NativeObservation } from "./native-agent.js";
 import {
   maintainNativeRemoteLease,
@@ -385,7 +390,7 @@ async function readJson(
   for await (const chunk of request) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += bytes.length;
-    if (size > 2_000_000) throw new Error("request_too_large");
+    if (size > MAX_JOB_BODY_BYTES) throw new Error("request_too_large");
     chunks.push(bytes);
   }
   return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<

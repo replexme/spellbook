@@ -8,8 +8,14 @@ import type {
 
 import type { LocalNativeTurns } from "./local-native-turns.js";
 import type { LocalPairingAuthority } from "./local-pairing.js";
-import type { LocalNativeJob, NativeJob } from "./types.js";
+import {
+  MAX_JOB_BODY_BYTES,
+  type LocalNativeJob,
+  type NativeJob,
+} from "./types.js";
 
+// Pairing, login and control requests are small; a job carries the bounded
+// conversation history (up to 24,000 characters) and is read like the worker's.
 const MAX_BODY_BYTES = 16_384;
 const JSON_HEADERS = { "content-type": "application/json; charset=utf-8" };
 
@@ -230,7 +236,10 @@ async function handle(
     return json(response, 404, { error: "not_found" });
   }
   if (url.pathname === "/v1/jobs/native") {
-    const body = (await readJson(request)) as unknown as LocalNativeJob;
+    const body = (await readJson(
+      request,
+      MAX_JOB_BODY_BYTES,
+    )) as unknown as LocalNativeJob;
     const job = validateLocalNativeJob(body, origin, options.identity);
     options.runNativeJob(job, body.capability);
     return json(response, 202, { status: "accepted", jobId: job.jobId });

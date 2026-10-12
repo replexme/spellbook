@@ -15,6 +15,7 @@ import {
 } from "@/design-system";
 import { browserEngineSupported } from "@/lib/browser-engine-support";
 import type { DocumentSummary } from "@/lib/history-types";
+import { documentFormatForName, documentProgram } from "@/lib/document-formats";
 import { UploadError, uploadDocumentFile } from "@/lib/upload-document";
 import {
   precheckUpload,
@@ -145,7 +146,7 @@ export function ImportDialog({
     return (
       <Dialog
         open
-        title="PowerPoint 가져오기"
+        title={`${documentProgram(documentFormatForName(file.name))} 가져오기`}
         onClose={onClose}
         footer={<Button onClick={onClose}>취소</Button>}
       >
@@ -169,7 +170,7 @@ export function ImportDialog({
     return (
       <Dialog
         open
-        title="PowerPoint 가져오기"
+        title={`${documentProgram(documentFormatForName(file.name))} 가져오기`}
         onClose={onClose}
         footer={<Button onClick={onClose}>닫기</Button>}
       >

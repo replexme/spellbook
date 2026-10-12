@@ -2,7 +2,10 @@
  * Why a file could not be imported, in two plain sentences: what is wrong,
  * and what to do. Keys are the reason codes the upload route returns.
  */
-import { availableDocumentFormatForFile } from "./document-formats";
+import {
+  availableDocumentFormatForFile,
+  documentFormatForName,
+} from "./document-formats";
 
 export type UploadFailure = {
   reason: string;
@@ -26,6 +29,12 @@ export function uploadFailure(
   fileName: string,
   maxBytes: number,
 ): UploadFailure {
+  // PowerPoint keeps its wording; an InDesign file is re-exported as IDML and counts pages.
+  const indesign = documentFormatForName(fileName).id === "idml";
+  const resave = indesign
+    ? "InDesign에서 열어 ‘파일 › 내보내기 › InDesign Markup(IDML)’로 다시 내보낸 뒤"
+    : "PowerPoint에서 열어 다시 저장한 뒤";
+  const pagesObject = indesign ? "쪽을" : "슬라이드를";
   switch (code) {
     case "unsupported_format":
       return /\.ppt$/i.test(fileName.trim())
@@ -36,20 +45,25 @@ export function uploadFailure(
           };
     case "browser_unsupported":
       return {
-        reason: "이 브라우저에서는 PPTX를 편집할 수 없어요.",
+        reason: `이 브라우저에서는 ${indesign ? "InDesign 문서를" : "PPTX를"} 편집할 수 없어요.`,
         fix: "PC의 최신 Chrome·Edge나 Android의 최신 Chrome에서 Spellbook을 열고 가져와 주세요. Safari, Firefox, iPhone·iPad에서는 아직 편집할 수 없어요.",
       };
     case "empty_file":
       return {
         reason: "빈 파일이에요.",
-        fix: "PowerPoint에서 파일을 다시 저장한 뒤 가져오세요.",
+        fix: indesign ? `${resave} 가져오세요.` : "PowerPoint에서 파일을 다시 저장한 뒤 가져오세요.",
       };
     case "file_too_large":
       return {
         reason: `파일이 ${megabytes(maxBytes)}MB보다 커요.`,
-        fix: "큰 그림이나 동영상을 줄이거나, 슬라이드를 나눠 저장한 뒤 가져오세요.",
+        fix: `큰 그림이나 동영상을 줄이거나, ${pagesObject} 나눠 저장한 뒤 가져오세요.`,
       };
     case "encrypted_or_legacy_file":
+      if (indesign)
+        return {
+          reason: "암호가 걸렸거나 IDML이 아닌 파일이에요.",
+          fix: `${resave} 가져오세요.`,
+        };
       return {
         reason: "암호가 걸린 파일이거나, 이름만 .pptx인 옛 형식 파일이에요.",
         fix: "PowerPoint에서 암호를 풀고 .pptx로 다시 저장한 뒤 가져오세요.",
@@ -57,22 +71,26 @@ export function uploadFailure(
     case "invalid_package":
       return {
         reason: "PPTX·IDML 파일 구조가 아니에요. 파일이 손상됐을 수 있어요.",
-        fix: "PowerPoint에서 열어 다시 저장한 뒤 가져오세요.",
+        fix: `${resave} 가져오세요.`,
       };
     case "broken_presentation":
       return {
-        reason: "PowerPoint 파일 안의 슬라이드 구성이 손상됐어요.",
-        fix: "PowerPoint에서 열어 다시 저장한 뒤 가져오세요. 올린 원본은 파일 목록에 남아 있어요.",
+        reason: indesign ? "InDesign 파일 안의 쪽 구성이 손상됐어요." : "PowerPoint 파일 안의 슬라이드 구성이 손상됐어요.",
+        fix: `${resave} 가져오세요. 올린 원본은 파일 목록에 남아 있어요.`,
       };
     case "render_failed":
       return {
-        reason: "서버에서 슬라이드를 그리지 못했어요.",
-        fix: "PowerPoint에서 다시 저장한 뒤 가져와 보세요. 같은 문제가 계속되면 알려 주세요.",
+        reason: `서버에서 ${pagesObject} 그리지 못했어요.`,
+        fix: indesign
+          ? `${resave} 가져와 보세요. 같은 문제가 계속되면 알려 주세요.`
+          : "PowerPoint에서 다시 저장한 뒤 가져와 보세요. 같은 문제가 계속되면 알려 주세요.",
       };
     case "too_many_slides":
       return {
-        reason: "슬라이드가 200장보다 많아요.",
-        fix: "PowerPoint에서 슬라이드를 200장 이하로 나눠 저장한 뒤 가져오세요.",
+        reason: indesign ? "쪽이 200쪽보다 많아요." : "슬라이드가 200장보다 많아요.",
+        fix: indesign
+          ? "InDesign에서 200쪽 이하로 나눠 IDML로 내보낸 뒤 가져오세요."
+          : "PowerPoint에서 슬라이드를 200장 이하로 나눠 저장한 뒤 가져오세요.",
       };
     case "expanded_too_large":
       return {
@@ -82,11 +100,13 @@ export function uploadFailure(
     case "image_too_large":
       return {
         reason: "해상도가 아주 큰 그림이 들어 있어서 열 수 없어요.",
-        fix: "PowerPoint에서 ‘그림 압축’으로 그림 크기를 줄여 저장한 뒤 가져오세요.",
+        fix: indesign
+          ? "큰 그림의 해상도를 줄여 다시 연결한 뒤 IDML로 내보내 가져오세요."
+          : "PowerPoint에서 ‘그림 압축’으로 그림 크기를 줄여 저장한 뒤 가져오세요.",
       };
     case "render_timeout":
       return {
-        reason: "슬라이드를 그리는 데 너무 오래 걸려서 멈췄어요.",
+        reason: `${pagesObject} 그리는 데 너무 오래 걸려서 멈췄어요.`,
         fix: "다시 확인해 보세요. 계속 안 되면 큰 그림이나 복잡한 도형을 줄여 저장한 뒤 가져오세요.",
       };
     case "processing_timeout":
@@ -117,7 +137,7 @@ export function uploadFailure(
       return {
         reason:
           "파일을 여는 중에 문제가 생겼어요. 파일이 손상됐거나 아직 읽지 못하는 내용이 있을 수 있어요.",
-        fix: "PowerPoint에서 열어 다시 저장한 뒤 가져와 보세요. 올린 원본은 파일 목록에 남아 있어요.",
+        fix: `${resave} 가져와 보세요. 올린 원본은 파일 목록에 남아 있어요.`,
       };
     case "storage_capacity_exhausted":
       return {

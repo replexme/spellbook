@@ -29,7 +29,11 @@ import {
   RenameDialog,
 } from "./file-actions";
 import { ImportDialog } from "./import-dialog";
-import { importAccept } from "@/lib/document-formats";
+import {
+  documentCountWord,
+  documentFormatForName,
+  importAccept,
+} from "@/lib/document-formats";
 
 type Sort = "updated" | "name" | "created";
 type View = "grid" | "list";
@@ -74,7 +78,9 @@ function meta(document: LibraryDocument) {
   if (document.status === "failed") return failureShort(document.failureCode);
   return [
     relative(document.updatedAt),
-    document.slideCount ? `${document.slideCount}장` : null,
+    document.slideCount
+      ? `${document.slideCount}${documentCountWord(documentFormatForName(document.fileName))}`
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");

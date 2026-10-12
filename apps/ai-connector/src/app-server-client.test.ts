@@ -414,6 +414,36 @@ describe("structured turn isolation", () => {
     }
     h.client.close();
   });
+  it("runs a turn without chosen settings on the account's default model, not Codex's config default", async () => {
+    const h = await harness();
+    const pending = h.client.runStructuredTurn([], {}, 2000, {
+      tools: [],
+      onTool: vi.fn(),
+    });
+    await vi.waitFor(() =>
+      expect(h.calls.some((call) => call.method === "turn/start")).toBe(true),
+    );
+    expect(
+      h.calls.filter((call) => call.method === "thread/start").at(-1)?.params
+        .model,
+    ).toBe("account-model");
+    expect(
+      h.calls.filter((call) => call.method === "turn/start").at(-1)?.params,
+    ).toMatchObject({ model: "account-model", effort: "high" });
+    h.send({
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: {
+          id: "turn-thread-1",
+          status: "completed",
+          items: [{ type: "agentMessage", text: "done" }],
+        },
+      },
+    });
+    await expect(pending).resolves.toBe("done");
+    h.client.close();
+  });
   it("isolates image generation in a fresh elevated thread without replacing the normal conversation", async () => {
     const h = await harness();
     const completeLatest = async (expectedThread: string) => {

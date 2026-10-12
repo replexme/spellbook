@@ -11,6 +11,11 @@ import {
   type CheckItem,
 } from "@/design-system";
 import type { DocumentSummary } from "@/lib/history-types";
+import {
+  documentFormatForName,
+  documentKind,
+  documentProgram,
+} from "@/lib/document-formats";
 import { fontCheck, renderCheck } from "../document-checks";
 import { fileSize, when } from "../copy";
 
@@ -52,8 +57,8 @@ export function downloadChecks(
   if (fonts) items.push(fonts);
   items.push({
     tone: "na",
-    label: "PowerPoint에서 직접 열어 보는 확인은 아직 하지 않아요",
-    evidence: "no automated PowerPoint reopen gate",
+    label: `${documentProgram(documentFormatForName(summary?.fileName ?? ""))}에서 직접 열어 보는 확인은 아직 하지 않아요`,
+    evidence: "no automated reopen gate in the file's own program",
   });
   return items;
 }
@@ -126,7 +131,10 @@ export function DownloadDialog({
         <FileMark />
         <div>
           <strong>{fileName}</strong>
-          <small>PowerPoint 프레젠테이션 · 계속 고칠 수 있는 원래 형식</small>
+          <small>
+            {documentKind(documentFormatForName(fileName))} · 계속 고칠 수 있는
+            원래 형식
+          </small>
         </div>
         <span />
       </div>

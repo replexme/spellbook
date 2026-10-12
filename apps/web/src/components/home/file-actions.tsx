@@ -14,7 +14,12 @@ import {
 } from "@/design-system";
 import type { LibraryDocument } from "@/lib/history-types";
 import { retryableFailure } from "@/lib/upload-reasons";
-import { documentBaseName } from "@/lib/document-formats";
+import {
+  documentBaseName,
+  documentCountWord,
+  documentFormatForName,
+  documentKind,
+} from "@/lib/document-formats";
 
 export function documentHref(document: LibraryDocument) {
   return `/documents/${document.id}`;
@@ -271,8 +276,8 @@ export function DeleteDialog({
           <strong>{document?.fileName}</strong>
           <small>
             {document?.slideCount
-              ? `${document.slideCount}장`
-              : "PowerPoint 프레젠테이션"}
+              ? `${document.slideCount}${documentCountWord(documentFormatForName(document.fileName))}`
+              : documentKind(documentFormatForName(document?.fileName ?? ""))}
           </small>
         </div>
         <span />

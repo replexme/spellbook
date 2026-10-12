@@ -1,3 +1,6 @@
+/** The largest AI job request either connector reads (the worker endpoint and the local app). */
+export const MAX_JOB_BODY_BYTES = 2_000_000;
+
 export interface RpcNotification {
   method: string;
   params?: unknown;
