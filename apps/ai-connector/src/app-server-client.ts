@@ -328,6 +328,30 @@ export class AppServerClient {
     return [...models.values()];
   }
 
+  /**
+   * The model for a turn that names none: the operator's SPELLBOOK_CODEX_MODEL,
+   * else the default of this account's own catalog (the one the product offers
+   * as recommended). Codex's config.toml default is used only when neither is
+   * known: on a person's computer it can name a model their account cannot use.
+   */
+  private async defaultModelSettings(): Promise<ModelSettings | undefined> {
+    const configured = process.env.SPELLBOOK_CODEX_MODEL?.trim();
+    if (configured)
+      return { provider: "codex", model: configured, effort: "medium" };
+    try {
+      const fallback = (await this.models()).find((item) => item.isDefault);
+      return fallback
+        ? {
+            provider: "codex",
+            model: fallback.model,
+            effort: fallback.defaultReasoningEffort,
+          }
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   async validateModelSettings(settings: {
     model: string;
     effort: string;
@@ -367,13 +391,15 @@ export class AppServerClient {
     timeoutMs = 300_000,
     options?: AgentTurnOptions,
   ): Promise<string> {
-    if (
-      options?.allowImageGeneration &&
-      !(await this.supportsImageGenerationForModel(options.modelSettings))
-    )
-      throw new Error("Selected model does not support image generation.");
     if (options?.modelSettings)
       await this.validateModelSettings(options.modelSettings);
+    const modelSettings =
+      options?.modelSettings ?? (await this.defaultModelSettings());
+    if (
+      options?.allowImageGeneration &&
+      !(await this.supportsImageGenerationForModel(modelSettings))
+    )
+      throw new Error("Selected model does not support image generation.");
     const workspace = path.join(
       process.env.SPELLBOOK_AI_WORKSPACE ?? "/tmp/spellbook-ai",
       "empty",
@@ -421,13 +447,7 @@ export class AppServerClient {
               ].join(" "),
             }
           : {}),
-        ...(options?.modelSettings?.model || process.env.SPELLBOOK_CODEX_MODEL
-          ? {
-              model:
-                options?.modelSettings?.model ??
-                process.env.SPELLBOOK_CODEX_MODEL,
-            }
-          : {}),
+        ...(modelSettings ? { model: modelSettings.model } : {}),
       },
     );
     const threadId = thread.thread.id;
@@ -610,10 +630,8 @@ export class AppServerClient {
         input,
         approvalPolicy: "never",
         sandboxPolicy: { type: "readOnly" },
-        ...(options?.modelSettings
-          ? { model: options.modelSettings.model }
-          : {}),
-        effort: options?.modelSettings?.effort ?? "medium",
+        ...(modelSettings ? { model: modelSettings.model } : {}),
+        effort: modelSettings?.effort ?? "medium",
         summary: "concise",
         ...(Object.keys(outputSchema).length ? { outputSchema } : {}),
       })

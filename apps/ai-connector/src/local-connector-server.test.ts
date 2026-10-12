@@ -389,6 +389,44 @@ describe("local connector HTTP boundary", () => {
     );
   });
 
+  it("accepts a native job carrying the longest conversation history the product sends", async () => {
+    const h = await harness();
+    const token = await pair(h.connectorOrigin);
+    const jobId = randomUUID();
+    // Twelve earlier turns of Korean text, as bounded by the turn policy (24,000 characters).
+    const conversationHistory = Array.from({ length: 12 }, (_, i) => ({
+      request: `${i}번째 요청 `.padEnd(400, "가"),
+      response: "바꿨습니다. ".padEnd(1_600, "나"),
+      status: "completed",
+    }));
+    const body = JSON.stringify({
+      jobId,
+      callbackUrl: `${productOrigin}/api/native/jobs/${jobId}/callback`,
+      toolUrl: `${productOrigin}/api/native/jobs/${jobId}/tools`,
+      mode: "native",
+      storageNamespace: "local",
+      baseGraphObject: `accounts/test/documents/${randomUUID()}/versions/${randomUUID()}/render/element-graph.json`,
+      sessionId: randomUUID(),
+      turnId: randomUUID(),
+      requestText: "새 쪽을 추가해 줘",
+      conversationHistory,
+      permissionMode: "document",
+      capability: "c".repeat(64),
+    });
+    expect(Buffer.byteLength(body)).toBeGreaterThan(16_384);
+    const response = await fetch(`${h.connectorOrigin}/v1/jobs/native`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+        origin: productOrigin,
+      },
+      body,
+    });
+    expect(response.status).toBe(202);
+    expect(h.runNativeJob).toHaveBeenCalledOnce();
+  });
+
   it("rejects a native job that could send its capability to another origin", async () => {
     const h = await harness();
     const token = await pair(h.connectorOrigin);

@@ -130,14 +130,26 @@ export async function createBrowserDocumentLaunch(
     if (existing?.status === "validating")
       throw new HttpError(409, "document_processing");
     if (existing) {
+      // The editor reopens the stored file, so AI edits that were never saved
+      // are gone with the old page. Start a new save window (as restoring a
+      // version does) so those edits no longer count against the next save;
+      // never while an AI request is still running.
       await sql`
-        update spellbook_native_sessions set
+        update spellbook_native_sessions s set
           account_email=${session.email}, editor_mode='browser',
           working_version_id=${current.current_version_id},
           working_sha256=${current.document_sha256}, status='active',
           wopi_lock=null, lock_updated_at=null, lock_expires_at=null, last_error=null,
+          save_revision = s.save_revision + case when exists (
+              select 1 from spellbook_native_tasks task
+              where task.session_id=s.id and task.save_revision_at_create=s.save_revision
+                and task.request->>'operation' <> 'observe'
+            ) and not exists (
+              select 1 from spellbook_native_turns turn
+              where turn.session_id=s.id and turn.status in ('queued','running')
+            ) then 1 else 0 end,
           expires_at=${new Date(expiresAt)}, last_seen_at=now(), updated_at=now()
-        where id=${existing.id}
+        where s.id=${existing.id}
       `;
     } else {
       await sql`

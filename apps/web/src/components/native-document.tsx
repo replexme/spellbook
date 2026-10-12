@@ -27,12 +27,17 @@ import {
 } from "./workspace/result-card";
 import { saveView, WorkspaceTopBar } from "./workspace/top-bar";
 import type { PermissionMode } from "./copy";
+import {
+  documentFormatForName,
+  type DocumentFormat,
+} from "@/lib/document-formats";
 
 type LaunchPhase = "checking" | "starting" | "slow" | "failed";
 
 type Failure = {
   title: string;
-  body: string;
+  /** Plain text, or text that names the file's own program. */
+  body: string | ((format: DocumentFormat) => string);
   retry: boolean;
   download: "current" | "original" | null;
 };
@@ -46,7 +51,10 @@ const failures: Record<string, Failure> = {
   },
   document_processing_failed: {
     title: "이 파일을 편집할 수 있게 준비하지 못했어요",
-    body: "올린 원본은 그대로 있어요. 원본을 내려받거나, PowerPoint에서 다시 저장한 뒤 올려 보세요.",
+    body: (format) =>
+      format.id === "idml"
+        ? "올린 원본은 그대로 있어요. 원본을 내려받거나, InDesign에서 IDML로 다시 내보낸 뒤 올려 보세요."
+        : "올린 원본은 그대로 있어요. 원본을 내려받거나, PowerPoint에서 다시 저장한 뒤 올려 보세요.",
     retry: false,
     download: "original",
   },
@@ -368,6 +376,9 @@ export default function NativeDocument({
     failure === "document_processing_failed" && summary?.failureCode
       ? uploadFailure(summary.failureCode, summary.fileName, 0).reason
       : null;
+  const format = documentFormatForName(summary?.fileName ?? "");
+  const problemBody =
+    typeof problem?.body === "function" ? problem.body(format) : problem?.body;
   const slow = !problem && elapsedSeconds >= 70;
   const message = offline
     ? "인터넷 연결이 끊겼어요. 연결되면 이어서 열어요."
@@ -392,7 +403,9 @@ export default function NativeDocument({
           icon="download"
           href={`/api/documents/${documentId}/download${problem.download === "original" ? "?source=original" : ""}`}
         >
-          {problem.download === "original" ? "원본 내려받기" : "PPTX 내려받기"}
+          {problem.download === "original"
+            ? "원본 내려받기"
+            : `${format.extensions[0]!.slice(1).toUpperCase()} 내려받기`}
         </ButtonLink>
       ) : null}
       {problem.retry ? (
@@ -443,7 +456,7 @@ export default function NativeDocument({
         <div className="ws-phone-slides">
           {problem ? (
             <Banner tone={problem.retry ? "warn" : "danger"} role="alert">
-              <strong>{problem.title}</strong> {reason ?? ""} {problem.body}
+              <strong>{problem.title}</strong> {reason ?? ""} {problemBody}
               {retryLine ? <> · {retryLine}</> : null}
             </Banner>
           ) : null}
@@ -470,7 +483,7 @@ export default function NativeDocument({
         {problem ? (
           <OpeningFailure title={problem.title} actions={failureActions}>
             {reason ? `${reason} ` : ""}
-            {problem.body}
+            {problemBody}
             {retryLine ? (
               <>
                 <br />
