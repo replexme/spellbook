@@ -8,7 +8,6 @@ import {
   composeCapture,
   copyPrivateFile,
   parseNamedArguments,
-  readEnvironment,
   requiredStringOption,
   resolveComposeVolume,
   sleepSync,
@@ -39,21 +38,7 @@ fs.mkdirSync(path.join(destination, "config"), { mode: 0o700 });
 const environmentFile = path.join(root, ".env");
 if (!fs.existsSync(environmentFile))
   throw new Error(".env is required. Run pnpm selfhost:setup first.");
-const environment = readEnvironment(environmentFile);
-const proofKeyPath = path.resolve(
-  root,
-  environment.SPELLBOOK_WOPI_PROOF_KEY_PATH ||
-    ".spellbook/secrets/wopi-proof-key.pem",
-);
-if (!fs.existsSync(proofKeyPath))
-  throw new Error("The persistent WOPI proof key is missing.");
-
-const writeServices = [
-  "web",
-  "office-editor",
-  "document-worker",
-  "ai-connector",
-];
+const writeServices = ["web", "document-worker", "ai-connector"];
 const runningBefore = new Set(
   composeCapture(project, ["ps", "--services", "--status", "running"])
     .split("\n")
@@ -110,10 +95,6 @@ try {
     fileName: "ai-auth-data.tar.gz",
   });
   copyPrivateFile(environmentFile, path.join(destination, "config", ".env"));
-  copyPrivateFile(
-    proofKeyPath,
-    path.join(destination, "config", "wopi-proof-key.pem"),
-  );
 
   const commit = capture("git", ["rev-parse", "HEAD"], { cwd: root });
   writeBackupManifest(
@@ -129,7 +110,6 @@ try {
       "document-data.tar.gz",
       "ai-auth-data.tar.gz",
       "config/.env",
-      "config/wopi-proof-key.pem",
     ],
   );
   process.stdout.write(`Backup verified and written to ${destination}\n`);

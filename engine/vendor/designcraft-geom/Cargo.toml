@@ -1,0 +1,17 @@
+[package]
+name = "designcraft-geom"
+version = "0.5.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "DesignCraft geometry: anchor paths, shapes, units and measurements, hit testing"
+
+[dependencies]
+kurbo = { version = "0.13", features = ["serde"] }
+flo_curves = { version = "0.8" }
+qrcodegen = { version = "1.8" }
+serde = { version = "1", features = ["derive", "rc"] }
+thiserror = { version = "2" }
+
+[dev-dependencies]
+proptest = { version = "1" }
+serde_json = { version = "1", features = ["float_roundtrip"] }

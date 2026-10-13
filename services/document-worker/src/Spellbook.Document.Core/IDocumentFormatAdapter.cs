@@ -11,11 +11,6 @@ public interface IDocumentFormatAdapter
     string FileExtension { get; }
     DocumentScan Scan(string path);
     ElementGraph Inspect(string path, DocumentScan? scan = null);
-    PatchResult Patch(
-        string inputPath,
-        string outputPath,
-        EditCommandBatch command,
-        IReadOnlyDictionary<string, byte[]>? assets = null);
     Task<IReadOnlyList<string>> RenderAsync(
         string inputPath,
         string outputDirectory,
@@ -24,32 +19,32 @@ public interface IDocumentFormatAdapter
     string RendererVersion { get; }
 }
 
-public sealed class PptxDocumentFormatAdapter(
-    PptxSafetyScanner scanner,
-    PresentationInspector inspector,
-    PptxPatcher patcher,
-    IPresentationRenderer renderer) : IDocumentFormatAdapter
+/// <summary>
+/// PowerPoint decks: the safety scan and element graph are read here (Open XML), the previews
+/// and the font check come from the engine program present-pptx.
+/// </summary>
+public sealed class PptxDocumentFormatAdapter(PptxSafetyScanner scanner, EngineProgram engine) : IDocumentFormatAdapter
 {
+    /// <summary>The engine program (SPELLBOOK_PPTX_ENGINE, default /app/present-pptx), or null.</summary>
+    public static string? ConfiguredEngine() => EngineProgram.Configured("SPELLBOOK_PPTX_ENGINE", "/app/present-pptx");
+
     public string FormatId => "pptx";
     public string FileExtension => ".pptx";
-    public string RendererName => renderer.Name;
-    public string RendererVersion => renderer.Version;
+    public string RendererName => "Present";
+    public string RendererVersion => EngineProgram.Version;
 
     public DocumentScan Scan(string path) => scanner.Scan(path);
 
+    /// <summary>The graph, with the fonts the engine draws this deck with.</summary>
     public ElementGraph Inspect(string path, DocumentScan? scan = null) =>
-        inspector.Inspect(path, scan);
-
-    public PatchResult Patch(
-        string inputPath,
-        string outputPath,
-        EditCommandBatch command,
-        IReadOnlyDictionary<string, byte[]>? assets = null) =>
-        patcher.Apply(inputPath, outputPath, command, assets);
+        new PresentationInspector(RendererFontEnvironment.FromEngineReport(engine.Fonts(path))).Inspect(path, scan);
 
     public Task<IReadOnlyList<string>> RenderAsync(
         string inputPath,
         string outputDirectory,
-        CancellationToken cancellationToken = default) =>
-        renderer.RenderAsync(inputPath, outputDirectory, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(engine.RenderAll(inputPath, outputDirectory));
+    }
 }

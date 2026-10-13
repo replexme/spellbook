@@ -8,7 +8,6 @@ import {
   copyPrivateFile,
   ensureComposeVolume,
   parseNamedArguments,
-  readEnvironment,
   requireBackupMembers,
   requiredStringOption,
   restoreVolume,
@@ -38,25 +37,12 @@ requireBackupMembers(manifest, [
   "document-data.tar.gz",
   "ai-auth-data.tar.gz",
   "config/.env",
-  "config/wopi-proof-key.pem",
 ]);
 
 if (restoreConfig) {
   const configDirectory = path.join(backup, "config");
   const environmentSource = path.join(configDirectory, ".env");
-  const proofSource = path.join(configDirectory, "wopi-proof-key.pem");
   replacePrivateFile(environmentSource, path.join(root, ".env"));
-  const environment = readEnvironment(environmentSource);
-  const proofDestination = path.resolve(
-    root,
-    environment.SPELLBOOK_WOPI_PROOF_KEY_PATH ||
-      ".spellbook/secrets/wopi-proof-key.pem",
-  );
-  fs.mkdirSync(path.dirname(proofDestination), {
-    recursive: true,
-    mode: 0o700,
-  });
-  replacePrivateFile(proofSource, proofDestination);
 }
 
 const runningBefore = new Set(
@@ -64,13 +50,7 @@ const runningBefore = new Set(
     .split("\n")
     .filter(Boolean),
 );
-const services = [
-  "web",
-  "office-editor",
-  "document-worker",
-  "ai-connector",
-  "database",
-];
+const services = ["web", "document-worker", "ai-connector", "database"];
 const runningServices = services.filter((service) =>
   runningBefore.has(service),
 );

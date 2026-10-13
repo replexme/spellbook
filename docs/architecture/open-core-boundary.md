@@ -2,7 +2,7 @@
 
 ## Decision
 
-This repository is the runnable self-hosted product, not an SDK teaser. A user can open, directly edit and AI-edit a supported document without a Replex account or Google Cloud project.
+This repository is the runnable self-hosted product, not an SDK teaser. A user can open a supported document and have the AI edit it without a Replex account or Google Cloud project.
 
 The hosted Replex product is a downstream distribution. Its private code may depend on public Spellbook contracts and packages. Public Spellbook may never depend on Replex identity, billing, infrastructure, customer data or private evaluation results.
 
@@ -10,8 +10,8 @@ The hosted Replex product is a downstream distribution. Its private code may dep
 
 | Area                                                                | Public Spellbook | Hosted overlay                         |
 | ------------------------------------------------------------------- | ---------------- | -------------------------------------- |
-| Browser workspace and editor UX                                     | Yes              | Branding/configuration only            |
-| WOPI host and editor bridge                                         | Yes              | Production routing and scaling         |
+| Browser workspace and document view                                 | Yes              | Branding/configuration only            |
+| Rust document engine and format modules                             | Yes              | Production routing and scaling         |
 | Document adapters, validators and render evaluation                 | Yes              | Private fixtures and release evidence  |
 | Local authentication                                                | Yes              | Replaced through an auth port          |
 | Local filesystem object store                                       | Yes              | GCS/S3 adapter                         |
@@ -46,4 +46,4 @@ Codex and Claude Code are implemented as user-direct provider adapters in the lo
 
 ## License boundary
 
-Spellbook-authored files use MPL-2.0 so changes to covered files remain available while separately authored hosted files can remain private. Third-party files and binaries retain their own licenses. No modified Collabora container is published from this repository until branding, trademark, notice and corresponding-source obligations are reviewed for that distribution.
+Spellbook-authored files use MPL-2.0 so changes to covered files remain available while separately authored hosted files can remain private. Third-party files and binaries retain their own licenses; see `THIRD_PARTY_NOTICES.md`.

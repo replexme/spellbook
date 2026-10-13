@@ -29,10 +29,6 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: "1.27.x"
-          cache: false
       - run: python -m pip install --requirement scripts/requirements-render-analysis.txt
       - run: python -m pip install 'reuse[charset-normalizer]==6.2.0'
       - run: pnpm install --frozen-lockfile
@@ -76,10 +72,8 @@ jobs:
             dockerfile: apps/ai-connector/Dockerfile
           - name: document-worker
             dockerfile: services/document-worker/Dockerfile
-          - name: office-editor
-            dockerfile: services/office-editor/Dockerfile
-          - name: browser-office
-            dockerfile: services/browser-office/Dockerfile
+          - name: document-view
+            dockerfile: services/document-view/Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build release runtime image

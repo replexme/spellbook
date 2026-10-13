@@ -70,13 +70,9 @@ turns retain timing where the adapter publishes failure metrics.
 
 Focused regression coverage lives in
 [native-customer-workflow.test.mjs](../../scripts/native-customer-workflow.test.mjs).
-[verify-native-image-shape.mjs](../../scripts/verify-native-image-shape.mjs)
-uses the real headless editor for shape, rejected arguments, crop/media
-preservation, undo/redo, native save/reopen and local goal persistence.
-[evaluate-native-customer-workflow.mjs](../../scripts/evaluate-native-customer-workflow.mjs)
-uses a real local subscription model and editor; each trial checks authored
-results, unrelated objects, saved media and exact reopened state. Pass
-`--require-success true` to fail when any required trial does not fulfil its goal.
+The earlier end-to-end scripts for image shape and customer workflow drove the
+removed browser editor and were deleted with it; equivalent runs against the
+document view are still to be written.
 
 Keep implementation, local integration, authenticated customer flow,
 PowerPoint compatibility, production deployment and comparative product

@@ -2,21 +2,27 @@
 
 [English](../README.md) | [한국어](README.ko.md)
 
-Spellbook은 기존 문서를 실제 브라우저 편집기로 열어 사람과 AI가 같은 편집 가능한 파일을
-함께 고치고, 변경 결과의 문서 구조와 렌더링 화면을 검증한 뒤 반영하는 오픈소스 문서
-작업공간이다.
+Spellbook은 기존 문서를 브라우저에서 열고, 사람이 AI에게 수정을 요청하면 AI가 원래 형식의
+편집 가능한 파일을 고치는 오픈소스 문서 작업공간이다. 사람은 문서를 보고 요청하며, 결과를
+되돌리거나 다시 실행하거나 이전 버전으로 돌아갈 수 있다. 문서는 AI만 고친다. AI의 변경은
+문서 구조와 그려진 화면으로 검증한 뒤 반영한다.
 
-현재 실제로 사용할 수 있는 형식은 **PowerPoint (`.pptx`)**다. DOCX와 Spellbook의 네이티브
+현재 실제로 사용할 수 있는 형식은 **PowerPoint (`.pptx`)**다. InDesign 문서(`.idml`)는
+실험 단계다. DOCX와 Spellbook의 네이티브
 페이지 레이아웃 문서는 계획된 어댑터이며 아직 동작하는 기능으로 안내하지 않는다.
 
 ## 공개 저장소의 범위
 
 이 저장소에는 셀프호스팅에 필요한 전체 제품이 들어 있다.
 
-- 웹 작업공간과 WOPI host
-- AI 연결 계층과 PPTX 구조 보존 편집
-- LibreOffice 렌더러 조정
-- 공개 평가·회귀 검증 도구
+- 웹 앱(`apps/web`): 로그인, 업로드, 버전, 대화, 작업공간 화면
+- 문서 보기 화면(`apps/office`): 작업공간 안에서 문서를 보여 주는 화면. Spellbook의 Rust
+  문서 엔진(`engine/`, `formats/`)을 WebAssembly로 컴파일해 실행하며, AI의 편집도 같은
+  엔진으로 적용한다.
+- 문서 worker(`services/document-worker`): 업로드한 파일을 검사하고 엔진의 명령줄 프로그램
+  `present-pptx`, `present-idml`로 미리보기를 그린다. LibreOffice를 쓰지 않는다.
+- AI 연결 계층(`apps/ai-connector`): 사용자의 Codex 또는 Claude Code 구독을 문서 작업에 연결한다.
+- 계약(`contracts/`)과 공개 평가·회귀 검증 도구(`scripts/`, `eval/`)
 
 Replex 계정이나 Google Cloud 없이 실행할 수 있다. Replex의 관리형 서비스는 비공개 배포,
 결제·이용 권한, 관리형 계정과 자격증명, 비공개 평가 자료를 별도 저장소에서 관리한다. 관리형
@@ -32,11 +38,11 @@ pnpm selfhost:up
 ```
 
 설정 명령이 출력한 이메일과 비밀번호로 <http://localhost:3000>에 로그인한다. 작업공간에서
-지원되는 로컬 AI 구독을 연결하면 AI 편집을 사용할 수 있고, AI를 연결하지 않아도 직접 편집할
-수 있다.
+지원되는 로컬 AI 구독을 연결하면 AI에게 수정을 요청할 수 있다. AI를 연결하지 않아도 문서를
+열어 볼 수 있다.
 
-첫 빌드는 고정된 LibreOffice·Collabora 이미지를 내려받으므로 시간이 걸릴 수 있다. 이후에는
-이미지와 영속 volume을 재사용한다. 이 명령은 서비스가 정상 상태가 된 뒤 사용 중인 이미지와
+첫 빌드는 기반 이미지를 내려받고 서비스를 빌드하므로 시간이 걸릴 수 있다. 이후에는 이미지와 영속
+volume을 재사용한다. 이 명령은 서비스가 정상 상태가 된 뒤 사용 중인 이미지와
 구성요소별 롤백 이미지 하나만 남기고 이전 Spellbook 이미지를 정리한다. 다른 프로젝트 이미지와
 문서·데이터베이스 volume은 건드리지 않는다. 설정과 서비스 상태는 `pnpm selfhost:doctor`로 확인한다.
 
@@ -69,12 +75,12 @@ pnpm test:e2e
 
 ```bash
 pnpm corpus:fetch-public -- \
-  --renderer-image <libreoffice-image> \
-  --renderer-version <libreoffice-release>
+  --renderer-image <renderer-image> \
+  --renderer-version <renderer-release>
 ```
 
 ## 라이선스
 
-Spellbook이 작성한 소스는 MPL-2.0으로 배포한다. 제3자 구성요소와 수정 파일은 각자의
+Rust 문서 엔진을 포함해 Spellbook이 작성한 소스는 MPL-2.0으로 배포한다. 제3자 구성요소와 수정 파일은 각자의
 라이선스를 유지한다. [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)와 `../LICENSES/`를
 확인한다.

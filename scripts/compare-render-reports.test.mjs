@@ -5,7 +5,7 @@ import { compareRenderReports } from "./compare-render-reports.mjs";
 
 function report(version, values, sha = "source-sha") {
   return {
-    renderer: { name: "LibreOffice", version },
+    renderer: { name: "Spellbook document engine", version },
     decks: [
       {
         id: "deck-1",
@@ -58,7 +58,7 @@ test("compares an explicitly selected focused deck against a full baseline", () 
     slides: [{ slideNumber: 1, comparison: { normalizedRmse: 0.4 } }],
   });
   const candidate = {
-    renderer: { name: "LibreOffice", version: "candidate" },
+    renderer: { name: "Spellbook document engine", version: "candidate" },
     decks: [baseline.decks[1]],
   };
 

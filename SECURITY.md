@@ -10,4 +10,4 @@ Do not open a public issue for a suspected vulnerability. Email security@replex.
 
 ## Self-hosting boundary
 
-Spellbook processes active document content and local AI subscription credentials. Keep the web, workers, database, object-data volume, and Collabora network private behind TLS. Set a unique session secret, internal service token, and local password. Never expose worker ports directly to the public internet.
+Spellbook processes active document content and local AI subscription credentials. Keep the web app and document view behind TLS, and keep the workers, database and object-data volume on a private network. Set a unique session secret, internal service token, and local password. Never expose worker ports directly to the public internet.

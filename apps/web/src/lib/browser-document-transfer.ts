@@ -1,4 +1,3 @@
-import type {LinkedImageManifest} from "../../../../services/document-resources/linked-image-snapshots.mjs";
 import { browserViewMediaTypes } from "./document-formats";
 /*
  * Moves the editor's file (a PPTX or IDML package) between the browser and storage. Where storage
@@ -14,8 +13,12 @@ const IDML_TYPE = "application/vnd.adobe.indesign-idml-package";
 
 /** An IDML package starts with its stored mimetype entry; any other package here is a PPTX. */
 function packageType(bytes: ArrayBuffer): string {
-  const head = new TextDecoder().decode(new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 96)));
-  return head.slice(30, 38) === "mimetype" && head.includes(IDML_TYPE) ? IDML_TYPE : PPTX_TYPE;
+  const head = new TextDecoder().decode(
+    new Uint8Array(bytes, 0, Math.min(bytes.byteLength, 96)),
+  );
+  return head.slice(30, 38) === "mimetype" && head.includes(IDML_TYPE)
+    ? IDML_TYPE
+    : PPTX_TYPE;
 }
 
 /** Largest file the app itself relays (its requests stop at 32 MiB). */
@@ -57,8 +60,7 @@ export async function readBrowserDocument(
   expectedRevision: string,
   maxBytes: number,
   fetchImpl: typeof fetch = fetch,
-): Promise<{ revision: string; bytes: ArrayBuffer; renderResources?: LinkedImageManifest|null }> {
-  let renderResources: LinkedImageManifest|null|undefined;
+): Promise<{ revision: string; bytes: ArrayBuffer }> {
   const source = await fetchImpl(`${contentApiBase}/source`, {
     cache: "no-store",
   }).catch(() => null);
@@ -66,9 +68,7 @@ export async function readBrowserDocument(
     const value = (await source.json().catch(() => ({}))) as {
       revision?: unknown;
       url?: unknown;
-      renderResources?: LinkedImageManifest|null;
     };
-    if(value.revision===expectedRevision)renderResources=value.renderResources;
     if (typeof value.url === "string" && value.revision === expectedRevision) {
       const stored = await fetchImpl(value.url, { cache: "no-store" }).catch(
         () => null,
@@ -81,7 +81,7 @@ export async function readBrowserDocument(
           !expectedRevision.endsWith(`:${digest}"`)
         )
           throw new TransferError("browser_document_identity_mismatch");
-        return { revision: expectedRevision, bytes, ...(renderResources===undefined?{}:{renderResources}) };
+        return { revision: expectedRevision, bytes };
       }
       // The storage host is unreachable from here; use the app instead.
     }
@@ -103,7 +103,7 @@ export async function readBrowserDocument(
     !isPackage(bytes, maxBytes)
   )
     throw new TransferError("browser_document_identity_mismatch");
-  return { revision, bytes, ...(renderResources===undefined?{}:{renderResources}) };
+  return { revision, bytes };
 }
 
 /**

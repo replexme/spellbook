@@ -1,0 +1,108 @@
+{
+ "repository": "https://github.com/storytold/designcraft",
+ "revision": "4fbf8938bf922b29602ef6e6e0984a229a8b994a",
+ "files": [
+  {
+   "path": "Cargo.toml",
+   "upstream": "crates/render/Cargo.toml",
+   "upstreamSha256": "a234c015334f8ca3ebc58da2883c27fecf184e04a17fbcdb9d2fb8766c6e414f",
+   "state": "modified"
+  },
+  {
+   "path": "src/damage.rs",
+   "upstream": "crates/render/src/damage.rs",
+   "upstreamSha256": "6a6cd46157eb20541daaeb798e200a0c88b8fbb9e5a06e39c044f5e443e2fd1d",
+   "state": "modified"
+  },
+  {
+   "path": "src/fx.rs",
+   "upstream": "crates/render/src/fx.rs",
+   "upstreamSha256": "97694d84b028e88e3584d0c9636a0abf4cc9beabb89d256fbef6879099418df0",
+   "state": "modified"
+  },
+  {
+   "path": "src/glyphs.rs",
+   "upstream": "crates/render/src/glyphs.rs",
+   "upstreamSha256": "1295f239d19768d5d92a18de22bffef3c9c68c93b4fadec71c2d2a26eb9e57d9",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/images.rs",
+   "upstream": "crates/render/src/images.rs",
+   "upstreamSha256": "dc8bafda28c4701e06a41f78a80b8fa9a39c3f4b7b35e2b60af582b34d0cbe3d",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/lib.rs",
+   "upstream": "crates/render/src/lib.rs",
+   "upstreamSha256": "ac9677205d1c5a0d87e7f5cff08524214925a36ab1ea38b44cc13f81454893b1",
+   "state": "modified"
+  },
+  {
+   "path": "src/pdf_layers.rs",
+   "upstream": "crates/render/src/pdf_layers.rs",
+   "upstreamSha256": "a8f34c7edf6caad8d7262dc560aca13292170be8981dca4326f7ddbf6fdfd380",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/text.rs",
+   "upstream": "crates/render/src/text.rs",
+   "upstreamSha256": "70bda0e81f5d24fe998b08355b79b7fef1187c244da70dab5776fcc96afa94ba",
+   "state": "unchanged"
+  },
+  {
+   "path": "tests/effects.rs",
+   "upstream": "crates/render/tests/effects.rs",
+   "upstreamSha256": "d18fb3c7cecb6890c9b1083852bd486c8fb81000d07de8e55f79f6864e6ef31c",
+   "state": "unchanged"
+  },
+  {
+   "path": "tests/golden/drop-shadow-spread.png",
+   "upstream": "crates/render/tests/golden/drop-shadow-spread.png",
+   "upstreamSha256": "dada40faa07e95a2cb8bdf5e276d33c1f017950960c6ce1f4bedc182d88a24a8",
+   "state": "unchanged"
+  },
+  {
+   "path": "tests/golden/drop-shadow-text.png",
+   "upstream": "crates/render/tests/golden/drop-shadow-text.png",
+   "upstreamSha256": "38b815ad78c8d0577179d838fc81c0d0fcfc41b3002a44e709d95854855430ae",
+   "state": "unchanged"
+  },
+  {
+   "path": "tests/golden/drop-shadow.png",
+   "upstream": "crates/render/tests/golden/drop-shadow.png",
+   "upstreamSha256": "b048604a23db329135b3800bd20d319dfe01a387ed7e59b329a2fe7f00873f65",
+   "state": "unchanged"
+  },
+  {
+   "path": "tests/golden/feather.png",
+   "upstream": "crates/render/tests/golden/feather.png",
+   "upstreamSha256": "5b618c2c7166ff1e27ef448139a94aa310d96ee9149b3520626c94eb5ca94c1a",
+   "state": "unchanged"
+  },
+  {
+   "path": "tests/golden/inner-shadow.png",
+   "upstream": "crates/render/tests/golden/inner-shadow.png",
+   "upstreamSha256": "198927f6470d0b9ac65d191a928ca18d711042d55d73cd23f437e700973c6190",
+   "state": "unchanged"
+  },
+  {
+   "path": "tests/golden/outer-glow.png",
+   "upstream": "crates/render/tests/golden/outer-glow.png",
+   "upstreamSha256": "f8308fd191843f6776962485ae9733badf6960765ba328fe1a9cc9a0a79bfeea",
+   "state": "unchanged"
+  },
+  {
+   "path": "tests/perf.rs",
+   "upstream": "crates/render/tests/perf.rs",
+   "upstreamSha256": "c125a34449ec84d91e9430176b5cefe857c21e14adad4dbfafa726e2c093aeb8",
+   "state": "unchanged"
+  },
+  {
+   "path": "tests/stroke_alignment.rs",
+   "upstream": "crates/render/tests/stroke_alignment.rs",
+   "upstreamSha256": "2a02606fc3dc1397339e0724b234cdee193403649b64ad60345e386dd6e726f4",
+   "state": "unchanged"
+  }
+ ]
+}

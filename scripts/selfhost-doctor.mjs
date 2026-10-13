@@ -1,26 +1,18 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
-import path from "node:path";
 
-const baseRequired = [
+const required = [
   "SPELLBOOK_LOCAL_EMAIL",
   "SPELLBOOK_LOCAL_PASSWORD_HASH",
   "SPELLBOOK_SESSION_SECRET",
+  // Signs the AI job capability tokens (historical name).
+  "SPELLBOOK_WOPI_SECRET",
   "SPELLBOOK_INTERNAL_TOKEN",
   "SPELLBOOK_POSTGRES_PASSWORD",
 ];
 
 const result = [];
 const environment = readEnvironment(".env");
-const editorMode = (environment.SPELLBOOK_EDITOR_MODE || "browser")
-  .trim()
-  .toLowerCase();
-const editorModeValid = editorMode === "wopi" || editorMode === "browser";
-result.push({ check: `editor mode ${editorMode}`, ok: editorModeValid });
-const required = [
-  ...baseRequired,
-  ...(editorMode === "wopi" ? ["SPELLBOOK_WOPI_SECRET"] : []),
-];
 for (const key of required) {
   const value = environment[key];
   const valid =
@@ -32,11 +24,6 @@ for (const key of required) {
   result.push({ check: key, ok: valid });
 }
 
-const proofMode = environment.SPELLBOOK_WOPI_PROOF_MODE || "required";
-result.push({
-  check: "WOPI proof verification required",
-  ok: editorMode !== "wopi" || proofMode === "required",
-});
 const storageReserve = Number(
   environment.SPELLBOOK_STORAGE_RESERVE_BYTES || 512 * 1024 * 1024,
 );
@@ -47,25 +34,6 @@ result.push({
     storageReserve >= 64 * 1024 * 1024 &&
     storageReserve <= 1024 * 1024 * 1024 * 1024,
 });
-const proofKeyPath = path.resolve(
-  environment.SPELLBOOK_WOPI_PROOF_KEY_PATH ||
-    ".spellbook/secrets/wopi-proof-key.pem",
-);
-let proofKeyValid = false;
-try {
-  const stat = fs.statSync(proofKeyPath);
-  proofKeyValid =
-    stat.isFile() &&
-    (stat.mode & 0o077) === 0 &&
-    fs.readFileSync(proofKeyPath, "utf8").includes("BEGIN RSA PRIVATE KEY");
-} catch {
-  proofKeyValid = false;
-}
-result.push({
-  check: "persistent WOPI proof key",
-  ok: editorMode !== "wopi" || proofKeyValid,
-});
-
 try {
   execFileSync("docker", ["compose", "config", "--quiet"], {
     stdio: "ignore",
@@ -75,13 +43,9 @@ try {
   result.push({ check: "docker compose config", ok: false });
 }
 
-const editorRuntime =
-  editorMode === "browser"
-    ? ["browser-office", "http://127.0.0.1:4173/readyz"]
-    : ["office-editor", "http://127.0.0.1:9980/readyz"];
 for (const [name, url] of [
   ["web", "http://127.0.0.1:3000/api/health"],
-  editorRuntime,
+  ["document view", "http://127.0.0.1:4173/readyz.json"],
 ]) {
   try {
     const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });

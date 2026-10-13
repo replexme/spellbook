@@ -1,0 +1,14 @@
+[package]
+name = "designcraft-idml"
+version = "0.5.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "DesignCraft IDML (InDesign Markup Language) import and export"
+
+[dependencies]
+designcraft-geom = { path = "../designcraft-geom" }
+designcraft-color = { path = "../designcraft-color" }
+designcraft-doc = { path = "../designcraft-doc" }
+thiserror = { version = "2" }
+quick-xml = { version = "0.38" }
+zip = { version = "3", default-features = false, features = ["deflate"] }

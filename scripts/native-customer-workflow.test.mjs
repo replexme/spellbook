@@ -8,7 +8,6 @@ const {
   newModelInput,
 } = require("../contracts/native-turn-runtime.cjs");
 const {
-  simpleGoalCommands,
   normalizeActiveGoal,
   goalChecks,
   verifyGoalChecks,
@@ -30,7 +29,7 @@ const image = {
   kind: "image",
   width: 2000,
   height: 2000,
-  onlyoffice: { geometry: { preset: "rect" } },
+  geometry: "rect",
 };
 const before = {
   revision: "r1",
@@ -146,7 +145,7 @@ test("circle is an ellipse with equal frame dimensions, not any successful comma
   const checks = goalChecks("사진을 원형으로 잘라줘", before, permission);
   assert.equal(verifyGoalChecks(checks, before).passed, false);
   const after = structuredClone(before);
-  after.slides[0].elements[0].onlyoffice.geometry.preset = "ellipse";
+  after.slides[0].elements[0].geometry = "ellipse";
   assert.equal(verifyGoalChecks(checks, after).passed, true);
   after.slides[0].elements[0].width = 3000;
   assert.equal(verifyGoalChecks(checks, after).passed, false);
@@ -161,21 +160,20 @@ test("circle is an ellipse with equal frame dimensions, not any successful comma
 });
 test("every executable operation has argument metadata and unused values are rejected", () => {
   const ops = nativeEditContract.mutationModel.operations;
-  for (const [op, metadata] of Object.entries(ops))
-    if (metadata.availability !== "format_excluded") {
-      assert(Array.isArray(metadata.arguments), op);
-      assert.equal(
-        new Set(metadata.arguments).size,
-        metadata.arguments.length,
-        op,
+  for (const [op, metadata] of Object.entries(ops)) {
+    assert(Array.isArray(metadata.arguments), op);
+    assert.equal(
+      new Set(metadata.arguments).size,
+      metadata.arguments.length,
+      op,
+    );
+    for (const field of metadata.arguments)
+      assert(
+        field in nativeEditContract.toolInputSchema.properties,
+        op + ":" + field,
       );
-      for (const field of metadata.arguments)
-        assert(
-          field in nativeEditContract.toolInputSchema.properties,
-          op + ":" + field,
-        );
-      assert.equal(validateOperationArguments({ op }), true);
-    }
+    assert.equal(validateOperationArguments({ op }), true);
+  }
   assert.throws(
     () =>
       validateOperationArguments({
@@ -207,14 +205,14 @@ test("every executable operation has argument metadata and unused values are rej
   assert(nativeAssetEditSchema.properties.op.enum.length === 4);
   assert.equal(
     nativeBatchEditSchema.properties.commands.items.properties.op.enum.length,
-    94,
+    Object.keys(ops).length,
   );
 });
 test("final visual review and message complete in one provider run, after fresh editor readback", async () => {
   const after = structuredClone(before);
   after.revision = "r2";
   after.changedSlideIndexes = [0];
-  after.slides[0].elements[0].onlyoffice.geometry.preset = "ellipse";
+  after.slides[0].elements[0].geometry = "ellipse";
   let current = before,
     modelCalls = 0,
     hostCalls = 0;
@@ -302,7 +300,7 @@ test("human changes invalidate final review even after a successful edit", async
     revision: "r2",
     changedSlideIndexes: [0],
   };
-  after.slides[0].elements[0].onlyoffice.geometry.preset = "ellipse";
+  after.slides[0].elements[0].geometry = "ellipse";
   const host = {
     call: async (request) => {
       if (request.operation === "edit_batch") current = after;
@@ -375,36 +373,6 @@ test("aborted queued work never runs, while failure timing is retained", async (
   assert(Number.isInteger(metrics.elapsedMs));
 });
 
-test("simple native execution accepts only the complete unique square-picture instruction", () => {
-  const checks = goalChecks("사진을 원형으로 잘라줘", before, permission);
-  assert.deepEqual(
-    simpleGoalCommands("사진을 원형으로 잘라줘", checks, before, permission),
-    [{ op: "crop_image", elementId: "0/0", geometry: "ellipse" }],
-  );
-  assert.equal(
-    simpleGoalCommands(
-      "사진을 원형으로 잘라줘. 제목도 바꿔줘",
-      checks,
-      before,
-      permission,
-    ),
-    null,
-  );
-  assert.equal(
-    simpleGoalCommands("사진을 원형으로 잘라줘", checks, before, {
-      ...permission,
-      mode: "read_only",
-    }),
-    null,
-  );
-  const rectangle = structuredClone(before);
-  rectangle.slides[0].elements[0].width = 4000;
-  assert.equal(
-    simpleGoalCommands("사진을 원형으로 잘라줘", checks, rectangle, permission),
-    null,
-  );
-});
-
 test("a failed objective is repaired using fresh images in a new provider call", async () => {
   let current = structuredClone(before),
     mutations = 0,
@@ -441,8 +409,7 @@ test("a failed objective is repaired using fresh images in a new provider call",
           current.revision = "r" + (mutations + 1);
           current.changedSlideIndexes = [0];
           if (mutations === 2)
-            current.slides[0].elements[0].onlyoffice.geometry.preset =
-              "ellipse";
+            current.slides[0].elements[0].geometry = "ellipse";
         }
         return structuredClone(current);
       },
@@ -493,8 +460,7 @@ test("known no-effect rejections can recover; ambiguous transport failures stay 
             if (!mutations++) throw Error(error);
             current.revision = "r2";
             current.changedSlideIndexes = [0];
-            current.slides[0].elements[0].onlyoffice.geometry.preset =
-              "ellipse";
+            current.slides[0].elements[0].geometry = "ellipse";
           }
           return structuredClone(current);
         },
@@ -551,8 +517,7 @@ test("successive edits require final screenshots and review for every touched sl
             const slide = mutations++;
             current = structuredClone(current);
             current.revision = "r" + (mutations + 1);
-            current.slides[slide].elements[0].onlyoffice.geometry.preset =
-              "ellipse";
+            current.slides[slide].elements[0].geometry = "ellipse";
             current.images = [{ ...before.images[0], slideIndex: slide }];
             current.changedSlideIndexes = [slide];
           }
@@ -575,19 +540,6 @@ test("successive edits require final screenshots and review for every touched sl
   );
   assert.deepEqual(captured, [0, 1]);
   assert.equal(result.task.outcome, "fulfilled");
-});
-
-test("circle check preserves the actual source media fingerprint", () => {
-  const source = structuredClone(before);
-  source.slides[0].onlyoffice = {
-    drawings: [{ imagePath: "sha256:" + "a".repeat(64) }],
-  };
-  const checks = goalChecks("사진을 원형으로 잘라줘", source, permission);
-  source.slides[0].elements[0].onlyoffice.geometry.preset = "ellipse";
-  assert(verifyGoalChecks(checks, source).passed);
-  source.slides[0].onlyoffice.drawings[0].imagePath =
-    "sha256:" + "b".repeat(64);
-  assert.equal(verifyGoalChecks(checks, source).passed, false);
 });
 
 test("repair removes introduced layout defects without hiding old document warnings", async () => {
@@ -627,8 +579,7 @@ test("repair removes introduced layout defects without hiding old document warni
             current = structuredClone(current);
             current.revision = "r" + (++mutations + 1);
             current.changedSlideIndexes = [0];
-            current.slides[0].elements[0].onlyoffice.geometry.preset =
-              "ellipse";
+            current.slides[0].elements[0].geometry = "ellipse";
             current.layoutAudit =
               mutations === 1
                 ? {
@@ -648,36 +599,6 @@ test("repair removes introduced layout defects without hiding old document warni
   );
   assert.equal(calls, 2);
   assert.equal(result.task.outcome, "fulfilled");
-});
-
-test("direct native execution counts only the result actually sent to the model", async () => {
-  let current = structuredClone(before);
-  const result = await runNativeTurn(
-    {
-      run: async (options) => {
-        assert.equal(JSON.parse(options.initialPage.text).revision, "r2");
-        assert.equal(options.initialPage.images.length, 1);
-        return completion();
-      },
-    },
-    {
-      ...input({
-        call: async (request) => {
-          if (request.operation === "edit_batch") {
-            current.revision = "r2";
-            current.changedSlideIndexes = [0];
-            current.slides[0].elements[0].onlyoffice.geometry.preset =
-              "ellipse";
-          }
-          return structuredClone(current);
-        },
-      }),
-      requestText: "사진을 원형으로 잘라줘",
-    },
-  );
-  assert.equal(result.task.outcome, "fulfilled");
-  assert.equal(result.modelInput.calls, 1);
-  assert.equal(result.modelInput.imageCount, 1);
 });
 
 test("an asynchronously inserted generated image is reviewed only after its slide image is delivered", async () => {
@@ -727,8 +648,7 @@ test("a provider that cannot receive images cannot approve an unseen slide", asy
           if (request.operation === "edit_batch") {
             current.revision = "r2";
             current.changedSlideIndexes = [0];
-            current.slides[0].elements[0].onlyoffice.geometry.preset =
-              "ellipse";
+            current.slides[0].elements[0].geometry = "ellipse";
           }
           return structuredClone(current);
         },

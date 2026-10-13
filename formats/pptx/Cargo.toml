@@ -1,0 +1,23 @@
+[package]
+name = "present-pptx"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+present-engine.workspace = true
+present-package = { path = "../package" }
+quick-xml.workspace = true
+flate2.workspace = true
+crc32fast.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+present-render = { path = "../../engine/render" }
+designcraft-fonts = { path = "../../engine/vendor/designcraft-fonts" }
+skrifa = "0.47"
+kurbo = "0.13"
+vello_cpu = "0.2"
+base64 = "0.22.1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif"] }

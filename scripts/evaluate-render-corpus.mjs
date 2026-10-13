@@ -6,7 +6,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const DEFAULT_IMAGE = "spellbook-document-worker:local";
-const TOOL_PATH = "/app/tool/Spellbook.Document.Tool.dll";
+// Programs in the document worker image: the element graph comes from the .NET tool, the slide
+// images from the document engine, with the fallback fonts the worker draws previews with.
+const TOOL_PROGRAM = "/app/tool/Spellbook.Document.Tool";
+const ENGINE_PROGRAM = "/app/present-pptx";
+const RENDER_WIDTH = "1280";
 export const DOCUMENT_TOOL_TIMEOUT_MS = 300_000;
 
 export function assessCorpus(manifest, deckResults) {
@@ -274,6 +278,7 @@ export async function evaluateCorpus({ manifestPath, outputPath }) {
       const inspectStarted = performance.now();
       console.log(`[corpus] ${deck.id}: inspect start`);
       runDocumentTool(image, rendererEnvironment, source, deckOutput, [
+        TOOL_PROGRAM,
         "inspect",
         "/input/document.pptx",
         "/output/element-graph.json",
@@ -287,9 +292,13 @@ export async function evaluateCorpus({ manifestPath, outputPath }) {
       const renderStarted = performance.now();
       console.log(`[corpus] ${deck.id}: render start`);
       runDocumentTool(image, rendererEnvironment, source, deckOutput, [
-        "render",
+        ENGINE_PROGRAM,
+        "render-all",
         "/input/document.pptx",
         "/output/render",
+        RENDER_WIDTH,
+        "--fonts",
+        "/app/fonts",
       ]);
       result.timings.renderMs = roundedMilliseconds(
         performance.now() - renderStarted,
@@ -525,13 +534,15 @@ export function documentToolInvocation(
   environment,
   source,
   output,
-  toolArgs,
+  [program, ...toolArgs],
 ) {
   const environmentArgs = Object.entries(environment)
     .sort(([left], [right]) => left.localeCompare(right))
     .flatMap(([name, value]) => ["--env", `${name}=${value}`]);
   const containerName = `spellbook-corpus-${createHash("sha256")
-    .update([source, output, ...environmentArgs, ...toolArgs].join("\0"))
+    .update(
+      [source, output, ...environmentArgs, program, ...toolArgs].join("\0"),
+    )
     .digest("hex")
     .slice(0, 20)}`;
   return {
@@ -544,14 +555,13 @@ export function documentToolInvocation(
       "--stop-timeout",
       "10",
       "--entrypoint",
-      "dotnet",
+      program,
       "--volume",
       `${source}:/input/document.pptx:ro`,
       "--volume",
       `${output}:/output`,
       ...environmentArgs,
       image,
-      TOOL_PATH,
       ...toolArgs,
     ],
   };
@@ -576,7 +586,7 @@ function runDocumentTool(image, environment, source, output, toolArgs) {
       timeout: 30_000,
     });
     throw new Error(
-      `Document tool timed out after ${DOCUMENT_TOOL_TIMEOUT_MS}ms: ${toolArgs[0] ?? "unknown"}`,
+      `Document tool timed out after ${DOCUMENT_TOOL_TIMEOUT_MS}ms: ${toolArgs[1] ?? "unknown"}`,
     );
   }
   if (result.error || result.status !== 0) throw commandError("docker", result);

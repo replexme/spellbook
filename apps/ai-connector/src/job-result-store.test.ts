@@ -1,18 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { JobResultStore } from "./job-result-store.js";
 import type { ObjectStore } from "./local-storage.js";
-import type { AiJob, AiWorkerCallback } from "./types.js";
+import type { AiWorkerCallback, NativeJob } from "./types.js";
 
 const job = {
   jobId: "job-1",
-  mode: "plan",
+  mode: "native",
   storageNamespace: "local",
   baseGraphObject:
     "accounts/account/documents/doc/versions/base/render/graph.json",
-} as AiJob;
+} as NativeJob;
 const result: AiWorkerCallback = {
   jobId: "job-1",
-  mode: "plan",
+  mode: "native",
   status: "succeeded",
   result: { summary: "done" },
 };

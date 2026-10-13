@@ -1,0 +1,18 @@
+[package]
+name = "present-engine-wasm"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+present-pptx = { path = "../../formats/pptx" }
+present-render = { path = "../render" }
+present-engine = { path = "../core" }
+base64 = "0.22.1"
+sha2.workspace = true
+serde_json.workspace = true
+wasm-bindgen = "=0.2.129"

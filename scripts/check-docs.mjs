@@ -22,7 +22,6 @@ const requiredDocuments = [
   "docs/architecture/open-core-boundary.md",
   "docs/delivery/self-hosting.md",
   "docs/delivery/release-gates.md",
-  "docs/delivery/runtime-verification-2026-09-11.md",
   "docs/research/open-core-selfhost-research-2026-09-11.md",
 ];
 
@@ -50,33 +49,19 @@ const mutationCapabilities = JSON.parse(
     "utf8",
   ),
 );
-const editorUpstream = JSON.parse(
-  fs.readFileSync(
-    path.join(root, "services/office-editor/libreoffice/upstream.json"),
-    "utf8",
-  ),
-);
 const mutationOperations = Object.values(
   mutationCapabilities.mutationModel.operations,
 );
 const operationCount = mutationOperations.length;
 const exposedOperationCount =
   mutationCapabilities.toolInputSchema.properties.op.enum.length;
-const availabilityCount = (availability) =>
-  mutationOperations.filter(
-    (operation) => operation.availability === availability,
-  ).length;
-const candidateOperationCount =
-  availabilityCount("engine_patch_ready") +
-  availabilityCount("runtime_validation_required");
 const formatSupport = fs.readFileSync(
   path.join(root, "docs/product/format-support.md"),
   "utf8",
 );
 for (const requiredStatement of [
   `classifies ${operationCount} operations`,
-  `of which ${exposedOperationCount} bounded operations are exposed`,
-  `Registry status: ${availabilityCount("runtime_verified")} runtime-verified; ${candidateOperationCount} engine candidates (\`${editorUpstream.patchLevel}\`).`,
+  `of which ${exposedOperationCount} are exposed`,
 ]) {
   if (!formatSupport.includes(requiredStatement))
     failures.push(
@@ -93,7 +78,7 @@ function markdownFiles(directory) {
         entry.name === ".git" ||
         entry.name === ".spellbook" ||
         entry.name === "artifacts" ||
-        path.relative(root, path.join(directory, entry.name)) === "services/browser-office/onlyoffice/distribution" ||
+        path.relative(root, path.join(directory, entry.name)) === "target" ||
         entry.name.startsWith(".tmp"))
     ) {
       continue;

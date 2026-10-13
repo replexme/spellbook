@@ -1,0 +1,162 @@
+{
+ "repository": "https://github.com/storytold/designcraft",
+ "revision": "4fbf8938bf922b29602ef6e6e0984a229a8b994a",
+ "files": [
+  {
+   "path": "Cargo.toml",
+   "upstream": "crates/doc/Cargo.toml",
+   "upstreamSha256": "c63c56ace167827dbd1872fc2a309ae847ccc8caec471a45199dc8f97e918566",
+   "state": "modified"
+  },
+  {
+   "path": "proptest-regressions/story.txt",
+   "upstream": "crates/doc/proptest-regressions/story.txt",
+   "upstreamSha256": "d460d7c2fcb9b28e1c4f5ee00d1e9890b617f33d4f7f6ca1ece79da173ad68ea",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/anchored.rs",
+   "upstream": "crates/doc/src/anchored.rs",
+   "upstreamSha256": "11331f9a4ad762ef631a78522a8b3b3540b324a40964e42f647cdc493b757bf9",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/arabic.rs",
+   "upstream": "crates/doc/src/arabic.rs",
+   "upstreamSha256": "bfcbf5cdd8d18ba82b87e9eee7e37992cefc3a30a1821861e1a8af682c2431ec",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/arrow.rs",
+   "upstream": "crates/doc/src/arrow.rs",
+   "upstreamSha256": "aee237f0c57a8737c4f9f684833525c7a6016151931afa91d768bdbc64e77dc9",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/attrs.rs",
+   "upstream": "crates/doc/src/attrs.rs",
+   "upstreamSha256": "762923e239ec8244dd5d531b2467a934b8b065e9693a0f243523ee525bcf09bb",
+   "state": "modified"
+  },
+  {
+   "path": "src/build.rs",
+   "upstream": "crates/doc/src/build.rs",
+   "upstreamSha256": "ed42e892558181131f567f030fa2954cb9702dda073fefaabe1ee7910a58284d",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/cjk.rs",
+   "upstream": "crates/doc/src/cjk.rs",
+   "upstreamSha256": "b33b6264b2fbc469a6b1490e975428c7cda86d79a5ccd398432b471351e4dfe2",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/datamerge.rs",
+   "upstream": "crates/doc/src/datamerge.rs",
+   "upstreamSha256": "a3205401d354786a5139de15df06a9f997e7196b3a00e5c1124a00cd2826491c",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/edit.rs",
+   "upstream": "crates/doc/src/edit.rs",
+   "upstreamSha256": "1a57f0111af8fd42291f6d87bcecff2b8ce8293beeb9586062380a9a55e4919d",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/endnotes.rs",
+   "upstream": "crates/doc/src/endnotes.rs",
+   "upstreamSha256": "f776e92f7945b48ba7acdd78e31b3e90a4afd9dd4c6a972ac15781627f5be8c7",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/ids.rs",
+   "upstream": "crates/doc/src/ids.rs",
+   "upstreamSha256": "79582b3246820231a33bda0e713d4e2987b523987d439a34e8b960e080299ce9",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/index.rs",
+   "upstream": "crates/doc/src/index.rs",
+   "upstreamSha256": "8738571a53cb025c2d5ebff50b0643776798d89399e956241f2b8c27173784fa",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/item.rs",
+   "upstream": "crates/doc/src/item.rs",
+   "upstreamSha256": "c1fa5731ed5dadaac2adcb70c5601adca2e94a1af009e43a13e34b964bcd9e9d",
+   "state": "modified"
+  },
+  {
+   "path": "src/lib.rs",
+   "upstream": "crates/doc/src/lib.rs",
+   "upstreamSha256": "23b764ed065ae95f146d37567904dcaf05b5126cb1d86b56bea5284a7298a6c7",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/notes.rs",
+   "upstream": "crates/doc/src/notes.rs",
+   "upstreamSha256": "fb20cd9d40302769867039ddaf8ae994d8a1a9869043fa86a811f33ef8b68021",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/otf.rs",
+   "upstream": "crates/doc/src/otf.rs",
+   "upstreamSha256": "da4b6b2fd2bf50f655f71364e6ba87b9054d945d8767429c450406caea496054",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/page.rs",
+   "upstream": "crates/doc/src/page.rs",
+   "upstreamSha256": "731b464e67a4045a93364468f541700829cbc2dcd6ee1faeffc5625f1d51f6a8",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/selection.rs",
+   "upstream": "crates/doc/src/selection.rs",
+   "upstreamSha256": "f325b940443269e15600808b2d20bdca605408b09dee210d29acc1b423292b6e",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/slice.rs",
+   "upstream": "crates/doc/src/slice.rs",
+   "upstreamSha256": "fabdf3d5dcf6f4fc896faf92b1bed44d861dea4c52450ccb9d91020c3d7f4d4e",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/story.rs",
+   "upstream": "crates/doc/src/story.rs",
+   "upstreamSha256": "f2fda2876c29a8bac43f727cec98878af53b7893a2a1eb6e5c8a4e55eed86814",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/styles.rs",
+   "upstream": "crates/doc/src/styles.rs",
+   "upstreamSha256": "fa081fd206be2a3df3605bfdcdab32a25be1d857231af1d2bbf93ec8104e5039",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/table.rs",
+   "upstream": "crates/doc/src/table.rs",
+   "upstreamSha256": "cfeb49aca10765d6f381bb166aa6b07b7cbd87b62da5c1df787633ee3ba026db",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/tests.rs",
+   "upstream": "crates/doc/src/tests.rs",
+   "upstreamSha256": "9c5f071ad02ff30baacef264a6c61b19f640f3d7795c79ded4c0612ddd833a46",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/vars.rs",
+   "upstream": "crates/doc/src/vars.rs",
+   "upstreamSha256": "47879bfad26ba422b66e7bd894fb3e6fc8ad1bc3461ba17cb8938ab1f6e8fc03",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/xref.rs",
+   "upstream": "crates/doc/src/xref.rs",
+   "upstreamSha256": "a68049a68c9f7ffc1dc76b7ec72b77f2ff1c97633f2098bf423d2f325d311dd3",
+   "state": "unchanged"
+  }
+ ]
+}

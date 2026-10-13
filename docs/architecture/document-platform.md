@@ -2,40 +2,31 @@
 
 ## Product invariant
 
-Spellbook edits the user's real document. It does not replace the file with a generated screenshot or migrate it into a proprietary format. A human and an AI operate on the same versioned, editable document; a candidate must pass structural validation and rendered review before approval.
+Spellbook edits the user's real document. It does not replace the file with a generated screenshot or migrate it into a proprietary format. The person views the document and asks for changes; only the AI edits it, and the person can undo, redo or return to an earlier version. Every AI edit works on the same versioned, editable document, and a candidate must pass structural validation and rendered review before approval.
 
 ## Dependency direction
 
 ```text
 hosted service overlay (private, optional)
                   ↓
-web workspace → platform contracts ← AI connector
-      ↓                 ↓                 ↓
- WOPI host       format adapter       provider runtime
-                        ↓
-                 native document file
+web app → platform contracts ← AI connector
+   ↓                ↓                 ↓
+document view   format modules    provider runtime
+   ↓                ↓
+document engine (Rust) → native document file
 ```
 
 The public platform never imports a hosted module. Hosting adds adapters around public ports; it does not fork document behavior.
 
-## Browser-owned edit sessions
+## Runtime pieces
 
-The browser renderer is never allowed to impersonate a WOPI client. WOPI and
-browser editing are mutually exclusive modes of the same owned document
-session. A browser launch is refused while Collabora holds a WOPI lock; after a
-mode switch, the old WOPI capability can no longer read or save the file.
+- **Web app** (`apps/web`): sign-in, uploads, versions, conversations, and the workspace screen. It embeds the document view and sends it save, undo, redo and show-page requests.
+- **Document view** (`apps/office`): the page that shows the document inside the workspace. It runs the Rust document engine compiled to WebAssembly in a browser worker, draws the pages, and carries out the AI's observe and edit requests on that same engine. People do not edit in it directly.
+- **Document engine** (`engine/`) and **format modules** (`formats/pptx`, `formats/idml`, `formats/package`): file reading and writing, layout, drawing, edit commands and Undo. The same source is built for the browser (WebAssembly) and as the command-line programs `present-pptx` and `present-idml`.
+- **Document worker** (`services/document-worker`): checks uploaded files and draws page previews with `present-pptx` and `present-idml`. It does not use LibreOffice.
+- **AI connector** (`apps/ai-connector`): runs the user's own Codex or Claude Code subscription for a document turn; its tool calls reach the document view through the web app.
 
-The browser receives an opaque revision made from the current version identity
-and SHA-256 digest. Every candidate upload must be same-origin and carry that
-revision in `If-Match`. The server locks the session row, rejects a stale base,
-stores the candidate as a new child version, and passes it through the existing
-package scan, render and preservation validation before advancing the document.
-OPFS protects unsaved local work across browser interruption, but it is not the
-shared source of truth and cannot bypass server validation or version lineage.
-
-The transport and recovery contracts are implemented and transaction-tested;
-selecting the browser engine in the product UI remains blocked on the browser
-engine promotion gates described in its pinned runtime manifest.
+Because the document view and the preview programs build from the same engine source, a format fix is made once in `engine/` or `formats/` and applies to both.
 
 ## Common platform responsibilities
 
@@ -59,125 +50,22 @@ The current `pptx` adapter owns:
 
 - ZIP/OOXML safety scanning and relationship checks;
 - slide and element inspection, including position, z-order, groups and fonts;
-- minimal-part patching and round-trip validation;
-- LibreOffice rendering and PowerPoint-oriented compatibility patches;
-- the Impress WOPI editor bridge and native editing operations.
+- edits that rewrite only the package parts they change;
+- drawing slides with the document engine;
+- the edit operations the AI may use, declared in `contracts/native-edit-capabilities.json`.
 
-The PPTX adapter currently has three independently pinned LibreOffice-derived
-builds: the document worker's headless renderer, Collabora Online's live editor,
-and the ZetaOffice browser-WASM candidate. They are alternative execution
-surfaces for one PPTX product, not three document formats. Their source versions
-and ABIs differ, so a format fix must carry the same behavioral regression
-across the affected builds rather than copying a binary patch blindly. See the
-[Collabora maintenance contract](../../services/office-editor/libreoffice/README.md),
-[browser-WASM contract](../../services/browser-office/libreoffice/README.md),
-and [renderer contract](../../services/document-worker/libreoffice/README.md).
-
-## Semantic save boundary
-
-An edit is not complete when an Office API reports success or when a ZIP file
-exists. Its intended effect must be checked against the persisted PPTX at the
-same document revision, while unrelated original content remains protected.
-For AI, the target is the authorized command plus its live post-edit readback;
-for direct human editing, it is the observed live document state immediately
-before save. The path is: target state → edit and Undo → serialize or local
-package patch → persisted-semantic check → package-scope/preservation
-validation → rendered review → version promotion. Human and AI edits may use
-different tools, but must satisfy this same outcome contract.
-
-Localized single edits use a minimal OOXML patch, while compound AI edits and
-direct human edits can create full native snapshots. The browser source now
-reopens native snapshot bytes in a separate document model without a UI frame
-and compares the intended, observable change with the same format-aware
-normalization used by the release conformance runner before writing the OPFS
-checkpoint. Its manual baseline is the preceding observation from the **same
-live session**, not a new import of the old file: even an unedited LibreOffice export can resolve
-inherited values differently. The model-only probe never becomes the visible
-editor. Package-only section and slide-topology edits use their own saved
-identity/order checks. The server separately checks package categories, target
-scope and preservation of selected unsupported features.
-
-Before publishing a browser checkpoint, the product snapshots its package
-bytes, revision, slide count, command journal and Undo/Redo stacks as one
-state. A failed checkpoint restores that whole state before attempting the
-corresponding engine rollback. This prevents a storage error from silently
-discarding Redo history or leaving metadata from an edit that was not saved.
-The journal is anchored to the last server-acknowledged PPTX; the session
-Undo/Redo stacks are separate and survive Save. An Undo after Save becomes a
-new unsaved snapshot relative to that acknowledged base, and Redo back to the
-saved bytes clears that journal delta without clearing the session history.
-To avoid retaining unlimited full PPTX buffers in the browser, recent session
-history is trimmed at 32 actions or 256 MiB of referenced snapshots. The
-latest Undo action remains available even if it alone exceeds that budget.
-The save/Undo separation is source-level until the candidate browser runtime
-passes the save → Undo → Redo → recovery scenario in the product bridge.
-
-This source-level boundary is not yet a verified runtime guarantee for every
-PPTX property. The new browser snapshot path must pass the immutable candidate
-runtime, all operation-family conformance cases, save/reopen, Undo/Redo,
-performance and PowerPoint checks. The observation graph also has to cover
-each claimed editable semantic family; a byte difference or a changed UNO
-revision is never a substitute for persisted intent. For example, paragraph
-margins must be compared as effective DrawingML semantics, not merely as a UNO
-field that may be remapped into numbering rules on import.
-
-### One artifact admission boundary
-
-`services/browser-office/product-artifact.mjs` owns admission of product PPTX
-artifacts. AI edits, human checkpoints, package edits, Undo/Redo and recovery
-must inspect the exact candidate package and verify its intended state before
-that digest/model-revision pair can be journaled or exported. Both exports that
-write a checkpoint and read-only exports require admission. A command reply,
-ZIP readback or existing journal alone cannot authorize a save.
-
-The localized OOXML rewrite remains a performance optimization. Its result
-must pass the same engine readback as the native snapshot. If readback disagrees
-with a live native edit, the coordinator preserves that actual native result
-through the existing scoped original/no-edit/edited merge and verifies it again.
-It does not expand the operation's package budget. A failure in either path
-retains the existing rollback behavior. Product documents require an admitted
-runtime before document opening or recovery storage access. The older stock
-runtime can serve the diagnostic harness, but its unsafe saved-package readback
-is not admitted to product editing. It cannot bypass validation or silently use
-the candidate-runtime fallback. Expected refusals are reported through the host
-queue without creating an unhandled browser promise.
-
-Admission records bind the candidate SHA-256, observed model revision and
-normalized saved-state SHA-256. OPFS stores that record with its byte-checked
-checkpoint, and recovery performs fresh package readback before admitting it.
-Legacy checkpoints retain their existing replay/revision checks and also pass
-fresh admission; migrations retain any existing admission record. Opening
-another document clears the session authority. Save pins its admitted pair
-until acknowledgement so later edits cannot evict an in-flight save's evidence.
-Native Undo/Redo that reaches an already admitted digest/revision pair reuses
-that exact proof. Comparing the same historical artifact anew against another
-import projection can reject harmless automatic object names. An expired pair
-or a reopened document with another revision still requires fresh admission;
-this does not exempt new mutations or changed authored names from verification.
-
-The authority retains at most four saved-state inspections and 128 admission
-records, plus the pinned save; it retains no additional document byte buffers.
-Repeated saves of identical admitted bytes check the digest/version binding
-without repeating the hidden-document import. Mutable input buffers and changed
-revisions invalidate evidence. This is integrity evidence, not a replacement
-for changed-slide visual review or an independent PowerPoint compatibility gate.
-
-Server native-save promotion also binds the validation report and element graph
-to the submitted version's digest and input object under a database lock. Output
-objects must belong to that job's output prefix, and the reported slide count
-must equal the graph. Agreement among worker outputs alone is insufficient if
-they describe a different submitted file. Browser and WOPI saves share this gate.
+The `idml` adapter follows the same pattern for InDesign documents at the experimental level declared in the registry.
 
 ## Current limitation that matters for expansion
 
-The worker boundary and upload registry are format-aware, but the current element graph, edit-command schema, conversation scope and UI still contain slide-specific fields. They are valid PPTX adapter contracts, not the future universal interchange model. Before enabling DOCX, introduce a small format-neutral observation envelope whose payload is validated by an adapter-owned schema. Do not stretch `slides[]` into `pages[]` or `paragraphs[]`.
+The worker boundary and upload registry are format-aware, but the current element graph, edit contract, conversation scope and UI still contain slide-specific fields. They are valid PPTX adapter contracts, not the future universal interchange model. Before enabling DOCX, introduce a small format-neutral observation envelope whose payload is validated by an adapter-owned schema. Do not stretch `slides[]` into `pages[]` or `paragraphs[]`.
 
 ## Adding a format
 
 A format can move from `planned` to `experimental` only after it has:
 
 1. an adapter implementation and adapter-owned observation/edit schemas;
-2. a browser editor route or native editor with stable document identity;
+2. a document view route with stable document identity;
 3. package-preserving validation and corrupted-file rejection;
 4. public, redistributable fidelity and round-trip fixtures;
 5. before/after visual review semantics appropriate to that format;

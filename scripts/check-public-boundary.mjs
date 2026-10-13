@@ -55,6 +55,7 @@ const textExtensions = new Set([
   ".mjs",
   ".patch",
   ".py",
+  ".rs",
   ".sh",
   ".slnx",
   ".toml",
@@ -101,6 +102,8 @@ function walk(directory) {
       continue;
     const absolute = path.join(directory, entry.name);
     const relative = path.relative(root, absolute).replaceAll(path.sep, "/");
+    // Cargo build output at the repository root.
+    if (relative === "target") continue;
     if (entry.isSymbolicLink()) {
       const resolved = fs.realpathSync(absolute);
       if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`))

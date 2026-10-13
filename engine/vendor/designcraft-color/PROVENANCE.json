@@ -1,0 +1,84 @@
+{
+ "repository": "https://github.com/storytold/designcraft",
+ "revision": "4fbf8938bf922b29602ef6e6e0984a229a8b994a",
+ "files": [
+  {
+   "path": "Cargo.toml",
+   "upstream": "crates/color/Cargo.toml",
+   "upstreamSha256": "de379b16d68729b89ba213adb5781bf27cf00523d89d51f291d78df3c09fdc58",
+   "state": "modified"
+  },
+  {
+   "path": "src/ase.rs",
+   "upstream": "crates/color/src/ase.rs",
+   "upstreamSha256": "cfd3b1d6a18e0b9503c3fefa585259ea47c7b657069d49f3d30cee6838044c03",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/blend.rs",
+   "upstream": "crates/color/src/blend.rs",
+   "upstreamSha256": "5890e60ccf3be6efb2e34dc0caebf61bff102e0ac68285e184b1d3e0b7f7cef4",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/cms/generic.rs",
+   "upstream": "crates/color/src/cms/generic.rs",
+   "upstreamSha256": "302df11414b2e6225051c6481ebc2a354c704409c14a54583bdb99cc65649a9c",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/cms/icc.rs",
+   "upstream": "crates/color/src/cms/icc.rs",
+   "upstreamSha256": "2e0e406664045dbd6f28e6e7f9fc9b7b678dce7cea71a0973bf2ad007ffc1015",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/cms/icc_out.rs",
+   "upstream": "crates/color/src/cms/icc_out.rs",
+   "upstreamSha256": "ff4c4f2ec58f2009904088ab3cc23c54e1524ac33f4a7a0f1cbe633b5bf9fb67",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/cms/lab.rs",
+   "upstream": "crates/color/src/cms/lab.rs",
+   "upstreamSha256": "fd7be9f286cf05c3d1706cb93d0a75125d4f786148445009f1d66b1a0d662c7b",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/cms/mod.rs",
+   "upstream": "crates/color/src/cms/mod.rs",
+   "upstreamSha256": "c9f69c27e1c5afb888e83b2b364b9d9493ca3ef62d58c9094540cc7fcffd4e11",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/cms/tests.rs",
+   "upstream": "crates/color/src/cms/tests.rs",
+   "upstreamSha256": "db05ccad262d8628a0be7f12377de9cca06446b1f9005afcd9c3b3d01bdf7cba",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/gradient.rs",
+   "upstream": "crates/color/src/gradient.rs",
+   "upstreamSha256": "854464f641ca3d23cdefd155a7381959afc47c66dd19bc11d549789523cbd345",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/harmony.rs",
+   "upstream": "crates/color/src/harmony.rs",
+   "upstreamSha256": "d21453ebe051a06c6b527d0f1bc9488a3669ab0469823a61524ea6780ab2eb7e",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/lib.rs",
+   "upstream": "crates/color/src/lib.rs",
+   "upstreamSha256": "f475d59f4548b8fa9321a4eced68df65f6cdaa101c9a4eb0d90a111496c73b78",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/swatch.rs",
+   "upstream": "crates/color/src/swatch.rs",
+   "upstreamSha256": "7edfea4d73fefc7b7b1c8b8ac264884e4af82a605082fd25b3bb436a939b2f38",
+   "state": "unchanged"
+  }
+ ]
+}

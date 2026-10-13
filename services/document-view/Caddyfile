@@ -1,0 +1,12 @@
+# The document view as a static site: /workspace serves workspace.html. Only the web app's
+# origin may frame it.
+:4173 {
+	root * /srv
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		Content-Security-Policy "frame-ancestors {$SPELLBOOK_APP_ORIGIN}"
+	}
+	try_files {path} {path}.html
+	file_server
+}

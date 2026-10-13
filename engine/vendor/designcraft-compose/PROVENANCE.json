@@ -1,0 +1,174 @@
+{
+ "repository": "https://github.com/storytold/designcraft",
+ "revision": "4fbf8938bf922b29602ef6e6e0984a229a8b994a",
+ "files": [
+  {
+   "path": "Cargo.toml",
+   "upstream": "crates/compose/Cargo.toml",
+   "upstreamSha256": "e01d99713da58bacb6de95b0d35bc1c11d0d2d2684e26d80e59830e61ab0727d",
+   "state": "modified"
+  },
+  {
+   "path": "assets/hyphenation/en-us.dic",
+   "upstream": "assets/hyphenation/en-us.dic",
+   "upstreamSha256": "66ce9023847dd2cfc5c6ad14b83aaab94e58607fe95258f4f3ac431a23df63f1",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/hyphenation/en-us.pat",
+   "upstream": "assets/hyphenation/en-us.pat",
+   "upstreamSha256": "0ad447633731c6c9faaf02ac1b327934eaac8aab23f658624d6c67ffe44b88b8",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/hyphenation/indesign/README.md",
+   "upstream": null,
+   "upstreamSha256": null,
+   "state": "added"
+  },
+  {
+   "path": "assets/hyphenation/indesign/en-ca.exc",
+   "upstream": null,
+   "upstreamSha256": null,
+   "state": "added"
+  },
+  {
+   "path": "assets/hyphenation/indesign/en-ca.pat.z",
+   "upstream": null,
+   "upstreamSha256": null,
+   "state": "added"
+  },
+  {
+   "path": "assets/hyphenation/indesign/en-gb.exc",
+   "upstream": null,
+   "upstreamSha256": null,
+   "state": "added"
+  },
+  {
+   "path": "assets/hyphenation/indesign/en-gb.pat.z",
+   "upstream": null,
+   "upstreamSha256": null,
+   "state": "added"
+  },
+  {
+   "path": "assets/hyphenation/indesign/en-us.exc",
+   "upstream": null,
+   "upstreamSha256": null,
+   "state": "added"
+  },
+  {
+   "path": "assets/hyphenation/indesign/en-us.pat.z",
+   "upstream": null,
+   "upstreamSha256": null,
+   "state": "added"
+  },
+  {
+   "path": "examples/hyphgen.rs",
+   "upstream": "crates/compose/examples/hyphgen.rs",
+   "upstreamSha256": "876c8bd24fd7307bf07d8339fe77fb2c01214f427ba6cb13355d281cbcda2a01",
+   "state": "unchanged"
+  },
+  {
+   "path": "examples/indesign_hyph.rs",
+   "upstream": null,
+   "upstreamSha256": null,
+   "state": "added"
+  },
+  {
+   "path": "src/bidi.rs",
+   "upstream": "crates/compose/src/bidi.rs",
+   "upstreamSha256": "027d746f5093625b9679e407f6947c8ea6b090f8edcf443607bb4ac4a34be59c",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/breaker.rs",
+   "upstream": "crates/compose/src/breaker.rs",
+   "upstreamSha256": "82b408f14ed0ab93ffddc32ecbb0d3821d4568a5014a07fbcb9093687f2a0546",
+   "state": "modified"
+  },
+  {
+   "path": "src/cache.rs",
+   "upstream": "crates/compose/src/cache.rs",
+   "upstreamSha256": "64479588622f4cbc499f8f1c1b7bd9d0e565d89505250fdefcfb0aa93ecb933f",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/hyphen/dict.rs",
+   "upstream": "crates/compose/src/hyphen/dict.rs",
+   "upstreamSha256": "dc1622df067291b862991e004f4a23649c912411faa357015e7e40ae15b5b3d7",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/hyphen/mod.rs",
+   "upstream": "crates/compose/src/hyphen/mod.rs",
+   "upstreamSha256": "580eae8567ddd518b61656ef94fe3ae0ea9bc6526fe0c5225a1ea6de4ff2de1b",
+   "state": "modified"
+  },
+  {
+   "path": "src/hyphen/patgen.rs",
+   "upstream": "crates/compose/src/hyphen/patgen.rs",
+   "upstreamSha256": "eaf9b9497240bd2fac976b0a3999274ed1dacb0f66375d289781abae4c24ea07",
+   "state": "modified"
+  },
+  {
+   "path": "src/hyphen/patterns.rs",
+   "upstream": "crates/compose/src/hyphen/patterns.rs",
+   "upstreamSha256": "aa64bc1df4b3888c08504f649fcfd52801a50671182b538a0312296146da4d97",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/lib.rs",
+   "upstream": "crates/compose/src/lib.rs",
+   "upstreamSha256": "3ddf9e52d60bb2fdc54e3575065ac44d9aa575511c9936480342a6b094baca03",
+   "state": "modified"
+  },
+  {
+   "path": "src/notes.rs",
+   "upstream": "crates/compose/src/notes.rs",
+   "upstreamSha256": "0e8a30356e512e4d42697c4704bd9513294fb8b5b9444b2252ba344321beb4d1",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/overlay.rs",
+   "upstream": "crates/compose/src/overlay.rs",
+   "upstreamSha256": "354cf9b514491e5887e3c5d84fbae2853caf5b2c0b534c7c152b0c545e80b814",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/ruby.rs",
+   "upstream": "crates/compose/src/ruby.rs",
+   "upstreamSha256": "a715397a33eef60e0708a1863d0fc66eefe92d2d89fc72e64904e62548258165",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/shape.rs",
+   "upstream": "crates/compose/src/shape.rs",
+   "upstreamSha256": "5f9c6ca8c17de95fea073e477a15be67df43decf3be85f8a508a2d610a813e2a",
+   "state": "modified"
+  },
+  {
+   "path": "src/table.rs",
+   "upstream": "crates/compose/src/table.rs",
+   "upstreamSha256": "c0eb849d8df8cadf95abca92b51956504b01360dcccd38cf45b61c17b98ce71c",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/tests.rs",
+   "upstream": "crates/compose/src/tests.rs",
+   "upstreamSha256": "9e717da1de3b25d7c9bbbbb991bb813dcb1ce1b438c0f0756c2bc6ab6702da57",
+   "state": "modified"
+  },
+  {
+   "path": "src/vars.rs",
+   "upstream": "crates/compose/src/vars.rs",
+   "upstreamSha256": "b0be1da9f0945fc03f9948a6a993951eae0e85ce5d5619a04fe768475d7cc0ad",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/xref.rs",
+   "upstream": "crates/compose/src/xref.rs",
+   "upstreamSha256": "41f67231f8ffb0eb05cbf51fc064c3c3c3faeb50156636b0392dd66c372f98c0",
+   "state": "unchanged"
+  }
+ ]
+}

@@ -2,6 +2,8 @@
 
 Date: 2026-09-11
 
+Note (2026-10-13): this is a dated record. The WOPI host, Collabora and LibreOffice sections describe editors and a renderer that have since been removed; the current structure is in [Document platform architecture](../architecture/document-platform.md). The identity, open-core, license and repository-security findings still apply.
+
 ## Executive conclusion
 
 The correct public boundary is a runnable product with local identity, local storage, the browser editor, document adapters, WOPI host, AI connector and evaluation harness. Publishing only the PPTX engine would not deliver the experience being evaluated and would make “self-hosted” misleading. The Replex-hosted product should remain a downstream overlay containing identity, billing, entitlement, cloud adapters, deployment and private operational evidence.

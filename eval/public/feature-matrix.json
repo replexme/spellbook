@@ -162,7 +162,7 @@
       "id": "vector-image",
       "verification": "render-and-preserve",
       "minimumFixtures": 1,
-      "productBoundary": "SVG, EMF, and WMF are static-render/preserve scope where LibreOffice supports them."
+      "productBoundary": "SVG, EMF, and WMF are static-render/preserve scope."
     },
     {
       "id": "animated-gif",

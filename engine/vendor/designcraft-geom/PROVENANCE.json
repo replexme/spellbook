@@ -1,0 +1,102 @@
+{
+ "repository": "https://github.com/storytold/designcraft",
+ "revision": "4fbf8938bf922b29602ef6e6e0984a229a8b994a",
+ "files": [
+  {
+   "path": "Cargo.toml",
+   "upstream": "crates/geom/Cargo.toml",
+   "upstreamSha256": "edc97aa2511b227b7ac7920f952ace0357c1dfe66a6ad20e693a813ee4572520",
+   "state": "modified"
+  },
+  {
+   "path": "src/corners.rs",
+   "upstream": "crates/geom/src/corners.rs",
+   "upstreamSha256": "737105281a803e6188d72089d089a15d78dce22e1f227e067833a439456478f9",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/decompose.rs",
+   "upstream": "crates/geom/src/decompose.rs",
+   "upstreamSha256": "9b16a9b799694e17ecf16da39bad5571f29ea3bb03df67d84717b3669c7d751d",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/edit_path.rs",
+   "upstream": "crates/geom/src/edit_path.rs",
+   "upstreamSha256": "bffd250865ba04958cac10ba08c2edb73538e8456e44705739f018000bcaa955",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/freehand.rs",
+   "upstream": "crates/geom/src/freehand.rs",
+   "upstreamSha256": "7a0029040c8a7fc4c5776efe3089fed0d4a7114477e50cd7f68c4f6cd366327e",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/hit.rs",
+   "upstream": "crates/geom/src/hit.rs",
+   "upstreamSha256": "9709730e66ced2c53672f19befb399f5a1dcea94f124915ef7ab81c7bf709587",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/lib.rs",
+   "upstream": "crates/geom/src/lib.rs",
+   "upstreamSha256": "4a77ea98c8757bb9ab70fdb978b18ebdad60b3c9b98583e018942d93a286a48a",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/path.rs",
+   "upstream": "crates/geom/src/path.rs",
+   "upstreamSha256": "49c4471ce36f5c57e2a9b7fbfc9b74f3e04ab34f06855047c402522820b5cba4",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/pathfinder.rs",
+   "upstream": "crates/geom/src/pathfinder.rs",
+   "upstreamSha256": "f12df9d626d27321aed405d15ac1caa64aef0ca8b7ccdef6a1cf58702e1d4e71",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/qr.rs",
+   "upstream": "crates/geom/src/qr.rs",
+   "upstreamSha256": "8e384212098439acc3873987b91ae65d6e52b3e0d51c7483b1af1a3a0240d143",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/shapes.rs",
+   "upstream": "crates/geom/src/shapes.rs",
+   "upstreamSha256": "3e188606c1f3b72582de5b5506cc0cfc683a714d204b106ccd96216992079af2",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/snap.rs",
+   "upstream": "crates/geom/src/snap.rs",
+   "upstreamSha256": "6b4dde0cb670994d6a06920f47f8f7458f562d469f1b7af34374d44931779b54",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/stroke_style.rs",
+   "upstream": "crates/geom/src/stroke_style.rs",
+   "upstreamSha256": "4f16ce29764d07b7f090abc825434a8b082540551849c902fecaa3b7d0882c9a",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/trace.rs",
+   "upstream": "crates/geom/src/trace.rs",
+   "upstreamSha256": "f3be6b2c6c4451991a5527f68a4099c1fa4442406c0da1bdbc444a8ab5268ea8",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/units.rs",
+   "upstream": "crates/geom/src/units.rs",
+   "upstreamSha256": "5bd84017383e617c57f92e8ac19d5a01f52113741d4b173487c64b791bc05fbc",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/warp.rs",
+   "upstream": "crates/geom/src/warp.rs",
+   "upstreamSha256": "2f6d0010cbd8b51d20a6d1b3ecfc846750618df1952f9a44ef3ec5ed5e4e17bb",
+   "state": "unchanged"
+  }
+ ]
+}

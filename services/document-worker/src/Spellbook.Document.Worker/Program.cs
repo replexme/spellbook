@@ -5,12 +5,10 @@ using Spellbook.Document.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton<LocalObjectStore>();
-builder.Services.AddSingleton<PptxSafetyScanner>();
-builder.Services.AddSingleton(RendererFontEnvironment.DetectOnlyOffice());
-builder.Services.AddSingleton<PresentationInspector>();
-builder.Services.AddSingleton<PptxPatcher>();
-builder.Services.AddSingleton<IPresentationRenderer, OnlyOfficeRenderer>();
-builder.Services.AddSingleton<IDocumentFormatAdapter, PptxDocumentFormatAdapter>();
+// The document engine's programs read, check and draw documents; without one, its format is off.
+if (PptxDocumentFormatAdapter.ConfiguredEngine() is { } pptxEngine)
+    builder.Services.AddSingleton<IDocumentFormatAdapter>(
+        new PptxDocumentFormatAdapter(new PptxSafetyScanner(), new EngineProgram(pptxEngine, "pptx")));
 if (IdmlDocumentFormatAdapter.ConfiguredEngine() is { } idmlEngine)
     builder.Services.AddSingleton<IDocumentFormatAdapter>(new IdmlDocumentFormatAdapter(idmlEngine));
 builder.Services.AddHttpClient();
@@ -18,10 +16,11 @@ builder.Services.AddHttpClient();
 var app = builder.Build();
 var activeJobs = new ConcurrentDictionary<string, byte>();
 
-app.MapGet("/health", (IPresentationRenderer renderer) => Results.Ok(new
+app.MapGet("/health", (IEnumerable<IDocumentFormatAdapter> adapters) => Results.Ok(new
 {
     status = "ok",
-    renderer = new { name = renderer.Name, version = renderer.Version }
+    renderer = new { name = "Present", version = EngineProgram.Version },
+    formats = adapters.Select(adapter => adapter.FormatId).ToArray()
 }));
 
 app.MapPost("/internal/jobs/scan-render", (
@@ -29,7 +28,6 @@ app.MapPost("/internal/jobs/scan-render", (
     ScanRenderJob job,
     LocalObjectStore storage,
     IEnumerable<IDocumentFormatAdapter> adapters,
-    IPresentationRenderer renderer,
     IHttpClientFactory clients) =>
 {
     Authorize(request);
@@ -38,30 +36,13 @@ app.MapPost("/internal/jobs/scan-render", (
         var adapter = RequireAdapter(adapters, job.FormatId);
         using var workspace = new JobWorkspace(job.JobId);
         var inputPath = Path.Combine(workspace.Path, $"source{adapter.FileExtension}");
+        await storage.DownloadAsync(job.InputObject, inputPath, cancellationToken);
+        // A save is checked against the version it was edited from.
         string? baselinePath = null;
-        if (adapter.FormatId == "pptx" && !string.IsNullOrWhiteSpace(job.BaselineInputObject))
+        if (!string.IsNullOrWhiteSpace(job.BaselineInputObject))
         {
-            var incomingPath = Path.Combine(workspace.Path, $"incoming{adapter.FileExtension}");
             baselinePath = Path.Combine(workspace.Path, $"baseline{adapter.FileExtension}");
-            await storage.DownloadAsync(job.InputObject, incomingPath, cancellationToken);
             await storage.DownloadAsync(job.BaselineInputObject, baselinePath, cancellationToken);
-            var preservation = new PptxUnsupportedFeaturePreserver()
-                .Preserve(baselinePath, incomingPath, inputPath);
-            if (!string.Equals(
-                preservation.CandidateDocumentSha256,
-                preservation.OutputDocumentSha256,
-                StringComparison.Ordinal))
-                await storage.UploadFileAsync(job.InputObject, inputPath, cancellationToken);
-        }
-        else
-        {
-            await storage.DownloadAsync(job.InputObject, inputPath, cancellationToken);
-            // A format that checks its own saves compares them with the version they were edited from.
-            if (adapter is IPackageChangeValidator && !string.IsNullOrWhiteSpace(job.BaselineInputObject))
-            {
-                baselinePath = Path.Combine(workspace.Path, $"baseline{adapter.FileExtension}");
-                await storage.DownloadAsync(job.BaselineInputObject, baselinePath, cancellationToken);
-            }
         }
         WorkerFailure.RejectCompoundFile(inputPath);
         string? validationObject = null;
@@ -92,62 +73,19 @@ app.MapPost("/internal/jobs/scan-render", (
                     validationObject,
                     validation.CandidateDocumentSha256);
         }
-        if (adapter.FormatId == "pptx" && renderer is IOwnedPresentationResources resources)
-            await resources.PrepareOwnedResourcesAsync(inputPath, job.InputObject, baselinePath, cancellationToken);
         var scan = adapter.Scan(inputPath);
         var graph = adapter.Inspect(inputPath, scan);
-        var (graphWithPreviews, renderedSlideCount) = await SavedPreviewRenderer.RenderAsync(
-            storage, adapter, renderer, inputPath, baselinePath, job.BaselineGraphObject,
-            validation, graph, Path.Combine(workspace.Path, "slides"), job.OutputPrefix, cancellationToken);
+        // Every page is drawn: the engine draws a whole deck in about a second.
+        var images = await adapter.RenderAsync(inputPath, Path.Combine(workspace.Path, "slides"), cancellationToken);
+        var graphWithPreviews = AddPreviewObjects(graph, job.OutputPrefix, images.Count, adapter);
+        await UploadImagesAsync(storage, job.OutputPrefix, images, cancellationToken);
         var graphObject = $"{job.OutputPrefix}/element-graph.json";
         var scanObject = $"{job.OutputPrefix}/scan.json";
         await storage.UploadJsonAsync(graphObject, graphWithPreviews, DocumentJsonContext.Default.ElementGraph, cancellationToken);
         await storage.UploadJsonAsync(scanObject, scan, DocumentJsonContext.Default.DocumentScan, cancellationToken);
-        Console.WriteLine(JsonSerializer.Serialize(new { eventType = "saved_preview_render", jobId = job.JobId,
-            slideCount = graph.Slides.Count, renderedSlideCount }));
+        Console.WriteLine(JsonSerializer.Serialize(new { eventType = "preview_render", jobId = job.JobId,
+            slideCount = graph.Slides.Count }));
         return new WorkerOutputs(graphObject, scanObject, validationObject, null, graph.Slides.Count, scan.DocumentSha256);
-    }));
-    return Results.Accepted(value: new { status = "accepted", jobId = job.JobId });
-});
-
-app.MapPost("/internal/jobs/patch-render", (
-    HttpRequest request,
-    PatchRenderJob job,
-    LocalObjectStore storage,
-    IEnumerable<IDocumentFormatAdapter> adapters,
-    IPresentationRenderer renderer,
-    IHttpClientFactory clients) =>
-{
-    Authorize(request);
-    AcceptJob(activeJobs, job.JobId, () => ExecuteJob(job.JobId, job.CallbackUrl, clients, storage, job.OutputPrefix, async cancellationToken =>
-    {
-        var adapter = RequireAdapter(adapters, job.FormatId);
-        using var workspace = new JobWorkspace(job.JobId);
-        var inputPath = Path.Combine(workspace.Path, $"source{adapter.FileExtension}");
-        var outputPath = Path.Combine(workspace.Path, $"candidate{adapter.FileExtension}");
-        await storage.DownloadAsync(job.InputObject, inputPath, cancellationToken);
-        var assets = new Dictionary<string, byte[]>();
-        foreach (var asset in job.AssetObjects ?? new Dictionary<string, string>())
-        {
-            if (assets.Count >= 12) throw new InvalidDataException("Too many image assets.");
-            var data = await storage.ReadAsync(asset.Value, cancellationToken);
-            if (data.Length > 5_000_000) throw new InvalidDataException("Image asset exceeds size limit.");
-            assets.Add(asset.Key, data);
-        }
-        var patch = adapter.Patch(inputPath, outputPath, job.Command, assets);
-        if (!patch.Validation.Valid)
-            throw new InvalidDataException(string.Join(" ", patch.Validation.Errors));
-        if (adapter.FormatId == "pptx" && renderer is IOwnedPresentationResources resources)
-            await resources.PrepareOwnedResourcesAsync(outputPath, job.OutputDocumentObject, inputPath, cancellationToken);
-        var images = await adapter.RenderAsync(outputPath, Path.Combine(workspace.Path, "slides"), cancellationToken);
-        var graphWithPreviews = AddPreviewObjects(patch.CandidateGraph, job.OutputPrefix, images.Count, adapter);
-        var graphObject = $"{job.OutputPrefix}/element-graph.json";
-        var reportObject = $"{job.OutputPrefix}/validation.json";
-        await storage.UploadFileAsync(job.OutputDocumentObject, outputPath, cancellationToken);
-        await storage.UploadJsonAsync(graphObject, graphWithPreviews, DocumentJsonContext.Default.ElementGraph, cancellationToken);
-        await storage.UploadJsonAsync(reportObject, patch.Validation, DocumentJsonContext.Default.ValidationReport, cancellationToken);
-        await UploadImagesAsync(storage, job.OutputPrefix, images, cancellationToken);
-        return new WorkerOutputs(graphObject, null, reportObject, job.OutputDocumentObject, images.Count, patch.Validation.CandidateDocumentSha256);
     }));
     return Results.Accepted(value: new { status = "accepted", jobId = job.JobId });
 });
@@ -157,8 +95,8 @@ app.Run();
 static void AcceptJob(ConcurrentDictionary<string, byte> activeJobs, string jobId, Func<Task> work)
 {
     // ConcurrentDictionary.GetOrAdd may invoke its value factory more than once.
-    // Claim membership first so an at-least-once delivery cannot start two
-    // LibreOffice processes for the same document job.
+    // Claim membership first so an at-least-once delivery cannot process the
+    // same document job twice at once.
     if (!activeJobs.TryAdd(jobId, 0)) return;
     _ = Task.Run(async () =>
     {
@@ -302,7 +240,6 @@ public sealed record ScanRenderJob(
     IReadOnlyList<string>? ChangeTaskIds = null,
     PackageChangeBudgetRequest? ChangeBudget = null,
     string? BaselineGraphObject = null);
-public sealed record PatchRenderJob(string JobId, string CallbackUrl, string StorageNamespace, string FormatId, string InputObject, string OutputDocumentObject, string OutputPrefix, EditCommandBatch Command, Dictionary<string, string>? AssetObjects = null);
 public sealed record WorkerOutputs(string GraphObject, string? ScanObject, string? ValidationObject, string? DocumentObject, int SlideCount, string DocumentSha256);
 public sealed record WorkerCallback(string JobId, string Status, WorkerOutputs? Outputs, string? Error, string? ErrorCode = null);
 

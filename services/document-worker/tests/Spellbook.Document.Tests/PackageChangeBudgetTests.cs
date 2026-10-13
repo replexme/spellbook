@@ -15,66 +15,6 @@ public sealed class PackageChangeBudgetTests : IDisposable
     public PackageChangeBudgetTests() => Directory.CreateDirectory(directory);
 
     [Fact]
-    public void AllowsOnlyTheDeclaredCategoryAndTargetSlide()
-    {
-        var source = TestPresentationFactory.Create(directory);
-        var twoSlides = Path.Combine(directory, "two-slides.pptx");
-        var addSlide = new EditCommandBatch(
-            ContractVersions.Current,
-            Hashing.FileSha256(source),
-            "add fixture slide",
-            [JsonSerializer.SerializeToElement(new
-            {
-                op = "duplicate_slide",
-                slideIndex = 0,
-                insertIndex = 1
-            })]);
-        var created = new PptxPatcher().Apply(source, twoSlides, addSlide);
-        Assert.True(created.Validation.Valid, string.Join("\n", created.Validation.Errors));
-
-        var target = created.CandidateGraph.Slides[1].Elements[0];
-        var candidate = Path.Combine(directory, "second-slide-edited.pptx");
-        var edit = new EditCommandBatch(
-            ContractVersions.Current,
-            Hashing.FileSha256(twoSlides),
-            "edit second slide",
-            [JsonSerializer.SerializeToElement(new
-            {
-                op = "replace_text",
-                target = new
-                {
-                    slideIndex = 1,
-                    elementId = target.ElementId,
-                    sourceHash = target.SourceHash
-                },
-                text = "두 번째 슬라이드만 변경"
-            })]);
-        var changed = new PptxPatcher().Apply(twoSlides, candidate, edit);
-        Assert.True(changed.Validation.Valid, string.Join("\n", changed.Validation.Errors));
-        var validator = new PptxPackageChangeBudgetValidator();
-
-        var accepted = validator.Validate(
-            twoSlides,
-            candidate,
-            new PackageChangeBudgetRequest(ContractVersions.Current, ["slide_parts"], [1]));
-        var rejected = validator.Validate(
-            twoSlides,
-            candidate,
-            new PackageChangeBudgetRequest(ContractVersions.Current, ["slide_parts"], [0]));
-
-        Assert.True(accepted.Valid, string.Join("\n", accepted.Errors));
-        Assert.Single(accepted.Changes);
-        Assert.Equal(
-            created.CandidateGraph.Slides[1].PartUri.TrimStart('/'),
-            accepted.Changes[0].Part);
-        Assert.Equal("slide_parts", accepted.Changes[0].Category);
-        Assert.False(rejected.Valid);
-        Assert.Contains(
-            rejected.Errors,
-            error => error.Contains("outside the targeted slide scope"));
-    }
-
-    [Fact]
     public void ResolvesTargetScopeThroughNonAsciiPartNames()
     {
         var source = TestPresentationFactory.Create(directory);

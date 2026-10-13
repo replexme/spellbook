@@ -8,7 +8,11 @@ on:
       - "apps/**/Dockerfile"
       - "apps/**/package.json"
       - "services/**/Dockerfile"
-      - "services/office-editor/gateway/**"
+      - "services/document-view/**"
+      - "apps/office/**"
+      - "engine/**"
+      - "formats/**"
+      - "Cargo.lock"
       - "package.json"
       - "pnpm-lock.yaml"
   pull_request:
@@ -17,7 +21,11 @@ on:
       - "apps/**/Dockerfile"
       - "apps/**/package.json"
       - "services/**/Dockerfile"
-      - "services/office-editor/gateway/**"
+      - "services/document-view/**"
+      - "apps/office/**"
+      - "engine/**"
+      - "formats/**"
+      - "Cargo.lock"
       - "package.json"
       - "pnpm-lock.yaml"
   schedule:
@@ -45,8 +53,8 @@ jobs:
             dockerfile: apps/ai-connector/Dockerfile
           - name: document-worker
             dockerfile: services/document-worker/Dockerfile
-          - name: office-editor
-            dockerfile: services/office-editor/Dockerfile
+          - name: document-view
+            dockerfile: services/document-view/Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build runtime image

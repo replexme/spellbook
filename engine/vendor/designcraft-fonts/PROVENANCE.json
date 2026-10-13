@@ -1,0 +1,180 @@
+{
+ "repository": "https://github.com/storytold/designcraft",
+ "revision": "4fbf8938bf922b29602ef6e6e0984a229a8b994a",
+ "files": [
+  {
+   "path": "Cargo.toml",
+   "upstream": "crates/fonts/Cargo.toml",
+   "upstreamSha256": "a864f4ad5531db0f8ccba321fe82b421b47f0826b9a60e4220a4bcc2d2b0c521",
+   "state": "modified"
+  },
+  {
+   "path": "assets/fonts/Inter-Medium.ttf",
+   "upstream": "assets/fonts/Inter-Medium.ttf",
+   "upstreamSha256": "97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/Inter-Regular.ttf",
+   "upstream": "assets/fonts/Inter-Regular.ttf",
+   "upstreamSha256": "40d692fce188e4471e2b3cba937be967878f631ad3ebbbdcd587687c7ebe0c82",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/Inter-SemiBold.ttf",
+   "upstream": "assets/fonts/Inter-SemiBold.ttf",
+   "upstreamSha256": "78a843fade9d4612a5567302fb595b56976eb5fcebf4fea5a5912d638bafcde3",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/JetBrainsMono-Regular.ttf",
+   "upstream": "assets/fonts/JetBrainsMono-Regular.ttf",
+   "upstreamSha256": "e6fd0d7e91550b3ed2b735d4312474362c4716edc4fc0577a0f61ed782d5aed1",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/OFL-Inter.txt",
+   "upstream": "assets/fonts/OFL-Inter.txt",
+   "upstreamSha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/OFL-JetBrainsMono.txt",
+   "upstream": "assets/fonts/OFL-JetBrainsMono.txt",
+   "upstreamSha256": "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/OFL-SourceSans3.txt",
+   "upstream": "assets/fonts/OFL-SourceSans3.txt",
+   "upstreamSha256": "56af9b9c6715597e458284a474dc118a50a4150e9d547c70f7b4a33c3e6a9328",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/OFL-SourceSerif4.txt",
+   "upstream": "assets/fonts/OFL-SourceSerif4.txt",
+   "upstreamSha256": "c21d7293d87b6d7ab1d0229a2f55b77f33a7613a6a4e66f6693d68d7d8d09464",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/SourceSans3-Bold.ttf",
+   "upstream": "assets/fonts/SourceSans3-Bold.ttf",
+   "upstreamSha256": "9214b9d95e4231c609802815c2646c98174e2102d0d37f88978a7f8e71006e6a",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/SourceSans3-It.ttf",
+   "upstream": "assets/fonts/SourceSans3-It.ttf",
+   "upstreamSha256": "192afd78f0f54a3c69eaf02d43f4d9a821e9d6110e41d3d25d61a7385cd580e4",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/SourceSans3-Regular.ttf",
+   "upstream": "assets/fonts/SourceSans3-Regular.ttf",
+   "upstreamSha256": "4644c81b86ec9caaa76b634889968ed3c4f4f52f054855933acc7c2b21e53b0f",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/SourceSans3-Semibold.ttf",
+   "upstream": "assets/fonts/SourceSans3-Semibold.ttf",
+   "upstreamSha256": "a3f4f8dcf343a8f24dc61951de93f3ba1558b15cd250ba24af8a40e957081b7d",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/SourceSerif4-Bold.ttf",
+   "upstream": "assets/fonts/SourceSerif4-Bold.ttf",
+   "upstreamSha256": "7cf4f4e1ad74f45058d5bc61716b82560442fbdcd9d3654d2dea96bf6c683d86",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/SourceSerif4-BoldIt.ttf",
+   "upstream": "assets/fonts/SourceSerif4-BoldIt.ttf",
+   "upstreamSha256": "7b215b37f8873f5579f3f8d2ded3ca7c588e2f435cd996605ebfc5befe2cd5eb",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/SourceSerif4-It.ttf",
+   "upstream": "assets/fonts/SourceSerif4-It.ttf",
+   "upstreamSha256": "9d2950a8f1da66e21502c35d646a1d2148e79f9ea43fd2158cf02f5232e7f430",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/SourceSerif4-Regular.ttf",
+   "upstream": "assets/fonts/SourceSerif4-Regular.ttf",
+   "upstreamSha256": "e5a4ee6a3d87bb9024796be390c6771e2a0eb1883dae25effaf57ca01668e24b",
+   "state": "unchanged"
+  },
+  {
+   "path": "assets/fonts/SourceSerif4-Semibold.ttf",
+   "upstream": "assets/fonts/SourceSerif4-Semibold.ttf",
+   "upstreamSha256": "36db62940cb5728b12b1802476dc7fcf4c6c519a7bdd476ba23a4e555fc4655f",
+   "state": "unchanged"
+  },
+  {
+   "path": "build.rs",
+   "upstream": "crates/fonts/build.rs",
+   "upstreamSha256": "c2f6ec9cd788ec939a5f2090617749bf888899212d5bb9091bff8137ca3e97d1",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/fontdb.rs",
+   "upstream": "crates/fonts/src/fontdb.rs",
+   "upstreamSha256": "c0284f3c8ddae992386774d1b501c02079795e9abb6756869b2eeec7ebf08fcd",
+   "state": "modified"
+  },
+  {
+   "path": "src/group.rs",
+   "upstream": "crates/fonts/src/group.rs",
+   "upstreamSha256": "bf41631fbca3f456aacf6932072e994e09b02fc7c4842b11441f144746e42cfd",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/lib.rs",
+   "upstream": "crates/fonts/src/lib.rs",
+   "upstreamSha256": "23f1701c435f799705d97a330b313176fc29047eadc4e437b8659eba242003e0",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/testing.rs",
+   "upstream": "crates/fonts/src/testing.rs",
+   "upstreamSha256": "ac8412b534b27178c4b16d505723542b5a0aa09c1575e285dcb7cec4b4f8a138",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/tests_docfonts.rs",
+   "upstream": "crates/fonts/src/tests_docfonts.rs",
+   "upstreamSha256": "d35acd6467f0031e0bb1b03dd0b0ff698e66e40c628e6bc0ee3a0d712ca453a3",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/tests_fallback.rs",
+   "upstream": "crates/fonts/src/tests_fallback.rs",
+   "upstreamSha256": "80a7983eb5c2e847a6f7ff1e516886060a76bb1fabe2676cd9a5abc21b6c9a05",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/tests_sysfonts.rs",
+   "upstream": "crates/fonts/src/tests_sysfonts.rs",
+   "upstreamSha256": "8d358de1f40ed4061e7339f85ba5b47fb45dee5043e10a57c2235450b2447506",
+   "state": "modified"
+  },
+  {
+   "path": "src/tests_vertical.rs",
+   "upstream": "crates/fonts/src/tests_vertical.rs",
+   "upstreamSha256": "6f15f5abafc835193cf64f971cef0bd6327c6f316f8aa88189784949eee97172",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/vertical.rs",
+   "upstream": "crates/fonts/src/vertical.rs",
+   "upstreamSha256": "41b623d46eab49de2bbabe4a5c48cb55ea917615fce83540403033332e801bcd",
+   "state": "modified"
+  },
+  {
+   "path": "tests/system_fonts.rs",
+   "upstream": "crates/fonts/tests/system_fonts.rs",
+   "upstreamSha256": "b3f271afce1fe69936a479962f0f4344e63bf1e742031b2fb8f828f506ba72d8",
+   "state": "unchanged"
+  }
+ ]
+}

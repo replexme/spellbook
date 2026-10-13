@@ -1,7 +1,5 @@
 "use client";
 
-import {readBrowserRenderResources} from "@/lib/browser-render-resources-client";
-
 import { aiRequestError } from "@/lib/ai-errors";
 import { reportSaveFailure } from "@/lib/save-failure-report";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -811,17 +809,15 @@ export function NativeWorkspace({
       if (browserOpening.current) return;
       browserOpening.current = true;
       try {
-        const { revision, bytes, renderResources:resourceManifest } = await readBrowserDocument(
+        const { revision, bytes } = await readBrowserDocument(
           launch.contentApiBase,
           launch.revision,
           launch.maxBytes,
         );
-        const renderResources=await readBrowserRenderResources(launch.contentApiBase,revision,launch.documentId,resourceManifest??null);
         browserRevision.current = revision;
         channel.postMessage(
           {
             type: "open",
-            renderResources,
             requestId: crypto.randomUUID(),
             documentId: launch.documentId,
             fileName: launch.fileName,
@@ -829,7 +825,7 @@ export function NativeWorkspace({
             maxBytes: launch.maxBytes,
             bytes,
           },
-          [bytes,...new Set(renderResources?.assets.map(asset=>asset.bytes)??[])],
+          [bytes],
         );
       } catch (cause) {
         browserOpening.current = false;

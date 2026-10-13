@@ -18,11 +18,12 @@ test("release SBOMs cover the source and every shipped runtime image", () => {
     "web",
     "ai-connector",
     "document-worker",
-    "office-editor",
-    "browser-office",
+    "document-view",
   ]) {
     assert.match(workflow, new RegExp(`name: ${name}`));
   }
+  for (const name of ["office-editor", "browser-office"])
+    assert.doesNotMatch(workflow, new RegExp(`name: ${name}`));
   assert.match(workflow, /spellbook-source-\$\{GITHUB_SHA\}\.spdx\.json/);
   assert.match(
     workflow,

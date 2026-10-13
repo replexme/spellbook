@@ -1,7 +1,0 @@
-{
-  "manifestVersion": "0.1",
-  "name": "Spellbook",
-  "entry": "index.html",
-  "icon": "icon.svg",
-  "supports": ["presentation"]
-}

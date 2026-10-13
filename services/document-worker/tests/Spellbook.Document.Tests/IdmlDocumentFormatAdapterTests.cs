@@ -43,7 +43,6 @@ public sealed class IdmlDocumentFormatAdapterTests : IDisposable
         Assert.Single(report.Errors);
         var pages = await adapter.RenderAsync("doc.idml", Path.Combine(dir, "pages"), TestContext.Current.CancellationToken);
         Assert.Equal(["page-1.png", "page-2.png"], pages.Select(Path.GetFileName));
-        Assert.Throws<NotSupportedException>(() => adapter.Patch("a", "b", new EditCommandBatch("1.0", Sha, "", [])));
     }
 
     [Fact]

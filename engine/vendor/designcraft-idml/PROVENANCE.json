@@ -1,0 +1,60 @@
+{
+ "repository": "https://github.com/storytold/designcraft",
+ "revision": "4fbf8938bf922b29602ef6e6e0984a229a8b994a",
+ "files": [
+  {
+   "path": "Cargo.toml",
+   "upstream": "crates/idml/Cargo.toml",
+   "upstreamSha256": "5020305099b3231e8992797e2033701b948b85d5df8ac762b0b6bf38f461d586",
+   "state": "modified"
+  },
+  {
+   "path": "src/arabic.rs",
+   "upstream": "crates/idml/src/arabic.rs",
+   "upstreamSha256": "9782ad130e535f2e56906084f9beec3a2622c3ee586a70debbf0f7953e294231",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/cjk.rs",
+   "upstream": "crates/idml/src/cjk.rs",
+   "upstreamSha256": "fd912beeb928210ad7b0a475ddb2c63d1d68ac58bb69150eff54f09be8b8ce40",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/export.rs",
+   "upstream": "crates/idml/src/export.rs",
+   "upstreamSha256": "4bca382c5edd8d3d6ac1ead7193e4c2d6680add12576dd4c9fc00e2471147c05",
+   "state": "modified"
+  },
+  {
+   "path": "src/import.rs",
+   "upstream": "crates/idml/src/import.rs",
+   "upstreamSha256": "f7b738aa8968dad814860cd7bb23657d6993882895cc015332178637e0c06ba3",
+   "state": "modified"
+  },
+  {
+   "path": "src/lib.rs",
+   "upstream": "crates/idml/src/lib.rs",
+   "upstreamSha256": "f9cc697e74c91eeddaff048713657e30f2f468bc9c723949e547fbd4bde1cd63",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/names.rs",
+   "upstream": "crates/idml/src/names.rs",
+   "upstreamSha256": "5a41ee91ecaaca6b058d4885eb6f9ca7d2f81213fcc9ad129f933ce4d61d62ae",
+   "state": "modified"
+  },
+  {
+   "path": "src/tests.rs",
+   "upstream": "crates/idml/src/tests.rs",
+   "upstreamSha256": "15cd5b97d392ac143225fba71532e872722505d6acfd1af4a29da22ae82f4fe4",
+   "state": "modified"
+  },
+  {
+   "path": "src/xml.rs",
+   "upstream": "crates/idml/src/xml.rs",
+   "upstreamSha256": "1d84ad6a5fcf226550224264845313b6177f83efa95b7360183c21598cc731e1",
+   "state": "unchanged"
+  }
+ ]
+}

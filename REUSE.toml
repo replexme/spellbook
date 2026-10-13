@@ -7,32 +7,43 @@ SPDX-FileCopyrightText = "2026 Spellbook contributors"
 SPDX-License-Identifier = "MPL-2.0"
 
 [[annotations]]
-path = ["services/document-worker/libreoffice/patches/**"]
-precedence = "override"
-SPDX-FileCopyrightText = "LibreOffice contributors"
-SPDX-License-Identifier = "MPL-2.0"
-
-[[annotations]]
-path = ["services/office-editor/libreoffice/patches/**"]
-precedence = "override"
-SPDX-FileCopyrightText = "LibreOffice contributors"
-SPDX-License-Identifier = "MPL-2.0"
-
-[[annotations]]
 path = ["eval/public/**", "eval/corpus.example.json"]
 precedence = "override"
 SPDX-FileCopyrightText = "2026 Spellbook contributors"
 SPDX-License-Identifier = "MPL-2.0"
 
+[[annotations]]
+path = ["engine/vendor/**"]
+precedence = "override"
+SPDX-FileCopyrightText = ["2026 ArtCraft Team and the DesignCraft contributors", "2026 Spellbook contributors"]
+SPDX-License-Identifier = "MIT OR Apache-2.0"
 
 [[annotations]]
-path = ["services/browser-office/onlyoffice/patches/**"]
+path = ["engine/vendor/designcraft-fonts/assets/fonts/**"]
 precedence = "override"
-SPDX-FileCopyrightText = ["Ascensio System SIA and upstream contributors", "2026 Spellbook contributors"]
-SPDX-License-Identifier = "AGPL-3.0-only"
+SPDX-FileCopyrightText = ["2016 The Inter Project Authors (https://github.com/rsms/inter)", "2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)", "2010-2024 Adobe (http://www.adobe.com/), with Reserved Font Name Source"]
+SPDX-License-Identifier = "OFL-1.1"
 
 [[annotations]]
-path = ["services/browser-office/onlyoffice/patches/0008-source-bound-distribution-and-reviewed-fonts.patch"]
+path = ["engine/vendor/designcraft-compose/assets/hyphenation/en-us.pat"]
 precedence = "override"
-SPDX-FileCopyrightText = ["Ascensio System SIA and upstream contributors", "2026 Spellbook contributors"]
-SPDX-License-Identifier = "AGPL-3.0-only AND CC-BY-SA-4.0"
+SPDX-FileCopyrightText = "2026 ArtCraft Team and the DesignCraft contributors"
+SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = ["engine/vendor/designcraft-compose/assets/hyphenation/en-us.dic"]
+precedence = "override"
+SPDX-FileCopyrightText = "Grady Ward (Moby Hyphenator II, public domain)"
+SPDX-License-Identifier = "LicenseRef-Public-Domain"
+
+[[annotations]]
+path = ["engine/vendor/designcraft-compose/assets/hyphenation/indesign/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 Spellbook contributors"
+SPDX-License-Identifier = "MPL-2.0"
+
+[[annotations]]
+path = ["formats/pptx/data/presetShapeDefinitions.xml", "formats/pptx/data/presetTextWarpDefinitions.xml"]
+precedence = "override"
+SPDX-FileCopyrightText = "Ecma International"
+SPDX-License-Identifier = "LicenseRef-Ecma-Text-Copyright-Policy"

@@ -5,6 +5,10 @@
 .tmp-*/
 artifacts/
 bin/
+# Rust command-line programs are source, not .NET build output.
+!**/src/bin/
+# Rust build output.
+/target/
 coverage/
 dist/
 node_modules/
@@ -17,12 +21,6 @@ __pycache__/
 apps/web/AGENTS.md
 apps/web/CLAUDE.md
 apps/web/next-env.d.ts
-services/office-editor/extension.zip
-services/office-editor/workspace-dist/
-services/browser-office/runtime/
-services/browser-office/onlyoffice/workspace-dist/
 eval/corpus/
 eval/results/
 eval/public/downloads/
-
-services/browser-office/onlyoffice/distribution/

@@ -1,0 +1,18 @@
+[package]
+name = "present-idml"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+present-package = { path = "../package" }
+designcraft-doc = { path = "../../engine/vendor/designcraft-doc" }
+designcraft-idml = { path = "../../engine/vendor/designcraft-idml" }
+designcraft-compose = { path = "../../engine/vendor/designcraft-compose" }
+designcraft-render = { path = "../../engine/vendor/designcraft-render" }
+designcraft-fonts = { path = "../../engine/vendor/designcraft-fonts" }
+designcraft-geom = { path = "../../engine/vendor/designcraft-geom" }
+serde_json.workspace = true
+quick-xml.workspace = true
+sha2.workspace = true

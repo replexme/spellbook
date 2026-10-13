@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["engine/core", "engine/render", "engine/vendor/designcraft-fonts", "engine/vendor/designcraft-geom", "engine/vendor/designcraft-color", "engine/vendor/designcraft-doc", "engine/vendor/designcraft-idml", "engine/vendor/designcraft-compose", "engine/vendor/designcraft-images", "engine/vendor/designcraft-render", "engine/wasm", "engine/wasm-idml", "formats/package", "formats/pptx", "formats/idml"]
+
+[workspace.package]
+edition = "2021"
+license = "MPL-2.0"
+publish = false
+
+[workspace.dependencies]
+present-engine = { path = "engine/core" }
+quick-xml = "0.38.4"
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+crc32fast = "1.5.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.10"

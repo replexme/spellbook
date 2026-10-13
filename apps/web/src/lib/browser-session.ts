@@ -1,8 +1,10 @@
-import * as renderResourceStore from "./storage";
-import {readLinkedImageManifest,type LinkedImageManifest} from "../../../../services/document-resources/linked-image-snapshots.mjs";
 import { createHash, randomUUID } from "node:crypto";
 
-import { browserViewFormatIds, documentFormatOf, type DocumentFormatId } from "./document-formats";
+import {
+  browserViewFormatIds,
+  documentFormatOf,
+  type DocumentFormatId,
+} from "./document-formats";
 import { db, ensureSchema } from "./db";
 import { HttpError } from "./http";
 import type { Session } from "./models";
@@ -166,9 +168,9 @@ export async function createBrowserDocumentLaunch(
   };
 }
 
-async function activeBrowserDocument(session: Session,documentId: string) {
+async function activeBrowserDocument(session: Session, documentId: string) {
   await ensureSchema();
-  const [row]=await db()`
+  const [row] = await db()`
     select d.file_name,d.format_id,s.working_version_id,s.working_sha256,v.document_object,v.document_bytes
     from spellbook_native_sessions s
     join spellbook_documents d on d.id=s.document_id and d.account_id=s.account_id
@@ -176,19 +178,32 @@ async function activeBrowserDocument(session: Session,documentId: string) {
     where s.document_id=${documentId} and s.account_id=${session.accountId}
       and s.editor_mode='browser' and s.status='active' and s.expires_at > now()
   `;
-  if(!row)throw new HttpError(409,"browser_session_not_active");
+  if (!row) throw new HttpError(409, "browser_session_not_active");
   return row;
 }
 
 /** The same active owned revision authorizes file and render-resource reads. */
-export async function browserDocumentIdentity(session: Session,documentId: string) {
-  const row=await activeBrowserDocument(session,documentId);
-  return {revision:browserRevision(row.working_version_id,row.working_sha256),sourceSha256:row.working_sha256 as string};
+export async function browserDocumentIdentity(
+  session: Session,
+  documentId: string,
+) {
+  const row = await activeBrowserDocument(session, documentId);
+  return {
+    revision: browserRevision(row.working_version_id, row.working_sha256),
+    sourceSha256: row.working_sha256 as string,
+  };
 }
 
-export async function getBrowserDocument(session: Session,documentId: string): Promise<{fileName: string; revision: string; data: Buffer}> {
-  const row=await activeBrowserDocument(session,documentId);
-  return {fileName:row.file_name,revision:browserRevision(row.working_version_id,row.working_sha256),data:await getObject(row.document_object)};
+export async function getBrowserDocument(
+  session: Session,
+  documentId: string,
+): Promise<{ fileName: string; revision: string; data: Buffer }> {
+  const row = await activeBrowserDocument(session, documentId);
+  return {
+    fileName: row.file_name,
+    revision: browserRevision(row.working_version_id, row.working_sha256),
+    data: await getObject(row.document_object),
+  };
 }
 
 export async function saveBrowserDocument(
@@ -202,8 +217,7 @@ export async function saveBrowserDocument(
   if (!expectedRevision) throw new HttpError(428, "browser_revision_required");
   const format = await sessionFormat(session, documentId);
   const length = Number(request.headers.get("content-length") ?? 0);
-  if (length > format.maxBytes)
-    throw new HttpError(413, "document_too_large");
+  if (length > format.maxBytes) throw new HttpError(413, "document_too_large");
   const data = Buffer.from(await request.arrayBuffer());
   if (
     !data.length ||
@@ -216,8 +230,7 @@ export async function saveBrowserDocument(
     versionId: randomUUID(),
     digest: createHash("sha256").update(data).digest("hex"),
     bytes: data.length,
-    store: (object) =>
-      putObject(object, data, format.mimeTypes[0]!),
+    store: (object) => putObject(object, data, format.mimeTypes[0]!),
     discard: async () => undefined,
     humanConfirmed:
       request.headers.get("x-spellbook-save-intent") === "human_confirmed",
@@ -236,15 +249,9 @@ export async function browserDocumentSource(
   revision: string;
   bytes: number | null;
   url: string | null;
-  renderResources: LinkedImageManifest|null;
 }> {
-  const row=await activeBrowserDocument(session,documentId);
-  const renderResources=await readLinkedImageManifest({accountId:session.accountId,documentId,sourceSha256:row.working_sha256,objectStore:renderResourceStore}).catch(error=>{
-    if(error.code==='ENOENT')return null;
-    throw error;
-  });
+  const row = await activeBrowserDocument(session, documentId);
   return {
-    renderResources,
     revision: browserRevision(row.working_version_id, row.working_sha256),
     bytes: row.document_bytes === null ? null : Number(row.document_bytes),
     url: await directReadUrl(row.document_object, {
@@ -296,8 +303,7 @@ export async function startBrowserSave(
     throw new HttpError(400, "invalid_document_package");
   const current = await activeBrowserSession(session, documentId);
   const format = documentFormatOf(current.format_id);
-  if (size > format.maxBytes)
-    throw new HttpError(413, "document_too_large");
+  if (size > format.maxBytes) throw new HttpError(413, "document_too_large");
   if (
     browserRevision(current.working_version_id, current.working_sha256) !==
     expectedRevision
@@ -309,7 +315,9 @@ export async function startBrowserSave(
   // Reject pending review before uploading a file that cannot become a version.
   await requireSavePolicy(current.id, current.save_revision, humanConfirmed);
   const target = await directWriteTarget(
-    incomingObjectName(savedObjects(session, documentId, versionId, format.id).object),
+    incomingObjectName(
+      savedObjects(session, documentId, versionId, format.id).object,
+    ),
     format.mimeTypes[0]!,
     format.maxBytes,
   );
@@ -398,7 +406,12 @@ async function sessionFormat(session: Session, documentId: string) {
   return documentFormatOf(row.format_id);
 }
 
-function savedObjects(session: Session, documentId: string, versionId: string, formatId: string) {
+function savedObjects(
+  session: Session,
+  documentId: string,
+  versionId: string,
+  formatId: string,
+) {
   const prefix = accountPrefix(session.accountId, documentId);
   return {
     object: `${prefix}/versions/${versionId}/document${documentFormatOf(formatId).extensions[0]}`,
@@ -492,7 +505,12 @@ async function acceptBrowserSave(
   }
   const versionId = file.versionId;
   const jobId = randomUUID();
-  const { object, outputPrefix } = savedObjects(session, documentId, versionId, current.format_id);
+  const { object, outputPrefix } = savedObjects(
+    session,
+    documentId,
+    versionId,
+    current.format_id,
+  );
   await file.store(object);
   let payload: Record<string, unknown>;
   try {

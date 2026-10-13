@@ -1,4 +1,4 @@
-import type { AiJob, AiWorkerCallback, NativeJob } from "./types.js";
+import type { AiWorkerCallback, NativeJob } from "./types.js";
 import { LocalStorage, type ObjectStore } from "./local-storage.js";
 
 export class JobResultStore {
@@ -6,7 +6,7 @@ export class JobResultStore {
   constructor(private readonly storage: ObjectStore = new LocalStorage()) {}
 
   async execute(
-    job: AiJob | NativeJob,
+    job: NativeJob,
     work: () => Promise<AiWorkerCallback>,
   ): Promise<AiWorkerCallback> {
     const ownerPrefix = job.baseGraphObject.match(
@@ -28,7 +28,7 @@ export class JobResultStore {
   }
 
   private async loadOrRun(
-    job: AiJob | NativeJob,
+    job: NativeJob,
     object: string,
     work: () => Promise<AiWorkerCallback>,
   ): Promise<AiWorkerCallback> {

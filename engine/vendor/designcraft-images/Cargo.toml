@@ -1,0 +1,16 @@
+[package]
+name = "designcraft-images"
+version = "0.5.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "DesignCraft placed-graphic decoding: raster formats (PNG, JPEG, GIF, WebP, TIFF, BMP, PSD) and SVG"
+
+[dependencies]
+designcraft-color = { path = "../designcraft-color" }
+designcraft-fonts = { path = "../designcraft-fonts" }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "tiff", "bmp"] }
+tiff = { version = "0.11" }
+resvg = { version = "0.47", default-features = false, features = ["text"] }
+
+[dev-dependencies]
+designcraft-fonts = { path = "../designcraft-fonts", features = ["testing"] }

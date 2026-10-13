@@ -43,10 +43,9 @@ public static partial class WorkerFailure
              message.Contains("Slide part", StringComparison.Ordinal) ||
              message.Contains("package relationship", StringComparison.Ordinal)))
             return "broken_presentation";
-        if (exception is InvalidOperationException &&
-            (message.Contains("LibreOffice", StringComparison.Ordinal) ||
-             message.Contains("renderer", StringComparison.OrdinalIgnoreCase) ||
-             message.Contains("exited with", StringComparison.Ordinal)))
+        // The engine program could not start, or could not draw the pages.
+        if ((exception is InvalidOperationException && message.EndsWith("_engine_unavailable", StringComparison.Ordinal)) ||
+            (exception is InvalidDataException && message.Contains("_render-all_failed:", StringComparison.Ordinal)))
             return "render_failed";
         return "processing_failed";
     }

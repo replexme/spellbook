@@ -28,31 +28,6 @@ export interface BrowserLoginResult {
   authUrl: string;
 }
 
-export interface AiJob {
-  modelSettings?: ModelSettings;
-  jobId: string;
-  callbackUrl: string;
-  mode: "plan" | "review";
-  email: string;
-  storageNamespace: string;
-  requestText: string;
-  conversational?: boolean;
-  execution?: "agent";
-  conversationHistory?: Array<{
-    request: string;
-    response: string | null;
-    status: string;
-    inputVersionId: string;
-  }>;
-  selectedElementIds: string[];
-  selectedSlideIndexes: number[];
-  baseGraphObject: string;
-  basePreviewObjects: string[];
-  candidateGraphObject?: string;
-  candidatePreviewObjects?: string[];
-  validationObject?: string;
-}
-
 export interface NativeJob {
   activeGoal?: import("../../../contracts/native-goal.cjs").ActiveGoal | null;
   jobId: string;
@@ -81,7 +56,7 @@ export interface LocalNativeJob extends Omit<NativeJob, "email"> {
 export interface AiWorkerCallback {
   jobId: string;
   status: "succeeded" | "failed";
-  mode: "plan" | "review" | "native";
+  mode: "native";
   result?: unknown;
   error?: string;
 }

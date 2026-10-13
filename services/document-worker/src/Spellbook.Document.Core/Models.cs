@@ -64,27 +64,6 @@ public sealed record ElementNode(
     // A chart whose data lives in a linked (external) workbook.
     bool ExternalData = false);
 
-public sealed record EditTarget(int SlideIndex, string ElementId, string SourceHash);
-
-public sealed record EditCommandBatch(
-    string ContractVersion,
-    string BaseDocumentSha256,
-    string Summary,
-    IReadOnlyList<JsonElement> Commands);
-
-public sealed record PatchResult(
-    ElementGraph CandidateGraph,
-    ValidationReport Validation);
-
-public sealed record ValidationReport(
-    string ContractVersion,
-    bool Valid,
-    string BaseDocumentSha256,
-    string CandidateDocumentSha256,
-    IReadOnlyList<string> ChangedParts,
-    IReadOnlyList<string> Errors,
-    IReadOnlyList<string> Warnings);
-
 public sealed record PackageChangeBudgetRequest(
     string ContractVersion,
     IReadOnlyList<string> AllowedCategories,
@@ -106,21 +85,9 @@ public sealed record PackageChangeBudgetReport(
     IReadOnlyList<PackagePartChange> Changes,
     IReadOnlyList<string> Errors);
 
-public sealed record UnsupportedFeaturePreservationReport(
-    string ContractVersion,
-    string BaselineDocumentSha256,
-    string CandidateDocumentSha256,
-    string OutputDocumentSha256,
-    IReadOnlyList<int> RestoredSlideIndexes,
-    IReadOnlyList<string> CopiedParts);
-
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(DocumentScan))]
 [JsonSerializable(typeof(ElementGraph))]
-[JsonSerializable(typeof(EditCommandBatch))]
-[JsonSerializable(typeof(PatchResult))]
-[JsonSerializable(typeof(ValidationReport))]
 [JsonSerializable(typeof(PackageChangeBudgetRequest))]
 [JsonSerializable(typeof(PackageChangeBudgetReport))]
-[JsonSerializable(typeof(UnsupportedFeaturePreservationReport))]
 public partial class DocumentJsonContext : JsonSerializerContext;

@@ -1,12 +1,10 @@
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import http from "node:http";
 
-import { EditRunner } from "./edit-runner.js";
 import { SessionManager } from "./session-manager.js";
 import { JobResultStore } from "./job-result-store.js";
 import {
   MAX_JOB_BODY_BYTES,
-  type AiJob,
   type AiWorkerCallback,
   type NativeJob,
 } from "./types.js";
@@ -20,7 +18,6 @@ import { LocalNativeTurns } from "./local-native-turns.js";
 import { LocalPairingAuthority } from "./local-pairing.js";
 
 const sessions = new SessionManager();
-const runner = new EditRunner(sessions);
 const results = new JobResultStore();
 const localMode = process.env.SPELLBOOK_CONNECTOR_MODE === "local";
 const port = parsePort(process.env.PORT, localMode ? 43_127 : 8080);
@@ -93,12 +90,6 @@ async function handleInternalRequest(
       await sessions.logout(requiredString(body, "email"));
       return json(response, 200, { status: "disconnected" });
     }
-    if (url.pathname === "/internal/jobs/edit") {
-      const job = body as unknown as AiJob;
-      validateJob(job);
-      runAcceptedJob(job, () => executeJob(job));
-      return json(response, 202, { status: "accepted", jobId: job.jobId });
-    }
     if (url.pathname === "/internal/jobs/native") {
       const job = body as unknown as NativeJob;
       validateNativeJob(job);
@@ -142,7 +133,7 @@ function parsePort(value: string | undefined, fallback: number): number {
 }
 
 function runAcceptedJob(
-  job: AiJob | NativeJob,
+  job: NativeJob,
   work: () => Promise<AiWorkerCallback>,
   callbackBearerToken?: string,
 ): void {
@@ -160,32 +151,6 @@ function runAcceptedJob(
         }),
       );
     });
-}
-
-async function executeJob(job: AiJob): Promise<AiWorkerCallback> {
-  try {
-    validateJob(job);
-    return {
-      jobId: job.jobId,
-      status: "succeeded",
-      mode: job.mode,
-      result: await runner.run(job),
-    };
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      /agent_already_running|agent_lease_lost/.test(error.message)
-    )
-      throw error;
-    const safe =
-      error instanceof Error &&
-      /not connected|invalid edit result|timed out|rate limit|Selected model/i.test(
-        error.message,
-      )
-        ? error.message
-        : "AI editing failed. Check worker logs with the job id.";
-    return { jobId: job.jobId, status: "failed", mode: job.mode, error: safe };
-  }
 }
 
 async function executeNativeJob(
@@ -326,22 +291,6 @@ function validateNativeJob(job: NativeJob): void {
     tools.pathname !== "/api/internal/native/tools"
   )
     throw new Error("Native AI callback boundary is invalid.");
-}
-
-function validateJob(job: AiJob): void {
-  if (
-    !job?.jobId ||
-    !job.callbackUrl ||
-    !job.email ||
-    !job.storageNamespace ||
-    !job.baseGraphObject ||
-    !job.requestText
-  ) {
-    throw new Error("AI job is missing required fields.");
-  }
-  if (job.mode !== "plan" && job.mode !== "review") {
-    throw new Error("AI job mode is invalid.");
-  }
 }
 
 async function sendCallback(

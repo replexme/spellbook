@@ -2,7 +2,7 @@
   "contractVersion": "1.0",
   "corpusId": "public-example",
   "renderer": {
-    "name": "LibreOffice",
+    "name": "Spellbook document engine",
     "image": "spellbook-document-worker:local",
     "version": "record-the-container-release"
   },

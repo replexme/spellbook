@@ -1,0 +1,13 @@
+Copyright © Ecma International.
+
+The covered files are unmodified copies of material from ECMA-376 Part 1,
+5th edition (December 2016). They are used under the Ecma text copyright
+policy:
+
+https://ecma-international.org/policies/by-ipr/ecma-text-copyright-policy/
+
+That policy permits copying and distributing the standard and preparing
+derivative works, including implementations in standard-conformant products
+that copy its functionality, provided the copyright notice is included and the
+content itself is not modified. Source, download date and SHA-256 of each file
+are recorded in formats/pptx/data/NOTICE.md.

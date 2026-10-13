@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare text geometry between a PowerPoint PDF and a LibreOffice PDF.
+"""Compare text geometry between a PowerPoint PDF and a candidate renderer's PDF.
 
 Both PDFs must come from the same PPTX. For every page the script extracts
 character boxes and the font each character was set in, groups characters
@@ -13,7 +13,7 @@ The report separates two questions that pixel RMSE cannot:
 
 Usage:
   python3 scripts/compare-pdf-text-geometry.py \
-      --reference eval/.../powerpoint.pdf --candidate eval/.../libreoffice.pdf \
+      --reference eval/.../powerpoint.pdf --candidate eval/.../candidate.pdf \
       --output .tmp-eval/results/pdf-text-geometry-<candidate>/ [--pages 49,55]
 """
 
@@ -377,7 +377,7 @@ def compare(reference_path: Path, candidate_path: Path, pages: set[int] | None) 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--reference", required=True, type=Path, help="PowerPoint PDF")
-    parser.add_argument("--candidate", required=True, type=Path, help="LibreOffice PDF")
+    parser.add_argument("--candidate", required=True, type=Path, help="candidate renderer PDF")
     parser.add_argument("--output", required=True, type=Path, help="output directory")
     parser.add_argument("--pages", default="", help="comma separated 1-based page numbers")
     args = parser.parse_args()

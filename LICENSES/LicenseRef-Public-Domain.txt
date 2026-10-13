@@ -1,0 +1,5 @@
+This material is in the public domain and carries no copyright licence.
+
+engine/vendor/designcraft-compose/assets/hyphenation/en-us.dic is derived from
+the Moby Hyphenator II word list by Grady Ward, released into the public domain
+(Project Gutenberg eBook #3204). See engine/vendor/NOTICE.

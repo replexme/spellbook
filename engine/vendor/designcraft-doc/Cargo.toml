@@ -1,0 +1,16 @@
+[package]
+name = "designcraft-doc"
+version = "0.5.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "DesignCraft document model: spreads, pages, parents, layers, frames, stories, styles, swatches"
+
+[dependencies]
+designcraft-geom = { path = "../designcraft-geom" }
+designcraft-color = { path = "../designcraft-color" }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+thiserror = { version = "2" }
+
+[dev-dependencies]
+proptest = { version = "1" }

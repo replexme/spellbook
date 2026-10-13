@@ -1,0 +1,21 @@
+[package]
+name = "designcraft-compose"
+version = "0.5.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "DesignCraft text composition: paragraph composer (Knuth\u2013Plass), hyphenation, justification, columns, threading, wrap"
+
+[dependencies]
+unicode-bidi = { version = "0.3" }
+unicode-bidi-mirroring = { version = "0.4" }
+designcraft-geom = { path = "../designcraft-geom" }
+designcraft-color = { path = "../designcraft-color" }
+designcraft-doc = { path = "../designcraft-doc" }
+designcraft-fonts = { path = "../designcraft-fonts" }
+log = { version = "0.4" }
+regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
+miniz_oxide = "0.8"
+
+[dev-dependencies]
+designcraft-fonts = { path = "../designcraft-fonts", features = ["testing"] }
+proptest = { version = "1" }

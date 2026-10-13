@@ -13,7 +13,8 @@ public sealed class PresentationInspector
 
     private readonly RendererFontEnvironment fontEnvironment;
 
-    public PresentationInspector() : this(RendererFontEnvironment.Detect())
+    /// <summary>Without the engine's font report: the font check says it could not run.</summary>
+    public PresentationInspector() : this(new RendererFontEnvironment(false, []))
     {
     }
 

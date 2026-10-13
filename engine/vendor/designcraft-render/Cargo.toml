@@ -1,0 +1,23 @@
+[package]
+name = "designcraft-render"
+version = "0.5.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "DesignCraft renderer: spreads, pages, frames, composed text and images to pixels (vello_cpu)"
+
+[dependencies]
+designcraft-geom = { path = "../designcraft-geom" }
+designcraft-color = { path = "../designcraft-color" }
+designcraft-doc = { path = "../designcraft-doc" }
+designcraft-fonts = { path = "../designcraft-fonts" }
+designcraft-compose = { path = "../designcraft-compose" }
+vello_cpu = { version = "0.2" }
+vello_common = { version = "0.2", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif", "tiff", "bmp"] }
+hayro = { version = "0.7" }
+designcraft-images = { path = "../designcraft-images" }
+log = { version = "0.4" }
+serde = { version = "1", features = ["derive", "rc"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+vello_cpu = { version = "0.2", features = ["multithreading"] }

@@ -29,7 +29,7 @@ export function buildDiscoveryManifest(
     contractVersion: "1.0",
     corpusId: `local-discovery-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}`,
     renderer: {
-      name: "LibreOffice",
+      name: "Spellbook document engine",
       image: rendererImage,
       version: rendererVersion,
     },

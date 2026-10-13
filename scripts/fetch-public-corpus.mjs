@@ -289,7 +289,7 @@ export async function fetchPublicCorpus(options) {
       contractVersion: "1.0",
       corpusId: catalog.corpusId,
       renderer: {
-        name: "LibreOffice",
+        name: "Spellbook document engine",
         image: options.rendererImage,
         version: options.rendererVersion,
       },

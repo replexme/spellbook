@@ -49,7 +49,7 @@ function completeManifest() {
   return {
     contractVersion: "1.0",
     renderer: {
-      name: "LibreOffice",
+      name: "Spellbook document engine",
       image: "spellbook-document-worker:local",
       version: "mvp1",
     },
@@ -125,7 +125,12 @@ test("bounds each document-tool container and gives it a removable stable name",
     {},
     "/tmp/source.pptx",
     "/tmp/output",
-    ["render", "/input/document.pptx", "/output/render"],
+    [
+      "/app/present-pptx",
+      "render-all",
+      "/input/document.pptx",
+      "/output/render",
+    ],
   );
   assert.equal(DOCUMENT_TOOL_TIMEOUT_MS, 300_000);
   assert.match(invocation.containerName, /^spellbook-corpus-[a-f0-9]{20}$/);
@@ -137,7 +142,13 @@ test("bounds each document-tool container and gives it a removable stable name",
     "--stop-timeout",
     "10",
     "--entrypoint",
-    "dotnet",
+    "/app/present-pptx",
+  ]);
+  assert.deepEqual(invocation.args.slice(-4), [
+    "renderer@sha256:fixture",
+    "render-all",
+    "/input/document.pptx",
+    "/output/render",
   ]);
 });
 
@@ -150,7 +161,12 @@ test("passes a sorted, recorded renderer environment to every container", () => 
     },
     "/tmp/source.pptx",
     "/tmp/output",
-    ["render", "/input/document.pptx", "/output/render"],
+    [
+      "/app/present-pptx",
+      "render-all",
+      "/input/document.pptx",
+      "/output/render",
+    ],
   );
   const imageIndex = invocation.args.indexOf("renderer@sha256:fixture");
   assert.deepEqual(invocation.args.slice(imageIndex - 4, imageIndex), [

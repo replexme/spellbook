@@ -1,0 +1,30 @@
+{
+ "repository": "https://github.com/storytold/designcraft",
+ "revision": "4fbf8938bf922b29602ef6e6e0984a229a8b994a",
+ "files": [
+  {
+   "path": "Cargo.toml",
+   "upstream": "crates/images/Cargo.toml",
+   "upstreamSha256": "aec3afbbfc963d72173adc7cefcb8d44153350235b1bd49de8e371813e98ed9f",
+   "state": "modified"
+  },
+  {
+   "path": "src/eps.rs",
+   "upstream": "crates/images/src/eps.rs",
+   "upstreamSha256": "d0b954a13165df185a54d72284bb40d7f69af577b4117d21de6ef0952aba085d",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/lib.rs",
+   "upstream": "crates/images/src/lib.rs",
+   "upstreamSha256": "95d381abee1505551298e628afbe2a3714729f6038ba5c00f9fa2144f3e6de66",
+   "state": "unchanged"
+  },
+  {
+   "path": "src/psd.rs",
+   "upstream": "crates/images/src/psd.rs",
+   "upstreamSha256": "b07ebe761d03d72ead00beed71e3a1c722ca4df954b0f7a8d5d28c28692d8f77",
+   "state": "unchanged"
+  }
+ ]
+}

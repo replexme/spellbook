@@ -10,7 +10,7 @@ The layers intentionally shared across formats are identity, ownership, immutabl
 
 ### 0. Freeze the PPTX baseline
 
-Keep the current live PPTX path and its public corpus reproducible. Close the remaining PowerPoint-reference, complex round-trip, WOPI security and operational gates before using PPTX behavior as a platform contract.
+Keep the current live PPTX path and its public corpus reproducible. Close the remaining PowerPoint-reference, complex round-trip and operational gates before using PPTX behavior as a platform contract.
 
 ### 1. Finish the format-neutral envelope
 
@@ -18,7 +18,7 @@ Move the remaining slide-specific fields out of common document, job, storage an
 
 ### 2. Add DOCX as an independent vertical
 
-Use Collabora Writer for direct editing, but add a DOCX scanner, WordprocessingML observation graph, paragraph/style/table/header/footer/footnote commands, Word reference corpus and DOCX-specific failure messages. Writer being present in the container is not evidence of product support.
+Add a DOCX module to the document engine with a DOCX scanner, WordprocessingML observation graph, paragraph/style/table/header/footer/footnote commands, Word reference corpus and DOCX-specific failure messages.
 
 ### 3. Add the native page-layout format
 

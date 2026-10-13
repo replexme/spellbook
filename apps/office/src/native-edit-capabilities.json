@@ -1,0 +1,2425 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "2",
+  "coordinateUnit": "1/100mm",
+  "nativeUndoRequired": true,
+  "aiExposure": {
+    "operationCount": 93,
+    "policy": "Offer each open document only the operations its engine runs (engine.supportedOperations in the observation). Before execution, authorize against the current document permission."
+  },
+  "transaction": {
+    "maxCommands": 50,
+    "supportsDryRun": true,
+    "atomicByDefault": true,
+    "targetResolution": "Targets are captured from one observed revision; the engine applies the batch to that document version.",
+    "identityReplacingOperations": [
+      "set_chart_data",
+      "set_chart_type",
+      "set_chart_format",
+      "replace_animation_effect"
+    ],
+    "ordering": "A batch commits as one engine transaction and one Undo step: if any command fails, nothing changes. An identity-replacing operation must be the only command in its transaction so no later command can target the replaced object."
+  },
+  "mutationModel": {
+    "version": "1.0.0",
+    "domains": {
+      "editor": {
+        "description": "Commands the document engine applies to the open document as one transaction and one Undo step."
+      },
+      "slide_transform": {
+        "description": "Slide and page structure commands, applied by the engine in the same transaction model."
+      },
+      "platform_asset": {
+        "description": "Binary assets are authorized and delivered by the host, then inserted by the engine as one Undo step; models never receive file or network authority."
+      }
+    },
+    "changeBudgetContract": {
+      "baseline": "same_engine_no_edit_save",
+      "candidate": "same_engine_mutated_save",
+      "scope": "Target-scoped categories are resolved through the saved presentation relationship graph; unclassified package parts fail closed.",
+      "categories": [
+        "package_manifest",
+        "package_relationships",
+        "document_properties",
+        "presentation",
+        "presentation_relationships",
+        "slide_parts",
+        "slide_relationships",
+        "notes_parts",
+        "notes_relationships",
+        "notes_master_parts",
+        "notes_master_relationships",
+        "slide_layout_parts",
+        "slide_layout_relationships",
+        "slide_master_parts",
+        "slide_master_relationships",
+        "theme_parts",
+        "chart_parts",
+        "embedded_workbooks",
+        "media_parts",
+        "diagram_parts",
+        "comments",
+        "custom_xml",
+        "macros",
+        "unknown"
+      ]
+    },
+    "families": {
+      "slide_structure": {
+        "domain": "slide_transform",
+        "undoProvider": "page_model_action",
+        "fixture": "slide-structure",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "allowPartCreationOrDeletion": true,
+        "changeBudget": [
+          "package_manifest",
+          "document_properties",
+          "presentation",
+          "presentation_relationships",
+          "slide_parts",
+          "slide_relationships",
+          "notes_parts",
+          "notes_relationships",
+          "notes_master_parts",
+          "notes_master_relationships",
+          "theme_parts"
+        ]
+      },
+      "slide_properties": {
+        "domain": "slide_transform",
+        "undoProvider": "page_property_snapshot",
+        "fixture": "slide-properties",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["presentation", "slide_parts", "slide_relationships"]
+      },
+      "document_design": {
+        "domain": "slide_transform",
+        "undoProvider": "document_design_snapshot",
+        "fixture": "document-design",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": [
+          "presentation",
+          "slide_parts",
+          "slide_master_parts",
+          "slide_layout_parts",
+          "theme_parts"
+        ]
+      },
+      "speaker_notes": {
+        "domain": "slide_transform",
+        "undoProvider": "notes_text_action",
+        "fixture": "speaker-notes",
+        "verification": ["structure", "save_reopen", "change_budget"],
+        "allowPartCreationOrDeletion": true,
+        "changeBudget": [
+          "package_manifest",
+          "presentation",
+          "presentation_relationships",
+          "notes_parts",
+          "notes_relationships",
+          "notes_master_parts",
+          "notes_master_relationships",
+          "slide_relationships",
+          "theme_parts"
+        ]
+      },
+      "object_creation": {
+        "domain": "editor",
+        "undoProvider": "sdr_creation_action",
+        "fixture": "object-creation",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["slide_parts", "slide_relationships", "media_parts"]
+      },
+      "object_geometry": {
+        "domain": "editor",
+        "undoProvider": "sdr_geometry_action",
+        "fixture": "object-geometry",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["slide_parts"]
+      },
+      "object_style": {
+        "domain": "editor",
+        "undoProvider": "sdr_attribute_action",
+        "fixture": "object-style",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["slide_parts"]
+      },
+      "object_interaction": {
+        "domain": "editor",
+        "undoProvider": "interaction_snapshot",
+        "fixture": "object-interaction",
+        "verification": [
+          "structure",
+          "save_reopen",
+          "change_budget",
+          "playback"
+        ],
+        "changeBudget": ["slide_parts", "slide_relationships"]
+      },
+      "object_text": {
+        "domain": "editor",
+        "undoProvider": "sdr_text_action",
+        "fixture": "object-text",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["slide_parts"]
+      },
+      "object_topology": {
+        "domain": "editor",
+        "undoProvider": "sdr_topology_action",
+        "fixture": "object-topology",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["slide_parts", "slide_relationships"]
+      },
+      "table_content": {
+        "domain": "editor",
+        "undoProvider": "table_cell_snapshot",
+        "fixture": "table-content",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["slide_parts"]
+      },
+      "table_structure": {
+        "domain": "editor",
+        "undoProvider": "table_model_action",
+        "fixture": "table-structure",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["slide_parts"]
+      },
+      "table_style": {
+        "domain": "editor",
+        "undoProvider": "table_cell_snapshot",
+        "fixture": "table-style",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["slide_parts"]
+      },
+      "chart_model": {
+        "domain": "editor",
+        "undoProvider": "chart_model_snapshot",
+        "fixture": "chart-model",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": [
+          "slide_parts",
+          "chart_parts",
+          "embedded_workbooks",
+          "slide_relationships"
+        ]
+      },
+      "media_geometry": {
+        "domain": "editor",
+        "undoProvider": "sdr_geometry_action",
+        "fixture": "media-geometry",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["slide_parts"]
+      },
+      "media_asset": {
+        "domain": "platform_asset",
+        "undoProvider": "editor_file_insert_action",
+        "fixture": "media-asset",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "allowPartCreationOrDeletion": true,
+        "changeBudget": [
+          "package_manifest",
+          "presentation_relationships",
+          "slide_parts",
+          "slide_relationships",
+          "media_parts"
+        ]
+      },
+      "diagram_model": {
+        "domain": "slide_transform",
+        "undoProvider": "diagram_model_snapshot",
+        "fixture": "smartart-diagram",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "allowPartCreationOrDeletion": true,
+        "changeBudget": [
+          "slide_parts",
+          "slide_relationships",
+          "diagram_parts",
+          "package_manifest"
+        ]
+      },
+      "fontwork": {
+        "domain": "slide_transform",
+        "undoProvider": "sdr_attribute_action",
+        "fixture": "fontwork",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "changeBudget": ["slide_parts"]
+      },
+      "slide_transition": {
+        "domain": "slide_transform",
+        "undoProvider": "transition_snapshot",
+        "fixture": "slide-transition",
+        "verification": [
+          "structure",
+          "save_reopen",
+          "change_budget",
+          "playback"
+        ],
+        "changeBudget": ["slide_parts"]
+      },
+      "animation": {
+        "domain": "slide_transform",
+        "undoProvider": "animation_tree_snapshot",
+        "fixture": "animation-timing",
+        "verification": [
+          "structure",
+          "save_reopen",
+          "change_budget",
+          "playback"
+        ],
+        "changeBudget": ["slide_parts"]
+      },
+      "comments": {
+        "domain": "editor",
+        "undoProvider": "annotation_model_action",
+        "fixture": "comments",
+        "verification": ["structure", "save_reopen", "change_budget", "visual"],
+        "allowPartCreationOrDeletion": true,
+        "changeBudget": [
+          "package_manifest",
+          "presentation_relationships",
+          "slide_relationships",
+          "comments"
+        ]
+      }
+    },
+    "operations": {
+      "insert_slide": {
+        "family": "slide_structure",
+        "target": "slide",
+        "execution": "native_transform",
+        "identityEffect": "create",
+        "arguments": ["slideIndex", "masterIndex", "layout", "name"]
+      },
+      "duplicate_slide": {
+        "family": "slide_structure",
+        "target": "slide",
+        "execution": "native_transform",
+        "identityEffect": "create",
+        "arguments": ["slideIndex"]
+      },
+      "delete_slide": {
+        "family": "slide_structure",
+        "target": "slide",
+        "execution": "native_transform",
+        "identityEffect": "delete",
+        "arguments": ["slideIndex"]
+      },
+      "move_slide": {
+        "family": "slide_structure",
+        "target": "slide",
+        "execution": "native_transform",
+        "identityEffect": "reorder",
+        "arguments": ["slideIndex", "targetSlideIndex"]
+      },
+      "set_sections": {
+        "family": "slide_structure",
+        "target": "document",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["sections"]
+      },
+      "set_slide_size": {
+        "family": "document_design",
+        "target": "document",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "changeBudget": ["presentation", "slide_parts"],
+        "arguments": ["width", "height", "scaleContent"]
+      },
+      "set_master_theme": {
+        "family": "document_design",
+        "target": "master",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "allowPartCreationOrDeletion": true,
+        "changeBudget": [
+          "package_manifest",
+          "presentation",
+          "presentation_relationships",
+          "slide_master_parts",
+          "slide_master_relationships",
+          "slide_layout_relationships",
+          "theme_parts"
+        ],
+        "arguments": ["masterIndex", "theme"]
+      },
+      "set_speaker_notes": {
+        "family": "speaker_notes",
+        "target": "slide",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["slideIndex", "text"]
+      },
+      "add_text_box": {
+        "family": "object_creation",
+        "target": "slide",
+        "execution": "editor_dispatch",
+        "identityEffect": "create",
+        "arguments": ["slideIndex", "x", "y", "width", "height", "text", "name"]
+      },
+      "add_shape": {
+        "family": "object_creation",
+        "target": "slide",
+        "execution": "editor_dispatch",
+        "identityEffect": "create",
+        "arguments": [
+          "slideIndex",
+          "x",
+          "y",
+          "width",
+          "height",
+          "geometry",
+          "color",
+          "name"
+        ]
+      },
+      "add_connector": {
+        "family": "object_creation",
+        "target": "slide",
+        "execution": "editor_dispatch",
+        "identityEffect": "create",
+        "arguments": [
+          "slideIndex",
+          "x",
+          "y",
+          "width",
+          "height",
+          "connectorKind",
+          "color",
+          "name"
+        ]
+      },
+      "add_freeform": {
+        "family": "object_creation",
+        "target": "slide",
+        "execution": "editor_dispatch",
+        "identityEffect": "create",
+        "arguments": [
+          "slideIndex",
+          "x",
+          "y",
+          "width",
+          "height",
+          "points",
+          "closed",
+          "color",
+          "name"
+        ]
+      },
+      "add_table": {
+        "family": "object_creation",
+        "target": "slide",
+        "execution": "editor_dispatch",
+        "identityEffect": "create",
+        "arguments": [
+          "slideIndex",
+          "x",
+          "y",
+          "width",
+          "height",
+          "cells",
+          "name"
+        ]
+      },
+      "align": {
+        "family": "object_geometry",
+        "target": "elements",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementIds", "alignment"]
+      },
+      "distribute": {
+        "family": "object_geometry",
+        "target": "elements",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementIds", "axis"]
+      },
+      "set_connector": {
+        "family": "object_geometry",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "connector"]
+      },
+      "group": {
+        "family": "object_topology",
+        "target": "elements",
+        "execution": "editor_dispatch",
+        "identityEffect": "reparent",
+        "arguments": ["elementIds"]
+      },
+      "replace_text": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "text"]
+      },
+      "move": {
+        "family": "object_geometry",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "x", "y"]
+      },
+      "resize": {
+        "family": "object_geometry",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "width", "height"]
+      },
+      "font_size": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "size"]
+      },
+      "bold": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "bold"]
+      },
+      "italic": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "italic"]
+      },
+      "underline": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "underline"]
+      },
+      "strikethrough": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "strikethrough"]
+      },
+      "text_shadow": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": [
+          "elementId",
+          "shadow",
+          "color",
+          "shadowOffsetX",
+          "shadowOffsetY",
+          "shadowBlur",
+          "opacity"
+        ]
+      },
+      "font_family": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "family"]
+      },
+      "font_color": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "color"]
+      },
+      "fill_color": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "color"]
+      },
+      "set_shape_fill": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "shapeFill"]
+      },
+      "set_shape_effects": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "shapeEffects"]
+      },
+      "line_color": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "color"]
+      },
+      "line_width": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "size"]
+      },
+      "fill_opacity": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "opacity"]
+      },
+      "line_opacity": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "opacity"]
+      },
+      "text_autofit": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "autofit"]
+      },
+      "rotate": {
+        "family": "object_geometry",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "degrees"]
+      },
+      "z_order": {
+        "family": "object_topology",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "reorder",
+        "arguments": ["elementId", "position"]
+      },
+      "paragraph_alignment": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "alignment"]
+      },
+      "flip": {
+        "family": "object_geometry",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "axis"]
+      },
+      "ungroup": {
+        "family": "object_topology",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "reparent",
+        "arguments": ["elementId"]
+      },
+      "duplicate_element": {
+        "family": "object_creation",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "create",
+        "arguments": ["elementId", "name", "x", "y"]
+      },
+      "delete_element": {
+        "family": "object_topology",
+        "target": "element",
+        "execution": "editor_dispatch",
+        "identityEffect": "delete",
+        "arguments": ["elementId"]
+      },
+      "set_chart_data": {
+        "family": "chart_model",
+        "target": "element",
+        "execution": "model_replace",
+        "identityEffect": "replace",
+        "arguments": [
+          "elementId",
+          "data",
+          "rowDescriptions",
+          "columnDescriptions"
+        ]
+      },
+      "set_chart_type": {
+        "family": "chart_model",
+        "target": "element",
+        "execution": "model_replace",
+        "identityEffect": "replace",
+        "arguments": ["elementId", "chartType"]
+      },
+      "set_chart_format": {
+        "family": "chart_model",
+        "target": "element",
+        "execution": "model_replace",
+        "identityEffect": "replace",
+        "arguments": ["elementId", "chartFormat"]
+      },
+      "set_slide_layout": {
+        "family": "slide_properties",
+        "target": "slide",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["slideIndex", "masterIndex", "layout"]
+      },
+      "set_background": {
+        "family": "slide_properties",
+        "target": "slide",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["slideIndex", "color"]
+      },
+      "set_table_cell": {
+        "family": "table_content",
+        "target": "table_cell",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "row", "column", "text"]
+      },
+      "rename_slide": {
+        "family": "slide_properties",
+        "target": "slide",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["slideIndex", "name"]
+      },
+      "set_slide_hidden": {
+        "family": "slide_properties",
+        "target": "slide",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["slideIndex", "hidden"]
+      },
+      "set_alt_text": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "title", "description", "decorative"]
+      },
+      "set_shape_name": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "name"]
+      },
+      "set_text_box": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": [
+          "elementId",
+          "marginLeft",
+          "marginRight",
+          "marginTop",
+          "marginBottom",
+          "autoGrowHeight",
+          "autoGrowWidth",
+          "wordWrap"
+        ]
+      },
+      "set_character_spacing": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "spacing"]
+      },
+      "set_text_language": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "languageTag"]
+      },
+      "set_text_case": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "textCase"]
+      },
+      "set_script_position": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "script"]
+      },
+      "set_shape_shadow": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": [
+          "elementId",
+          "shadow",
+          "color",
+          "shadowOffsetX",
+          "shadowOffsetY",
+          "shadowBlur",
+          "opacity"
+        ]
+      },
+      "set_object_lock": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "lockPosition", "lockSize", "printable"]
+      },
+      "set_line_style": {
+        "family": "object_style",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "lineStyle"]
+      },
+      "set_object_interaction": {
+        "family": "object_interaction",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": [
+          "elementId",
+          "interaction",
+          "url",
+          "description",
+          "targetSlideIndex"
+        ]
+      },
+      "replace_text_range": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": [
+          "elementId",
+          "paragraphId",
+          "startOffset",
+          "endOffset",
+          "expectedText",
+          "text"
+        ]
+      },
+      "insert_table_rows": {
+        "family": "table_structure",
+        "target": "table_range",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "index", "count"]
+      },
+      "delete_table_rows": {
+        "family": "table_structure",
+        "target": "table_range",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "index", "count"]
+      },
+      "insert_table_columns": {
+        "family": "table_structure",
+        "target": "table_range",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "index", "count"]
+      },
+      "delete_table_columns": {
+        "family": "table_structure",
+        "target": "table_range",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "index", "count"]
+      },
+      "merge_table_cells": {
+        "family": "table_structure",
+        "target": "table_range",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": [
+          "elementId",
+          "startRow",
+          "endRow",
+          "startColumn",
+          "endColumn"
+        ]
+      },
+      "split_table_cell": {
+        "family": "table_structure",
+        "target": "table_cell",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "row", "column", "rows", "columns"]
+      },
+      "set_table_row_height": {
+        "family": "table_structure",
+        "target": "table_range",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "index", "height"]
+      },
+      "set_table_column_width": {
+        "family": "table_structure",
+        "target": "table_range",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "index", "width"]
+      },
+      "set_table_cell_format": {
+        "family": "table_style",
+        "target": "table_range",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "row", "column", "tableCellFormat"]
+      },
+      "set_slide_transition": {
+        "family": "slide_transition",
+        "target": "slide",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["slideIndex", "transitionEffect", "transitionDuration"]
+      },
+      "set_animation_timing": {
+        "family": "animation",
+        "target": "animation_effect",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "animationId", "duration", "delay", "start"]
+      },
+      "add_animation_effect": {
+        "family": "animation",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "create",
+        "arguments": ["elementId", "presetId", "duration", "delay", "start"]
+      },
+      "remove_animation_effect": {
+        "family": "animation",
+        "target": "animation_effect",
+        "execution": "native_transform",
+        "identityEffect": "delete",
+        "arguments": ["elementId", "animationId"]
+      },
+      "replace_animation_effect": {
+        "family": "animation",
+        "target": "animation_effect",
+        "execution": "native_transform",
+        "identityEffect": "replace",
+        "arguments": ["elementId", "animationId", "presetId"]
+      },
+      "move_animation_effect": {
+        "family": "animation",
+        "target": "animation_effect",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "animationId", "animationIndex"]
+      },
+      "crop_image": {
+        "family": "media_geometry",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": [
+          "elementId",
+          "left",
+          "top",
+          "right",
+          "bottom",
+          "geometry"
+        ],
+        "description": "Crop the existing picture without replacing its original media. geometry ellipse clips to an ellipse; a circle also requires equal observed width and height. rectangle restores the rectangular picture shape. left/top/right/bottom are source fractions from 0 inclusive to 1 exclusive; pass zero for full source. Omit all four crop fractions to change only shape and preserve existing framing."
+      },
+      "insert_image": {
+        "family": "media_asset",
+        "target": "slide",
+        "execution": "platform_asset",
+        "identityEffect": "create",
+        "arguments": [
+          "slideIndex",
+          "assetId",
+          "x",
+          "y",
+          "width",
+          "height",
+          "name"
+        ]
+      },
+      "replace_image": {
+        "family": "media_asset",
+        "target": "element",
+        "execution": "platform_asset",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "assetId"]
+      },
+      "insert_media": {
+        "family": "media_asset",
+        "target": "slide",
+        "execution": "platform_asset",
+        "identityEffect": "create",
+        "arguments": [
+          "slideIndex",
+          "assetId",
+          "x",
+          "y",
+          "width",
+          "height",
+          "name"
+        ]
+      },
+      "replace_media": {
+        "family": "media_asset",
+        "target": "element",
+        "execution": "platform_asset",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "assetId"]
+      },
+      "set_smartart_node": {
+        "family": "diagram_model",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "smartartNode"]
+      },
+      "add_smartart_node": {
+        "family": "diagram_model",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "create",
+        "arguments": ["elementId", "smartartNode"]
+      },
+      "delete_smartart_node": {
+        "family": "diagram_model",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "delete",
+        "arguments": ["elementId", "smartartNode"]
+      },
+      "set_fontwork": {
+        "family": "fontwork",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "fontwork"]
+      },
+      "set_reading_order": {
+        "family": "object_topology",
+        "target": "elements",
+        "execution": "native_transform",
+        "identityEffect": "reorder",
+        "arguments": ["elementIds"]
+      },
+      "set_paragraph_format": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "paragraphId", "paragraphFormat"]
+      },
+      "set_paragraph_list": {
+        "family": "object_text",
+        "target": "element",
+        "execution": "native_transform",
+        "identityEffect": "preserve",
+        "arguments": ["elementId", "paragraphId", "paragraphList"]
+      },
+      "add_comment": {
+        "family": "comments",
+        "target": "slide",
+        "execution": "editor_dispatch",
+        "identityEffect": "create",
+        "arguments": ["slideIndex", "text", "author", "initials", "x", "y"]
+      },
+      "edit_comment": {
+        "family": "comments",
+        "target": "slide",
+        "execution": "editor_dispatch",
+        "identityEffect": "preserve",
+        "arguments": ["slideIndex", "commentIndex", "text", "author"]
+      },
+      "delete_comment": {
+        "family": "comments",
+        "target": "slide",
+        "execution": "editor_dispatch",
+        "identityEffect": "delete",
+        "arguments": ["slideIndex", "commentIndex"]
+      }
+    }
+  },
+  "operationGroups": {
+    "document": ["set_slide_size", "set_master_theme", "set_sections"],
+    "slide": [
+      "insert_slide",
+      "duplicate_slide",
+      "delete_slide",
+      "move_slide",
+      "set_speaker_notes",
+      "set_slide_layout",
+      "set_background",
+      "rename_slide",
+      "set_slide_hidden",
+      "set_slide_transition",
+      "insert_image",
+      "insert_media",
+      "add_comment",
+      "edit_comment",
+      "delete_comment"
+    ],
+    "create": [
+      "add_text_box",
+      "add_shape",
+      "add_connector",
+      "add_freeform",
+      "add_table"
+    ],
+    "multiElement": ["align", "distribute", "group", "set_reading_order"],
+    "element": [
+      "replace_text",
+      "move",
+      "resize",
+      "font_size",
+      "bold",
+      "italic",
+      "underline",
+      "strikethrough",
+      "text_shadow",
+      "font_family",
+      "font_color",
+      "fill_color",
+      "set_shape_fill",
+      "set_shape_effects",
+      "line_color",
+      "line_width",
+      "fill_opacity",
+      "line_opacity",
+      "text_autofit",
+      "rotate",
+      "z_order",
+      "paragraph_alignment",
+      "flip",
+      "ungroup",
+      "duplicate_element",
+      "delete_element",
+      "set_chart_data",
+      "set_chart_type",
+      "set_chart_format",
+      "set_table_cell",
+      "set_alt_text",
+      "set_shape_name",
+      "set_text_box",
+      "set_character_spacing",
+      "set_text_language",
+      "set_text_case",
+      "set_script_position",
+      "set_shape_shadow",
+      "set_object_lock",
+      "set_line_style",
+      "set_object_interaction",
+      "replace_text_range",
+      "insert_table_rows",
+      "delete_table_rows",
+      "insert_table_columns",
+      "delete_table_columns",
+      "merge_table_cells",
+      "split_table_cell",
+      "set_table_row_height",
+      "set_table_column_width",
+      "set_table_cell_format",
+      "set_animation_timing",
+      "add_animation_effect",
+      "remove_animation_effect",
+      "replace_animation_effect",
+      "move_animation_effect",
+      "crop_image",
+      "replace_image",
+      "replace_media",
+      "set_smartart_node",
+      "add_smartart_node",
+      "delete_smartart_node",
+      "set_fontwork",
+      "set_paragraph_format",
+      "set_paragraph_list",
+      "set_connector"
+    ]
+  },
+  "toolInputSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "op": {
+        "type": "string",
+        "enum": [
+          "insert_slide",
+          "duplicate_slide",
+          "delete_slide",
+          "move_slide",
+          "set_sections",
+          "set_slide_size",
+          "set_master_theme",
+          "set_speaker_notes",
+          "add_text_box",
+          "add_shape",
+          "add_connector",
+          "add_freeform",
+          "add_table",
+          "align",
+          "distribute",
+          "group",
+          "replace_text",
+          "move",
+          "resize",
+          "font_size",
+          "bold",
+          "italic",
+          "underline",
+          "strikethrough",
+          "text_shadow",
+          "font_family",
+          "font_color",
+          "fill_color",
+          "set_shape_fill",
+          "set_shape_effects",
+          "line_color",
+          "line_width",
+          "fill_opacity",
+          "line_opacity",
+          "text_autofit",
+          "rotate",
+          "z_order",
+          "paragraph_alignment",
+          "flip",
+          "ungroup",
+          "duplicate_element",
+          "delete_element",
+          "set_chart_data",
+          "set_chart_type",
+          "set_chart_format",
+          "set_slide_layout",
+          "set_background",
+          "set_table_cell",
+          "rename_slide",
+          "set_slide_hidden",
+          "set_alt_text",
+          "set_shape_name",
+          "set_text_box",
+          "set_character_spacing",
+          "set_text_language",
+          "set_text_case",
+          "set_script_position",
+          "set_shape_shadow",
+          "set_object_lock",
+          "set_line_style",
+          "set_object_interaction",
+          "replace_text_range",
+          "insert_table_rows",
+          "delete_table_rows",
+          "insert_table_columns",
+          "delete_table_columns",
+          "merge_table_cells",
+          "split_table_cell",
+          "set_table_row_height",
+          "set_table_column_width",
+          "set_table_cell_format",
+          "set_slide_transition",
+          "set_animation_timing",
+          "add_animation_effect",
+          "remove_animation_effect",
+          "replace_animation_effect",
+          "move_animation_effect",
+          "crop_image",
+          "insert_image",
+          "replace_image",
+          "insert_media",
+          "replace_media",
+          "set_smartart_node",
+          "add_smartart_node",
+          "delete_smartart_node",
+          "set_fontwork",
+          "set_reading_order",
+          "set_paragraph_format",
+          "set_paragraph_list",
+          "set_connector",
+          "add_comment",
+          "edit_comment",
+          "delete_comment"
+        ]
+      },
+      "elementId": {
+        "type": ["string", "null"]
+      },
+      "elementIds": {
+        "type": ["array", "null"],
+        "items": {
+          "type": "string"
+        }
+      },
+      "slideIndex": {
+        "type": ["number", "null"]
+      },
+      "sections": {
+        "type": ["array", "null"],
+        "maxItems": 100,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "pattern": "^\\{[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\\}$"
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "startSlideIndex": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": ["id", "name", "startSlideIndex"]
+        },
+        "description": "Complete ordered section definition. Non-empty lists must start at slide 0 and use strictly increasing startSlideIndex values. Preserve observed ids when retaining sections; generate a new braced UUID for a new section."
+      },
+      "masterIndex": {
+        "type": ["number", "null"],
+        "description": "Exact master index from the current native observation. Required by set_slide_layout and set_master_theme."
+      },
+      "scaleContent": {
+        "type": ["boolean", "null"],
+        "description": "When changing slide size, scale existing slide and master objects with the page."
+      },
+      "theme": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "colorSchemeName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "colors": {
+            "type": "array",
+            "minItems": 12,
+            "maxItems": 12,
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777215
+            }
+          },
+          "fontSchemeName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "majorLatin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "majorAsian": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "majorComplex": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "minorLatin": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "minorAsian": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          "minorComplex": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        },
+        "required": [
+          "name",
+          "colorSchemeName",
+          "colors",
+          "fontSchemeName",
+          "majorLatin",
+          "majorAsian",
+          "majorComplex",
+          "minorLatin",
+          "minorAsian",
+          "minorComplex"
+        ]
+      },
+      "targetSlideIndex": {
+        "type": ["number", "null"]
+      },
+      "interaction": {
+        "type": ["string", "null"],
+        "enum": [
+          "none",
+          "external_url",
+          "internal_slide",
+          "next_slide",
+          "previous_slide",
+          "first_slide",
+          "last_slide",
+          "end_show",
+          null
+        ],
+        "description": "Bounded PowerPoint click behavior. External URLs permit only credential-free HTTP(S); internal_slide requires targetSlideIndex."
+      },
+      "url": {
+        "type": ["string", "null"],
+        "maxLength": 2048,
+        "description": "External HTTP(S) target for set_object_interaction."
+      },
+      "hidden": {
+        "type": ["boolean", "null"]
+      },
+      "layout": {
+        "type": ["number", "null"]
+      },
+      "transitionEffect": {
+        "type": ["string", "null"],
+        "enum": [
+          "none",
+          "fade",
+          "fade-through-black",
+          "fade-through-white",
+          "wipe-left-to-right",
+          "wipe-top-to-bottom",
+          "push-from-left",
+          "push-from-top",
+          "push-from-right",
+          "push-from-bottom",
+          null
+        ]
+      },
+      "transitionDuration": {
+        "type": ["number", "null"],
+        "minimum": 0,
+        "maximum": 60,
+        "description": "Slide transition duration in seconds."
+      },
+      "animationId": {
+        "type": ["string", "null"],
+        "maxLength": 64,
+        "description": "Exact animation effect id from the current native observation."
+      },
+      "animationIndex": {
+        "type": ["integer", "null"],
+        "minimum": 0,
+        "maximum": 199,
+        "description": "Requested global effect position from the current slide animation observation."
+      },
+      "presetId": {
+        "type": ["string", "null"],
+        "minLength": 1,
+        "maxLength": 128,
+        "pattern": "^(entrance|emphasis|exit|motionpath)-[A-Za-z0-9._-]+$",
+        "description": "Animation preset: class and effect, for example entrance-fade, emphasis-spin or exit-fly."
+      },
+      "duration": {
+        "type": ["number", "null"],
+        "minimum": 0.001,
+        "maximum": 60,
+        "description": "Object animation effect duration in seconds."
+      },
+      "delay": {
+        "type": ["number", "null"],
+        "minimum": 0,
+        "maximum": 60,
+        "description": "Object animation effect delay in seconds."
+      },
+      "start": {
+        "type": ["string", "null"],
+        "enum": ["on-click", "with-previous", "after-previous", null],
+        "description": "Object animation effect start mode."
+      },
+      "text": {
+        "type": ["string", "null"]
+      },
+      "paragraphId": {
+        "type": ["string", "null"]
+      },
+      "startOffset": {
+        "type": ["number", "null"]
+      },
+      "endOffset": {
+        "type": ["number", "null"]
+      },
+      "expectedText": {
+        "type": ["string", "null"]
+      },
+      "name": {
+        "type": ["string", "null"]
+      },
+      "title": {
+        "type": ["string", "null"]
+      },
+      "description": {
+        "type": ["string", "null"]
+      },
+      "decorative": {
+        "type": ["boolean", "null"]
+      },
+      "author": {
+        "type": ["string", "null"],
+        "maxLength": 255
+      },
+      "initials": {
+        "type": ["string", "null"],
+        "maxLength": 16
+      },
+      "commentIndex": {
+        "type": ["integer", "null"],
+        "minimum": 0
+      },
+      "assetId": {
+        "type": ["string", "null"],
+        "pattern": "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$",
+        "description": "Document-scoped asset id returned by the host. The model never supplies a URL or path."
+      },
+      "smartartNode": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "expectedText": {
+            "type": ["string", "null"],
+            "maxLength": 4000
+          },
+          "occurrence": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 999
+          },
+          "text": {
+            "type": ["string", "null"],
+            "maxLength": 4000
+          }
+        },
+        "required": ["expectedText", "occurrence", "text"],
+        "description": "One semantic SmartArt data node. Replacement/deletion is stale-guarded by its observed text and occurrence; add uses text with expectedText null."
+      },
+      "fontwork": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "preset": {
+            "type": ["string", "null"],
+            "enum": [
+              "textPlain",
+              "textStop",
+              "textTriangle",
+              "textTriangleInverted",
+              "textChevron",
+              "textChevronInverted",
+              "textRingInside",
+              "textRingOutside",
+              "textArchUp",
+              "textArchDown",
+              "textCircle",
+              "textButton",
+              "textArchUpPour",
+              "textArchDownPour",
+              "textCirclePour",
+              "textButtonPour",
+              "textCurveUp",
+              "textCurveDown",
+              "textCanUp",
+              "textCanDown",
+              "textWave1",
+              "textWave2",
+              "textDoubleWave1",
+              "textWave4",
+              "textInflate",
+              "textDeflate",
+              "textInflateBottom",
+              "textDeflateBottom",
+              "textInflateTop",
+              "textDeflateTop",
+              "textDeflateInflate",
+              "textDeflateInflateDeflate",
+              "textFadeRight",
+              "textFadeLeft",
+              "textFadeUp",
+              "textFadeDown",
+              "textSlantUp",
+              "textSlantDown",
+              "textCascadeUp",
+              "textCascadeDown",
+              null
+            ],
+            "description": "PowerPoint WordArt transform (a:prstTxWarp preset) for an observed WordArt shape."
+          }
+        },
+        "required": ["preset"]
+      },
+      "x": {
+        "type": ["number", "null"]
+      },
+      "y": {
+        "type": ["number", "null"]
+      },
+      "width": {
+        "type": ["number", "null"]
+      },
+      "height": {
+        "type": ["number", "null"]
+      },
+      "left": {
+        "type": ["number", "null"]
+      },
+      "top": {
+        "type": ["number", "null"]
+      },
+      "right": {
+        "type": ["number", "null"]
+      },
+      "bottom": {
+        "type": ["number", "null"]
+      },
+      "size": {
+        "type": ["number", "null"],
+        "description": "font_size in points; line_width in millimetres."
+      },
+      "degrees": {
+        "type": ["number", "null"],
+        "description": "Clockwise rotation in degrees."
+      },
+      "bold": {
+        "type": ["boolean", "null"]
+      },
+      "italic": {
+        "type": ["boolean", "null"]
+      },
+      "underline": {
+        "type": ["boolean", "null"]
+      },
+      "strikethrough": {
+        "type": ["boolean", "null"]
+      },
+      "shadow": {
+        "type": ["boolean", "null"]
+      },
+      "family": {
+        "type": ["string", "null"]
+      },
+      "color": {
+        "type": ["number", "null"]
+      },
+      "opacity": {
+        "type": ["number", "null"],
+        "description": "Opacity percentage from 0 to 100."
+      },
+      "autofit": {
+        "type": ["boolean", "null"]
+      },
+      "marginLeft": {
+        "type": ["number", "null"],
+        "description": "Text inset in 1/100 mm."
+      },
+      "marginRight": {
+        "type": ["number", "null"],
+        "description": "Text inset in 1/100 mm."
+      },
+      "marginTop": {
+        "type": ["number", "null"],
+        "description": "Text inset in 1/100 mm."
+      },
+      "marginBottom": {
+        "type": ["number", "null"],
+        "description": "Text inset in 1/100 mm."
+      },
+      "autoGrowHeight": {
+        "type": ["boolean", "null"]
+      },
+      "autoGrowWidth": {
+        "type": ["boolean", "null"]
+      },
+      "wordWrap": {
+        "type": ["boolean", "null"]
+      },
+      "spacing": {
+        "type": ["number", "null"],
+        "description": "PowerPoint character spacing in points; null when unused."
+      },
+      "script": {
+        "type": ["string", "null"],
+        "enum": ["normal", "superscript", "subscript", null]
+      },
+      "languageTag": {
+        "type": ["string", "null"],
+        "pattern": "^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$",
+        "description": "BCP 47 language tag applied to Latin, East Asian and complex-script text runs."
+      },
+      "textCase": {
+        "type": ["string", "null"],
+        "enum": ["none", "uppercase", "lowercase", "title", "small_caps", null]
+      },
+      "shadowOffsetX": {
+        "type": ["number", "null"],
+        "description": "Shadow offset in 1/100 mm."
+      },
+      "shadowOffsetY": {
+        "type": ["number", "null"],
+        "description": "Shadow offset in 1/100 mm."
+      },
+      "shadowBlur": {
+        "type": ["number", "null"],
+        "description": "Shadow blur radius in 1/100 mm."
+      },
+      "lockPosition": {
+        "type": ["boolean", "null"]
+      },
+      "lockSize": {
+        "type": ["boolean", "null"]
+      },
+      "printable": {
+        "type": ["boolean", "null"]
+      },
+      "lineStyle": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "dash": {
+            "type": ["string", "null"],
+            "enum": [
+              "solid",
+              "dot",
+              "dash",
+              "dashDot",
+              "lgDash",
+              "lgDashDot",
+              "lgDashDotDot",
+              "sysDot",
+              "sysDash",
+              "sysDashDot",
+              "sysDashDotDot",
+              null
+            ]
+          },
+          "startArrow": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "triangle",
+                  "stealth",
+                  "diamond",
+                  "oval",
+                  "arrow"
+                ]
+              },
+              "width": {
+                "type": ["string", "null"],
+                "enum": ["sm", "med", "lg", null]
+              },
+              "length": {
+                "type": ["string", "null"],
+                "enum": ["sm", "med", "lg", null]
+              }
+            },
+            "required": ["type", "width", "length"]
+          },
+          "endArrow": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "triangle",
+                  "stealth",
+                  "diamond",
+                  "oval",
+                  "arrow"
+                ]
+              },
+              "width": {
+                "type": ["string", "null"],
+                "enum": ["sm", "med", "lg", null]
+              },
+              "length": {
+                "type": ["string", "null"],
+                "enum": ["sm", "med", "lg", null]
+              }
+            },
+            "required": ["type", "width", "length"]
+          }
+        },
+        "required": ["dash", "startArrow", "endArrow"],
+        "description": "PowerPoint line presets: the dash, and the arrowhead at the line's start and end with its width and length (medium when null). A null dash or line end keeps its current value."
+      },
+      "shapeFill": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["none", "solid", "gradient", "hatch"]
+          },
+          "color": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "maximum": 16777215
+          },
+          "opacity": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "catalogName": {
+            "type": ["string", "null"],
+            "maxLength": 255
+          }
+        },
+        "required": ["type", "color", "opacity", "catalogName"],
+        "description": "No fill, a solid color, or an existing gradient/hatch from the observed document catalog. Arbitrary unobserved style names are rejected."
+      },
+      "shapeEffects": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "glowRadius": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "glowColor": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "maximum": 16777215
+          },
+          "glowOpacity": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "softEdgeRadius": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100000
+          }
+        },
+        "required": ["glowRadius", "glowColor", "glowOpacity", "softEdgeRadius"]
+      },
+      "paragraphFormat": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "leftMargin": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "rightMargin": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "firstLineIndent": {
+            "type": ["number", "null"],
+            "minimum": -100000,
+            "maximum": 100000
+          },
+          "topMargin": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "bottomMargin": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "direction": {
+            "type": ["string", "null"],
+            "enum": ["left-to-right", "right-to-left", "top-to-bottom", null]
+          }
+        },
+        "required": [
+          "leftMargin",
+          "rightMargin",
+          "firstLineIndent",
+          "topMargin",
+          "bottomMargin",
+          "direction"
+        ]
+      },
+      "paragraphList": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["none", "bullet", "number"]
+          },
+          "level": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9
+          },
+          "prefix": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "suffix": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "startWith": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 32767
+          },
+          "bulletCharacter": {
+            "type": ["string", "null"],
+            "maxLength": 2
+          }
+        },
+        "required": [
+          "type",
+          "level",
+          "prefix",
+          "suffix",
+          "startWith",
+          "bulletCharacter"
+        ]
+      },
+      "alignment": {
+        "type": ["string", "null"],
+        "enum": [
+          "left",
+          "center",
+          "right",
+          "justify",
+          "top",
+          "middle",
+          "bottom",
+          null
+        ]
+      },
+      "axis": {
+        "type": ["string", "null"],
+        "enum": ["horizontal", "vertical", null]
+      },
+      "position": {
+        "type": ["string", "null"],
+        "enum": ["front", "forward", "backward", "back", null]
+      },
+      "geometry": {
+        "type": ["string", "null"],
+        "enum": ["rectangle", "ellipse", "line", null],
+        "description": "add_shape: rectangle/ellipse/line; crop_image: rectangle/ellipse only (circle requires width=height). Preserve original media with crop_image, never replace it with a flattened image."
+      },
+      "connectorKind": {
+        "type": ["string", "null"],
+        "enum": ["standard", "curve", "straight", null]
+      },
+      "points": {
+        "type": ["array", "null"],
+        "minItems": 2,
+        "maxItems": 200,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "x": {
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            }
+          },
+          "required": ["x", "y"]
+        }
+      },
+      "closed": {
+        "type": ["boolean", "null"]
+      },
+      "connector": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["standard", "curve", "straight"]
+          },
+          "start": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": ["x", "y"]
+          },
+          "end": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              }
+            },
+            "required": ["x", "y"]
+          },
+          "startElementId": {
+            "type": ["string", "null"]
+          },
+          "endElementId": {
+            "type": ["string", "null"]
+          },
+          "startGluePoint": {
+            "type": ["integer", "null"],
+            "minimum": -1,
+            "maximum": 65535
+          },
+          "endGluePoint": {
+            "type": ["integer", "null"],
+            "minimum": -1,
+            "maximum": 65535
+          }
+        },
+        "required": [
+          "kind",
+          "start",
+          "end",
+          "startElementId",
+          "endElementId",
+          "startGluePoint",
+          "endGluePoint"
+        ]
+      },
+      "cells": {
+        "type": ["array", "null"],
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "data": {
+        "type": ["array", "null"],
+        "items": {
+          "type": "array",
+          "items": {
+            "type": ["number", "null"]
+          }
+        }
+      },
+      "rowDescriptions": {
+        "type": ["array", "null"],
+        "maxItems": 100,
+        "items": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "description": "Chart category labels. When provided, the array length must equal the observed chart rowCount."
+      },
+      "columnDescriptions": {
+        "type": ["array", "null"],
+        "maxItems": 50,
+        "items": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "description": "Chart series labels. When provided, the array length must equal the observed chart columnCount."
+      },
+      "chartType": {
+        "type": ["string", "null"],
+        "enum": ["column", "line", "area", "pie", "scatter", "radar", null],
+        "description": "Bounded internal-data chart family for set_chart_type."
+      },
+      "chartFormat": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": ["string", "null"],
+            "maxLength": 1000
+          },
+          "legendVisible": {
+            "type": ["boolean", "null"]
+          },
+          "legendPosition": {
+            "type": ["string", "null"],
+            "enum": ["left", "right", "top", "bottom", null]
+          },
+          "categoryAxisVisible": {
+            "type": ["boolean", "null"]
+          },
+          "valueAxisVisible": {
+            "type": ["boolean", "null"]
+          },
+          "showValues": {
+            "type": ["boolean", "null"]
+          },
+          "showCategoryNames": {
+            "type": ["boolean", "null"]
+          },
+          "showSeriesNames": {
+            "type": ["boolean", "null"]
+          },
+          "seriesColors": {
+            "type": ["array", "null"],
+            "maxItems": 50,
+            "items": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777215
+            }
+          }
+        },
+        "required": [
+          "title",
+          "legendVisible",
+          "legendPosition",
+          "categoryAxisVisible",
+          "valueAxisVisible",
+          "showValues",
+          "showCategoryNames",
+          "showSeriesNames",
+          "seriesColors"
+        ]
+      },
+      "row": {
+        "type": ["number", "null"]
+      },
+      "column": {
+        "type": ["number", "null"]
+      },
+      "index": {
+        "type": ["number", "null"]
+      },
+      "count": {
+        "type": ["number", "null"]
+      },
+      "startRow": {
+        "type": ["number", "null"]
+      },
+      "endRow": {
+        "type": ["number", "null"]
+      },
+      "startColumn": {
+        "type": ["number", "null"]
+      },
+      "endColumn": {
+        "type": ["number", "null"]
+      },
+      "rows": {
+        "type": ["integer", "null"],
+        "minimum": 1,
+        "maximum": 20,
+        "description": "Target vertical subdivision count for split_table_cell; 1 keeps the current vertical division."
+      },
+      "columns": {
+        "type": ["integer", "null"],
+        "minimum": 1,
+        "maximum": 20,
+        "description": "Target horizontal subdivision count for split_table_cell; 1 keeps the current horizontal division."
+      },
+      "tableCellFormat": {
+        "type": ["object", "null"],
+        "additionalProperties": false,
+        "properties": {
+          "fillColor": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "maximum": 16777215
+          },
+          "fillOpacity": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100
+          },
+          "fontColor": {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "maximum": 16777215
+          },
+          "fontSize": {
+            "type": ["number", "null"],
+            "minimum": 1,
+            "maximum": 400
+          },
+          "fontFamily": {
+            "type": ["string", "null"],
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "bold": {
+            "type": ["boolean", "null"]
+          },
+          "underline": {
+            "type": ["boolean", "null"]
+          },
+          "strikethrough": {
+            "type": ["boolean", "null"]
+          },
+          "textShadow": {
+            "type": ["boolean", "null"]
+          },
+          "characterSpacing": {
+            "type": ["number", "null"],
+            "minimum": -100,
+            "maximum": 100,
+            "description": "PowerPoint character spacing in points."
+          },
+          "paragraphAlignment": {
+            "type": ["string", "null"],
+            "enum": ["left", "center", "right", "justify", null]
+          },
+          "marginLeft": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "marginRight": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "marginTop": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "marginBottom": {
+            "type": ["number", "null"],
+            "minimum": 0,
+            "maximum": 100000
+          },
+          "borderTop": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "color": {
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "maximum": 16777215
+              },
+              "width": {
+                "type": ["number", "null"],
+                "minimum": 0,
+                "maximum": 100
+              }
+            },
+            "required": ["color", "width"]
+          },
+          "borderRight": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "color": {
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "maximum": 16777215
+              },
+              "width": {
+                "type": ["number", "null"],
+                "minimum": 0,
+                "maximum": 100
+              }
+            },
+            "required": ["color", "width"]
+          },
+          "borderBottom": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "color": {
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "maximum": 16777215
+              },
+              "width": {
+                "type": ["number", "null"],
+                "minimum": 0,
+                "maximum": 100
+              }
+            },
+            "required": ["color", "width"]
+          },
+          "borderLeft": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {
+              "color": {
+                "type": ["integer", "null"],
+                "minimum": 0,
+                "maximum": 16777215
+              },
+              "width": {
+                "type": ["number", "null"],
+                "minimum": 0,
+                "maximum": 100
+              }
+            },
+            "required": ["color", "width"]
+          }
+        },
+        "required": [
+          "fillColor",
+          "fillOpacity",
+          "fontColor",
+          "fontSize",
+          "fontFamily",
+          "bold",
+          "underline",
+          "strikethrough",
+          "textShadow",
+          "characterSpacing",
+          "paragraphAlignment",
+          "marginLeft",
+          "marginRight",
+          "marginTop",
+          "marginBottom",
+          "borderTop",
+          "borderRight",
+          "borderBottom",
+          "borderLeft"
+        ]
+      }
+    },
+    "required": [
+      "op",
+      "elementId",
+      "elementIds",
+      "slideIndex",
+      "sections",
+      "masterIndex",
+      "scaleContent",
+      "theme",
+      "targetSlideIndex",
+      "interaction",
+      "url",
+      "hidden",
+      "layout",
+      "transitionEffect",
+      "transitionDuration",
+      "animationId",
+      "animationIndex",
+      "presetId",
+      "duration",
+      "delay",
+      "start",
+      "text",
+      "paragraphId",
+      "startOffset",
+      "endOffset",
+      "expectedText",
+      "name",
+      "title",
+      "description",
+      "decorative",
+      "author",
+      "initials",
+      "commentIndex",
+      "assetId",
+      "smartartNode",
+      "fontwork",
+      "x",
+      "y",
+      "width",
+      "height",
+      "left",
+      "top",
+      "right",
+      "bottom",
+      "size",
+      "degrees",
+      "bold",
+      "italic",
+      "underline",
+      "strikethrough",
+      "shadow",
+      "family",
+      "color",
+      "opacity",
+      "autofit",
+      "marginLeft",
+      "marginRight",
+      "marginTop",
+      "marginBottom",
+      "autoGrowHeight",
+      "autoGrowWidth",
+      "wordWrap",
+      "spacing",
+      "script",
+      "languageTag",
+      "textCase",
+      "shadowOffsetX",
+      "shadowOffsetY",
+      "shadowBlur",
+      "lockPosition",
+      "lockSize",
+      "printable",
+      "lineStyle",
+      "shapeFill",
+      "shapeEffects",
+      "paragraphFormat",
+      "paragraphList",
+      "alignment",
+      "axis",
+      "position",
+      "geometry",
+      "connectorKind",
+      "points",
+      "closed",
+      "connector",
+      "cells",
+      "data",
+      "rowDescriptions",
+      "columnDescriptions",
+      "chartType",
+      "chartFormat",
+      "row",
+      "column",
+      "index",
+      "count",
+      "startRow",
+      "endRow",
+      "startColumn",
+      "endColumn",
+      "rows",
+      "columns",
+      "tableCellFormat"
+    ]
+  }
+}

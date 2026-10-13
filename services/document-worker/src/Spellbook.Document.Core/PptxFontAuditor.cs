@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
@@ -37,18 +36,22 @@ public sealed class RendererFontEnvironment
 
     public bool EmbeddedFontsSupported { get; }
 
-    public static RendererFontEnvironment DetectOnlyOffice(string? sourceMapPath = null)
+    /// <summary>
+    /// The fonts the engine draws a deck with, from its report (present-pptx fonts): the
+    /// families it has, and the substitute it drew each missing one with.
+    /// </summary>
+    public static RendererFontEnvironment FromEngineReport(string report)
     {
-        sourceMapPath ??= Path.Combine(Directory.GetCurrentDirectory(),
-            "services/browser-office/onlyoffice/distribution/onlyoffice-browser-font-source-map.json");
-        using var sourceMap = JsonDocument.Parse(File.ReadAllBytes(sourceMapPath));
-        var families = sourceMap.RootElement.GetProperty("visibleFamilies").EnumerateArray()
-            .Select(value => value.GetString() ?? throw new InvalidDataException("Invalid ONLYOFFICE font family."))
-            .ToArray();
-        if (families.Length == 0) throw new InvalidDataException("ONLYOFFICE font catalog is empty.");
-        // The selected 9.3 presentation importer does not load embedded PPTX fonts.
-        // Host fontconfig and package preservation are not evidence of availability.
-        return new RendererFontEnvironment(true, families, embeddedFontsSupported: false);
+        using var document = JsonDocument.Parse(report);
+        var available = new List<string>();
+        var substitutes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var family in document.RootElement.GetProperty("families").EnumerateObject())
+        {
+            if (family.Value.GetProperty("available").GetBoolean()) available.Add(family.Name);
+            else if (family.Value.GetProperty("substitute").GetString() is { Length: > 0 } substitute)
+                substitutes[family.Name] = substitute;
+        }
+        return new RendererFontEnvironment(true, available, family => substitutes.GetValueOrDefault(family));
     }
 
     public bool HasFamily(string family) => normalizedFamilies.Contains(Normalize(family));
@@ -62,87 +65,8 @@ public sealed class RendererFontEnvironment
             : resolved;
     }
 
-    public static RendererFontEnvironment Detect()
-    {
-        try
-        {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "fc-list",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-            process.StartInfo.ArgumentList.Add("--format=%{family}\n%{fullname}\n%{postscriptname}\n");
-            if (!process.Start())
-            {
-                return new RendererFontEnvironment(false, []);
-            }
-
-            var outputTask = process.StandardOutput.ReadToEndAsync();
-            if (!process.WaitForExit(5_000))
-            {
-                process.Kill(true);
-                return new RendererFontEnvironment(false, []);
-            }
-
-            var families = outputTask.GetAwaiter().GetResult()
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .SelectMany(SplitAliases)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(family => family, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            return process.ExitCode == 0 && families.Count > 0
-                ? new RendererFontEnvironment(true, families, ResolveWithFontConfig)
-                : new RendererFontEnvironment(false, []);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            return new RendererFontEnvironment(false, []);
-        }
-    }
-
     private static IEnumerable<string> SplitAliases(string value) =>
         value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-    private static string? ResolveWithFontConfig(string family)
-    {
-        try
-        {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "fc-match",
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-            process.StartInfo.ArgumentList.Add("--format=%{family}");
-            process.StartInfo.ArgumentList.Add("--");
-            process.StartInfo.ArgumentList.Add(family);
-            if (!process.Start()) return null;
-
-            var outputTask = process.StandardOutput.ReadToEndAsync();
-            if (!process.WaitForExit(2_000))
-            {
-                process.Kill(true);
-                return null;
-            }
-
-            return process.ExitCode == 0
-                ? SplitAliases(outputTask.GetAwaiter().GetResult()).FirstOrDefault()
-                : null;
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
-        {
-            return null;
-        }
-    }
 
     private static string Normalize(string value) => Regex.Replace(
         value.Normalize(NormalizationForm.FormKC).Trim().ToUpperInvariant(),

@@ -62,66 +62,24 @@ services:
       timeout: 5s
       retries: 20
 
-  office-editor:
-    profiles: ["wopi"]
+  document-view:
     build:
       context: .
-      dockerfile: services/office-editor/Dockerfile
+      dockerfile: services/document-view/Dockerfile
+      args:
+        SPELLBOOK_APP_ORIGIN: ${SPELLBOOK_PUBLIC_URL:-http://localhost:3000}
     restart: unless-stopped
-    environment:
-      PORT: 9980
-      SPELLBOOK_OFFICE_FORWARDED_PROTO: http
-      aliasgroup1: http://web:3000
-      extra_params: >-
-        --o:ssl.enable=false
-        --o:ssl.termination=false
-        --o:welcome.enable=false
-        --o:experimental_features=true
-        --o:hide_legacy_script_warning=true
-        --o:net.frame_ancestors=http://localhost:3000
-        --o:storage.wopi.host[0]=web
-    cap_add:
-      - CHOWN
-      - FOWNER
-      - MKNOD
-      - SYS_CHROOT
-    volumes:
-      - ${SPELLBOOK_WOPI_PROOF_KEY_PATH:-./.spellbook/secrets/wopi-proof-key.pem}:/etc/coolwsd/proof_key:ro
-    ports:
-      - "9980:9980"
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/spellbook-office-gateway", "healthcheck"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-      start_period: 30s
-
-  browser-office:
-    profiles: ["browser"]
-    build:
-      context: .
-      dockerfile: services/browser-office/Dockerfile
-    restart: unless-stopped
-    environment:
-      PORT: 4173
-      HOST: 0.0.0.0
-      SPELLBOOK_BROWSER_ENGINE: onlyoffice
-      SPELLBOOK_ONLYOFFICE_DISTRIBUTION: /app/services/browser-office/onlyoffice/distribution
-      SPELLBOOK_BROWSER_OFFICE_PUBLIC_URL: ${SPELLBOOK_BROWSER_OFFICE_PUBLIC_URL:-http://localhost:4173}
-      SPELLBOOK_ONLYOFFICE_SDK_ORIGIN: ${SPELLBOOK_ONLYOFFICE_SDK_ORIGIN:-http://localhost:4174}
-      SPELLBOOK_ONLYOFFICE_INSPECTION_ORIGIN: ${SPELLBOOK_ONLYOFFICE_INSPECTION_ORIGIN:-http://localhost:4175}
-      SPELLBOOK_BROWSER_HOST_ORIGIN: ${SPELLBOOK_PUBLIC_URL:-http://localhost:3000}
     ports:
       - "4173:4173"
-      - "4174:4174"
-      - "4175:4175"
     healthcheck:
       test:
         [
           "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:4173/readyz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:4173/readyz.json",
         ]
       interval: 10s
       timeout: 5s
@@ -148,14 +106,12 @@ services:
       SPELLBOOK_AI_CONNECTOR_MODE: ${SPELLBOOK_AI_CONNECTOR_MODE:-internal}
       SPELLBOOK_LOCAL_CONNECTOR_ORIGIN: ${SPELLBOOK_LOCAL_CONNECTOR_ORIGIN:-http://127.0.0.1:43127}
       SPELLBOOK_INTERNAL_APP_URL: http://web:3000
-      SPELLBOOK_OFFICE_EDITOR_URL: ${SPELLBOOK_OFFICE_PUBLIC_URL:-http://localhost:9980}
-      SPELLBOOK_OFFICE_EDITOR_INTERNAL_URL: http://office-editor:9980
-      SPELLBOOK_EDITOR_MODE: ${SPELLBOOK_EDITOR_MODE:-browser}
-      SPELLBOOK_BROWSER_OFFICE_URL: ${SPELLBOOK_BROWSER_OFFICE_PUBLIC_URL:-http://localhost:4173}
+      # The document view's public address (the browser loads it).
+      SPELLBOOK_BROWSER_OFFICE_URL: ${SPELLBOOK_DOCUMENT_VIEW_PUBLIC_URL:-http://localhost:4173}
       SPELLBOOK_INTERNAL_TOKEN: ${SPELLBOOK_INTERNAL_TOKEN}
       SPELLBOOK_SESSION_SECRET: ${SPELLBOOK_SESSION_SECRET}
+      # Signs the AI job capability tokens (historical name).
       SPELLBOOK_WOPI_SECRET: ${SPELLBOOK_WOPI_SECRET}
-      SPELLBOOK_WOPI_PROOF_MODE: ${SPELLBOOK_WOPI_PROOF_MODE:-required}
       SPELLBOOK_LOCAL_EMAIL: ${SPELLBOOK_LOCAL_EMAIL}
       SPELLBOOK_LOCAL_PASSWORD_HASH: ${SPELLBOOK_LOCAL_PASSWORD_HASH}
     volumes:
@@ -168,6 +124,8 @@ services:
       document-worker:
         condition: service_healthy
       ai-connector:
+        condition: service_healthy
+      document-view:
         condition: service_healthy
     healthcheck:
       test:

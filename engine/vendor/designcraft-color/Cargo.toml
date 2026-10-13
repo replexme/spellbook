@@ -1,0 +1,16 @@
+[package]
+name = "designcraft-color"
+version = "0.5.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "DesignCraft color"
+
+[dependencies]
+kurbo = { version = "0.13", features = ["serde"] }
+serde = { version = "1", features = ["derive", "rc"] }
+thiserror = { version = "2" }
+moxcms = "0.8"
+
+[dev-dependencies]
+proptest = { version = "1" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
