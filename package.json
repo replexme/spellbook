@@ -46,7 +46,7 @@
     "selfhost:down": "docker compose down"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.1",
+    "@playwright/test": "1.64.0",
     "@xmldom/xmldom": "0.9.12",
     "ajv": "8.20.0",
     "esbuild": "0.28.2",
